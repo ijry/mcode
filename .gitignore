@@ -1,0 +1,27 @@
+# Dependencies
+**/node_modules/
+
+# Build outputs
+**/dist/
+**/build/
+**/.output/
+**/.nuxt/
+**/.next/
+
+# Rust / Tauri
+**/target/
+
+# Logs / temp
+*.log
+*.tmp
+*.temp
+
+# Env files
+.env
+.env.*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

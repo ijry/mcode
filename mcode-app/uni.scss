@@ -1,0 +1,46 @@
+$u-main-color: #111111;
+$u-content-color: #333333;
+$u-tips-color: #666666;
+$u-border-color: #e5e7eb;
+
+page {
+  background: #f7f7f8;
+  color: #111111;
+}
+
+.page {
+  min-height: 100vh;
+  padding: 24rpx;
+  box-sizing: border-box;
+}
+
+.section {
+  background: #ffffff;
+  border: 1px solid $u-border-color;
+  border-radius: 8rpx;
+  padding: 24rpx;
+  margin-bottom: 24rpx;
+}
+
+.row {
+  display: flex;
+  gap: 16rpx;
+  align-items: center;
+}
+
+.col {
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+}
+
+.muted {
+  color: $u-tips-color;
+  font-size: 24rpx;
+}
+
+.title {
+  font-size: 32rpx;
+  font-weight: 600;
+  line-height: 1.3;
+}
