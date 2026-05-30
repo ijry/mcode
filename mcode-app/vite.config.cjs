@@ -1,12 +1,18 @@
 const { defineConfig } = require("vite")
 const uni = require("@dcloudio/vite-plugin-uni").default
 
-module.exports = defineConfig({
-  plugins: [uni()],
-  css: {
-    preprocessorOptions: {
-      scss: {
-        additionalData: '@import "uview-plus/theme.scss";'
+module.exports = defineConfig(async () => {
+  const UnoCss = await import('unocss/vite').then(i => i.default)
+  return {
+    plugins: [
+      uni(),
+      UnoCss(),
+    ],
+    css: {
+      preprocessorOptions: {
+        scss: {
+          additionalData: '@import "uview-plus/theme.scss";'
+        }
       }
     }
   }

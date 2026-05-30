@@ -23,11 +23,15 @@
   "devDependencies": {
     "@dcloudio/types": "^3.4.31",
     "@dcloudio/vite-plugin-uni": "3.0.0-alpha-5000720260327001",
+    "@iconify/json": "^2.2.481",
     "@types/node": "^22.13.10",
+    "@unocss/transformer-directives": "^0.58.9",
     "@vue/compiler-sfc": "^3.4.21",
     "@vue/tsconfig": "^0.7.0",
     "sass": "^1.83.4",
     "typescript": "^5.7.3",
+    "unocss": "^0.58.9",
+    "unocss-preset-weapp": "^0.58.9",
     "vite": "^5.2.8",
     "vue-tsc": "^2.2.2"
   }
