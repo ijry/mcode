@@ -27,8 +27,9 @@ import {
   useMemo,
   useState,
 } from "react"
-import { Streamdown } from "streamdown"
+import { Streamdown, defaultRemarkPlugins } from "streamdown"
 import { useStreamdownLinkSafety } from "./link-safety"
+import { remarkRewriteFileUriLinks } from "./remark-file-uri-links"
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: UIMessage["role"]
@@ -327,7 +328,22 @@ export const MessageBranchPage = ({
 export type MessageResponseProps = ComponentProps<typeof Streamdown>
 
 const math = createMathPlugin({ singleDollarTextMath: true })
-const streamdownPlugins = { cjk, code, math, mermaid }
+
+// Wrap the code plugin to guard against unsupported language identifiers
+// (e.g. "##", "function") that appear in fenced code blocks from tool output.
+// Without this, Shiki's createHighlighter tries to load unknown grammars and
+// produces noisy console errors.
+const safeCode: typeof code = {
+  ...code,
+  highlight(options, callback) {
+    const lang = code.supportsLanguage(options.language)
+      ? options.language
+      : ("text" as typeof options.language)
+    return code.highlight({ ...options, language: lang }, callback)
+  },
+}
+
+const streamdownPlugins = { cjk, code: safeCode, math, mermaid }
 
 // remark-math only supports `$` delimiters. Convert LaTeX-style
 // `\[...\]` / `\(...\)` to `$$...$$` / `$...$` so they are recognized.
@@ -351,6 +367,11 @@ export function normalizeMathDelimiters(text: string): string {
   )
 }
 
+const remarkPlugins = [
+  ...Object.values(defaultRemarkPlugins),
+  remarkRewriteFileUriLinks,
+]
+
 function MessageResponseImpl({
   className,
   children,
@@ -373,6 +394,7 @@ function MessageResponseImpl({
       )}
       linkSafety={linkSafety}
       plugins={streamdownPlugins}
+      remarkPlugins={remarkPlugins}
       {...props}
     >
       {normalized}

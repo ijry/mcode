@@ -76,9 +76,11 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
 import { Skeleton } from "@/components/ui/skeleton"
+import { AuxPanelNoFolderEmpty } from "@/components/layout/aux-panel-no-folder-empty"
 import { subscribe } from "@/lib/platform"
-import { useFolderContext } from "@/contexts/folder-context"
+import { useActiveFolder } from "@/contexts/active-folder-context"
 import { useWorkspaceContext } from "@/contexts/workspace-context"
+import { useWorkspaceStateStore } from "@/hooks/use-workspace-state-store"
 import {
   getGitBranch,
   gitCommitBranches,
@@ -95,7 +97,7 @@ import type {
   GitResetMode,
 } from "@/lib/types"
 import { toast } from "sonner"
-import { toErrorMessage } from "@/lib/app-error"
+import { isNotAGitRepoError, toErrorMessage } from "@/lib/app-error"
 import { ScrollArea } from "@/components/ui/scroll-area"
 
 const emitEvent = async (event: string, payload?: unknown) => {
@@ -690,12 +692,15 @@ function BranchSelector({
 export function GitLogTab() {
   const t = useTranslations("Folder.gitLogTab")
   const tCommon = useTranslations("Folder.common")
-  const { folder } = useFolderContext()
+  const { activeFolder: folder } = useActiveFolder()
   const { openCommitDiff, openFilePreview } = useWorkspaceContext()
+  const workspaceState = useWorkspaceStateStore(folder?.path ?? null)
+  const isGitRepo = workspaceState.isGitRepo
   const [entries, setEntries] = useState<GitLogEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [notAGitRepo, setNotAGitRepo] = useState(false)
   const [scrolled, setScrolled] = useState(false)
   const [openByCommit, setOpenByCommit] = useState<Record<string, boolean>>({})
   const [branchesByCommit, setBranchesByCommit] = useState<
@@ -760,10 +765,13 @@ export function GitLogTab() {
     [folder?.path]
   )
 
-  // Fetch branches on mount
+  // Fetch branches on mount and when git presence flips — the preflight
+  // check in `git_list_all_branches` would short-circuit on non-git folders
+  // anyway, but skipping the call saves an unnecessary round trip.
   useEffect(() => {
+    if (!isGitRepo || notAGitRepo) return
     void refreshBranches()
-  }, [refreshBranches])
+  }, [isGitRepo, notAGitRepo, refreshBranches])
 
   const fetchCommitBranches = useCallback(
     async (fullHash: string) => {
@@ -808,6 +816,7 @@ export function GitLogTab() {
         setBranchesError({})
       }
       setError(null)
+      setNotAGitRepo(false)
       try {
         const result = await gitLog(folder.path, 100, branch ?? undefined)
         setEntries(result.entries)
@@ -829,7 +838,14 @@ export function GitLogTab() {
           )
         }
       } catch (e) {
-        setError(toErrorMessage(e))
+        if (isNotAGitRepoError(e)) {
+          setNotAGitRepo(true)
+          // Workspace state will flip isGitRepo within the next watch flush;
+          // clear entries so stale log data does not linger while we wait.
+          setEntries([])
+        } else {
+          setError(toErrorMessage(e))
+        }
       } finally {
         if (inline) {
           setRefreshing(false)
@@ -840,6 +856,10 @@ export function GitLogTab() {
     },
     [folder?.path, selectedBranch]
   )
+
+  useEffect(() => {
+    setNotAGitRepo(false)
+  }, [folder?.path])
 
   const handleRefresh = useCallback(() => {
     void fetchLog({ inline: true })
@@ -871,7 +891,7 @@ export function GitLogTab() {
       })
     } catch (error) {
       toast.error(t("toasts.createBranchFailed"), {
-        description: error instanceof Error ? error.message : String(error),
+        description: toErrorMessage(error),
       })
     } finally {
       setCreatingBranch(false)
@@ -932,7 +952,7 @@ export function GitLogTab() {
       setResetMode("mixed")
     } catch (error) {
       toast.error(t("toasts.resetFailed"), {
-        description: error instanceof Error ? error.message : String(error),
+        description: toErrorMessage(error),
       })
     } finally {
       setResetting(false)
@@ -951,8 +971,20 @@ export function GitLogTab() {
   ])
 
   useEffect(() => {
+    if (!folder?.path) return
+    // Only fetch when workspaceState says we're in a git repo. When it flips
+    // (user runs `git init` / deletes `.git` externally), this effect re-runs
+    // and either re-fetches or clears the log to stay aligned with the other
+    // workspace panels.
+    if (!isGitRepo) {
+      setNotAGitRepo(false)
+      setEntries([])
+      setError(null)
+      setLoading(false)
+      return
+    }
     void fetchLog()
-  }, [fetchLog])
+  }, [folder?.path, isGitRepo, fetchLog])
 
   // Refresh branches & log on branch change, commit, or push
   useEffect(() => {
@@ -993,6 +1025,10 @@ export function GitLogTab() {
     setScrolled((prev) => (prev === nextScrolled ? prev : nextScrolled))
   }, [])
 
+  if (!folder) {
+    return <AuxPanelNoFolderEmpty />
+  }
+
   if (loading) {
     return (
       <ScrollArea className="h-full px-3 py-3">
@@ -1014,6 +1050,32 @@ export function GitLogTab() {
               <Skeleton className="h-3 w-24" />
             </div>
           ))}
+        </div>
+      </ScrollArea>
+    )
+  }
+
+  if (!isGitRepo || notAGitRepo) {
+    return (
+      <ScrollArea className="h-full px-3 py-3">
+        <div className="flex flex-col items-center justify-center min-h-full gap-1 p-6 text-center">
+          <GitBranch className="size-5 text-muted-foreground/60" aria-hidden />
+          <p className="text-sm font-medium">{t("notAGitRepoTitle")}</p>
+          <p className="text-xs text-muted-foreground">
+            {t("notAGitRepoHint")}
+          </p>
+          {isGitRepo && (
+            <Button
+              variant="ghost"
+              size="xs"
+              className="mt-2"
+              onClick={() => {
+                void fetchLog()
+              }}
+            >
+              {t("retry")}
+            </Button>
+          )}
         </div>
       </ScrollArea>
     )
@@ -1457,7 +1519,7 @@ export function GitLogTab() {
               <span className="text-muted-foreground">
                 {t("dialogs.reset.messageLabel")}
               </span>
-              <p className="min-w-0 whitespace-pre-wrap break-words">
+              <p className="max-h-32 min-w-0 overflow-y-auto whitespace-pre-wrap break-words">
                 {resetTarget?.message || "-"}
               </p>
             </div>

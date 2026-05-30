@@ -8,7 +8,7 @@ import {
   useRef,
   useState,
 } from "react"
-import { ChevronsDownUp, ChevronsUpDown } from "lucide-react"
+import { ChevronsDownUp, ChevronsUpDown, GitBranch } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import {
@@ -34,10 +34,12 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
 import { Skeleton } from "@/components/ui/skeleton"
-import { useFolderContext } from "@/contexts/folder-context"
+import { useActiveFolder } from "@/contexts/active-folder-context"
 import { useTabContext } from "@/contexts/tab-context"
 import { useWorkspaceContext } from "@/contexts/workspace-context"
 import { useWorkspaceStateStore } from "@/hooks/use-workspace-state-store"
+import { AuxPanelNoFolderEmpty } from "@/components/layout/aux-panel-no-folder-empty"
+import { WorkspaceDegradedBanner } from "@/components/layout/workspace-degraded-banner"
 import {
   deleteFileTreeEntry,
   gitAddFiles,
@@ -48,6 +50,7 @@ import {
 import { joinFsPath } from "@/lib/path-utils"
 import { emitAttachFileToSession } from "@/lib/session-attachment-events"
 import type { GitStatusEntry } from "@/lib/types"
+import { toErrorMessage } from "@/lib/app-error"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -377,7 +380,7 @@ export function GitChangesTab() {
   const t = useTranslations("Folder.gitChangesTab")
   const tCommon = useTranslations("Folder.common")
   const tFileTree = useTranslations("Folder.fileTreeTab")
-  const { folder } = useFolderContext()
+  const { activeFolder: folder } = useActiveFolder()
   const { tabs, activeTabId } = useTabContext()
   const { openFilePreview, openWorkingTreeDiff } = useWorkspaceContext()
   const workspaceState = useWorkspaceStateStore(folder?.path ?? null)
@@ -562,7 +565,7 @@ export function GitChangesTab() {
   const handleOpenCommitWindow = useCallback(() => {
     if (!folder) return
     openCommitWindow(folder.id).catch((error) => {
-      const message = error instanceof Error ? error.message : String(error)
+      const message = toErrorMessage(error)
       toast.error(t("toasts.openCommitWindowFailed"), {
         description: message,
       })
@@ -625,7 +628,7 @@ export function GitChangesTab() {
           new Set(candidates.map((entry) => entry.path))
         )
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
+        const message = toErrorMessage(error)
         setDirectoryGitError(message)
       } finally {
         setDirectoryGitLoading(false)
@@ -658,7 +661,7 @@ export function GitChangesTab() {
         toast.success(t("toasts.addedToVcs", { name: target.name }))
         await workspaceState.requestResync("git_action:add")
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
+        const message = toErrorMessage(error)
         toast.error(t("toasts.addToVcsFailed"), { description: message })
       }
     },
@@ -675,7 +678,7 @@ export function GitChangesTab() {
       setRollbackTarget(null)
       await workspaceState.requestResync("git_action:rollback")
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
+      const message = toErrorMessage(error)
       toast.error(t("toasts.rollbackFailed"), { description: message })
     } finally {
       setRollingBack(false)
@@ -706,7 +709,7 @@ export function GitChangesTab() {
       setDeleteTarget(null)
       await workspaceState.requestResync("git_action:delete")
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
+      const message = toErrorMessage(error)
       toast.error(t("toasts.deleteFailed"), { description: message })
     } finally {
       setDeleting(false)
@@ -791,7 +794,7 @@ export function GitChangesTab() {
       resetDirectoryGitActionDialog()
       await workspaceState.requestResync("git_action:batch")
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
+      const message = toErrorMessage(error)
       setDirectoryGitError(message)
       toast.error(
         directoryGitActionType === "add"
@@ -1165,6 +1168,10 @@ export function GitChangesTab() {
     ]
   )
 
+  if (!folder) {
+    return <AuxPanelNoFolderEmpty />
+  }
+
   if (loading) {
     return (
       <div className="p-2 space-y-2">
@@ -1185,14 +1192,30 @@ export function GitChangesTab() {
   }
 
   return (
-    <>
-      <ScrollArea className="h-full min-h-0" x="scroll">
+    <div className="flex flex-col h-full min-h-0">
+      {workspaceState.degraded && (
+        <WorkspaceDegradedBanner onRetry={workspaceState.restart} />
+      )}
+      <ScrollArea className="flex-1 min-h-0" x="scroll">
         {trackedChanges.length === 0 && untrackedChanges.length === 0 ? (
-          <div className="flex items-center justify-center h-full p-4">
-            <p className="text-xs text-muted-foreground text-center">
-              {t("noChanges")}
-            </p>
-          </div>
+          !workspaceState.isGitRepo ? (
+            <div className="flex flex-col items-center justify-center h-full gap-1 p-6 text-center">
+              <GitBranch
+                className="size-5 text-muted-foreground/60"
+                aria-hidden
+              />
+              <p className="text-sm font-medium">{t("notAGitRepoTitle")}</p>
+              <p className="text-xs text-muted-foreground">
+                {t("notAGitRepoHint")}
+              </p>
+            </div>
+          ) : (
+            <div className="flex items-center justify-center h-full p-4">
+              <p className="text-xs text-muted-foreground text-center">
+                {t("noChanges")}
+              </p>
+            </div>
+          )
         ) : (
           <div className="space-y-2 pb-2">
             {trackedChanges.length > 0 && (
@@ -1644,6 +1667,6 @@ export function GitChangesTab() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </>
+    </div>
   )
 }

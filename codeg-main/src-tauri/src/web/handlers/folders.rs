@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 use crate::app_error::AppCommandError;
 use crate::app_state::AppState;
 use crate::commands::folders as folder_commands;
-use crate::db::service::folder_service;
 use crate::models::*;
 
 #[derive(Deserialize)]
@@ -18,33 +17,26 @@ pub struct FolderIdParams {
 pub async fn load_folder_history(
     Extension(state): Extension<Arc<AppState>>,
 ) -> Result<Json<Vec<FolderHistoryEntry>>, AppCommandError> {
-    let db = &state.db;
-    let result = folder_service::list_folders(&db.conn)
-        .await
-        .map_err(AppCommandError::from)?;
-    Ok(Json(result))
+    Ok(Json(
+        folder_commands::load_folder_history_core(&state.db).await?,
+    ))
 }
 
 pub async fn list_open_folders(
     Extension(state): Extension<Arc<AppState>>,
 ) -> Result<Json<Vec<FolderHistoryEntry>>, AppCommandError> {
-    let db = &state.db;
-    let result = folder_service::list_open_folders(&db.conn)
-        .await
-        .map_err(AppCommandError::from)?;
-    Ok(Json(result))
+    Ok(Json(
+        folder_commands::list_open_folders_core(&state.db).await?,
+    ))
 }
 
 pub async fn get_folder(
     Extension(state): Extension<Arc<AppState>>,
     Json(params): Json<FolderIdParams>,
 ) -> Result<Json<FolderDetail>, AppCommandError> {
-    let db = &state.db;
-    let folder = folder_service::get_folder_by_id(&db.conn, params.folder_id)
-        .await
-        .map_err(AppCommandError::from)?
-        .ok_or_else(|| AppCommandError::not_found("Folder not found"))?;
-    Ok(Json(folder))
+    Ok(Json(
+        folder_commands::get_folder_core(&state.db, params.folder_id).await?,
+    ))
 }
 
 #[derive(Deserialize)]
@@ -53,48 +45,116 @@ pub struct AddFolderParams {
     pub path: String,
 }
 
-/// Web equivalent of `open_folder_window`: adds the folder to DB and returns its ID.
-/// The web client then navigates to `/folder?id=N` itself.
-pub async fn open_folder_window(
+/// Add the folder to the workspace (upsert + set is_open=true) and return its full detail.
+/// Previously this spawned a new window; the new single-window workspace model
+/// simply returns the folder info so the client can update its local state.
+pub async fn open_folder(
     Extension(state): Extension<Arc<AppState>>,
     Json(params): Json<AddFolderParams>,
-) -> Result<Json<FolderHistoryEntry>, AppCommandError> {
-    let db = &state.db;
-    let entry = folder_service::add_folder(&db.conn, &params.path)
-        .await
-        .map_err(AppCommandError::from)?;
-    Ok(Json(entry))
+) -> Result<Json<FolderDetail>, AppCommandError> {
+    Ok(Json(
+        folder_commands::open_folder_core(&state.db, params.path).await?,
+    ))
 }
 
-pub async fn close_folder_window(
+/// Open a folder into the workspace and broadcast it to workspace clients so
+/// the (separate) launcher tab's handoff lands. See
+/// `open_folder_in_workspace_core`.
+pub async fn open_folder_in_workspace(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<AddFolderParams>,
+) -> Result<Json<FolderDetail>, AppCommandError> {
+    let emitter = state.emitter.clone();
+    Ok(Json(
+        folder_commands::open_folder_in_workspace_core(&emitter, &state.db, params.path).await?,
+    ))
+}
+
+// --- New workspace handlers ---
+
+pub async fn list_open_folder_details(
+    Extension(state): Extension<Arc<AppState>>,
+) -> Result<Json<Vec<FolderDetail>>, AppCommandError> {
+    Ok(Json(
+        folder_commands::list_open_folder_details_core(&state.db).await?,
+    ))
+}
+
+pub async fn list_all_folder_details(
+    Extension(state): Extension<Arc<AppState>>,
+) -> Result<Json<Vec<FolderDetail>>, AppCommandError> {
+    Ok(Json(
+        folder_commands::list_all_folder_details_core(&state.db).await?,
+    ))
+}
+
+pub async fn open_folder_by_id(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<FolderIdParams>,
+) -> Result<Json<FolderDetail>, AppCommandError> {
+    Ok(Json(
+        folder_commands::open_folder_by_id_core(&state.db, params.folder_id).await?,
+    ))
+}
+
+pub async fn remove_folder_from_workspace(
     Extension(state): Extension<Arc<AppState>>,
     Json(params): Json<FolderIdParams>,
 ) -> Result<Json<()>, AppCommandError> {
-    let db = &state.db;
-    folder_service::set_folder_open(&db.conn, params.folder_id, false)
-        .await
-        .map_err(AppCommandError::from)?;
+    folder_commands::remove_folder_from_workspace_core(&state.db, params.folder_id).await?;
     Ok(Json(()))
 }
-
-// --- New handlers below ---
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SaveFolderOpenedConversationsParams {
-    pub folder_id: i32,
-    pub items: Vec<OpenedConversation>,
+pub struct ReorderFoldersParams {
+    pub ids: Vec<i32>,
 }
 
-pub async fn save_folder_opened_conversations(
+pub async fn reorder_folders(
     Extension(state): Extension<Arc<AppState>>,
-    Json(params): Json<SaveFolderOpenedConversationsParams>,
+    Json(params): Json<ReorderFoldersParams>,
 ) -> Result<Json<()>, AppCommandError> {
-    let db = &state.db;
-    folder_service::save_opened_conversations(&db.conn, params.folder_id, params.items)
-        .await
-        .map_err(AppCommandError::from)?;
+    folder_commands::reorder_folders_core(&state.db, params.ids).await?;
     Ok(Json(()))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateFolderColorParams {
+    pub folder_id: i32,
+    pub color: String,
+}
+
+pub async fn update_folder_color(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<UpdateFolderColorParams>,
+) -> Result<Json<FolderDetail>, AppCommandError> {
+    Ok(Json(
+        folder_commands::update_folder_color_core(&state.db, params.folder_id, params.color)
+            .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateFolderDefaultAgentParams {
+    pub folder_id: i32,
+    pub default_agent_type: Option<AgentType>,
+}
+
+pub async fn update_folder_default_agent(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<UpdateFolderDefaultAgentParams>,
+) -> Result<Json<FolderDetail>, AppCommandError> {
+    Ok(Json(
+        folder_commands::update_folder_default_agent_core(
+            &state.db,
+            params.folder_id,
+            params.default_agent_type,
+        )
+        .await?,
+    ))
 }
 
 #[derive(Deserialize)]
@@ -125,6 +185,13 @@ pub async fn list_directory_entries(
     Json(params): Json<ListDirectoryEntriesParams>,
 ) -> Result<Json<Vec<folder_commands::DirectoryEntry>>, AppCommandError> {
     let result = folder_commands::list_directory_entries(params.path).await?;
+    Ok(Json(result))
+}
+
+pub async fn list_directory_with_files(
+    Json(params): Json<ListDirectoryEntriesParams>,
+) -> Result<Json<Vec<folder_commands::DirectoryItem>>, AppCommandError> {
+    let result = folder_commands::list_directory_with_files(params.path).await?;
     Ok(Json(result))
 }
 
@@ -244,42 +311,20 @@ pub async fn open_push_window(
     }))
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SetFolderParentBranchParams {
-    pub path: String,
-    pub parent_branch: Option<String>,
-}
-
 pub async fn add_folder_to_history(
     Extension(state): Extension<Arc<AppState>>,
     Json(params): Json<AddFolderParams>,
 ) -> Result<Json<FolderHistoryEntry>, AppCommandError> {
-    let db = &state.db;
-    let result = folder_service::add_folder(&db.conn, &params.path)
-        .await
-        .map_err(AppCommandError::from)?;
-    Ok(Json(result))
-}
-
-pub async fn set_folder_parent_branch(
-    Extension(state): Extension<Arc<AppState>>,
-    Json(params): Json<SetFolderParentBranchParams>,
-) -> Result<Json<()>, AppCommandError> {
-    let db = &state.db;
-    folder_commands::set_folder_parent_branch_core(&db.conn, &params.path, params.parent_branch)
-        .await?;
-    Ok(Json(()))
+    Ok(Json(
+        folder_commands::add_folder_to_history_core(&state.db, params.path).await?,
+    ))
 }
 
 pub async fn remove_folder_from_history(
     Extension(state): Extension<Arc<AppState>>,
     Json(params): Json<AddFolderParams>,
 ) -> Result<Json<()>, AppCommandError> {
-    let db = &state.db;
-    folder_service::remove_folder(&db.conn, &params.path)
-        .await
-        .map_err(AppCommandError::from)?;
+    folder_commands::remove_folder_from_history_core(&state.db, params.path).await?;
     Ok(Json(()))
 }
 

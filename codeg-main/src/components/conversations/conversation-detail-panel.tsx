@@ -1,38 +1,43 @@
 "use client"
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from "react"
+import {
+  Copy,
   Download,
   FileCode,
   FileImage,
   FileText,
+  Focus,
   Plus,
   RefreshCw,
   X,
 } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
-import { disposeTauriListener } from "@/lib/tauri-listener"
-import { useAcpActions } from "@/contexts/acp-connections-context"
-import { useFolderContext } from "@/contexts/folder-context"
+import { useAcpActions, useAcpEvent } from "@/contexts/acp-connections-context"
+import { useActiveFolder } from "@/contexts/active-folder-context"
+import { useAppWorkspace } from "@/contexts/app-workspace-context"
 import { useTabContext } from "@/contexts/tab-context"
 import { useSessionStats } from "@/contexts/session-stats-context"
 import { useTaskContext } from "@/contexts/task-context"
-import { cn, randomUUID } from "@/lib/utils"
+import { cn, copyTextToClipboard, randomUUID } from "@/lib/utils"
 import { useConnectionLifecycle } from "@/hooks/use-connection-lifecycle"
 import { useMessageQueue, type QueuedMessage } from "@/hooks/use-message-queue"
 import { MessageListView } from "@/components/message/message-list-view"
 import { ConversationShell } from "@/components/chat/conversation-shell"
 import { AgentSelector } from "@/components/chat/agent-selector"
 import { ChatInput } from "@/components/chat/chat-input"
-import {
-  acpFork,
-  createConversation,
-  openSettingsWindow,
-  updateConversationExternalId,
-  updateConversationStatus,
-  updateConversationTitle,
-} from "@/lib/api"
+import { WelcomeHero, WelcomeTip } from "@/components/chat/welcome-hero"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { acpFork, createConversation, openSettingsWindow } from "@/lib/api"
 import { useConversationRuntime } from "@/contexts/conversation-runtime-context"
 import { useConversationDetail } from "@/hooks/use-conversation-detail"
 import {
@@ -42,9 +47,9 @@ import {
 } from "@/lib/prompt-draft"
 import {
   AGENT_LABELS,
-  type AcpEvent,
   type AgentType,
   type ContentBlock,
+  type EventEnvelope,
   type MessageTurn,
   type PromptDraft,
 } from "@/lib/types"
@@ -55,7 +60,7 @@ import {
 import {
   buildConversationDraftStorageKey,
   buildNewConversationDraftStorageKey,
-  moveMessageInputDraft,
+  clearMessageInputDraft,
 } from "@/lib/message-input-draft"
 import {
   ContextMenu,
@@ -120,16 +125,6 @@ function buildOptimisticUserTurnFromDraft(
   }
 }
 
-function normalizeErrorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message
-  return String(error)
-}
-
-function isExpectedConnectError(error: unknown): boolean {
-  if (!error || typeof error !== "object") return false
-  return (error as { alerted?: unknown }).alerted === true
-}
-
 function buildVirtualConversationId(seed: string): number {
   let hash = 0
   for (let i = 0; i < seed.length; i += 1) {
@@ -150,10 +145,19 @@ const ConversationTabView = memo(function ConversationTabView({
   const t = useTranslations("Folder.conversation")
   const tWelcome = useTranslations("Folder.chat.welcomeInputPanel")
   const sharedT = useTranslations("Folder.chat.shared")
-  const { folder, folderId, refreshConversations, updateConversationLocal } =
-    useFolderContext()
-  const { tabs, bindConversationTab, setTabRuntimeConversationId, pinTab } =
-    useTabContext()
+  const { activeFolder: folder, activeFolderId } = useActiveFolder()
+  const { refreshConversations } = useAppWorkspace()
+  const folderId = activeFolderId ?? 0
+  const {
+    tabs,
+    bindConversationTab,
+    setTabRuntimeConversationId,
+    pinTab,
+    openNewConversationTab,
+    closeTab,
+    confirmDraftAgent,
+    setDraftAgentFromFallback,
+  } = useTabContext()
   const { setSessionStats } = useSessionStats()
   const {
     appendOptimisticTurn,
@@ -162,11 +166,13 @@ const ConversationTabView = memo(function ConversationTabView({
     refetchDetail,
     syncTurnMetadata,
     removeConversation,
+    setAcpLoadError,
     setExternalId,
     setLiveMessage,
     setPendingCleanup,
     setSyncState,
   } = useConversationRuntime()
+  const acpActions = useAcpActions()
 
   // Stable runtime session key — set once at mount, never changes.
   // For new conversations this is a virtual (negative) ID; for existing
@@ -180,7 +186,19 @@ const ConversationTabView = memo(function ConversationTabView({
   const dbConversationId = conversationId ?? createdConversationId
   const [draftAgentType, setDraftAgentType] = useState<AgentType>(agentType)
   const selectedAgent = conversationId != null ? agentType : draftAgentType
-  const [modeId, setModeId] = useState<string | null>(null)
+  // Seed from localStorage so the React state reflects the user's saved
+  // mode for this agent immediately on mount. Without this seed, a reuse-
+  // path connect (idle window after a refresh, before the agent is GC'd)
+  // would silently fall back to whatever `current_mode_id` the backend
+  // happens to be on: `handleModeChange` updates only React state and
+  // localStorage, not the agent — the agent gets synced inside
+  // `handleSend` by diffing `modeId` against `modes.current_mode_id`.
+  // A null seed here means that diff is "agent default vs null", which
+  // resolves the displayed mode through `conn.modes.current_mode_id`
+  // and never triggers the catch-up `setMode`.
+  const [modeId, setModeId] = useState<string | null>(() =>
+    getSavedModeId(agentType)
+  )
   const [sendSignal, setSendSignal] = useState(0)
   const [agentsLoaded, setAgentsLoaded] = useState(false)
   const [usableAgentCount, setUsableAgentCount] = useState(0)
@@ -190,8 +208,6 @@ const ConversationTabView = memo(function ConversationTabView({
   const [hasSentMessage, setHasSentMessage] = useState(false)
 
   const hasPersistedConversation = dbConversationId != null
-  const canAutoConnect =
-    hasPersistedConversation || (agentsLoaded && usableAgentCount > 0)
 
   // Expose the runtime session key to the tab so the aux panel (Diff sidebar)
   // can look up live turns even before the DB conversation is created.
@@ -218,16 +234,8 @@ const ConversationTabView = memo(function ConversationTabView({
   } | null>(null)
   const dbConvIdRef = useRef<number | null>(conversationId)
   const mountedRef = useRef(true)
-  const statusUpdatedRef = useRef(false)
   const selectedAgentRef = useRef(selectedAgent)
   const createConversationPendingRef = useRef(false)
-  // When the turn finishes (cancel / complete) before createConversation
-  // resolves, we can't update the DB status yet.  This ref records the
-  // desired status so the createConversation callback can apply it.
-  const deferredStatusRef = useRef<string | null>(null)
-  // For existing conversations (opened from sidebar), the external_id is
-  // already persisted — don't let a session/new fallback overwrite it.
-  const externalIdSavedRef = useRef(conversationId != null)
   const sessionIdRef = useRef<string | null>(null)
   const syncCancelRef = useRef<(() => void) | null>(null)
 
@@ -239,10 +247,26 @@ const ConversationTabView = memo(function ConversationTabView({
     selectedAgentRef.current = selectedAgent
   }, [selectedAgent])
 
+  // Sync the agentType prop into draftAgentType for draft tabs. The prop
+  // changes when openNewConversationTab re-points an existing draft at a
+  // different folder's default agent (or when any other external mutation
+  // updates tab.agentType). Without this mirror, the local draftAgentType
+  // would stay frozen at its mount value and the UI/connection would not
+  // follow. Persisted conversations read agentType directly from the prop
+  // via selectedAgent, so they are unaffected.
+  useEffect(() => {
+    if (conversationId != null) return
+    if (agentType === selectedAgentRef.current) return
+    setDraftAgentType(agentType)
+    setModeId(getSavedModeId(agentType))
+    setAgentConnectError(null)
+  }, [agentType, conversationId])
+
   const {
     detail,
     loading: detailLoading,
     error: detailError,
+    acpLoadError,
   } = useConversationDetail(effectiveConversationId)
 
   const runtimeSession = getSession(effectiveConversationId)
@@ -253,19 +277,44 @@ const ConversationTabView = memo(function ConversationTabView({
     setSessionStats(effectiveSessionStats)
   }, [effectiveSessionStats, isActive, setSessionStats])
 
-  const externalId = detail?.summary.external_id ?? undefined
+  // Two-source resolution for the session id passed to acp_connect:
+  //   1. detail.summary.external_id — DB value, available for tabs opened
+  //      from the sidebar (effectiveConversationId equals the real cid).
+  //   2. runtimeSession.externalId — populated by the connSessionId effect
+  //      below when SessionStarted fires. This is the ONLY source for tabs
+  //      that started as a new conversation: their effectiveConversationId
+  //      is locked to a virtual negative id (line 186 useState initializer
+  //      runs once), useConversationDetail skips fetching for virtual ids,
+  //      and detail stays null forever. Without this fallback, every
+  //      reconnect on a new-conversation tab passes sessionId=undefined →
+  //      backend takes session/new → DB.external_id is overwritten on the
+  //      next prompt → original sid orphaned, agent loses prior context.
+  const externalId =
+    detail?.summary.external_id ?? runtimeSession?.externalId ?? undefined
+  // For persisted conversations opened from the sidebar, wait until the
+  // session's external_id has been resolved before auto-connecting.
+  // Otherwise the auto-connect effect fires with sessionId=undefined and
+  // the backend falls back to session/new, orphaning the historical
+  // context. cline doesn't support session resume, so it connects
+  // immediately regardless.
+  const awaitingHistoricalSessionId =
+    hasPersistedConversation && selectedAgent !== "cline" && detailLoading
+  const canAutoConnect =
+    (hasPersistedConversation || (agentsLoaded && usableAgentCount > 0)) &&
+    !awaitingHistoricalSessionId &&
+    !(hasPersistedConversation && detailError) &&
+    !(hasPersistedConversation && acpLoadError)
   const draftStorageKey = useMemo(() => {
     if (dbConversationId != null) {
-      return buildConversationDraftStorageKey(selectedAgent, dbConversationId)
+      return buildConversationDraftStorageKey(dbConversationId)
     }
-    return buildNewConversationDraftStorageKey({ folderId })
-  }, [dbConversationId, folderId, selectedAgent])
-  const workingDirForConnection = useMemo(() => {
-    if (dbConversationId != null) {
-      return detailLoading ? undefined : folder?.path
-    }
-    return workingDir ?? folder?.path
-  }, [dbConversationId, detailLoading, folder?.path, workingDir])
+    return buildNewConversationDraftStorageKey()
+  }, [dbConversationId])
+  // Use the per-tab workingDir (derived from the tab's own folderId by the
+  // parent) rather than the active folder's path — otherwise switching tabs
+  // briefly exposes the previous folder's path to the ACP auto-connect
+  // effect, and the connection sticks with the wrong cwd.
+  const workingDirForConnection = workingDir ?? folder?.path
 
   const {
     conn,
@@ -288,12 +337,7 @@ const ConversationTabView = memo(function ConversationTabView({
         ? externalId
         : undefined,
   })
-  const {
-    status: connStatus,
-    connect: connConnect,
-    disconnect: connDisconnect,
-    sessionId: connSessionId,
-  } = conn
+  const { status: connStatus, sessionId: connSessionId } = conn
   const messageQueue = useMessageQueue()
   const {
     queue: msgQueue,
@@ -337,6 +381,15 @@ const ConversationTabView = memo(function ConversationTabView({
     }
   }, [connSessionId])
 
+  // Mirror the connection's load failure (set on `session_load_failed` from
+  // the agent) onto the per-conversation runtime session so the detail UI
+  // can surface it next to detail-load errors. Cleared automatically when
+  // the connection's loadError clears (e.g. via Reload).
+  const connLoadError = conn.loadError
+  useEffect(() => {
+    setAcpLoadError(effectiveConversationId, connLoadError ?? null)
+  }, [connLoadError, effectiveConversationId, setAcpLoadError])
+
   // completeTurn MUST be declared BEFORE setLiveMessage so that React runs
   // its cleanup/setup before setLiveMessage's cleanup. When connStatus
   // transitions away from "prompting", completeTurn snapshots and promotes
@@ -347,49 +400,31 @@ const ConversationTabView = memo(function ConversationTabView({
     prevConnStatusRef.current = connStatus
     if (!wasPrompting || connStatus === "prompting") return
 
-    // Turn completed — promote liveMessage + optimisticTurns to localTurns
-    completeTurn(effectiveConversationId)
+    // Turn completed — promote liveMessage + optimisticTurns to localTurns.
+    // Pass conn.liveMessage explicitly: when turn_complete arrives in the
+    // same React batch as the final STREAM_BATCH (typical case), the mirror
+    // effect that syncs conn.liveMessage into the runtime session has not
+    // run yet for this render, so session.liveMessage would be missing the
+    // final text chunk. The connections-context value is authoritative.
+    completeTurn(effectiveConversationId, conn.liveMessage)
 
     // Cancel previous metadata sync (handles rapid consecutive turns)
     syncCancelRef.current?.()
     syncCancelRef.current = null
 
-    const targetStatus =
-      connStatus === "disconnected" || connStatus === "error"
-        ? null
-        : "pending_review"
-
     const persistedId = dbConvIdRef.current
-    if (!persistedId) {
-      // Conversation hasn't been persisted yet (createConversation still
-      // in flight).  Record the desired status so the create callback
-      // can apply it once the DB row exists.
-      if (targetStatus) {
-        deferredStatusRef.current = targetStatus
-      }
-      return
-    }
-
-    // Async patch metadata (usage, duration_ms, model, session_stats)
-    if (persistedId > 0) {
+    if (persistedId && persistedId > 0) {
       syncCancelRef.current = syncTurnMetadata(
         persistedId,
         effectiveConversationId
       )
     }
-
-    if (targetStatus) {
-      updateConversationLocal(persistedId, { status: targetStatus })
-      updateConversationStatus(persistedId, targetStatus).catch((e: unknown) =>
-        console.error("[ConversationTabView] update status:", e)
-      )
-    }
   }, [
     completeTurn,
     connStatus,
+    conn.liveMessage,
     effectiveConversationId,
     syncTurnMetadata,
-    updateConversationLocal,
   ])
 
   // Auto-send queued messages when agent finishes responding.
@@ -425,7 +460,17 @@ const ConversationTabView = memo(function ConversationTabView({
     // Clearing is handled by COMPLETE_TURN (sets liveMessage = null) and
     // by this effect's cleanup (when not prompting).
     if (conn.liveMessage != null) {
-      setLiveMessage(effectiveConversationId, conn.liveMessage)
+      // isLive=true when actively prompting tells the runtime reducer to
+      // bypass its stale-reconnect-replay guard. This matters for the
+      // rekey path (close+reopen mid-turn): the runtime session for the
+      // persisted conversation id is fresh and may have user turns in
+      // detail.turns post-load, which would otherwise drop the live
+      // assistant stream on the floor.
+      setLiveMessage(
+        effectiveConversationId,
+        conn.liveMessage,
+        connStatus === "prompting"
+      )
     }
     return () => {
       // Don't clear liveMessage if agent is still responding — the session
@@ -435,7 +480,7 @@ const ConversationTabView = memo(function ConversationTabView({
         setLiveMessage(effectiveConversationId, null)
       }
     }
-  }, [conn.liveMessage, effectiveConversationId, setLiveMessage])
+  }, [conn.liveMessage, connStatus, effectiveConversationId, setLiveMessage])
 
   useEffect(() => {
     if (effectiveConversationId <= 0) return
@@ -446,57 +491,6 @@ const ConversationTabView = memo(function ConversationTabView({
     if (!connSessionId) return
     setExternalId(effectiveConversationId, connSessionId)
   }, [connSessionId, effectiveConversationId, setExternalId])
-
-  const trySaveExternalId = useCallback(() => {
-    if (
-      externalIdSavedRef.current ||
-      !dbConvIdRef.current ||
-      !sessionIdRef.current
-    ) {
-      return
-    }
-    externalIdSavedRef.current = true
-    updateConversationExternalId(
-      dbConvIdRef.current,
-      sessionIdRef.current
-    ).catch((e: unknown) =>
-      console.error("[ConversationTabView] update external_id:", e)
-    )
-  }, [])
-
-  useEffect(() => {
-    if (connSessionId) {
-      trySaveExternalId()
-    }
-  }, [connSessionId, trySaveExternalId])
-
-  useEffect(() => {
-    if (connStatus === "connected" || connStatus === "prompting") {
-      statusUpdatedRef.current = false
-      return
-    }
-    if (statusUpdatedRef.current) return
-    const persistedId = dbConvIdRef.current
-    if (!persistedId) return
-    // Only update status if the user actually interacted in this session.
-    // A pure history view (opened from sidebar, no messages sent) should
-    // not flip the conversation to "completed" just because the ACP
-    // connection disconnected (e.g. agent auth expired).
-    if (!hasSentMessage) return
-    if (connStatus === "disconnected") {
-      statusUpdatedRef.current = true
-      updateConversationLocal(persistedId, { status: "completed" })
-      updateConversationStatus(persistedId, "completed").catch((e) =>
-        console.error("[ConversationTabView] update status:", e)
-      )
-    } else if (connStatus === "error") {
-      statusUpdatedRef.current = true
-      updateConversationLocal(persistedId, { status: "cancelled" })
-      updateConversationStatus(persistedId, "cancelled").catch((e) =>
-        console.error("[ConversationTabView] update status:", e)
-      )
-    }
-  }, [connStatus, hasSentMessage, updateConversationLocal])
 
   useEffect(() => {
     if (dbConversationId == null) return
@@ -571,32 +565,42 @@ const ConversationTabView = memo(function ConversationTabView({
       if (currentTab && !currentTab.isPinned) {
         pinTab(tabId)
       }
-      lifecycleSend(draft, selectedModeIdArg)
 
       const persistedId = dbConvIdRef.current
       if (persistedId) {
-        updateConversationLocal(persistedId, { status: "in_progress" })
-        updateConversationStatus(persistedId, "in_progress").catch(
-          (e: unknown) =>
-            console.error("[ConversationTabView] update status:", e)
-        )
-        statusUpdatedRef.current = false
+        // Existing-tab path: row already exists, send immediately with the
+        // conversation_id pinned so the backend reuses our row instead of
+        // creating a duplicate.
+        lifecycleSend(draft, selectedModeIdArg, {
+          folderId,
+          conversationId: persistedId,
+        })
         return
       }
 
+      // New-tab path: create the DB row first, then send with the new id
+      // pinned. This prevents the backend's send_prompt_linked from racing
+      // us to create its own conversation row.
       if (createConversationPendingRef.current) return
       createConversationPendingRef.current = true
       const title = getPromptDraftDisplayText(
         draft,
         sharedT("attachedResources")
       ).slice(0, 80)
-      createConversation(folderId, selectedAgent, title)
-        .then((newConversationId) => {
+
+      void (async () => {
+        try {
+          const newConversationId = await createConversation(
+            folderId,
+            selectedAgent,
+            title
+          )
           dbConvIdRef.current = newConversationId
           // Set external ID on the stable virtual session (no migration needed —
-          // effectiveConversationId never changes, so the session stays in place)
+          // effectiveConversationId never changes, so the session stays in place).
+          // DB persistence of external_id is now backend-driven from
+          // send_prompt_linked once the row is linked, so no explicit DB write here.
           setExternalId(effectiveConversationId, sessionIdRef.current ?? null)
-          trySaveExternalId()
 
           if (!mountedRef.current) {
             // Component unmounted while creating — mark for deferred cleanup
@@ -614,31 +618,22 @@ const ConversationTabView = memo(function ConversationTabView({
             title,
             effectiveConversationId
           )
-          moveMessageInputDraft(
-            buildNewConversationDraftStorageKey({ folderId }),
-            buildConversationDraftStorageKey(selectedAgent, newConversationId)
-          )
-          statusUpdatedRef.current = false
-          // If the turn already finished while we were creating the
-          // conversation, apply the deferred status directly instead
-          // of setting "in_progress" (which would never be updated).
-          const initialStatus = deferredStatusRef.current ?? "in_progress"
-          deferredStatusRef.current = null
+          clearMessageInputDraft(buildNewConversationDraftStorageKey())
           refreshConversations()
-          updateConversationLocal(newConversationId, {
-            status: initialStatus,
+
+          // Now that the row exists, kick off the actual prompt with the
+          // conversation_id pinned so the backend adopts our row instead of
+          // creating a duplicate one.
+          lifecycleSend(draft, selectedModeIdArg, {
+            folderId,
+            conversationId: newConversationId,
           })
-          updateConversationStatus(newConversationId, initialStatus).catch(
-            (e: unknown) =>
-              console.error("[ConversationTabView] update status:", e)
-          )
-        })
-        .catch((e: unknown) =>
+        } catch (e) {
           console.error("[ConversationTabView] create conversation:", e)
-        )
-        .finally(() => {
+        } finally {
           createConversationPendingRef.current = false
-        })
+        }
+      })()
     },
     [
       appendOptimisticTurn,
@@ -659,8 +654,6 @@ const ConversationTabView = memo(function ConversationTabView({
       tabs,
       tWelcome,
       tabId,
-      trySaveExternalId,
-      updateConversationLocal,
     ]
   )
 
@@ -669,38 +662,16 @@ const ConversationTabView = memo(function ConversationTabView({
     handleSendRef.current = handleSend
   }, [handleSend])
 
-  // Resolve the current conversation title from tab context (most up-to-date)
-  // or fall back to the DB detail summary.
-  const conversationTitle = useMemo(() => {
-    const tabTitle = tabs.find((tab) => tab.id === tabId)?.title
-    return tabTitle || detail?.summary.title || null
-  }, [tabs, tabId, detail?.summary.title])
-
   const handleForkSend = useCallback(
     async (draft: PromptDraft, selectedModeIdArg?: string | null) => {
       const connectionId = conn.connectionId
       if (!connectionId || connStatus !== "connected") return
       try {
-        const { forkedSessionId, originalSessionId } =
-          await acpFork(connectionId)
-        const persistedId = dbConvIdRef.current
-        if (persistedId != null) {
-          const baseTitle = conversationTitle ?? t("newConversation")
-          // Strip existing [Fork] prefix to avoid stacking
-          const cleanTitle = baseTitle.replace(/^\[Fork]\s*/g, "")
-          // Point current conversation at S2 (forked) and add fork tag
-          await updateConversationExternalId(persistedId, forkedSessionId)
-          await updateConversationTitle(persistedId, `[Fork] ${cleanTitle}`)
-          // Save original S1 as a separate conversation with original title
-          const s1ConvId = await createConversation(
-            folderId,
-            selectedAgent,
-            cleanTitle
-          )
-          await updateConversationExternalId(s1ConvId, originalSessionId)
-          await updateConversationStatus(s1ConvId, "pending_review")
-        }
-        // Update runtime session id to S2
+        // Backend now performs all DB writes in one transaction-shaped call:
+        // - current row: external_id=S2, title="[Fork] ..."
+        // - sibling row: created with external_id=S1, status=pending_review
+        const { forkedSessionId } = await acpFork(connectionId)
+        // Update runtime session id to S2 (frontend in-memory state only)
         sessionIdRef.current = forkedSessionId
         setExternalId(effectiveConversationId, forkedSessionId)
 
@@ -723,12 +694,9 @@ const ConversationTabView = memo(function ConversationTabView({
     [
       conn.connectionId,
       connStatus,
-      conversationTitle,
       effectiveConversationId,
-      folderId,
       handleSend,
       refreshConversations,
-      selectedAgent,
       setExternalId,
       t,
     ]
@@ -743,6 +711,15 @@ const ConversationTabView = memo(function ConversationTabView({
     })
   }, [selectedAgent])
 
+  // Manual agent switch only updates local draft state. The single source of
+  // truth for (dis)connecting is `useConnectionLifecycle`'s auto-connect
+  // effect: when `selectedAgent` changes, the hook re-fires `connect()`,
+  // which internally disconnects the old agent's connection at the same
+  // contextKey before creating the new one (acp-connections-context.tsx).
+  // Doing the disconnect+reconnect here too would race the lifecycle path:
+  // a late-returning disconnect would dispatch CONNECTION_REMOVED by
+  // contextKey and wipe the new connection's frontend state, leaving a
+  // backend orphan.
   const handleAgentSelect = useCallback(
     (nextAgentType: AgentType) => {
       if (nextAgentType === selectedAgentRef.current) return
@@ -751,35 +728,30 @@ const ConversationTabView = memo(function ConversationTabView({
       setDraftAgentType(nextAgentType)
       setModeId(getSavedModeId(nextAgentType))
       setAgentConnectError(null)
-
-      const s = connStatusRef.current
-      const doConnect = () => {
-        if (!workingDirForConnection) return
-        connConnect(nextAgentType, workingDirForConnection, undefined)
-          .then(() => {
-            setAgentConnectError(null)
-          })
-          .catch((e) => {
-            setAgentConnectError(normalizeErrorMessage(e))
-            if (!isExpectedConnectError(e)) {
-              console.error("[ConversationTabView] switch agent:", e)
-            }
-          })
-      }
-
-      // If not yet connected, directly attempt to connect with the new agent.
-      if (!s || s === "disconnected" || s === "error") {
-        doConnect()
-        return
-      }
-
-      connDisconnect()
-        .catch((e) =>
-          console.error("[ConversationTabView] disconnect old agent:", e)
-        )
-        .finally(doConnect)
+      // Real user click — clear the provisional flag so TabProvider's
+      // correction effect leaves this tab alone.
+      confirmDraftAgent(tabId, nextAgentType)
     },
-    [connConnect, connDisconnect, workingDirForConnection]
+    [confirmDraftAgent, tabId]
+  )
+
+  // AgentSelector auto-fallback: the requested default agent was missing
+  // or unavailable, so it picked a substitute on its own. Sync local UI
+  // state (so the connection points at the right agent immediately) but
+  // mark the tab as still provisional — TabProvider's correction effect
+  // will re-resolve against the folder's saved default once all three
+  // hydration gates are open, and overwrite this substitute if needed.
+  const handleAgentFallback = useCallback(
+    (nextAgentType: AgentType) => {
+      if (nextAgentType === selectedAgentRef.current) return
+      if (dbConvIdRef.current) return
+
+      setDraftAgentType(nextAgentType)
+      setModeId(getSavedModeId(nextAgentType))
+      setAgentConnectError(null)
+      setDraftAgentFromFallback(tabId, nextAgentType)
+    },
+    [setDraftAgentFromFallback, tabId]
   )
 
   const handleModeChange = useCallback(
@@ -856,6 +828,36 @@ const ConversationTabView = memo(function ConversationTabView({
   const showDraftHeader = !hasPersistedConversation && !hasSentMessage
   const isWelcomeMode = showDraftHeader
 
+  const canShowDetailErrorActions =
+    hasPersistedConversation && dbConversationId != null && !!folder
+  const handleReloadDetail = useCallback(() => {
+    if (dbConversationId == null) return
+    // Clear the ACP load failure so canAutoConnect re-enables and the next
+    // auto-connect attempt is allowed to retry session/load. The mirror
+    // effect above syncs this back into the runtime session as null.
+    if (acpLoadError) {
+      acpActions.clearAcpLoadError(tabId)
+    }
+    refetchDetail(dbConversationId)
+  }, [acpActions, acpLoadError, dbConversationId, refetchDetail, tabId])
+  // Open (or re-activate) the singleton draft tab BEFORE closing the failing
+  // tab. closeTab auto-creates a replacement draft when it removes the last
+  // tab, and `openNewConversationTab` reads `rawTabsRef.current` which
+  // wouldn't yet reflect either pending update if we closed first — the
+  // singleton check would miss the replacement and we'd end up with two
+  // drafts. Doing it in this order means the second `setTabs` (closeTab)
+  // runs against the result of the first.
+  const handleOpenNewSession = useCallback(() => {
+    if (!folder) return
+    // Retry-from-error: user wants a fresh draft in the same conversation
+    // context, so inherit the active tab's agent when the folder has no
+    // pinned default.
+    openNewConversationTab(folder.id, workingDirForConnection ?? folder.path, {
+      inheritFromActive: true,
+    })
+    closeTab(tabId)
+  }, [closeTab, folder, openNewConversationTab, tabId, workingDirForConnection])
+
   const messageListNode = (
     <MessageListView
       conversationId={effectiveConversationId}
@@ -866,7 +868,12 @@ const ConversationTabView = memo(function ConversationTabView({
       sessionStats={effectiveSessionStats}
       detailLoading={detailLoading}
       detailError={detailError}
+      acpLoadError={acpLoadError}
       hideEmptyState={!hasPersistedConversation || hasSentMessage}
+      onReload={canShowDetailErrorActions ? handleReloadDetail : undefined}
+      onNewSession={
+        canShowDetailErrorActions ? handleOpenNewSession : undefined
+      }
     />
   )
 
@@ -897,7 +904,7 @@ const ConversationTabView = memo(function ConversationTabView({
       availableCommands={connectionCommands}
       attachmentTabId={tabId}
       draftStorageKey={draftStorageKey}
-      hideInput={isWelcomeMode}
+      hideInput={isWelcomeMode || Boolean(acpLoadError)}
       isActive={isActive}
       queue={msgQueue}
       onEnqueue={mqEnqueue}
@@ -918,23 +925,26 @@ const ConversationTabView = memo(function ConversationTabView({
       }
     >
       {isWelcomeMode ? (
-        <div className="flex h-full min-h-0 flex-col items-center justify-center">
-          <div className="flex w-full max-w-2xl flex-col gap-4 px-4">
-            <AgentSelector
-              defaultAgentType={
-                conversationId != null ? selectedAgent : undefined
-              }
-              onSelect={handleAgentSelect}
-              onAgentsLoaded={(agents) => {
-                setAgentsLoaded(true)
-                setUsableAgentCount(
-                  agents.filter((agent) => agent.enabled && agent.available)
-                    .length
-                )
-              }}
-              onOpenAgentsSettings={handleOpenAgentsSettings}
-              disabled={isConnecting || dbConversationId != null}
-            />
+        <div className="relative isolate flex h-full min-h-0 flex-col overflow-x-hidden overflow-y-auto">
+          <div className="flex-1" />
+          <div className="mx-auto flex w-full max-w-2xl shrink-0 flex-col gap-6 px-4 py-4">
+            <WelcomeHero />
+            <div className="flex justify-center">
+              <AgentSelector
+                defaultAgentType={selectedAgent}
+                onSelect={handleAgentSelect}
+                onFallback={handleAgentFallback}
+                onAgentsLoaded={(agents) => {
+                  setAgentsLoaded(true)
+                  setUsableAgentCount(
+                    agents.filter((agent) => agent.enabled && agent.available)
+                      .length
+                  )
+                }}
+                onOpenAgentsSettings={handleOpenAgentsSettings}
+                disabled={isConnecting || dbConversationId != null}
+              />
+            </div>
             {autoConnectError || agentConnectError ? (
               <button
                 type="button"
@@ -972,15 +982,18 @@ const ConversationTabView = memo(function ConversationTabView({
               isActive={isActive}
             />
           </div>
+          <div className="flex-1" />
+          <div className="mx-auto w-full max-w-2xl shrink-0 px-4 pb-6">
+            <WelcomeTip />
+          </div>
         </div>
       ) : showDraftHeader ? (
         <div className="flex h-full min-h-0 flex-col">
           <div className="px-4 pt-3 pb-2">
             <AgentSelector
-              defaultAgentType={
-                conversationId != null ? selectedAgent : undefined
-              }
+              defaultAgentType={selectedAgent}
               onSelect={handleAgentSelect}
+              onFallback={handleAgentFallback}
               onAgentsLoaded={(agents) => {
                 setAgentsLoaded(true)
                 setUsableAgentCount(
@@ -1025,13 +1038,8 @@ export function ConversationDetailPanel() {
     getSession,
     removeConversation: runtimeRemoveConversation,
   } = useConversationRuntime()
-  const {
-    folder,
-    newConversation,
-    conversations,
-    refreshConversations,
-    updateConversationLocal,
-  } = useFolderContext()
+  const { activeFolder: folder } = useActiveFolder()
+  const { conversations, getFolder } = useAppWorkspace()
   const {
     tabs,
     activeTabId,
@@ -1041,19 +1049,16 @@ export function ConversationDetailPanel() {
     switchTab,
     onPreviewTabReplaced,
   } = useTabContext()
+  const newConversation = useMemo(() => {
+    const activeTab = tabs.find((tab) => tab.id === activeTabId)
+    if (!activeTab || activeTab.conversationId != null) return null
+    const workingDir = activeTab.workingDir ?? folder?.path
+    if (!workingDir) return null
+    return { workingDir, folderId: activeTab.folderId }
+  }, [tabs, activeTabId, folder?.path])
   const { disconnect: disconnectByKey } = useAcpActions()
   const { addTask, updateTask } = useTaskContext()
   const [reloadByTabId, setReloadByTabId] = useState<Record<string, number>>({})
-  const tabsRef = useRef(tabs)
-  const conversationsRef = useRef(conversations)
-
-  useEffect(() => {
-    tabsRef.current = tabs
-  }, [tabs])
-
-  useEffect(() => {
-    conversationsRef.current = conversations
-  }, [conversations])
 
   const exportLabels = useMemo<ExportLabels>(
     () => ({
@@ -1091,118 +1096,67 @@ export function ConversationDetailPanel() {
     })
   }, [onPreviewTabReplaced, disconnectByKey])
 
-  // Refs for background turn_complete handler so the listener
-  // can be registered once and always read the latest values.
-  const getConversationIdByExternalIdRef = useRef(getConversationIdByExternalId)
-  const getSessionRef = useRef(getSession)
-  const runtimeCompleteTurnRef = useRef(runtimeCompleteTurn)
-  const runtimeRemoveConversationRef = useRef(runtimeRemoveConversation)
-  const refreshConversationsRef = useRef(refreshConversations)
-  const updateConversationLocalRef = useRef(updateConversationLocal)
-  useEffect(() => {
-    getConversationIdByExternalIdRef.current = getConversationIdByExternalId
-  }, [getConversationIdByExternalId])
-  useEffect(() => {
-    getSessionRef.current = getSession
-  }, [getSession])
-  useEffect(() => {
-    runtimeCompleteTurnRef.current = runtimeCompleteTurn
-  }, [runtimeCompleteTurn])
-  useEffect(() => {
-    runtimeRemoveConversationRef.current = runtimeRemoveConversation
-  }, [runtimeRemoveConversation])
-  useEffect(() => {
-    refreshConversationsRef.current = refreshConversations
-  }, [refreshConversations])
-  useEffect(() => {
-    updateConversationLocalRef.current = updateConversationLocal
-  }, [updateConversationLocal])
-
   // Background turn_complete handler: for conversations not open in tabs.
-  // Registered once — uses refs to avoid re-creating the listener on every
-  // state change, which would cause "Couldn't find callback id" warnings
-  // due to the async gap between unlisten and the new listen().
-  useEffect(() => {
-    let cancelled = false
-    let unlisten: (() => void | Promise<void>) | null = null
+  // Subscribes via the context's primary `acp://event` listener (single
+  // physical Tauri/WebSocket subscription, plus seq dedup from Phase 3b).
+  // `useAcpEvent` stabilizes handler identity internally, so the callback
+  // can read closure values directly — no caller-side refs needed.
+  useAcpEvent(
+    useCallback(
+      (envelope: EventEnvelope) => {
+        if (envelope.type !== "turn_complete") return
 
-    void import("@tauri-apps/api/event")
-      .then(({ listen }) =>
-        listen<AcpEvent>("acp://event", (event) => {
-          const payload = event.payload
-          if (payload.type !== "turn_complete") return
+        const runtimeConversationId = getConversationIdByExternalId(
+          envelope.session_id
+        )
+        const summary = conversations.find(
+          (item) => item.external_id === envelope.session_id
+        )
+        const matchedConversationId =
+          runtimeConversationId ?? summary?.id ?? null
+        if (!matchedConversationId) return
 
-          const runtimeConversationId =
-            getConversationIdByExternalIdRef.current(payload.session_id)
-          const summary = conversationsRef.current.find(
-            (item) => item.external_id === payload.session_id
-          )
-          const matchedConversationId =
-            runtimeConversationId ?? summary?.id ?? null
-          if (!matchedConversationId) return
+        // Match against every identifier the panel may carry for the same
+        // runtime session — otherwise this background handler races the
+        // panel's own completeTurn effect and double-promotes streamingTurns
+        // into localTurns (visible as a duplicated assistant message until
+        // the conversation is reopened from DB).
+        //
+        // Invariant: `tab.runtimeConversationId` is only set when the panel's
+        // effectiveConversationId differs from its bound conversationId, i.e.
+        // for new conversations whose session lives under a virtual (negative)
+        // id. `dbId2` is always a real DB id, so a runtimeConversationId vs.
+        // dbId2 comparison is unreachable and intentionally omitted.
+        // `conversations` may lag the tab update on fast turns, so dbId2
+        // alone (without the runtime id branch) is not a reliable signal.
+        const dbId2 = summary?.id
+        const isOpenInTabs = tabs.some(
+          (tab) =>
+            tab.conversationId === matchedConversationId ||
+            tab.runtimeConversationId === matchedConversationId ||
+            (dbId2 != null && tab.conversationId === dbId2)
+        )
+        if (isOpenInTabs) return
 
-          // Check both virtual (runtime) ID and real DB ID — after
-          // bindConversationTab the tab stores the real DB ID while the
-          // runtime session may still be keyed by the virtual ID.
-          const dbId2 = summary?.id
-          const isOpenInTabs = tabsRef.current.some(
-            (tab) =>
-              tab.conversationId === matchedConversationId ||
-              (dbId2 != null && tab.conversationId === dbId2)
-          )
-          if (isOpenInTabs) return
+        // Promote liveMessage + optimisticTurns to localTurns immediately
+        runtimeCompleteTurn(matchedConversationId)
 
-          // Promote liveMessage + optimisticTurns to localTurns immediately
-          runtimeCompleteTurnRef.current(matchedConversationId)
-
-          // If tab was closed while agent was responding, clean up now
-          const session = getSessionRef.current(matchedConversationId)
-          if (session?.pendingCleanup) {
-            runtimeRemoveConversationRef.current(matchedConversationId)
-          }
-
-          // Update conversation status — use the DB summary (found by
-          // external_id above) since matchedConversationId may be a virtual
-          // (negative) ID that won't match any DB record.
-          const dbId =
-            summary?.id ??
-            (matchedConversationId > 0 ? matchedConversationId : null)
-          if (dbId && (!summary || summary.status === "in_progress")) {
-            updateConversationLocalRef.current(dbId, {
-              status: "pending_review",
-            })
-            updateConversationStatus(dbId, "pending_review").catch(
-              (error: unknown) =>
-                console.error(
-                  "[ConversationDetailPanel] background update status:",
-                  error
-                )
-            )
-          }
-        })
-      )
-      .then((dispose) => {
-        if (cancelled) {
-          disposeTauriListener(
-            dispose,
-            "ConversationDetailPanel.backgroundRefresh"
-          )
-          return
+        // If tab was closed while agent was responding, clean up now
+        const session = getSession(matchedConversationId)
+        if (session?.pendingCleanup) {
+          runtimeRemoveConversation(matchedConversationId)
         }
-        unlisten = dispose
-      })
-      .catch(() => {
-        // Ignore when non-tauri runtime.
-      })
-
-    return () => {
-      cancelled = true
-      disposeTauriListener(
-        unlisten,
-        "ConversationDetailPanel.backgroundRefresh"
-      )
-    }
-  }, [])
+      },
+      [
+        conversations,
+        tabs,
+        getConversationIdByExternalId,
+        getSession,
+        runtimeCompleteTurn,
+        runtimeRemoveConversation,
+      ]
+    )
+  )
 
   const hasNoTabs = tabs.length === 0 && !activeTabId
   const activeConversationTab = useMemo(
@@ -1221,9 +1175,73 @@ export function ConversationDetailPanel() {
     }))
   }, [activeConversationTab])
 
+  const [contextMenuSelectedText, setContextMenuSelectedText] = useState("")
+  const savedSelectionRangeRef = useRef<Range | null>(null)
+  const isContextMenuOpenRef = useRef(false)
+
+  const handleContextMenuOpenChange = useCallback((open: boolean) => {
+    isContextMenuOpenRef.current = open
+    if (!open) {
+      savedSelectionRangeRef.current = null
+      return
+    }
+    const selection = window.getSelection()
+    const text = selection?.toString() ?? ""
+    setContextMenuSelectedText(text)
+    savedSelectionRangeRef.current =
+      selection && selection.rangeCount > 0 && !selection.isCollapsed
+        ? selection.getRangeAt(0).cloneRange()
+        : null
+  }, [])
+
+  const handleContextMenuTriggerPointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (event.button !== 2) return
+      const selection = window.getSelection()
+      if (selection && !selection.isCollapsed) {
+        event.preventDefault()
+      }
+    },
+    []
+  )
+
+  useEffect(() => {
+    const handler = () => {
+      if (!isContextMenuOpenRef.current) return
+      const range = savedSelectionRangeRef.current
+      if (!range) return
+      if (
+        !document.contains(range.startContainer) ||
+        !document.contains(range.endContainer)
+      ) {
+        savedSelectionRangeRef.current = null
+        return
+      }
+      const selection = window.getSelection()
+      if (!selection) return
+      if (selection.toString().length > 0) return
+      selection.removeAllRanges()
+      selection.addRange(range)
+    }
+    document.addEventListener("selectionchange", handler)
+    return () => document.removeEventListener("selectionchange", handler)
+  }, [])
+
+  const handleCopySelectedText = useCallback(async () => {
+    if (!contextMenuSelectedText) return
+    const ok = await copyTextToClipboard(contextMenuSelectedText)
+    if (ok) {
+      toast.success(t("copyTextSuccess"))
+    } else {
+      toast.error(t("copyTextFailed"))
+    }
+  }, [contextMenuSelectedText, t])
+
   const handleNewConversation = useCallback(() => {
     if (!folder) return
-    openNewConversationTab(folder.path)
+    // Right-click "new conversation" inside a conversation tab: keep the
+    // active agent when the target folder has no pinned default.
+    openNewConversationTab(folder.id, folder.path, { inheritFromActive: true })
   }, [folder, openNewConversationTab])
 
   const handleCloseActiveTab = useCallback(() => {
@@ -1247,24 +1265,26 @@ export function ConversationDetailPanel() {
     }
   }, [activeConversationTab, getSession, exportLabels])
 
-  const handleExportMarkdown = useCallback(() => {
+  const handleExportMarkdown = useCallback(async () => {
     const data = getExportData()
     if (!data) return
     try {
-      exportAsMarkdown(data)
-      toast.success(t("exportSuccess"))
+      const result = await exportAsMarkdown(data)
+      if (result === "saved") toast.success(t("exportSuccess"))
+      // "cancelled": user dismissed the Save dialog — stay silent,
+      // matching the downloadImage / workspace-download conventions.
     } catch (err) {
       toast.error(t("exportFailed"))
       console.error("[ConversationDetailPanel] export markdown:", err)
     }
   }, [getExportData, t])
 
-  const handleExportHtml = useCallback(() => {
+  const handleExportHtml = useCallback(async () => {
     const data = getExportData()
     if (!data) return
     try {
-      exportAsHtml(data)
-      toast.success(t("exportSuccess"))
+      const result = await exportAsHtml(data)
+      if (result === "saved") toast.success(t("exportSuccess"))
     } catch (err) {
       toast.error(t("exportFailed"))
       console.error("[ConversationDetailPanel] export html:", err)
@@ -1278,9 +1298,9 @@ export function ConversationDetailPanel() {
     addTask(taskId, t("exportImage"))
     updateTask(taskId, { status: "running" })
     try {
-      await exportAsImage(data)
+      const result = await exportAsImage(data)
       updateTask(taskId, { status: "completed" })
-      toast.success(t("exportSuccess"))
+      if (result === "saved") toast.success(t("exportSuccess"))
     } catch (err) {
       updateTask(taskId, { status: "failed" })
       if (err instanceof ExportTooLongError) {
@@ -1297,68 +1317,113 @@ export function ConversationDetailPanel() {
     if (!folder) return
 
     if (hasNoTabs) {
-      openNewConversationTab(newConversation?.workingDir ?? folder.path)
+      openNewConversationTab(
+        folder.id,
+        newConversation?.workingDir ?? folder.path
+      )
     }
   }, [folder, hasNoTabs, newConversation?.workingDir, openNewConversationTab])
 
   const canTile = isTileMode && tabs.length > 1
 
-  // Empty state: no tabs at all — show full-screen welcome
+  const tileTabRefs = useRef<Map<string, HTMLDivElement | null>>(new Map())
+
+  useEffect(() => {
+    if (!canTile || !activeTabId) return
+    const el = tileTabRefs.current.get(activeTabId)
+    if (!el) return
+    el.scrollIntoView({
+      behavior: "smooth",
+      inline: "center",
+      block: "nearest",
+    })
+  }, [canTile, activeTabId])
+
   if (hasNoTabs) {
     return null
   }
 
+  const tabElements = tabs.map((tab, index) => {
+    const active = tab.id === activeTabId
+    return (
+      <div
+        key={tab.id}
+        ref={(el) => {
+          if (el) {
+            tileTabRefs.current.set(tab.id, el)
+          } else {
+            tileTabRefs.current.delete(tab.id)
+          }
+        }}
+        className={cn(
+          canTile
+            ? cn(
+                "relative h-full min-w-[24rem] flex-1 overflow-hidden",
+                index > 0 && "border-l border-border"
+              )
+            : active
+              ? "h-full"
+              : "absolute inset-0 invisible pointer-events-none"
+        )}
+        onPointerDownCapture={
+          canTile && !active ? () => switchTab(tab.id) : undefined
+        }
+      >
+        {canTile && active && (
+          <div
+            role="img"
+            aria-label={t("activeConversationIndicator")}
+            title={t("activeConversationIndicator")}
+            className="absolute top-2 left-1/2 z-20 flex h-6 w-6 -translate-x-1/2 items-center justify-center rounded-full bg-background/40 text-sidebar-primary shadow-sm ring-1 ring-sidebar-primary/20 backdrop-blur"
+          >
+            <Focus className="h-4 w-4" />
+          </div>
+        )}
+        <ConversationTabView
+          tabId={tab.id}
+          conversationId={tab.conversationId}
+          agentType={tab.agentType}
+          workingDir={tab.workingDir ?? getFolder(tab.folderId)?.path}
+          isActive={active}
+          reloadSignal={reloadByTabId[tab.id] ?? 0}
+        />
+      </div>
+    )
+  })
+
   return (
-    <ContextMenu>
+    <ContextMenu onOpenChange={handleContextMenuOpenChange}>
       <ContextMenuTrigger asChild>
         <div
-          className={cn(
-            "relative h-full min-h-0 overflow-hidden",
-            canTile && "flex flex-row"
-          )}
+          className="relative h-full min-h-0 overflow-hidden"
+          onPointerDown={handleContextMenuTriggerPointerDown}
         >
-          {tabs.map((tab, index) => {
-            const active = tab.id === activeTabId
-            return (
-              <div
-                key={tab.id}
-                className={cn(
-                  canTile
-                    ? cn(
-                        "relative h-full min-w-[200px] flex-1 overflow-hidden",
-                        index > 0 && "border-l border-border",
-                        active &&
-                          "bg-gradient-to-b from-muted/50 to-transparent"
-                      )
-                    : active
-                      ? "h-full"
-                      : "absolute inset-0 invisible pointer-events-none"
-                )}
-                onPointerDownCapture={
-                  canTile && !active ? () => switchTab(tab.id) : undefined
-                }
-              >
-                <ConversationTabView
-                  tabId={tab.id}
-                  conversationId={tab.conversationId}
-                  agentType={tab.agentType}
-                  workingDir={tab.workingDir ?? folder?.path}
-                  isActive={active}
-                  reloadSignal={reloadByTabId[tab.id] ?? 0}
-                />
-              </div>
-            )
-          })}
+          {/* Stable wrapper across canTile flip — otherwise sibling tabs remount and a live streaming response is torn down. */}
+          <ScrollArea
+            x={canTile ? "scroll" : "hidden"}
+            y="hidden"
+            className="h-full w-full"
+          >
+            <div
+              className={cn(
+                "relative h-full",
+                canTile && "flex min-w-full flex-row"
+              )}
+            >
+              {tabElements}
+            </div>
+          </ScrollArea>
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent>
         <ContextMenuItem
-          disabled={!canReloadActiveConversation}
-          onSelect={handleReloadActiveConversation}
+          disabled={!contextMenuSelectedText}
+          onSelect={handleCopySelectedText}
         >
-          <RefreshCw className="h-4 w-4" />
-          {t("reload")}
+          <Copy className="h-4 w-4" />
+          {t("copyText")}
         </ContextMenuItem>
+        <ContextMenuSeparator />
         <ContextMenuItem
           disabled={!folder?.path}
           onSelect={handleNewConversation}
@@ -1386,6 +1451,13 @@ export function ConversationDetailPanel() {
             </ContextMenuItem>
           </ContextMenuSubContent>
         </ContextMenuSub>
+        <ContextMenuItem
+          disabled={!canReloadActiveConversation}
+          onSelect={handleReloadActiveConversation}
+        >
+          <RefreshCw className="h-4 w-4" />
+          {t("reload")}
+        </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem
           disabled={!activeTabId}

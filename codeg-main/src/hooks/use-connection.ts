@@ -43,13 +43,17 @@ export interface UseConnectionReturn {
   pendingQuestion: PendingQuestion | null
   claudeApiRetry: ClaudeApiRetryState | null
   error: string | null
+  loadError: string | null
   connect: (
     agentType: AgentType,
     workingDir?: string,
     sessionId?: string
   ) => Promise<void>
   disconnect: () => Promise<void>
-  sendPrompt: (blocks: PromptInputBlock[]) => Promise<void>
+  sendPrompt: (
+    blocks: PromptInputBlock[],
+    opts?: { folderId?: number | null; conversationId?: number | null }
+  ) => Promise<void>
   setMode: (modeId: string) => Promise<void>
   setConfigOption: (configId: string, valueId: string) => Promise<void>
   cancel: () => Promise<void>
@@ -95,6 +99,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
   const pendingQuestion = connection?.pendingQuestion ?? null
   const claudeApiRetry = connection?.claudeApiRetry ?? null
   const error = connection?.error ?? null
+  const loadError = connection?.loadError ?? null
 
   const connect = useCallback(
     (agentType: AgentType, workingDir?: string, sessionId?: string) =>
@@ -108,7 +113,10 @@ export function useConnection(contextKey: string): UseConnectionReturn {
   )
 
   const sendPrompt = useCallback(
-    (blocks: PromptInputBlock[]) => actions.sendPrompt(contextKey, blocks),
+    (
+      blocks: PromptInputBlock[],
+      opts?: { folderId?: number | null; conversationId?: number | null }
+    ) => actions.sendPrompt(contextKey, blocks, opts),
     [actions, contextKey]
   )
 
@@ -151,6 +159,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
       pendingQuestion,
       claudeApiRetry,
       error,
+      loadError,
       connect,
       disconnect,
       sendPrompt,
@@ -175,6 +184,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
       pendingQuestion,
       claudeApiRetry,
       error,
+      loadError,
       connect,
       disconnect,
       sendPrompt,

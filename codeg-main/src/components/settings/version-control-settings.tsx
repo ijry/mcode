@@ -42,6 +42,7 @@ import type {
   GitHubAccount,
   GitHubAccountsSettings,
 } from "@/lib/types"
+import { toErrorMessage } from "@/lib/app-error"
 import { AddGitHubAccountDialog } from "./add-github-account-dialog"
 import { AddGitAccountDialog } from "./add-git-account-dialog"
 
@@ -188,7 +189,7 @@ export function VersionControlSettings() {
       setCustomPath(settings.custom_path ?? "")
       setAccounts(ghAccounts)
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = toErrorMessage(err)
       toast.error(t("loadFailed", { message }))
     } finally {
       setLoading(false)
@@ -221,7 +222,7 @@ export function VersionControlSettings() {
       setEditingPath(false)
       toast.success(t("saveSuccess"))
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = toErrorMessage(err)
       toast.error(t("saveFailed", { message }))
     } finally {
       setSavingGit(false)
@@ -253,7 +254,7 @@ export function VersionControlSettings() {
         setAccounts(saved)
         toast.success(t("addSuccess", { username: account.username }))
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = toErrorMessage(err)
         toast.error(t("addFailed", { message }))
       }
     },
@@ -286,7 +287,7 @@ export function VersionControlSettings() {
           toast.success(t("connectionSuccess"))
         }
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = toErrorMessage(err)
         toast.error(t("connectionFailed", { message }))
       } finally {
         setTestingAccountId(null)
@@ -308,7 +309,7 @@ export function VersionControlSettings() {
         setAccounts(saved)
         toast.success(t("defaultSet"))
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = toErrorMessage(err)
         toast.error(message)
       }
     },
@@ -326,7 +327,7 @@ export function VersionControlSettings() {
       setAccounts(saved)
       toast.success(t("removeSuccess"))
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = toErrorMessage(err)
       toast.error(message)
     } finally {
       setRemoveTarget(null)
@@ -346,7 +347,7 @@ export function VersionControlSettings() {
 
   return (
     <ScrollArea className="h-full">
-      <div className="w-full space-y-4">
+      <div className="w-full space-y-4 p-3 md:p-4">
         <section className="space-y-1">
           <h1 className="text-sm font-semibold">{t("sectionTitle")}</h1>
           <p className="text-xs text-muted-foreground">

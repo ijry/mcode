@@ -1,20 +1,28 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::Extension,
+    extract::{DefaultBodyLimit, Extension},
     http::{StatusCode, Uri},
     middleware::{self, Next},
     response::IntoResponse,
     routing::{get, post},
     Json, Router,
 };
+
+use crate::web::handlers::files::UPLOAD_MAX_BYTES;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
 
+use super::shutdown::ShutdownSignal;
 use super::{auth, handlers, ws};
 use crate::app_state::AppState;
 
-pub fn build_router(state: Arc<AppState>, token: String, static_dir: std::path::PathBuf) -> Router {
+pub fn build_router(
+    state: Arc<AppState>,
+    token: String,
+    static_dir: std::path::PathBuf,
+    shutdown_signal: Arc<ShutdownSignal>,
+) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)
@@ -24,6 +32,13 @@ pub fn build_router(state: Arc<AppState>, token: String, static_dir: std::path::
 
     let api = Router::new()
         .route("/health", post(health_check))
+        // Debug endpoint: operator-facing snapshot of `EventBusMetrics`
+        // (emit volume, lag/eviction counts, attach decision counts).
+        // Sits behind the same auth middleware as every other route.
+        .route(
+            "/debug/event_metrics",
+            get(handlers::event_metrics::get_event_metrics),
+        )
         // ─── Conversations ───
         .route(
             "/list_conversations",
@@ -34,12 +49,32 @@ pub fn build_router(state: Arc<AppState>, token: String, static_dir: std::path::
             post(handlers::conversations::get_conversation),
         )
         .route(
-            "/list_folder_conversations",
-            post(handlers::conversations::list_folder_conversations),
+            "/list_all_conversations",
+            post(handlers::conversations::list_all_conversations),
+        )
+        .route(
+            "/list_child_conversations",
+            post(handlers::conversations::list_child_conversations),
+        )
+        .route(
+            "/get_delegation_settings",
+            post(handlers::delegation::get_delegation_settings),
+        )
+        .route(
+            "/set_delegation_settings",
+            post(handlers::delegation::set_delegation_settings),
         )
         .route(
             "/get_folder_conversation",
             post(handlers::conversations::get_folder_conversation),
+        )
+        .route(
+            "/list_opened_tabs",
+            post(handlers::conversations::list_opened_tabs),
+        )
+        .route(
+            "/save_opened_tabs",
+            post(handlers::conversations::save_opened_tabs),
         )
         .route(
             "/import_local_conversations",
@@ -67,10 +102,6 @@ pub fn build_router(state: Arc<AppState>, token: String, static_dir: std::path::
             "/delete_conversation",
             post(handlers::conversations::delete_conversation),
         )
-        .route(
-            "/update_conversation_external_id",
-            post(handlers::conversations::update_conversation_external_id),
-        )
         // ─── Folders ───
         .route(
             "/load_folder_history",
@@ -81,21 +112,39 @@ pub fn build_router(state: Arc<AppState>, token: String, static_dir: std::path::
             post(handlers::folders::list_open_folders),
         )
         .route(
-            "/close_folder_window",
-            post(handlers::folders::close_folder_window),
+            "/list_open_folder_details",
+            post(handlers::folders::list_open_folder_details),
+        )
+        .route(
+            "/list_all_folder_details",
+            post(handlers::folders::list_all_folder_details),
         )
         .route("/get_folder", post(handlers::folders::get_folder))
+        .route("/open_folder", post(handlers::folders::open_folder))
         .route(
-            "/open_folder_window",
-            post(handlers::folders::open_folder_window),
+            "/open_folder_in_workspace",
+            post(handlers::folders::open_folder_in_workspace),
+        )
+        .route(
+            "/open_folder_by_id",
+            post(handlers::folders::open_folder_by_id),
+        )
+        .route(
+            "/remove_folder_from_workspace",
+            post(handlers::folders::remove_folder_from_workspace),
+        )
+        .route("/reorder_folders", post(handlers::folders::reorder_folders))
+        .route(
+            "/update_folder_color",
+            post(handlers::folders::update_folder_color),
+        )
+        .route(
+            "/update_folder_default_agent",
+            post(handlers::folders::update_folder_default_agent),
         )
         .route(
             "/add_folder_to_history",
             post(handlers::folders::add_folder_to_history),
-        )
-        .route(
-            "/set_folder_parent_branch",
-            post(handlers::folders::set_folder_parent_branch),
         )
         .route(
             "/remove_folder_from_history",
@@ -105,10 +154,6 @@ pub fn build_router(state: Arc<AppState>, token: String, static_dir: std::path::
             "/create_folder_directory",
             post(handlers::folders::create_folder_directory),
         )
-        .route(
-            "/save_folder_opened_conversations",
-            post(handlers::folders::save_folder_opened_conversations),
-        )
         .route("/get_git_branch", post(handlers::folders::get_git_branch))
         .route(
             "/get_home_directory",
@@ -117,6 +162,10 @@ pub fn build_router(state: Arc<AppState>, token: String, static_dir: std::path::
         .route(
             "/list_directory_entries",
             post(handlers::folders::list_directory_entries),
+        )
+        .route(
+            "/list_directory_with_files",
+            post(handlers::folders::list_directory_with_files),
         )
         .route("/get_file_tree", post(handlers::folders::get_file_tree))
         .route(
@@ -182,7 +231,6 @@ pub fn build_router(state: Arc<AppState>, token: String, static_dir: std::path::
         .route("/git_new_branch", post(handlers::git::git_new_branch))
         .route("/git_checkout", post(handlers::git::git_checkout))
         .route("/git_reset", post(handlers::git::git_reset))
-        .route("/git_delete_branch", post(handlers::git::git_delete_branch))
         .route("/git_merge", post(handlers::git::git_merge))
         .route("/git_rebase", post(handlers::git::git_rebase))
         .route("/git_worktree_add", post(handlers::git::git_worktree_add))
@@ -231,6 +279,7 @@ pub fn build_router(state: Arc<AppState>, token: String, static_dir: std::path::
         .route("/git_fetch", post(handlers::git::git_fetch))
         .route("/git_commit", post(handlers::git::git_commit))
         .route("/git_fetch_remote", post(handlers::git::git_fetch_remote))
+        .route("/git_delete_branch", post(handlers::git::git_delete_branch))
         .route(
             "/git_delete_remote_branch",
             post(handlers::git::git_delete_remote_branch),
@@ -262,6 +311,46 @@ pub fn build_router(state: Arc<AppState>, token: String, static_dir: std::path::
         .route(
             "/create_file_tree_entry",
             post(handlers::files::create_file_tree_entry),
+        )
+        .route(
+            "/upload_attachment",
+            // The 2MiB `UPLOAD_MAX_BYTES` is the *file payload* limit; the
+            // raw multipart body also carries boundary markers, the
+            // `Content-Disposition` headers, and the `session_id` field —
+            // ~256-512 bytes of overhead. Without this layer, axum's default
+            // 2MiB `DefaultBodyLimit` rejects a perfectly-sized 2MiB file
+            // before our handler ever sees a chunk. Pad by 64KiB so the
+            // handler's own chunk-summing check (in `files.rs`) stays the
+            // authoritative size boundary.
+            post(handlers::files::upload_attachment)
+                .layer(DefaultBodyLimit::max(UPLOAD_MAX_BYTES as usize + 64 * 1024)),
+        )
+        // ─── Workspace files (web upload/download) ───
+        //
+        // Issue #179: when codeg runs in server mode the user has no
+        // native file dialog, so they need HTTP endpoints to move files
+        // between the browser and the workspace. The upload handler
+        // streams to a same-dir staging file then renames into place;
+        // the download handlers stream files and walk-then-zip whole
+        // directories. Disable axum's default multipart body limit here:
+        // workspace files are user-owned bytes moving between the user's
+        // browser and filesystem, not model-context attachments.
+        .route(
+            "/upload_workspace_file",
+            post(handlers::workspace_files::upload_workspace_file)
+                .layer(DefaultBodyLimit::disable()),
+        )
+        .route(
+            "/workspace_download_ticket",
+            post(handlers::workspace_files::create_download_ticket),
+        )
+        .route(
+            "/download_workspace_file",
+            post(handlers::workspace_files::download_workspace_file),
+        )
+        .route(
+            "/download_workspace_dir",
+            post(handlers::workspace_files::download_workspace_dir),
         )
         // ─── Folder commands ───
         .route(
@@ -359,8 +448,16 @@ pub fn build_router(state: Arc<AppState>, token: String, static_dir: std::path::
             post(handlers::system_settings::get_system_proxy_settings),
         )
         .route(
-            "/get_system_language_settings",
-            post(handlers::system_settings::get_system_language_settings),
+            "/get_system_terminal_settings",
+            post(handlers::system_settings::get_system_terminal_settings),
+        )
+        .route(
+            "/get_available_terminal_shells",
+            post(handlers::system_settings::get_available_terminal_shells),
+        )
+        .route(
+            "/probe_terminal_shell_path",
+            post(handlers::system_settings::probe_terminal_shell_path),
         )
         .route(
             "/update_system_proxy_settings",
@@ -370,6 +467,10 @@ pub fn build_router(state: Arc<AppState>, token: String, static_dir: std::path::
             "/update_system_language_settings",
             post(handlers::system_settings::update_system_language_settings),
         )
+        .route(
+            "/update_system_terminal_settings",
+            post(handlers::system_settings::update_system_terminal_settings),
+        )
         // ─── ACP ───
         .route(
             "/acp_get_agent_status",
@@ -378,12 +479,20 @@ pub fn build_router(state: Arc<AppState>, token: String, static_dir: std::path::
         .route("/acp_list_agents", post(handlers::acp::acp_list_agents))
         .route("/acp_connect", post(handlers::acp::acp_connect))
         .route("/acp_disconnect", post(handlers::acp::acp_disconnect))
+        .route(
+            "/acp_touch_connection",
+            post(handlers::acp::acp_touch_connection),
+        )
         .route("/acp_prompt", post(handlers::acp::acp_prompt))
         .route("/acp_preflight", post(handlers::acp::acp_preflight))
         .route("/acp_set_mode", post(handlers::acp::acp_set_mode))
         .route(
             "/acp_set_config_option",
             post(handlers::acp::acp_set_config_option),
+        )
+        .route(
+            "/acp_describe_agent_options",
+            post(handlers::acp::acp_describe_agent_options),
         )
         .route("/acp_cancel", post(handlers::acp::acp_cancel))
         .route("/acp_fork", post(handlers::acp::acp_fork))
@@ -394,6 +503,14 @@ pub fn build_router(state: Arc<AppState>, token: String, static_dir: std::path::
         .route(
             "/acp_list_connections",
             post(handlers::acp::acp_list_connections),
+        )
+        .route(
+            "/acp_get_session_snapshot",
+            post(handlers::acp::acp_get_session_snapshot),
+        )
+        .route(
+            "/acp_get_session_snapshot_by_conversation",
+            post(handlers::acp::acp_get_session_snapshot_by_conversation),
         )
         .route(
             "/acp_clear_binary_cache",
@@ -508,12 +625,24 @@ pub fn build_router(state: Arc<AppState>, token: String, static_dir: std::path::
             post(handlers::web_server::get_web_server_status),
         )
         .route(
+            "/get_web_service_config",
+            post(handlers::web_server::get_web_service_config),
+        )
+        .route(
+            "/update_web_service_config",
+            post(handlers::web_server::update_web_service_config),
+        )
+        .route(
             "/start_web_server",
             post(handlers::web_server::start_web_server),
         )
         .route(
             "/stop_web_server",
             post(handlers::web_server::stop_web_server),
+        )
+        .route(
+            "/probe_web_service_port",
+            post(handlers::web_server::probe_web_service_port),
         )
         .route(
             "/check_app_update",
@@ -617,6 +746,69 @@ pub fn build_router(state: Arc<AppState>, token: String, static_dir: std::path::
             "/delete_model_provider",
             post(handlers::model_provider::delete_model_provider),
         )
+        // ─── Quick Messages ───
+        .route(
+            "/quick_messages_list",
+            post(handlers::quick_messages::quick_messages_list),
+        )
+        .route(
+            "/quick_messages_create",
+            post(handlers::quick_messages::quick_messages_create),
+        )
+        .route(
+            "/quick_messages_update",
+            post(handlers::quick_messages::quick_messages_update),
+        )
+        .route(
+            "/quick_messages_delete",
+            post(handlers::quick_messages::quick_messages_delete),
+        )
+        .route(
+            "/quick_messages_reorder",
+            post(handlers::quick_messages::quick_messages_reorder),
+        )
+        // ─── Pet ───
+        .route("/pet_list", post(handlers::pet::pet_list))
+        .route("/pet_get", post(handlers::pet::pet_get))
+        .route(
+            "/pet_read_spritesheet",
+            post(handlers::pet::pet_read_spritesheet),
+        )
+        .route("/pet_add", post(handlers::pet::pet_add))
+        .route("/pet_update_meta", post(handlers::pet::pet_update_meta))
+        .route(
+            "/pet_replace_sprite",
+            post(handlers::pet::pet_replace_sprite),
+        )
+        .route("/pet_delete", post(handlers::pet::pet_delete))
+        .route(
+            "/pet_list_importable_codex",
+            post(handlers::pet::pet_list_importable_codex),
+        )
+        .route("/pet_import_codex", post(handlers::pet::pet_import_codex))
+        .route(
+            "/pet_codex_import_available",
+            post(handlers::pet::pet_codex_import_available),
+        )
+        .route("/pet_get_settings", post(handlers::pet::pet_get_settings))
+        .route("/pet_set_active", post(handlers::pet::pet_set_active))
+        .route(
+            "/pet_save_window_state",
+            post(handlers::pet::pet_save_window_state),
+        )
+        .route(
+            "/pet_marketplace_list",
+            post(handlers::pet::pet_marketplace_list),
+        )
+        .route(
+            "/pet_marketplace_install",
+            post(handlers::pet::pet_marketplace_install),
+        )
+        .route("/pet_celebrate", post(handlers::pet::pet_celebrate))
+        .route(
+            "/pet_get_current_state",
+            post(handlers::pet::pet_get_current_state),
+        )
         // ─── Terminal ───
         .route("/terminal_spawn", post(handlers::terminal::terminal_spawn))
         .route("/terminal_write", post(handlers::terminal::terminal_write))
@@ -632,7 +824,22 @@ pub fn build_router(state: Arc<AppState>, token: String, static_dir: std::path::
             auth::require_token(req, next, token.clone())
         }));
 
-    // WebSocket route (auth via query param)
+    // Public endpoints — no token required.
+    // The login page needs to read the user's preferred language before
+    // authenticating so it can render in their chosen locale.
+    let public_api = Router::new()
+        .route(
+            "/get_system_language_settings",
+            post(handlers::system_settings::get_system_language_settings),
+        )
+        .route(
+            "/workspace_download/{ticket}",
+            get(handlers::workspace_files::consume_download_ticket),
+        );
+
+    let api = public_api.merge(api);
+
+    // WebSocket route (auth via Sec-WebSocket-Protocol)
     let ws_route = Router::new()
         .route("/ws/events", get(ws::ws_handler))
         .layer(middleware::from_fn(move |req, next| {
@@ -684,6 +891,7 @@ pub fn build_router(state: Arc<AppState>, token: String, static_dir: std::path::
         .layer(html_rewrite)
         .layer(cors)
         .layer(Extension(state))
+        .layer(Extension(shutdown_signal))
 }
 
 async fn health_check() -> impl IntoResponse {

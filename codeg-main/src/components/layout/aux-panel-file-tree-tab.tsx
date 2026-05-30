@@ -13,15 +13,24 @@ import ignore from "ignore"
 import { Check, ChevronRight } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
-import { useFolderContext } from "@/contexts/folder-context"
+import { useActiveFolder } from "@/contexts/active-folder-context"
 import { useAuxPanelContext } from "@/contexts/aux-panel-context"
 import { useTabContext } from "@/contexts/tab-context"
 import { useTerminalContext } from "@/contexts/terminal-context"
-import { useWorkspaceContext } from "@/contexts/workspace-context"
+import {
+  type FileWorkspaceTab,
+  isImageFile,
+  useWorkspaceContext,
+} from "@/contexts/workspace-context"
 import { useWorkspaceStateStore } from "@/hooks/use-workspace-state-store"
+import { AuxPanelNoFolderEmpty } from "@/components/layout/aux-panel-no-folder-empty"
+import { WorkspaceDegradedBanner } from "@/components/layout/workspace-degraded-banner"
+import { WorkspaceUploadDialog } from "@/components/layout/workspace-upload-dialog"
 import {
   createFileTreeEntry,
   deleteFileTreeEntry,
+  downloadWorkspaceDir,
+  downloadWorkspaceFile,
   gitAddFiles,
   getFileTree,
   getGitBranch,
@@ -33,10 +42,17 @@ import {
   openCommitWindow,
   renameFileTreeEntry,
   saveFileCopy,
+  WORKSPACE_DOWNLOAD_CANCELLED,
 } from "@/lib/api"
+import { isDesktop, isRemoteDesktopMode } from "@/lib/transport"
 import { emitAttachFileToSession } from "@/lib/session-attachment-events"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import type { FileTreeNode, GitBranchList, GitStatusEntry } from "@/lib/types"
+import type {
+  FileEditContent,
+  FileTreeNode,
+  GitBranchList,
+  GitStatusEntry,
+} from "@/lib/types"
 import {
   FileTree,
   FileTreeFolder,
@@ -78,12 +94,19 @@ import {
 } from "@/components/ui/collapsible"
 import { Skeleton } from "@/components/ui/skeleton"
 import { joinFsPath } from "@/lib/path-utils"
+import { toErrorMessage } from "@/lib/app-error"
 
 function parentDir(filePath: string): string {
   const slashIndex = filePath.lastIndexOf("/")
   const backslashIndex = filePath.lastIndexOf("\\")
   const splitIndex = Math.max(slashIndex, backslashIndex)
-  if (splitIndex < 0) return filePath
+  // No separator at all: the input is a leaf living at its root. For an
+  // OS path that's a degenerate "C:" / "foo" — we can't navigate above
+  // it, so the caller treated the result as the path itself. For a
+  // workspace-relative path like "README.md" the answer is "workspace
+  // root", encoded as empty string. The empty-string convention is the
+  // safer default and matches what every caller currently expects.
+  if (splitIndex < 0) return ""
   if (splitIndex === 0) return filePath.slice(0, 1)
   return filePath.slice(0, splitIndex)
 }
@@ -433,6 +456,8 @@ interface RenderNodeProps {
   workspacePath: string
   activeSessionTabId: string | null
   gitEnabled: boolean
+  webMode: boolean
+  folderUploadSupported: boolean
   gitStatusByPath: ReadonlyMap<string, string>
   gitChangedDirPaths: ReadonlySet<string>
   untrackedDirPaths: ReadonlySet<string>
@@ -450,6 +475,9 @@ interface RenderNodeProps {
   onRequestRename: (target: FileActionTarget) => void
   onRequestCreate: (parentPath: string, kind: "file" | "dir") => void
   onRequestDelete: (target: FileActionTarget) => void
+  onRequestUpload: (targetPath: string) => void
+  onRequestDownloadFile: (target: FileActionTarget) => void
+  onRequestDownloadDir: (target: FileActionTarget) => void
   onRefresh: () => void
 }
 
@@ -459,6 +487,8 @@ function RenderNode({
   workspacePath,
   activeSessionTabId,
   gitEnabled,
+  webMode,
+  folderUploadSupported,
   gitStatusByPath,
   gitChangedDirPaths,
   untrackedDirPaths,
@@ -476,6 +506,9 @@ function RenderNode({
   onRequestCreate,
   onRequestRename,
   onRequestDelete,
+  onRequestUpload,
+  onRequestDownloadFile,
+  onRequestDownloadDir,
   onRefresh,
 }: RenderNodeProps) {
   const t = useTranslations("Folder.fileTreeTab")
@@ -513,7 +546,7 @@ function RenderNode({
       try {
         await revealItemInDir(absolutePath)
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
+        const message = toErrorMessage(error)
         toast.error(t("toasts.openDirectoryFailed"), { description: message })
       }
     }
@@ -618,6 +651,18 @@ function RenderNode({
               </ContextMenuItem>
             </ContextMenuSubContent>
           </ContextMenuSub>
+          {webMode && (
+            <>
+              <ContextMenuItem
+                onSelect={() => onRequestUpload(parentDir(node.path))}
+              >
+                {t("upload")}
+              </ContextMenuItem>
+              <ContextMenuItem onSelect={() => onRequestDownloadFile(node)}>
+                {t("download")}
+              </ContextMenuItem>
+            </>
+          )}
           <ContextMenuItem
             onSelect={() => onRequestDelete(node)}
             variant="destructive"
@@ -650,7 +695,7 @@ function RenderNode({
     try {
       await revealItemInDir(absolutePath)
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
+      const message = toErrorMessage(error)
       toast.error(t("toasts.openDirectoryFailed"), { description: message })
     }
   }
@@ -679,6 +724,8 @@ function RenderNode({
                   workspacePath={workspacePath}
                   activeSessionTabId={activeSessionTabId}
                   gitEnabled={gitEnabled}
+                  webMode={webMode}
+                  folderUploadSupported={folderUploadSupported}
                   gitStatusByPath={gitStatusByPath}
                   gitChangedDirPaths={gitChangedDirPaths}
                   untrackedDirPaths={untrackedDirPaths}
@@ -696,6 +743,9 @@ function RenderNode({
                   onRequestAddToVcs={onRequestAddToVcs}
                   onRequestRename={onRequestRename}
                   onRequestDelete={onRequestDelete}
+                  onRequestUpload={onRequestUpload}
+                  onRequestDownloadFile={onRequestDownloadFile}
+                  onRequestDownloadDir={onRequestDownloadDir}
                   onRefresh={onRefresh}
                 />
               ))
@@ -778,6 +828,16 @@ function RenderNode({
             </ContextMenuItem>
           </ContextMenuSubContent>
         </ContextMenuSub>
+        {webMode && (
+          <>
+            <ContextMenuItem onSelect={() => onRequestUpload(node.path)}>
+              {t("upload")}
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={() => onRequestDownloadDir(node)}>
+              {t("downloadAsZip")}
+            </ContextMenuItem>
+          </>
+        )}
         <ContextMenuItem onSelect={onRefresh}>
           {t("reloadFromDisk")}
         </ContextMenuItem>
@@ -796,16 +856,21 @@ export function FileTreeTab() {
   const t = useTranslations("Folder.fileTreeTab")
   const tCommon = useTranslations("Folder.common")
   const { pendingRevealPath, consumePendingRevealPath } = useAuxPanelContext()
-  const { folder } = useFolderContext()
+  const { activeFolder: folder } = useActiveFolder()
   const { tabs, activeTabId } = useTabContext()
   const { createTerminalInDirectory } = useTerminalContext()
   const {
     activeFileTab,
     activeFilePath,
+    fileTabs,
     openBranchDiff,
     openExternalConflictDiff,
     openFilePreview,
     openWorkingTreeDiff,
+    reloadOpenFileBackground,
+    applyExternalReload,
+    markTabsStale,
+    rejectFileTab,
   } = useWorkspaceContext()
   const workspaceState = useWorkspaceStateStore(folder?.path ?? null)
   const [nodes, setNodes] = useState<FileTreeNode[]>([])
@@ -878,8 +943,8 @@ export function FileTreeTab() {
     Set<string>
   >(new Set())
   const activeFileTabRef = useRef(activeFileTab)
+  const fileTabsRef = useRef<FileWorkspaceTab[]>(fileTabs)
   const filePathSetRef = useRef<Set<string>>(new Set())
-  const previousWorkspaceSeqRef = useRef(0)
   const previousExpandedPathsRef = useRef<Set<string>>(
     new Set([FILE_TREE_ROOT_PATH])
   )
@@ -887,6 +952,11 @@ export function FileTreeTab() {
     new Map()
   )
   const lazyLoadingDirPathsRef = useRef<Set<string>>(new Set())
+  const loadDirectoryChildrenRef = useRef<
+    ((dirPath: string) => Promise<void>) | null
+  >(null)
+  const expandedPathsRef = useRef<Set<string>>(new Set([FILE_TREE_ROOT_PATH]))
+  const workspaceTreeRef = useRef<FileTreeNode[]>([])
   const externalConflictSignatureByPathRef = useRef<Map<string, string>>(
     new Map()
   )
@@ -894,6 +964,10 @@ export function FileTreeTab() {
   useEffect(() => {
     activeFileTabRef.current = activeFileTab
   }, [activeFileTab])
+
+  useEffect(() => {
+    fileTabsRef.current = fileTabs
+  }, [fileTabs])
 
   useEffect(() => {
     setExpandedPaths(new Set([FILE_TREE_ROOT_PATH]))
@@ -904,7 +978,6 @@ export function FileTreeTab() {
     lazyLoadedChildrenByPathRef.current.clear()
     lazyLoadingDirPathsRef.current.clear()
     externalConflictSignatureByPathRef.current.clear()
-    previousWorkspaceSeqRef.current = 0
   }, [folder?.path])
 
   // Handle pending reveal path: expand all ancestor directories once tree is loaded
@@ -966,36 +1039,58 @@ export function FileTreeTab() {
         return
       }
 
+      // Drop the lazy-load override cache so the fresh snapshot is not
+      // masked by stale children (e.g. after deletes / renames / rollbacks
+      // or files the agent just created). Reading expanded paths via a ref
+      // keeps fetchTree's identity stable across expand/collapse so
+      // downstream memoization is not invalidated on every tree interaction.
+      const pathsToReload = Array.from(expandedPathsRef.current).filter(
+        (path) => path !== FILE_TREE_ROOT_PATH
+      )
+      lazyLoadedChildrenByPathRef.current.clear()
       await workspaceState.requestResync("manual_refresh")
+      // Re-hydrate children for directories beyond WORKSPACE_TREE_MAX_DEPTH
+      // that are still expanded — the backend snapshot does not include them.
+      const loader = loadDirectoryChildrenRef.current
+      if (loader) {
+        for (const path of pathsToReload) {
+          void loader(path)
+        }
+      }
     },
     [folder?.path, workspaceState]
   )
 
+  // Tree updates are the only source that should cause a full setNodes.
+  // applyLazyTreeOverrides rebuilds every directory node object, which forces
+  // React to re-render the entire tree. Keeping this effect narrow avoids
+  // wasted work on health / seq / error / git transitions that don't touch
+  // the tree shape (e.g. the intermediate "resyncing" patch during a refresh).
   useEffect(() => {
+    workspaceTreeRef.current = workspaceState.tree
     setNodes(
       applyLazyTreeOverrides(
         workspaceState.tree,
         lazyLoadedChildrenByPathRef.current
       )
     )
+  }, [folder?.path, workspaceState.tree])
+
+  useEffect(() => {
     const nextStatusByPath = new Map<string, string>()
     for (const entry of workspaceState.git) {
       nextStatusByPath.set(entry.path, entry.status)
     }
     setGitStatusByPath(nextStatusByPath)
     setGitEnabled(true)
+  }, [workspaceState.git])
+
+  useEffect(() => {
     setLoading(
       workspaceState.health === "resyncing" && workspaceState.seq === 0
     )
     setError(workspaceState.health === "degraded" ? workspaceState.error : null)
-  }, [
-    folder?.path,
-    workspaceState.error,
-    workspaceState.git,
-    workspaceState.health,
-    workspaceState.seq,
-    workspaceState.tree,
-  ])
+  }, [workspaceState.error, workspaceState.health, workspaceState.seq])
 
   const loadDirectoryChildren = useCallback(
     async (dirPath: string) => {
@@ -1006,12 +1101,19 @@ export function FileTreeTab() {
       if (lazyLoadedChildrenByPathRef.current.has(normalizedDirPath)) return
       if (lazyLoadingDirPathsRef.current.has(normalizedDirPath)) return
 
-      const existingChildren = findDirectoryChildren(nodes, normalizedDirPath)
+      // Check the backend tree (source of truth), not the rendered `nodes`.
+      // `nodes` carries stale lazy-cache overrides that don't invalidate
+      // until a tree_replace delta arrives — but for directories beyond
+      // WORKSPACE_TREE_MAX_DEPTH the backend never emits tree_replace for
+      // changes inside them (their children are not in tree_snapshot, so
+      // the refreshed tree compares equal to the old one). Checking
+      // `nodes` would cause fetchTree's forced reload to short-circuit on
+      // the stale override and miss deletions / creations in deep dirs.
+      const existingChildren = findDirectoryChildren(
+        workspaceTreeRef.current,
+        normalizedDirPath
+      )
       if (existingChildren && existingChildren.length > 0) {
-        lazyLoadedChildrenByPathRef.current.set(
-          normalizedDirPath,
-          existingChildren
-        )
         return
       }
 
@@ -1032,8 +1134,102 @@ export function FileTreeTab() {
         lazyLoadingDirPathsRef.current.delete(normalizedDirPath)
       }
     },
-    [folder?.path, nodes]
+    [folder?.path]
   )
+
+  useEffect(() => {
+    loadDirectoryChildrenRef.current = loadDirectoryChildren
+  }, [loadDirectoryChildren])
+
+  useEffect(() => {
+    expandedPathsRef.current = expandedPaths
+  }, [expandedPaths])
+
+  // Subscribe to workspace envelopes to invalidate lazy-loaded overrides for
+  // directories beyond WORKSPACE_TREE_MAX_DEPTH. Those directories are never
+  // reflected in the backend's depth-2 tree_snapshot, so changes inside them
+  // don't emit a tree_replace delta — the frontend has to target invalidation
+  // by matching each `changed_paths` entry against its cached ancestors.
+  // The backend already debounces raw FS events (300ms / 1.5s max), so we only
+  // need a microtask hop here to merge paths that hit the same cached
+  // ancestor within one envelope (or any synchronous burst of envelopes).
+  const subscribeWorkspaceEnvelopes = workspaceState.subscribeEnvelopes
+  useEffect(() => {
+    if (!subscribeWorkspaceEnvelopes) return
+
+    const pendingPaths = new Set<string>()
+    let flushScheduled = false
+    let disposed = false
+
+    const flushPending = () => {
+      flushScheduled = false
+      if (disposed || pendingPaths.size === 0) return
+      const paths = Array.from(pendingPaths)
+      pendingPaths.clear()
+
+      const loader = loadDirectoryChildrenRef.current
+      const cache = lazyLoadedChildrenByPathRef.current
+      const invalidated = new Set<string>()
+
+      for (const changed of paths) {
+        const normalized = normalizeComparePath(changed)
+        if (!normalized) continue
+        // When the changed path is itself a cached directory (FS events
+        // that report the directory directly, e.g. a rename or a dir-level
+        // notification), its own entry is stale — invalidate it.
+        if (cache.has(normalized)) {
+          invalidated.add(normalized)
+        }
+        // Independently of the above, walk up to the nearest cached
+        // ancestor: the ancestor's children listing may also be stale
+        // (a child was added, removed, or renamed). Without this, cases
+        // where both a parent and child are cached leave the parent
+        // holding a ghost reference to the old child.
+        let cursor = normalized
+        while (cursor.length > 0) {
+          const slash = cursor.lastIndexOf("/")
+          const parent = slash === -1 ? "" : cursor.slice(0, slash)
+          if (parent.length === 0) break
+          if (cache.has(parent)) {
+            invalidated.add(parent)
+            break
+          }
+          cursor = parent
+        }
+      }
+
+      if (invalidated.size === 0) return
+      for (const path of invalidated) {
+        cache.delete(path)
+      }
+      if (!loader) return
+      // Skip refetching directories that are no longer expanded — their
+      // cleared cache will be re-hydrated on the next expansion via the
+      // expandedPaths effect. This avoids spurious getFileTree traffic
+      // for collapsed branches under bursty FS activity.
+      const expanded = expandedPathsRef.current
+      for (const path of invalidated) {
+        if (!expanded.has(path)) continue
+        void loader(path)
+      }
+    }
+
+    const unsubscribe = subscribeWorkspaceEnvelopes(({ changed_paths }) => {
+      if (!changed_paths || changed_paths.length === 0) return
+      for (const path of changed_paths) {
+        pendingPaths.add(path)
+      }
+      if (flushScheduled) return
+      flushScheduled = true
+      queueMicrotask(flushPending)
+    })
+
+    return () => {
+      disposed = true
+      unsubscribe()
+      pendingPaths.clear()
+    }
+  }, [subscribeWorkspaceEnvelopes])
 
   useEffect(() => {
     const previousExpanded = previousExpandedPathsRef.current
@@ -1215,7 +1411,7 @@ export function FileTreeTab() {
   const handleOpenCommitWindow = useCallback(() => {
     if (!folder) return
     openCommitWindow(folder.id).catch((error) => {
-      const message = error instanceof Error ? error.message : String(error)
+      const message = toErrorMessage(error)
       toast.error(t("toasts.openCommitWindowFailed"), {
         description: message,
       })
@@ -1239,6 +1435,95 @@ export function FileTreeTab() {
   const handleRequestDelete = useCallback((target: FileActionTarget) => {
     setDeleteTarget(target)
   }, [])
+
+  // ─── Web upload / download (issue #179) ───
+  // In web mode the user has no native file dialog, so the file-tree
+  // context menu opens `WorkspaceUploadDialog`, which owns the queue,
+  // progress UI, and cancellation. We only track which directory the
+  // user right-clicked from and whether the dialog is open.
+  const [webMode, setWebMode] = useState(false)
+  // `webkitdirectory` is non-standard. Chromium, Edge, Firefox, and
+  // desktop Safari support it; iOS Safari does not, and historically
+  // some embedded webviews lacked it too. Feature-detect at mount and
+  // hide the "Select folder" affordance where the picker would silently
+  // fall back to single-file selection — that would surprise the user
+  // mid-flow and risk corrupting the relative-path contract.
+  const [folderUploadSupported, setFolderUploadSupported] = useState(false)
+  const [uploadDialogOpen, setUploadDialogOpen] = useState(false)
+  const [uploadDialogTarget, setUploadDialogTarget] = useState("")
+  useEffect(() => {
+    // "webMode" here is a misnomer for "needs in-app upload/download
+    // affordances because there's no native OS file picker for the
+    // *destination/source* filesystem". That's true in pure-web mode
+    // AND in remote-desktop mode (where the workspace lives on the
+    // remote server, not on the local disk the OS dialog would target).
+    setWebMode(!isDesktop() || isRemoteDesktopMode())
+    setFolderUploadSupported(
+      "webkitdirectory" in document.createElement("input")
+    )
+  }, [])
+
+  const handleRequestUpload = useCallback((targetPath: string) => {
+    setUploadDialogTarget(targetPath)
+    setUploadDialogOpen(true)
+  }, [])
+
+  const handleUploadComplete = useCallback(() => {
+    void fetchTree()
+  }, [fetchTree])
+
+  const handleRequestDownloadFile = useCallback(
+    async (target: FileActionTarget) => {
+      const folderPath = folder?.path
+      if (!folderPath) return
+      try {
+        const result = await downloadWorkspaceFile(
+          folderPath,
+          target.path,
+          target.name
+        )
+        // Remote-desktop downloads flow through a save-dialog; surface
+        // the cancel-vs-saved outcome instead of silently doing nothing.
+        if (result.status === "started") return
+        if (result.status === WORKSPACE_DOWNLOAD_CANCELLED) return
+        if (result.savedPath) {
+          toast.success(t("toasts.downloadSaved", { name: target.name }), {
+            description: result.savedPath,
+          })
+        }
+      } catch (error) {
+        const message = toErrorMessage(error)
+        toast.error(t("toasts.downloadFailed", { name: target.name }), {
+          description: message,
+        })
+      }
+    },
+    [folder?.path, t]
+  )
+
+  const handleRequestDownloadDir = useCallback(
+    async (target: FileActionTarget) => {
+      const folderPath = folder?.path
+      if (!folderPath) return
+      const name = target.name || baseName(folderPath) || "workspace"
+      try {
+        const result = await downloadWorkspaceDir(folderPath, target.path, name)
+        if (result.status === "started") return
+        if (result.status === WORKSPACE_DOWNLOAD_CANCELLED) return
+        if (result.savedPath) {
+          toast.success(t("toasts.downloadSaved", { name }), {
+            description: result.savedPath,
+          })
+        }
+      } catch (error) {
+        const message = toErrorMessage(error)
+        toast.error(t("toasts.downloadFailed", { name }), {
+          description: message,
+        })
+      }
+    },
+    [folder?.path, t]
+  )
 
   const resetDirectoryGitActionDialog = useCallback(() => {
     setDirectoryGitActionType(null)
@@ -1289,7 +1574,7 @@ export function FileTreeTab() {
         )
         setDirectoryGitExpandedPaths(expanded)
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
+        const message = toErrorMessage(error)
         setDirectoryGitError(message)
       } finally {
         setDirectoryGitLoading(false)
@@ -1321,7 +1606,7 @@ export function FileTreeTab() {
         toast.success(t("toasts.addedToVcs", { name: target.name }))
         await fetchTree()
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
+        const message = toErrorMessage(error)
         toast.error(t("toasts.addToVcsFailed"), { description: message })
       }
     },
@@ -1360,7 +1645,7 @@ export function FileTreeTab() {
     } catch (error) {
       setCompareBranchList({ local: [], remote: [], worktree_branches: [] })
       setCompareCurrentBranch(null)
-      const message = error instanceof Error ? error.message : String(error)
+      const message = toErrorMessage(error)
       toast.error(t("toasts.loadBranchesFailed"), { description: message })
     } finally {
       setCompareBranchLoading(false)
@@ -1628,7 +1913,7 @@ export function FileTreeTab() {
       setCreateName("")
       await fetchTree()
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
+      const message = toErrorMessage(error)
       toast.error(t("toasts.createFailed"), { description: message })
     } finally {
       setCreating(false)
@@ -1650,7 +1935,7 @@ export function FileTreeTab() {
       setRenameValue("")
       await fetchTree()
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
+      const message = toErrorMessage(error)
       toast.error(t("toasts.renameFailed"), { description: message })
     } finally {
       setRenaming(false)
@@ -1665,7 +1950,7 @@ export function FileTreeTab() {
       setDeleteTarget(null)
       await fetchTree()
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
+      const message = toErrorMessage(error)
       toast.error(t("toasts.deleteFailed"), { description: message })
     } finally {
       setDeleting(false)
@@ -1681,7 +1966,7 @@ export function FileTreeTab() {
       setRollbackTarget(null)
       await fetchTree()
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
+      const message = toErrorMessage(error)
       toast.error(t("toasts.rollbackFailed"), { description: message })
     } finally {
       setRollingBack(false)
@@ -1718,7 +2003,7 @@ export function FileTreeTab() {
       resetDirectoryGitActionDialog()
       await fetchTree()
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
+      const message = toErrorMessage(error)
       setDirectoryGitError(message)
       toast.error(
         directoryGitActionType === "add"
@@ -1791,7 +2076,7 @@ export function FileTreeTab() {
       externalConflictPrompt.path
     )
     setExternalConflictPrompt(null)
-    void openFilePreview(externalConflictPrompt.path)
+    void openFilePreview(externalConflictPrompt.path, { reload: true })
   }, [externalConflictPrompt, openFilePreview])
 
   const handleSaveExternalConflictCopy = useCallback(async () => {
@@ -1821,7 +2106,7 @@ export function FileTreeTab() {
       setExternalConflictPrompt(null)
       void fetchTree({ silent: true })
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
+      const message = toErrorMessage(error)
       toast.error(t("toasts.saveCopyFailed"), { description: message })
     } finally {
       setSavingExternalConflictCopy(false)
@@ -1849,9 +2134,9 @@ export function FileTreeTab() {
     [rootNodeName]
   )
 
-  type ActiveFileChangeDecision =
+  type FileChangeDecision =
     | { kind: "none" }
-    | { kind: "reload"; path: string }
+    | { kind: "reload"; path: string; latest: FileEditContent }
     | {
         kind: "conflict"
         path: string
@@ -1859,91 +2144,79 @@ export function FileTreeTab() {
         unsavedContent: string
         signature: string
       }
+    | { kind: "missing"; path: string; error: string }
 
-  const resolveActiveFileChangeDecision = useCallback(
-    async (path: string): Promise<ActiveFileChangeDecision> => {
+  // Per-tab disk-vs-buffer resolver. Compares the tab's known etag against
+  // the latest disk read for the same path. Independent of activation —
+  // callable for any open file tab so the watcher can scan inactive tabs
+  // too. Re-reads the tab from `fileTabsRef.current` after the fetch to
+  // guard against close/reopen races during the async window. The `reload`
+  // decision carries the fetched FileEditContent so the watcher can write
+  // it directly via applyExternalReload, avoiding a second readFileForEdit.
+  const resolveFileChangeDecision = useCallback(
+    async (tabSnapshot: FileWorkspaceTab): Promise<FileChangeDecision> => {
       const rootPath = folder?.path
       if (!rootPath) return { kind: "none" }
+      if (tabSnapshot.kind !== "file") return { kind: "none" }
+      const path = tabSnapshot.path
+      if (!path) return { kind: "none" }
+      if (tabSnapshot.loading) return { kind: "none" }
 
-      const currentTab = activeFileTabRef.current
-      if (!currentTab || currentTab.kind !== "file") return { kind: "none" }
-      if (
-        normalizeComparePath(currentTab.path ?? "") !==
-        normalizeComparePath(path)
-      ) {
-        return { kind: "none" }
+      const tabId = tabSnapshot.id
+
+      const stillSameTab = (): FileWorkspaceTab | null => {
+        const latestTab = fileTabsRef.current.find((t) => t.id === tabId)
+        if (!latestTab || latestTab.kind !== "file") return null
+        if (
+          normalizeComparePath(latestTab.path ?? "") !==
+          normalizeComparePath(path)
+        ) {
+          return null
+        }
+        if (latestTab.loading) return null
+        return latestTab
       }
-      if (currentTab.loading) return { kind: "none" }
 
-      const knownTabEtag = currentTab.etag ?? null
-
+      let latest: FileEditContent
       try {
-        const latest = await readFileForEdit(rootPath, path)
-        const latestTab = activeFileTabRef.current
-        if (!latestTab || latestTab.kind !== "file") return { kind: "none" }
-        if (
-          normalizeComparePath(latestTab.path ?? "") !==
-          normalizeComparePath(path)
-        ) {
-          return { kind: "none" }
-        }
-        if (latestTab.loading) return { kind: "none" }
-
-        const latestTabEtag = latestTab.etag ?? null
-        if (latest.etag === latestTabEtag) return { kind: "none" }
-
-        if (latestTab.isDirty) {
-          return {
-            kind: "conflict",
-            path,
-            diskContent: latest.content,
-            unsavedContent: latestTab.content,
-            signature: `${path}:${latest.etag}`,
-          }
-        }
-
-        return { kind: "reload", path }
-      } catch {
-        const latestTab = activeFileTabRef.current
-        if (!latestTab || latestTab.kind !== "file") return { kind: "none" }
-        if (
-          normalizeComparePath(latestTab.path ?? "") !==
-          normalizeComparePath(path)
-        ) {
-          return { kind: "none" }
-        }
-        if (latestTab.loading) return { kind: "none" }
-        if (latestTab.isDirty) return { kind: "none" }
-        if (!knownTabEtag) return { kind: "reload", path }
-        return { kind: "reload", path }
+        latest = await readFileForEdit(rootPath, path)
+      } catch (error) {
+        // Disk read failed — most commonly an external delete, but also
+        // permission revocation, an exclusive lock, or a transient FS
+        // error. Surface this as its own decision: the watcher routes it
+        // to rejectFileTab (clean) or markTabsStale (dirty) so the user
+        // is never silently shown a buffer that no longer matches disk.
+        const latestTab = stillSameTab()
+        if (!latestTab) return { kind: "none" }
+        return { kind: "missing", path, error: toErrorMessage(error) }
       }
+
+      const latestTab = stillSameTab()
+      if (!latestTab) return { kind: "none" }
+
+      const latestTabEtag = latestTab.etag ?? null
+      if (latest.etag === latestTabEtag) return { kind: "none" }
+
+      if (latestTab.isDirty) {
+        return {
+          kind: "conflict",
+          path,
+          diskContent: latest.content,
+          unsavedContent: latestTab.content,
+          signature: `${path}:${latest.etag}`,
+        }
+      }
+
+      return { kind: "reload", path, latest }
     },
     [folder?.path]
   )
 
-  useEffect(() => {
-    const rootPath = folder?.path
-    if (!rootPath) return
-
-    const nextSeq = workspaceState.seq
-    if (nextSeq <= previousWorkspaceSeqRef.current) return
-    previousWorkspaceSeqRef.current = nextSeq
-
-    const currentTab = activeFileTabRef.current
-    if (!currentTab || currentTab.kind !== "file") return
-    if (!currentTab.path || currentTab.loading) return
-
-    const activePath = currentTab.path
-    void (async () => {
-      const decision = await resolveActiveFileChangeDecision(activePath)
-      if (decision.kind === "none") return
-
-      if (decision.kind === "reload") {
-        externalConflictSignatureByPathRef.current.delete(decision.path)
-        void openFilePreview(decision.path)
-        return
-      }
-
+  // Surface a conflict prompt for `decision`, deduping by signature so a
+  // repeated workspace event or activation transition does not flicker
+  // the UI.
+  const announceConflict = useCallback(
+    (decision: Extract<FileChangeDecision, { kind: "conflict" }>) => {
       const shownSignature = externalConflictSignatureByPathRef.current.get(
         decision.path
       )
@@ -1961,13 +2234,222 @@ export function FileTreeTab() {
           signature: decision.signature,
         }
       })
-    })()
+    },
+    []
+  )
+
+  // Envelope-driven change watcher.
+  //
+  // Replaces the prior workspaceState.seq polling loop, which forced a
+  // full open-tab scan on every workspace event and read each candidate
+  // file twice (resolver + reload). The new path:
+  //   • subscribes to envelopes and uses `changed_paths` to scope work to
+  //     tabs whose paths actually changed;
+  //   • falls back to a full sweep only on `resync_hint` or envelopes
+  //     missing changed_paths, so external changes cannot be lost when
+  //     the backend cannot enumerate paths;
+  //   • coalesces bursts (e.g. git checkout) via queueMicrotask and a
+  //     single in-flight drainer, so concurrent reconciliations cannot
+  //     double-fire;
+  //   • skips image tabs (no etag — would otherwise trigger spurious
+  //     full base64 re-reads every workspace event);
+  //   • re-reads activeFileTabRef.current AFTER each per-tab resolve
+  //     await so a user mid-scan tab switch is honored;
+  //   • dispatches reload via applyExternalReload — handing the prefetched
+  //     content from the resolver to the context — instead of triggering
+  //     a second readFileForEdit through openFilePreview.
+  useEffect(() => {
+    if (!folder?.path) return
+    if (!subscribeWorkspaceEnvelopes) return
+
+    const pendingPaths = new Set<string>()
+    let pendingFullScan = false
+    let flushScheduled = false
+    let flushPromise: Promise<void> | null = null
+    let disposed = false
+
+    const reconcileChanges = async (
+      paths: string[],
+      fullScan: boolean
+    ): Promise<void> => {
+      const openFileTabs = fileTabsRef.current.filter(
+        (t) => t.kind === "file" && t.path && !t.loading
+      )
+
+      const candidates = (() => {
+        if (fullScan) return openFileTabs
+        const pathSet = new Set(paths.map(normalizeComparePath))
+        return openFileTabs.filter(
+          (t) => t.path && pathSet.has(normalizeComparePath(t.path))
+        )
+      })()
+
+      for (const tab of candidates) {
+        if (disposed) return
+        const path = tab.path
+        if (!path) continue
+
+        // Image tabs do not carry an etag and load via readFileBase64.
+        // Bypass the text-file resolver: a single path-match is enough
+        // to trigger a refresh, and only when changed_paths actually
+        // names the image (full-scan covers the resync fallback).
+        if (isImageFile(path)) {
+          void reloadOpenFileBackground(path)
+          continue
+        }
+
+        const decision = await resolveFileChangeDecision(tab)
+        if (disposed) return
+        if (decision.kind === "none") continue
+
+        // CRITICAL: re-read active tab id AFTER the resolver await. If
+        // we used a snapshot captured before the loop, a tab the user
+        // switched away from could be silently re-activated by a
+        // foreground reload — which is the exact bug this guards.
+        const isActive = tab.id === (activeFileTabRef.current?.id ?? null)
+
+        if (decision.kind === "reload") {
+          // Either active or inactive: applyExternalReload writes the
+          // prefetched payload without changing activeFileTabId, so the
+          // user's focus is preserved either way and no second
+          // readFileForEdit fires.
+          externalConflictSignatureByPathRef.current.delete(decision.path)
+          void applyExternalReload(decision.path, decision.latest)
+          continue
+        }
+
+        if (decision.kind === "missing") {
+          // Disk read failed on a path that an envelope flagged as
+          // changed — the file is gone, locked, or otherwise unreadable.
+          // Clean tab: reject to error state so the user is never shown a
+          // stale buffer that no longer corresponds to disk. Dirty tab:
+          // mark stale to preserve unsaved edits; the next save attempt
+          // (or activation transition) surfaces the failure.
+          externalConflictSignatureByPathRef.current.delete(decision.path)
+          const liveTab = fileTabsRef.current.find((t) => t.id === tab.id)
+          if (liveTab?.isDirty) {
+            markTabsStale(decision.path)
+          } else {
+            rejectFileTab(decision.path, decision.error)
+          }
+          continue
+        }
+
+        if (isActive) {
+          announceConflict(decision)
+        } else {
+          markTabsStale(decision.path)
+        }
+      }
+    }
+
+    const ensureFlushing = () => {
+      if (flushPromise || flushScheduled) return
+      flushScheduled = true
+      queueMicrotask(() => {
+        flushScheduled = false
+        if (disposed) return
+        flushPromise = (async () => {
+          try {
+            // Drain anything pending — including envelopes that arrive
+            // while we're awaiting reconcileChanges. ensureFlushing()
+            // calls from those listener callbacks see flushPromise !=
+            // null and return; their paths land in pendingPaths and the
+            // next loop iteration picks them up.
+            while (!disposed && (pendingPaths.size > 0 || pendingFullScan)) {
+              const paths = Array.from(pendingPaths)
+              pendingPaths.clear()
+              const fullScan = pendingFullScan
+              pendingFullScan = false
+              await reconcileChanges(paths, fullScan)
+            }
+          } finally {
+            flushPromise = null
+          }
+        })()
+      })
+    }
+
+    const unsubscribe = subscribeWorkspaceEnvelopes(
+      ({ changed_paths, kind }) => {
+        if (
+          kind === "resync_hint" ||
+          !changed_paths ||
+          changed_paths.length === 0
+        ) {
+          // Resync or untargeted event — we cannot scope work, so cover
+          // every open tab. Targeted paths from later envelopes are
+          // additive (full scan is a superset).
+          pendingFullScan = true
+        } else {
+          for (const path of changed_paths) {
+            pendingPaths.add(path)
+          }
+        }
+        ensureFlushing()
+      }
+    )
+
+    return () => {
+      disposed = true
+      unsubscribe()
+      pendingPaths.clear()
+    }
   }, [
     folder?.path,
-    openFilePreview,
-    resolveActiveFileChangeDecision,
-    workspaceState.seq,
+    subscribeWorkspaceEnvelopes,
+    resolveFileChangeDecision,
+    applyExternalReload,
+    reloadOpenFileBackground,
+    markTabsStale,
+    rejectFileTab,
+    announceConflict,
   ])
+
+  // Stale-on-activation: when the user switches to (or just opened) a tab
+  // that the watcher previously flagged stale, fire the appropriate action
+  // now — without waiting for the next workspace event. Clean stale is
+  // promoted to reload by openFilePreview's decideLoad path; this effect
+  // covers dirty stale (conflict prompt) and the defensive fallback for
+  // clean stale that somehow survived activation (e.g. switchFileTab).
+  useEffect(() => {
+    const tab = activeFileTab
+    if (!tab || tab.kind !== "file" || !tab.path) return
+    if (!tab.stale || tab.loading) return
+
+    const path = tab.path
+    if (!tab.isDirty) {
+      void openFilePreview(path, { reload: true })
+      return
+    }
+
+    void (async () => {
+      const decision = await resolveFileChangeDecision(tab)
+      if (decision.kind === "conflict") {
+        announceConflict(decision)
+      } else if (decision.kind === "reload") {
+        void applyExternalReload(decision.path, decision.latest)
+      } else if (decision.kind === "missing") {
+        // File vanished while the dirty buffer sat in a non-active tab.
+        // The buffer is still dirty here (this branch only runs for
+        // tab.isDirty === true) so we keep markTabsStale on the path —
+        // refusing to silently lose the user's unsaved edits. The user
+        // discovers the deletion on save (backend recreates or errors).
+        markTabsStale(decision.path)
+      }
+    })()
+  }, [
+    activeFileTab,
+    openFilePreview,
+    applyExternalReload,
+    resolveFileChangeDecision,
+    announceConflict,
+    markTabsStale,
+  ])
+
+  if (!folder) {
+    return <AuxPanelNoFolderEmpty />
+  }
 
   if (loading && nodes.length === 0) {
     return (
@@ -2001,6 +2483,9 @@ export function FileTreeTab() {
 
   return (
     <div className="flex flex-col h-full">
+      {workspaceState.degraded && (
+        <WorkspaceDegradedBanner onRetry={workspaceState.restart} />
+      )}
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <ScrollArea className="flex-1 min-h-0 pb-1" x="scroll">
@@ -2028,6 +2513,8 @@ export function FileTreeTab() {
                           workspacePath={folder.path}
                           activeSessionTabId={activeSessionTabId}
                           gitEnabled={gitEnabled}
+                          webMode={webMode}
+                          folderUploadSupported={folderUploadSupported}
                           gitStatusByPath={gitStatusByPath}
                           gitChangedDirPaths={gitChangedDirPaths}
                           untrackedDirPaths={untrackedDirPaths}
@@ -2055,6 +2542,13 @@ export function FileTreeTab() {
                           onRequestAddToVcs={handleAddToVcs}
                           onRequestRename={handleRequestRename}
                           onRequestDelete={handleRequestDelete}
+                          onRequestUpload={handleRequestUpload}
+                          onRequestDownloadFile={(target) =>
+                            void handleRequestDownloadFile(target)
+                          }
+                          onRequestDownloadDir={(target) =>
+                            void handleRequestDownloadDir(target)
+                          }
                           onRefresh={fetchTree}
                         />
                       ))}
@@ -2151,6 +2645,22 @@ export function FileTreeTab() {
                         </ContextMenuItem>
                       </ContextMenuSubContent>
                     </ContextMenuSub>
+                    {webMode && (
+                      <>
+                        <ContextMenuItem
+                          onSelect={() => handleRequestUpload("")}
+                        >
+                          {t("upload")}
+                        </ContextMenuItem>
+                        <ContextMenuItem
+                          onSelect={() =>
+                            void handleRequestDownloadDir(rootTarget)
+                          }
+                        >
+                          {t("downloadAsZip")}
+                        </ContextMenuItem>
+                      </>
+                    )}
                   </ContextMenuContent>
                 </ContextMenu>
               )}
@@ -2169,6 +2679,11 @@ export function FileTreeTab() {
               </ContextMenuItem>
             </ContextMenuSubContent>
           </ContextMenuSub>
+          {webMode && (
+            <ContextMenuItem onSelect={() => handleRequestUpload("")}>
+              {t("upload")}
+            </ContextMenuItem>
+          )}
           <ContextMenuItem
             onSelect={() => {
               void fetchTree()
@@ -2178,6 +2693,16 @@ export function FileTreeTab() {
           </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
+      {webMode && folder?.path && (
+        <WorkspaceUploadDialog
+          open={uploadDialogOpen}
+          onOpenChange={setUploadDialogOpen}
+          rootPath={folder.path}
+          targetPath={uploadDialogTarget}
+          folderUploadSupported={folderUploadSupported}
+          onComplete={handleUploadComplete}
+        />
+      )}
 
       <Dialog
         open={createParentPath !== null}

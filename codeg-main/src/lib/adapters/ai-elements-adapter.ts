@@ -3,7 +3,10 @@ import type {
   ContentBlock,
   MessageRole,
   TurnUsage,
+  AgentExecutionStats,
+  ToolCallStatus,
 } from "@/lib/types"
+import { isAgentLikeToolName } from "@/lib/adapters/tool-kind-classifier"
 
 /**
  * Adapted content part types for AI SDK Elements components
@@ -14,18 +17,48 @@ export type ToolCallState =
   | "output-available"
   | "output-error"
 
+export type AdaptedToolCallPart = {
+  type: "tool-call"
+  toolCallId: string
+  toolName: string
+  displayTitle?: string | null
+  input: string | null
+  state: ToolCallState
+  output?: string | null
+  errorText?: string
+  agentStats?: AgentExecutionStats | null
+  /**
+   * ACP extensibility metadata forwarded from `ContentBlock.tool_use.meta`.
+   * Opaque pass-through; the only consumer today is `<DelegatedSubThread>`
+   * which reads `meta["codeg.delegation"]` as a binding fallback when the
+   * live DelegationContext entry is missing (page refresh, late mount).
+   */
+  meta?: Record<string, unknown> | null
+}
+
+/**
+ * Inline rendering of codex-acp v0.14+ image generation. Mirrors the
+ * `ContentBlock::ImageGeneration` data shape. Distinct from regular tool
+ * calls so it never folds into a `tool-group` — each image stands alone
+ * with its own labeled card. One image per part — multi-image turns are
+ * already split into multiple consecutive blocks at the runtime layer.
+ *
+ * `status` lets the renderer distinguish "still generating" from "the call
+ * failed without producing an image" when `image` is null. `null` means
+ * the source didn't carry status (Rust JSONL replay) — by definition such
+ * blocks always have an image, so the status is irrelevant there.
+ */
+export type AdaptedGeneratedImagePart = {
+  type: "generated-image"
+  revisedPrompt: string | null
+  /** `null` while the agent has emitted the ToolCall but no image yet. */
+  image: UserImageDisplay | null
+  status: ToolCallStatus | null
+}
+
 export type AdaptedContentPart =
   | { type: "text"; text: string }
-  | {
-      type: "tool-call"
-      toolCallId: string
-      toolName: string
-      displayTitle?: string | null
-      input: string | null
-      state: ToolCallState
-      output?: string | null
-      errorText?: string
-    }
+  | AdaptedToolCallPart
   | {
       type: "tool-result"
       toolCallId: string
@@ -34,6 +67,12 @@ export type AdaptedContentPart =
       state: "output-available" | "output-error"
     }
   | { type: "reasoning"; content: string; isStreaming: boolean }
+  | {
+      type: "tool-group"
+      items: AdaptedToolCallPart[]
+      isStreaming: boolean
+    }
+  | AdaptedGeneratedImagePart
 
 export interface UserResourceDisplay {
   name: string
@@ -64,6 +103,8 @@ export interface AdaptedMessage {
   usage?: TurnUsage | null
   duration_ms?: number | null
   model?: string | null
+  /** Wall-clock completion time as ISO string (parsed once at the Rust layer). */
+  completed_at?: string | null
 }
 
 export interface AdapterMessageText {
@@ -552,10 +593,12 @@ function adaptContentBlock(
     case "tool_use":
       return {
         type: "tool-call",
-        toolCallId: generateToolCallId(messageId, blockIndex),
+        toolCallId:
+          block.tool_use_id ?? generateToolCallId(messageId, blockIndex),
         toolName: block.tool_name,
         input: block.input_preview,
         state: "input-available",
+        meta: block.meta ?? null,
       }
 
     case "tool_result":
@@ -576,9 +619,104 @@ function adaptContentBlock(
         isStreaming,
       }
 
+    case "image_generation": {
+      const img = block.image ?? null
+      const display: UserImageDisplay | null =
+        img && img.data && img.mime_type
+          ? {
+              name: deriveImageNameFromImageData(img),
+              data: img.data,
+              mime_type: img.mime_type,
+              uri: img.uri ?? null,
+            }
+          : null
+      return {
+        type: "generated-image",
+        revisedPrompt: block.revised_prompt ?? null,
+        image: display,
+        status: block.status ?? null,
+      }
+    }
+
     default:
       return null
   }
+}
+
+function deriveImageNameFromImageData(img: {
+  data: string
+  mime_type: string
+  uri?: string | null
+}): string {
+  if (img.uri && img.uri.trim().length > 0) {
+    return fileNameFromUri(img.uri)
+  }
+  const ext = img.mime_type.split("/")[1]?.split("+")[0] ?? "image"
+  return `image.${ext}`
+}
+
+/**
+ * Merge adjacent tool-group parts in a parts array into a single tool-group.
+ * Used for cross-turn merging when concatenated content from consecutive
+ * assistant turns lands two tool-groups next to each other.
+ */
+export function mergeAdjacentToolGroups(
+  parts: AdaptedContentPart[]
+): AdaptedContentPart[] {
+  const result: AdaptedContentPart[] = []
+  for (const part of parts) {
+    const last = result[result.length - 1]
+    if (part.type === "tool-group" && last?.type === "tool-group") {
+      const mergedItems = [...last.items, ...part.items]
+      result[result.length - 1] = {
+        type: "tool-group",
+        items: mergedItems,
+        isStreaming: mergedItems.some(
+          (item) =>
+            item.state === "input-streaming" || item.state === "input-available"
+        ),
+      }
+    } else {
+      result.push(part)
+    }
+  }
+  return result
+}
+
+/**
+ * Wrap any consecutive run of tool-call parts into a single tool-group.
+ * Text, reasoning, tool-result and any other part types break the run.
+ * Even a single tool call is wrapped, so the renderer can present a uniform
+ * collapsed summary across history.
+ */
+export function groupConsecutiveToolCalls(
+  parts: AdaptedContentPart[]
+): AdaptedContentPart[] {
+  const result: AdaptedContentPart[] = []
+  let buffer: AdaptedToolCallPart[] = []
+
+  const flush = () => {
+    if (buffer.length === 0) return
+    const items = buffer
+    buffer = []
+    const isStreaming = items.some(
+      (item) =>
+        item.state === "input-streaming" || item.state === "input-available"
+    )
+    result.push({ type: "tool-group", items, isStreaming })
+  }
+
+  for (const part of parts) {
+    if (part.type === "tool-call" && !isAgentLikeToolName(part.toolName)) {
+      buffer.push(part)
+      continue
+    }
+    flush()
+    result.push(part)
+  }
+  flush()
+
+  return result
 }
 
 /**
@@ -662,6 +800,8 @@ export function adaptMessageTurn(
           errorText: matchedResult.is_error
             ? matchedResult.output_preview || undefined
             : undefined,
+          agentStats: matchedResult.agent_stats ?? undefined,
+          meta: block.meta ?? null,
         })
       } else {
         // Position-based matching: if this tool_use has no ID, check next block
@@ -687,6 +827,8 @@ export function adaptMessageTurn(
             errorText: positionalResult.is_error
               ? positionalResult.output_preview || undefined
               : undefined,
+            agentStats: positionalResult.agent_stats ?? undefined,
+            meta: block.meta ?? null,
           })
         } else {
           // For live streaming, unmatched tools are still running.
@@ -698,6 +840,7 @@ export function adaptMessageTurn(
             toolName: block.tool_name,
             input: block.input_preview,
             state: isStreaming ? "input-available" : "output-available",
+            meta: block.meta ?? null,
           })
         }
       }
@@ -727,10 +870,18 @@ export function adaptMessageTurn(
     }
   }
 
+  const groupedContent =
+    turn.role === "assistant"
+      ? groupConsecutiveToolCalls(adaptedContent)
+      : adaptedContent
+
   const userSplit =
     turn.role === "user"
-      ? splitUserTextAndResources(adaptedContent, text.attachedResources)
-      : { parts: adaptedContent, resources: [] as UserResourceDisplay[] }
+      ? splitUserTextAndResources(groupedContent, text.attachedResources)
+      : { parts: groupedContent, resources: [] as UserResourceDisplay[] }
+  // Only user-uploaded images surface as top-of-message attachments.
+  // Assistant-side image_generation flows through the inline
+  // `generated-image` part, rendered in-position.
   const userImages =
     turn.role === "user" ? extractUserImagesFromBlocks(turn.blocks) : []
 
@@ -745,6 +896,7 @@ export function adaptMessageTurn(
     usage: turn.usage,
     duration_ms: turn.duration_ms,
     model: turn.model,
+    completed_at: turn.completed_at,
   }
 }
 
@@ -771,4 +923,120 @@ export function adaptMessageTurns(
       inProgressToolCallIdsByIndex?.get(i)
     )
   )
+}
+
+interface TurnCacheEntry {
+  text: AdapterMessageText
+  blocks: ContentBlock[]
+  blocksLen: number
+  timestamp: string
+  role: MessageRole
+  usage: TurnUsage | null | undefined
+  duration_ms: number | null | undefined
+  model: string | null | undefined
+  completed_at: string | null | undefined
+  adapted: AdaptedMessage
+}
+
+export interface MessageTurnAdapter {
+  /**
+   * Adapt all turns to messages, reusing previously computed `AdaptedMessage`
+   * references for turns whose content hasn't changed. Streaming turns and
+   * turns with in-progress tool calls are never cached so partial state always
+   * re-flows through the adapter.
+   */
+  adapt(
+    turns: MessageTurn[],
+    text: AdapterMessageText,
+    streamingIndices?: Set<number>,
+    inProgressToolCallIdsByIndex?: Map<number, Set<string>>
+  ): AdaptedMessage[]
+  clear(): void
+}
+
+/**
+ * Build a stateful adapter that caches per-turn results. Intended to live for
+ * the lifetime of a chat view — instantiate once via `useRef` so the cache
+ * survives across re-renders triggered by streaming deltas.
+ *
+ * Cache invalidation: an entry is reused only when `(text, blocks,
+ * blocksLen, timestamp, role, usage, duration_ms, model)` all match. The
+ * blocks reference catches whole-turn rewrites (e.g. detail refetch
+ * replacing `detail.turns`) where blocksLen/timestamp may stay equal but
+ * a tool's output_preview was updated; PATCH_TURN_METADATA preserves the
+ * blocks reference, so it still hits. The usage trio is patched in by
+ * `syncTurnMetadata` after a stream finishes (initial blocks land first,
+ * token totals arrive on a later DB roundtrip), so excluding them would
+ * freeze the turn at its pre-patch state and the post-stream stats row
+ * would never appear. Turns no longer present are GC'd at the end of
+ * every adapt() call so the cache size tracks the conversation.
+ */
+export function createMessageTurnAdapter(): MessageTurnAdapter {
+  const cache = new Map<string, TurnCacheEntry>()
+
+  return {
+    adapt(turns, text, streamingIndices, inProgressToolCallIdsByIndex) {
+      const seen = new Set<string>()
+      const out: AdaptedMessage[] = new Array(turns.length)
+
+      for (let i = 0; i < turns.length; i += 1) {
+        const turn = turns[i]
+        seen.add(turn.id)
+        const isStreaming = streamingIndices?.has(i) ?? false
+        const inProgress = inProgressToolCallIdsByIndex?.get(i)
+        const cacheable = !isStreaming && !inProgress
+        const blocksLen = turn.blocks.length
+
+        if (cacheable) {
+          const cached = cache.get(turn.id)
+          if (
+            cached &&
+            cached.text === text &&
+            cached.blocks === turn.blocks &&
+            cached.blocksLen === blocksLen &&
+            cached.timestamp === turn.timestamp &&
+            cached.role === turn.role &&
+            cached.usage === turn.usage &&
+            cached.duration_ms === turn.duration_ms &&
+            cached.model === turn.model &&
+            cached.completed_at === turn.completed_at
+          ) {
+            out[i] = cached.adapted
+            continue
+          }
+        }
+
+        const adapted = adaptMessageTurn(turn, text, isStreaming, inProgress)
+        out[i] = adapted
+
+        if (cacheable) {
+          cache.set(turn.id, {
+            text,
+            blocks: turn.blocks,
+            blocksLen,
+            timestamp: turn.timestamp,
+            role: turn.role,
+            usage: turn.usage,
+            duration_ms: turn.duration_ms,
+            model: turn.model,
+            completed_at: turn.completed_at,
+            adapted,
+          })
+        } else {
+          cache.delete(turn.id)
+        }
+      }
+
+      if (cache.size > seen.size) {
+        for (const id of cache.keys()) {
+          if (!seen.has(id)) cache.delete(id)
+        }
+      }
+
+      return out
+    },
+    clear() {
+      cache.clear()
+    },
+  }
 }

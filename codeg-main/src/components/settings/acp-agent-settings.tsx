@@ -24,6 +24,7 @@ import {
   GripVertical,
   Loader2,
   Minus,
+  PackagePlus,
   RefreshCw,
   Save,
   Trash2,
@@ -64,7 +65,7 @@ import {
   ComboboxLabel,
   ComboboxList,
 } from "@/components/ui/combobox"
-import { cn } from "@/lib/utils"
+import { cn, copyTextToClipboard, randomUUID } from "@/lib/utils"
 import {
   acpClearBinaryCache,
   acpDetectAgentLocalVersion,
@@ -88,6 +89,8 @@ import type {
   ModelProviderInfo,
   PreflightResult,
 } from "@/lib/types"
+import { parseClaudeProviderModel } from "@/lib/types"
+import { toErrorMessage } from "@/lib/app-error"
 import { useAgentInstallStream } from "@/hooks/use-agent-install-stream"
 import { OpencodePluginsModal } from "./opencode-plugins-modal"
 
@@ -151,6 +154,7 @@ type RunningActionKind =
   | "uninstall_binary"
   | "uninstall_npx"
   | "redownload_binary"
+  | "custom_install"
 
 type UiFixAction =
   | FixAction
@@ -164,6 +168,7 @@ type UiFixAction =
         | "uninstall_binary"
         | "uninstall_npx"
         | "install_opencode_plugins"
+        | "custom_install"
       payload: string
     }
 
@@ -257,20 +262,24 @@ const CLAUDE_MODEL_ENV_KEYS = {
 
 const CLAUDE_EFFORT_LEVEL_CONFIG_KEY = "effortLevel"
 
-type ClaudeEffortLevel = "" | "low" | "medium" | "high" | "max"
+type ClaudeEffortLevel = "" | "low" | "medium" | "high" | "xhigh"
 
 const CLAUDE_EFFORT_LEVEL_VALUES: ReadonlyArray<
   Exclude<ClaudeEffortLevel, "">
-> = ["low", "medium", "high", "max"]
+> = ["low", "medium", "high", "xhigh"]
 
 function normalizeClaudeEffortLevel(value: unknown): ClaudeEffortLevel {
   if (typeof value !== "string") return ""
   const normalized = value.trim().toLowerCase()
+  // Upstream claude-agent-acp >=0.37 exposes the sentinel string "default";
+  // collapse it to "" so our UI's "默认/Default" placeholder stays
+  // canonical regardless of which side wrote the config.
+  if (normalized === "" || normalized === "default") return ""
   if (
     normalized === "low" ||
     normalized === "medium" ||
     normalized === "high" ||
-    normalized === "max"
+    normalized === "xhigh"
   ) {
     return normalized
   }
@@ -375,7 +384,7 @@ function parseConfigJsonText(configText: string): ConfigParseResult {
     }
     return { config: parsed as Record<string, unknown>, error: null }
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
+    const message = toErrorMessage(err)
     return {
       config: {},
       error: acpText(
@@ -411,7 +420,7 @@ function parseOpenCodeAuthJsonText(authJsonText: string): {
     }
     return { authObject: parsed as Record<string, unknown>, error: null }
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
+    const message = toErrorMessage(err)
     return {
       authObject: null,
       error: acpText(
@@ -985,6 +994,34 @@ const OPENCODE_PROVIDER_NPM_OPTIONS = [
     value: "@ai-sdk/cerebras",
     label: "@ai-sdk/cerebras",
   },
+  {
+    value: "@ai-sdk/azure",
+    label: "@ai-sdk/azure",
+  },
+  {
+    value: "@ai-sdk/xai",
+    label: "@ai-sdk/xai",
+  },
+  {
+    value: "@ai-sdk/anthropic",
+    label: "@ai-sdk/anthropic",
+  },
+  {
+    value: "@ai-sdk/amazon-bedrock",
+    label: "@ai-sdk/amazon-bedrock",
+  },
+  {
+    value: "@ai-sdk/google",
+    label: "@ai-sdk/google",
+  },
+  {
+    value: "@ai-sdk/google-vertex",
+    label: "@ai-sdk/google-vertex",
+  },
+  {
+    value: "@ai-sdk/deepseek",
+    label: "@ai-sdk/deepseek",
+  },
 ] as const
 
 interface OpenCodeModelOptionGroup {
@@ -1170,6 +1207,30 @@ function patchOpenCodeConfigText(
       Object.keys(config).length === 0 ? "" : JSON.stringify(config, null, 2),
     recoveredFromInvalid: Boolean(parseResult.error),
   }
+}
+
+// Fill in `provider.<id>.npm` with the first option for any providers that
+// lack it, so the displayed Select value matches what gets persisted to disk.
+function ensureOpenCodeProviderNpm(configText: string): string {
+  if (!configText.trim()) return configText
+  const parseResult = parseConfigJsonText(configText)
+  if (parseResult.error) return configText
+  const config = parseResult.config
+  const providerRoot = asObjectRecord(config.provider)
+  if (!providerRoot) return configText
+  let mutated = false
+  for (const providerId of Object.keys(providerRoot)) {
+    const provider = asObjectRecord(providerRoot[providerId])
+    if (!provider) continue
+    const currentNpm =
+      typeof provider.npm === "string" ? provider.npm.trim() : ""
+    if (!currentNpm) {
+      provider.npm = OPENCODE_PROVIDER_NPM_OPTIONS[0].value
+      mutated = true
+    }
+  }
+  if (!mutated) return configText
+  return JSON.stringify(config, null, 2)
 }
 
 interface CodexTomlImportantValues {
@@ -1520,7 +1581,7 @@ function parseCodexAuthJsonObject(authJsonText: string): {
     }
     return { authObject: parsed as Record<string, unknown>, error: null }
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
+    const message = toErrorMessage(err)
     return {
       authObject: null,
       error: acpText(
@@ -2399,6 +2460,16 @@ function hasComparableVersion(
   return Boolean(value && /\d/.test(value) && value.includes("."))
 }
 
+// Mirror of the backend `sanitize_custom_version`: a custom install version
+// tolerates a leading `v`, must start with a digit, must be dotted (e.g.
+// `1.2.3`), and may only contain `[0-9A-Za-z.-+]` (semver pre-release/build +
+// calendar versions). Rejects npm dist-tags like `latest`, bare majors like
+// `2`, and anything with spaces / `@`.
+function isValidCustomVersion(value: string): boolean {
+  const normalized = value.trim().replace(/^[vV]/, "")
+  return /^[0-9][0-9A-Za-z.\-+]*$/.test(normalized) && normalized.includes(".")
+}
+
 function buildVersionCheck(agent: AcpAgentInfo): UiCheckItem | null {
   if (agent.distribution_type !== "binary" && agent.distribution_type !== "npx")
     return null
@@ -2432,6 +2503,19 @@ function buildVersionCheck(agent: AcpAgentInfo): UiCheckItem | null {
     }
   }
 
+  // Custom-version install is offered in every installable state (and stays
+  // available after a version is installed, so users can switch versions).
+  // Binary agents need the registry version present to template the download URL.
+  const supportsCustomInstall =
+    agent.distribution_type === "npx" || Boolean(agent.registry_version)
+  const customInstallFix: UiFixAction = {
+    label: acpText("actions.customInstall", "Custom install"),
+    kind: "custom_install",
+    payload: agent.agent_type,
+  }
+  const withCustomInstall = (fixes: UiFixAction[]): UiFixAction[] =>
+    supportsCustomInstall ? [...fixes, customInstallFix] : fixes
+
   if (!agent.installed_version) {
     return {
       check_id: "version_status",
@@ -2442,13 +2526,13 @@ function buildVersionCheck(agent: AcpAgentInfo): UiCheckItem | null {
         "{versionText}. Click Install on the right.",
         { versionText }
       ),
-      fixes: [
+      fixes: withCustomInstall([
         {
           label: acpText("actions.install", "Install"),
           kind: installAction,
           payload: agent.agent_type,
         },
-      ],
+      ]),
     }
   }
 
@@ -2466,7 +2550,7 @@ function buildVersionCheck(agent: AcpAgentInfo): UiCheckItem | null {
         "{versionText}. Local version is not comparable; try upgrade to overwrite install.",
         { versionText }
       ),
-      fixes: [
+      fixes: withCustomInstall([
         {
           label: acpText("actions.upgrade", "Upgrade"),
           kind: upgradeAction,
@@ -2477,7 +2561,7 @@ function buildVersionCheck(agent: AcpAgentInfo): UiCheckItem | null {
           kind: uninstallAction,
           payload: agent.agent_type,
         },
-      ],
+      ]),
     }
   }
 
@@ -2495,7 +2579,7 @@ function buildVersionCheck(agent: AcpAgentInfo): UiCheckItem | null {
         "{versionText}. Upgrade available.",
         { versionText }
       ),
-      fixes: [
+      fixes: withCustomInstall([
         {
           label: acpText("actions.upgrade", "Upgrade"),
           kind: upgradeAction,
@@ -2506,7 +2590,7 @@ function buildVersionCheck(agent: AcpAgentInfo): UiCheckItem | null {
           kind: uninstallAction,
           payload: agent.agent_type,
         },
-      ],
+      ]),
     }
   }
 
@@ -2520,13 +2604,13 @@ function buildVersionCheck(agent: AcpAgentInfo): UiCheckItem | null {
         "{versionText}. Remote version is currently unavailable.",
         { versionText }
       ),
-      fixes: [
+      fixes: withCustomInstall([
         {
           label: acpText("actions.uninstall", "Uninstall"),
           kind: uninstallAction,
           payload: agent.agent_type,
         },
-      ],
+      ]),
     }
   }
 
@@ -2537,13 +2621,13 @@ function buildVersionCheck(agent: AcpAgentInfo): UiCheckItem | null {
     message: acpText("version.latest", "{versionText}. Already latest.", {
       versionText,
     }),
-    fixes: [
+    fixes: withCustomInstall([
       {
         label: acpText("actions.uninstall", "Uninstall"),
         kind: uninstallAction,
         payload: agent.agent_type,
       },
-    ],
+    ]),
   }
 }
 
@@ -2660,6 +2744,9 @@ export function AcpAgentSettings() {
   const [modelProviders, setModelProviders] = useState<ModelProviderInfo[]>([])
   const [uninstallConfirmAgent, setUninstallConfirmAgent] =
     useState<AcpAgentInfo | null>(null)
+  const [customInstallAgent, setCustomInstallAgent] =
+    useState<AcpAgentInfo | null>(null)
+  const [customVersionInput, setCustomVersionInput] = useState("")
   const [pluginModalOpen, setPluginModalOpen] = useState(false)
   const [pluginModalAgent, setPluginModalAgent] = useState<AgentType | null>(
     null
@@ -2766,7 +2853,7 @@ export function AcpAgentSettings() {
         return updated
       })
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = toErrorMessage(err)
       setLoadingError(message)
     } finally {
       setLoadingAgents(false)
@@ -2812,7 +2899,7 @@ export function AcpAgentSettings() {
           }))
         }
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = toErrorMessage(err)
         setCheckState((prev) => ({ ...prev, [agentType]: { error: message } }))
       } finally {
         setChecking((prev) => ({ ...prev, [agentType]: false }))
@@ -2973,7 +3060,10 @@ export function AcpAgentSettings() {
           throw new Error(authError)
         }
       }
-      const normalizedConfig = normalizeConfigText(configText)
+      let normalizedConfig = normalizeConfigText(configText)
+      if (agentType === "open_code" && normalizedConfig) {
+        normalizedConfig = ensureOpenCodeProviderNpm(normalizedConfig)
+      }
       // For agents using merge strategy, mark removed keys as null
       // so the backend merge_json_values can delete them from disk.
       let configForPersist =
@@ -3042,7 +3132,8 @@ export function AcpAgentSettings() {
     async (
       agent: AcpAgentInfo,
       mode: "download" | "upgrade",
-      kind?: RunningActionKind
+      kind?: RunningActionKind,
+      versionOverride?: string
     ) => {
       if (busyActionRef.current.has(agent.agent_type)) return
       busyActionRef.current.add(agent.agent_type)
@@ -3052,14 +3143,26 @@ export function AcpAgentSettings() {
         [agent.agent_type]:
           kind ?? (mode === "download" ? "download_binary" : "upgrade_binary"),
       }))
-      const taskId = crypto.randomUUID()
+      // A custom-version install must replace whatever is cached, otherwise a
+      // higher cached version would still win on connect.
+      const clearCache = mode === "upgrade" || Boolean(versionOverride)
+      const actionLabel = versionOverride
+        ? t("actions.customInstall")
+        : mode === "upgrade"
+          ? t("actions.upgrade")
+          : t("actions.install")
+      const taskId = randomUUID()
       setStreamAgentType(agent.agent_type)
       await installStream.start(taskId)
       try {
-        if (mode === "upgrade") {
+        if (clearCache) {
           await acpClearBinaryCache(agent.agent_type)
         }
-        await acpDownloadAgentBinary(agent.agent_type, taskId)
+        await acpDownloadAgentBinary(
+          agent.agent_type,
+          taskId,
+          versionOverride ?? null
+        )
         await runPreflight(agent.agent_type)
         const detectedVersion = await acpDetectAgentLocalVersion(
           agent.agent_type
@@ -3074,8 +3177,7 @@ export function AcpAgentSettings() {
         toast.success(
           t("toasts.agentActionCompleted", {
             name: agent.name,
-            action:
-              mode === "upgrade" ? t("actions.upgrade") : t("actions.install"),
+            action: actionLabel,
           }),
           {
             description: detectedVersion
@@ -3084,17 +3186,36 @@ export function AcpAgentSettings() {
           }
         )
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = toErrorMessage(err)
         toast.error(
           t("toasts.agentActionFailed", {
             name: agent.name,
-            action:
-              mode === "upgrade" ? t("actions.upgrade") : t("actions.install"),
+            action: actionLabel,
           }),
           {
             description: message,
           }
         )
+        if (clearCache) {
+          // The cache was cleared before downloading, so a failure here may
+          // have removed the previously working binary — resync local state so
+          // the UI doesn't keep showing a phantom version.
+          try {
+            const detected = await acpDetectAgentLocalVersion(agent.agent_type)
+            setAgents((prev) =>
+              prev.map((item) =>
+                item.agent_type === agent.agent_type
+                  ? { ...item, installed_version: detected ?? null }
+                  : item
+              )
+            )
+          } catch (detectErr) {
+            console.error(
+              "[Settings] failed to resync installed version after binary install failure:",
+              detectErr
+            )
+          }
+        }
         throw err
       } finally {
         busyActionRef.current.delete(agent.agent_type)
@@ -3110,22 +3231,40 @@ export function AcpAgentSettings() {
   )
 
   const runNpxAction = useCallback(
-    async (agent: AcpAgentInfo, mode: "install" | "upgrade") => {
+    async (
+      agent: AcpAgentInfo,
+      mode: "install" | "upgrade",
+      versionOverride?: string
+    ) => {
       if (busyActionRef.current.has(agent.agent_type)) return
       busyActionRef.current.add(agent.agent_type)
       setBusyBinaryAction((prev) => ({ ...prev, [agent.agent_type]: true }))
       setRunningActionKind((prev) => ({
         ...prev,
-        [agent.agent_type]: mode === "install" ? "install_npx" : "upgrade_npx",
+        [agent.agent_type]: versionOverride
+          ? "custom_install"
+          : mode === "install"
+            ? "install_npx"
+            : "upgrade_npx",
       }))
-      const taskId = crypto.randomUUID()
+      // A custom-version install forces a clean reinstall so the requested
+      // version replaces whatever is currently installed.
+      const cleanFirst = mode === "upgrade" || Boolean(versionOverride)
+      const actionLabel = versionOverride
+        ? t("actions.customInstall")
+        : mode === "upgrade"
+          ? t("actions.upgrade")
+          : t("actions.install")
+      const taskId = randomUUID()
       setStreamAgentType(agent.agent_type)
       await installStream.start(taskId)
       try {
         const installedVersion = await acpPrepareNpxAgent(
           agent.agent_type,
           agent.registry_version,
-          taskId
+          taskId,
+          cleanFirst,
+          versionOverride ?? null
         )
         setAgents((prev) =>
           prev.map((item) =>
@@ -3151,8 +3290,7 @@ export function AcpAgentSettings() {
         toast.success(
           t("toasts.agentActionCompleted", {
             name: agent.name,
-            action:
-              mode === "upgrade" ? t("actions.upgrade") : t("actions.install"),
+            action: actionLabel,
           }),
           {
             description: finalVersion
@@ -3161,17 +3299,35 @@ export function AcpAgentSettings() {
           }
         )
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = toErrorMessage(err)
         toast.error(
           t("toasts.agentActionFailed", {
             name: agent.name,
-            action:
-              mode === "upgrade" ? t("actions.upgrade") : t("actions.install"),
+            action: actionLabel,
           }),
           {
             description: message,
           }
         )
+        if (cleanFirst) {
+          // Clean reinstall may have removed the old install before failing —
+          // resync local state so the UI doesn't keep showing a phantom version.
+          try {
+            const detected = await acpDetectAgentLocalVersion(agent.agent_type)
+            setAgents((prev) =>
+              prev.map((item) =>
+                item.agent_type === agent.agent_type
+                  ? { ...item, installed_version: detected ?? null }
+                  : item
+              )
+            )
+          } catch (detectErr) {
+            console.error(
+              "[Settings] failed to resync installed version after upgrade failure:",
+              detectErr
+            )
+          }
+        }
         throw err
       } finally {
         busyActionRef.current.delete(agent.agent_type)
@@ -3198,7 +3354,7 @@ export function AcpAgentSettings() {
             ? "uninstall_binary"
             : "uninstall_npx",
       }))
-      const taskId = crypto.randomUUID()
+      const taskId = randomUUID()
       setStreamAgentType(agent.agent_type)
       await installStream.start(taskId)
       try {
@@ -3215,7 +3371,7 @@ export function AcpAgentSettings() {
           description: t("toasts.localVersionRemoved"),
         })
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = toErrorMessage(err)
         toast.error(t("toasts.uninstallFailed", { name: agent.name }), {
           description: message,
         })
@@ -3273,6 +3429,11 @@ export function AcpAgentSettings() {
       setPluginModalOpen(true)
       return
     }
+    if (action.kind === "custom_install") {
+      setCustomVersionInput("")
+      setCustomInstallAgent(agent)
+      return
+    }
     await runPreflight(agent.agent_type)
   }
 
@@ -3288,6 +3449,23 @@ export function AcpAgentSettings() {
       })
   }, [runUninstallAction, uninstallConfirmAgent])
 
+  const confirmCustomInstall = useCallback(() => {
+    if (!customInstallAgent) return
+    const agent = customInstallAgent
+    const version = customVersionInput.trim()
+    if (!isValidCustomVersion(version)) return
+    // Close immediately; progress streams into the detail panel log, and any
+    // failure is surfaced via toast inside the run* actions.
+    const run =
+      agent.distribution_type === "binary"
+        ? runBinaryAction(agent, "upgrade", "custom_install", version)
+        : runNpxAction(agent, "upgrade", version)
+    run.catch((err) => {
+      console.error("[Settings] custom install failed:", err)
+    })
+    setCustomInstallAgent(null)
+  }, [customInstallAgent, customVersionInput, runBinaryAction, runNpxAction])
+
   const persistReorder = useCallback(
     async (order: AgentType[]) => {
       if (order.length === 0) return
@@ -3296,7 +3474,7 @@ export function AcpAgentSettings() {
         await acpReorderAgents(order)
       } catch (err) {
         console.error("[Settings] reorder agents failed:", err)
-        const message = err instanceof Error ? err.message : String(err)
+        const message = toErrorMessage(err)
         toast.error(t("toasts.saveAgentOrderFailed"), {
           description: message,
         })
@@ -3375,6 +3553,7 @@ export function AcpAgentSettings() {
                         "uninstall_npx",
                         "redownload_binary",
                         "install_opencode_plugins",
+                        "custom_install",
                       ].includes(fix.kind)
                     }
                     onClick={() => {
@@ -3397,6 +3576,8 @@ export function AcpAgentSettings() {
                       <Trash2 className="h-3 w-3" />
                     ) : fix.kind === "install_opencode_plugins" ? (
                       <Download className="h-3 w-3" />
+                    ) : fix.kind === "custom_install" ? (
+                      <PackagePlus className="h-3 w-3" />
                     ) : null}
                     {fix.label}
                   </Button>
@@ -3434,8 +3615,8 @@ export function AcpAgentSettings() {
 
   const selectedModelProviders = useMemo(() => {
     if (!selectedAgent) return []
-    return modelProviders.filter((p) =>
-      p.agent_types.includes(selectedAgent.agent_type)
+    return modelProviders.filter(
+      (p) => p.agent_type === selectedAgent.agent_type
     )
   }, [modelProviders, selectedAgent])
 
@@ -3768,44 +3949,103 @@ export function AcpAgentSettings() {
       const agentType = selectedAgent.agent_type
 
       if (agentType === "claude_code") {
+        // Provider's model fields are authoritative: missing/empty keys clear
+        // the corresponding draft + env value.
+        const claudeModel = parseClaudeProviderModel(provider?.model ?? null)
+        const claudeMain = claudeModel.main ?? ""
+        const claudeReasoning = claudeModel.reasoning ?? ""
+        const claudeHaiku = claudeModel.haiku ?? ""
+        const claudeSonnet = claudeModel.sonnet ?? ""
+        const claudeOpus = claudeModel.opus ?? ""
         const nextConfigJson = patchImportantConfigText(
           agentType,
           selectedDraft.configText,
-          { apiBaseUrl: apiUrl, apiKey }
+          {
+            apiBaseUrl: apiUrl,
+            apiKey,
+            model: selectedDraft.model,
+            claudeMainModel: claudeMain,
+            claudeReasoningModel: claudeReasoning,
+            claudeDefaultHaikuModel: claudeHaiku,
+            claudeDefaultSonnetModel: claudeSonnet,
+            claudeDefaultOpusModel: claudeOpus,
+          }
         )
         setConfigErrors((prev) => ({
           ...prev,
           [agentType]: null,
         }))
-        updateSelectedDraft((current) => ({
-          ...current,
-          modelProviderId: providerId,
-          apiBaseUrl: apiUrl,
-          apiKey,
-          envText: patchEnvByImportantKey(
+        updateSelectedDraft((current) => {
+          let nextEnvText = patchEnvByImportantKey(
             agentType,
-            patchEnvByImportantKey(
-              agentType,
-              current.envText,
-              "apiBaseUrl",
-              apiUrl
-            ),
+            current.envText,
+            "apiBaseUrl",
+            apiUrl
+          )
+          nextEnvText = patchEnvByImportantKey(
+            agentType,
+            nextEnvText,
             "apiKey",
             apiKey
-          ),
-          configText: nextConfigJson.configText,
-        }))
+          )
+          nextEnvText = patchEnvByImportantKey(
+            agentType,
+            nextEnvText,
+            "claudeMainModel",
+            claudeMain
+          )
+          nextEnvText = patchEnvByImportantKey(
+            agentType,
+            nextEnvText,
+            "claudeReasoningModel",
+            claudeReasoning
+          )
+          nextEnvText = patchEnvByImportantKey(
+            agentType,
+            nextEnvText,
+            "claudeDefaultHaikuModel",
+            claudeHaiku
+          )
+          nextEnvText = patchEnvByImportantKey(
+            agentType,
+            nextEnvText,
+            "claudeDefaultSonnetModel",
+            claudeSonnet
+          )
+          nextEnvText = patchEnvByImportantKey(
+            agentType,
+            nextEnvText,
+            "claudeDefaultOpusModel",
+            claudeOpus
+          )
+          return {
+            ...current,
+            modelProviderId: providerId,
+            apiBaseUrl: apiUrl,
+            apiKey,
+            claudeMainModel: claudeMain,
+            claudeReasoningModel: claudeReasoning,
+            claudeDefaultHaikuModel: claudeHaiku,
+            claudeDefaultSonnetModel: claudeSonnet,
+            claudeDefaultOpusModel: claudeOpus,
+            envText: nextEnvText,
+            configText: nextConfigJson.configText,
+          }
+        })
       } else if (agentType === "codex") {
+        const codexModel = provider?.model?.trim() ?? ""
         const nextAuthPatch = patchCodexAuthJsonText(
           selectedDraft.codexAuthJsonText,
           { apiKey, authMode: null }
         )
         const nextAuthJsonText = nextAuthPatch.authJsonText
+        // Always pass the provider's model (empty string clears it from the toml).
         const nextConfigTomlText = patchCodexConfigTomlText(
           selectedDraft.codexConfigTomlText,
           {
             modelProvider: CODEX_DEFAULT_MODEL_PROVIDER,
             apiBaseUrl: apiUrl,
+            model: codexModel,
           }
         )
         const synced = extractCodexImportantValues(
@@ -3817,6 +4057,7 @@ export function AcpAgentSettings() {
           modelProviderId: providerId,
           apiBaseUrl: apiUrl,
           apiKey,
+          model: codexModel,
           codexAuthJsonText: nextAuthJsonText,
           codexConfigTomlText: nextConfigTomlText,
           codexModelProvider: CODEX_DEFAULT_MODEL_PROVIDER,
@@ -3824,9 +4065,11 @@ export function AcpAgentSettings() {
           envText: patchEnvText(current.envText, {
             OPENAI_API_KEY: apiKey,
             OPENAI_BASE_URL: apiUrl,
+            OPENAI_MODEL: codexModel,
           }),
         }))
       } else if (agentType === "gemini") {
+        const geminiModel = provider?.model?.trim() ?? ""
         const nextConfigJson = patchGeminiConfigText(selectedDraft.configText, {
           apiBaseUrl: apiUrl,
           geminiApiKey: apiKey,
@@ -3835,18 +4078,27 @@ export function AcpAgentSettings() {
           ...prev,
           [agentType]: null,
         }))
-        updateSelectedDraft((current) => ({
-          ...current,
-          modelProviderId: providerId,
-          apiBaseUrl: apiUrl,
-          apiKey,
-          geminiApiKey: apiKey,
-          envText: patchGeminiEnvText(current.envText, {
+        updateSelectedDraft((current) => {
+          let nextEnvText = patchGeminiEnvText(current.envText, {
             apiBaseUrl: apiUrl,
             geminiApiKey: apiKey,
-          }),
-          configText: nextConfigJson.configText,
-        }))
+          })
+          // Always overwrite GEMINI_MODEL with the provider's value (empty
+          // string clears it).
+          nextEnvText = patchEnvText(nextEnvText, {
+            GEMINI_MODEL: geminiModel,
+          })
+          return {
+            ...current,
+            modelProviderId: providerId,
+            apiBaseUrl: apiUrl,
+            apiKey,
+            geminiApiKey: apiKey,
+            model: geminiModel,
+            envText: nextEnvText,
+            configText: nextConfigJson.configText,
+          }
+        })
       } else {
         updateSelectedDraft((current) => ({
           ...current,
@@ -3856,6 +4108,21 @@ export function AcpAgentSettings() {
     },
     [selectedAgent, selectedDraft, modelProviders, updateSelectedDraft]
   )
+
+  // Auto-select the first available provider when the user switches an agent to
+  // "model_provider" auth mode and hasn't picked one yet. If the list is empty,
+  // the existing "noModelProviderAvailable" hint handles the empty state.
+  useEffect(() => {
+    if (!selectedNeedsModelProvider) return
+    if (selectedDraft?.modelProviderId != null) return
+    if (selectedModelProviders.length === 0) return
+    handleModelProviderSelect(String(selectedModelProviders[0].id))
+  }, [
+    selectedNeedsModelProvider,
+    selectedDraft?.modelProviderId,
+    selectedModelProviders,
+    handleModelProviderSelect,
+  ])
 
   const handleGeminiFieldChange = useCallback(
     (
@@ -4144,8 +4411,35 @@ export function AcpAgentSettings() {
         config.provider = providerRoot
       }
       providerRoot[providerId] = {
+        npm: OPENCODE_PROVIDER_NPM_OPTIONS[0].value,
         options: {},
         models: {},
+      }
+
+      if (
+        Array.isArray(config.enabled_providers) &&
+        config.enabled_providers.length > 0
+      ) {
+        const enabledProviders = config.enabled_providers
+          .filter((item): item is string => typeof item === "string")
+          .map((item) => item.trim())
+          .filter(Boolean)
+        if (!enabledProviders.includes(providerId)) {
+          enabledProviders.push(providerId)
+        }
+        config.enabled_providers = enabledProviders
+      }
+
+      if (Array.isArray(config.disabled_providers)) {
+        const disabledProviders = config.disabled_providers
+          .filter((item): item is string => typeof item === "string")
+          .map((item) => item.trim())
+          .filter((item) => item && item !== providerId)
+        if (disabledProviders.length > 0) {
+          config.disabled_providers = disabledProviders
+        } else {
+          delete config.disabled_providers
+        }
       }
     })
     setOpenCodeProviderId(providerId)
@@ -4290,7 +4584,7 @@ export function AcpAgentSettings() {
       })
       .catch((err) => {
         console.error("[Settings] remove opencode provider failed:", err)
-        const message = err instanceof Error ? err.message : String(err)
+        const message = toErrorMessage(err)
         toast.error(t("toasts.providerDeleteFailed", { providerId }), {
           description: message,
         })
@@ -4308,6 +4602,9 @@ export function AcpAgentSettings() {
       const targetId = providerId.trim()
       if (!targetId) return
       handleOpenCodeConfigPatch((config) => {
+        const hadEnabledAllowlist =
+          Array.isArray(config.enabled_providers) &&
+          config.enabled_providers.length > 0
         const enabledProviders = Array.isArray(config.enabled_providers)
           ? config.enabled_providers
               .filter((item): item is string => typeof item === "string")
@@ -4325,11 +4622,15 @@ export function AcpAgentSettings() {
         const nextDisabled = new Set(disabledProviders)
 
         if (enabled) {
-          nextEnabled.add(targetId)
           nextDisabled.delete(targetId)
+          if (hadEnabledAllowlist) {
+            nextEnabled.add(targetId)
+          }
         } else {
           nextDisabled.add(targetId)
-          nextEnabled.delete(targetId)
+          if (hadEnabledAllowlist) {
+            nextEnabled.delete(targetId)
+          }
         }
 
         const enabledArray = Array.from(nextEnabled)
@@ -4907,7 +5208,7 @@ export function AcpAgentSettings() {
       setCodexDeviceCode(resp)
       setCodexLoginStatus("polling")
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
+      const msg = toErrorMessage(err)
       setCodexLoginError(msg)
       setCodexLoginStatus("error")
     }
@@ -4987,7 +5288,7 @@ export function AcpAgentSettings() {
                 }),
               ])
             } catch (err) {
-              const msg = err instanceof Error ? err.message : String(err)
+              const msg = toErrorMessage(err)
               toast.error(t("codex.loginSaveFailed"), {
                 description: msg,
               })
@@ -5039,7 +5340,7 @@ export function AcpAgentSettings() {
   }
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="h-full flex flex-col p-3 md:p-4">
       <div className="flex items-center justify-between gap-3 pb-4">
         <div>
           <h2 className="text-base font-semibold">{t("title")}</h2>
@@ -5261,8 +5562,7 @@ export function AcpAgentSettings() {
                             "[Settings] persist enabled failed:",
                             err
                           )
-                          const message =
-                            err instanceof Error ? err.message : String(err)
+                          const message = toErrorMessage(err)
                           toast.error(t("toasts.saveAgentSwitchFailed"), {
                             description: message,
                           })
@@ -5359,8 +5659,7 @@ export function AcpAgentSettings() {
                           })
                           .catch((err) => {
                             console.error("[Settings] save env failed:", err)
-                            const message =
-                              err instanceof Error ? err.message : String(err)
+                            const message = toErrorMessage(err)
                             toast.error(t("toasts.saveEnvFailed"), {
                               description: message,
                             })
@@ -5486,11 +5785,13 @@ export function AcpAgentSettings() {
                                 size="sm"
                                 variant="ghost"
                                 className="h-7 w-7 p-0"
-                                onClick={() => {
-                                  navigator.clipboard.writeText(
+                                onClick={async () => {
+                                  const ok = await copyTextToClipboard(
                                     codexDeviceCode.userCode
                                   )
-                                  toast.success(t("codex.loginCodeCopied"))
+                                  if (ok) {
+                                    toast.success(t("codex.loginCodeCopied"))
+                                  }
                                 }}
                               >
                                 <Copy className="h-3 w-3" />
@@ -5572,13 +5873,17 @@ export function AcpAgentSettings() {
                       </div>
                     )}
 
-                    {selectedDraft.codexAuthMode === "api_key" && (
+                    {(selectedDraft.codexAuthMode === "api_key" ||
+                      selectedDraft.codexAuthMode === "model_provider") && (
                       <div className="space-y-1.5">
                         <label className="text-[11px] text-muted-foreground">
                           API URL
                         </label>
                         <Input
                           value={selectedDraft.apiBaseUrl}
+                          readOnly={
+                            selectedDraft.codexAuthMode === "model_provider"
+                          }
                           onChange={(event) => {
                             handleCodexImportantConfigChange(
                               "apiBaseUrl",
@@ -5590,7 +5895,8 @@ export function AcpAgentSettings() {
                       </div>
                     )}
 
-                    {selectedDraft.codexAuthMode === "api_key" && (
+                    {(selectedDraft.codexAuthMode === "api_key" ||
+                      selectedDraft.codexAuthMode === "model_provider") && (
                       <div className="space-y-1.5">
                         <label className="text-[11px] text-muted-foreground">
                           API Key
@@ -5603,6 +5909,9 @@ export function AcpAgentSettings() {
                                 : "password"
                             }
                             value={selectedDraft.apiKey}
+                            readOnly={
+                              selectedDraft.codexAuthMode === "model_provider"
+                            }
                             onChange={(event) => {
                               handleCodexImportantConfigChange(
                                 "apiKey",
@@ -5646,6 +5955,9 @@ export function AcpAgentSettings() {
                         </label>
                         <Input
                           value={selectedDraft.model}
+                          readOnly={
+                            selectedDraft.codexAuthMode === "model_provider"
+                          }
                           onChange={(event) => {
                             handleCodexImportantConfigChange(
                               "model",
@@ -5796,8 +6108,7 @@ supports_websockets = true`}
                                 "[Settings] save codex native config failed:",
                                 err
                               )
-                              const message =
-                                err instanceof Error ? err.message : String(err)
+                              const message = toErrorMessage(err)
                               toast.error(t("toasts.saveCodexNativeFailed"), {
                                 description: message,
                               })
@@ -5906,6 +6217,9 @@ supports_websockets = true`}
                       </label>
                       <Input
                         value={selectedDraft.model}
+                        readOnly={
+                          selectedDraft.geminiAuthMode === "model_provider"
+                        }
                         onChange={(event) => {
                           handleGeminiFieldChange("model", event.target.value)
                         }}
@@ -6112,8 +6426,7 @@ supports_websockets = true`}
                                 "[Settings] save gemini config failed:",
                                 err
                               )
-                              const message =
-                                err instanceof Error ? err.message : String(err)
+                              const message = toErrorMessage(err)
                               toast.error(t("toasts.saveGeminiFailed"), {
                                 description: message,
                               })
@@ -6223,7 +6536,12 @@ supports_websockets = true`}
                               const isDisabled =
                                 selectedOpenCodeConfig.disabledProviders.includes(
                                   providerId
-                                )
+                                ) ||
+                                (selectedOpenCodeConfig.enabledProviders
+                                  .length > 0 &&
+                                  !selectedOpenCodeConfig.enabledProviders.includes(
+                                    providerId
+                                  ))
                               return (
                                 <Collapsible
                                   key={providerId}
@@ -6329,15 +6647,14 @@ supports_websockets = true`}
                                             value={
                                               provider.npm.trim()
                                                 ? provider.npm
-                                                : "__none__"
+                                                : OPENCODE_PROVIDER_NPM_OPTIONS[0]
+                                                    .value
                                             }
                                             onValueChange={(value) => {
                                               handleOpenCodeProviderFieldChange(
                                                 providerId,
                                                 "npm",
-                                                value === "__none__"
-                                                  ? ""
-                                                  : value
+                                                value
                                               )
                                             }}
                                           >
@@ -6349,9 +6666,6 @@ supports_websockets = true`}
                                               />
                                             </SelectTrigger>
                                             <SelectContent align="start">
-                                              <SelectItem value="__none__">
-                                                {t("openCode.notSet")}
-                                              </SelectItem>
                                               {buildOpenCodeNpmOptions(
                                                 provider.npm
                                               ).map((npmOption) => (
@@ -6788,8 +7102,7 @@ supports_websockets = true`}
                                 "[Settings] save opencode config failed:",
                                 err
                               )
-                              const message =
-                                err instanceof Error ? err.message : String(err)
+                              const message = toErrorMessage(err)
                               toast.error(t("toasts.saveOpenCodeFailed"), {
                                 description: message,
                               })
@@ -6962,8 +7275,7 @@ supports_websockets = true`}
                                 "[Settings] save cline config failed:",
                                 err
                               )
-                              const message =
-                                err instanceof Error ? err.message : String(err)
+                              const message = toErrorMessage(err)
                               toast.error(t("toasts.saveClineFailed"), {
                                 description: message,
                               })
@@ -7109,8 +7421,7 @@ supports_websockets = true`}
                                 "[Settings] save openclaw config failed:",
                                 err
                               )
-                              const message =
-                                err instanceof Error ? err.message : String(err)
+                              const message = toErrorMessage(err)
                               toast.error(t("toasts.saveOpenClawFailed"), {
                                 description: message,
                               })
@@ -7230,7 +7541,8 @@ supports_websockets = true`}
                       )}
 
                     {(selectedAgent.agent_type !== "claude_code" ||
-                      selectedDraft.claudeAuthMode === "custom") && (
+                      selectedDraft.claudeAuthMode === "custom" ||
+                      selectedDraft.claudeAuthMode === "model_provider") && (
                       <>
                         <div className="space-y-1.5">
                           <label className="text-[11px] text-muted-foreground">
@@ -7314,6 +7626,10 @@ supports_websockets = true`}
                             </label>
                             <Input
                               value={selectedDraft.claudeMainModel}
+                              readOnly={
+                                selectedDraft.claudeAuthMode ===
+                                "model_provider"
+                              }
                               onChange={(event) => {
                                 handleImportantConfigChange(
                                   "claudeMainModel",
@@ -7329,13 +7645,17 @@ supports_websockets = true`}
                             </label>
                             <Input
                               value={selectedDraft.claudeReasoningModel}
+                              readOnly={
+                                selectedDraft.claudeAuthMode ===
+                                "model_provider"
+                              }
                               onChange={(event) => {
                                 handleImportantConfigChange(
                                   "claudeReasoningModel",
                                   event.target.value
                                 )
                               }}
-                              placeholder="claude-opus-4-6"
+                              placeholder="claude-opus-4-8"
                             />
                           </div>
                           <div className="space-y-1.5">
@@ -7344,6 +7664,10 @@ supports_websockets = true`}
                             </label>
                             <Input
                               value={selectedDraft.claudeDefaultHaikuModel}
+                              readOnly={
+                                selectedDraft.claudeAuthMode ===
+                                "model_provider"
+                              }
                               onChange={(event) => {
                                 handleImportantConfigChange(
                                   "claudeDefaultHaikuModel",
@@ -7359,6 +7683,10 @@ supports_websockets = true`}
                             </label>
                             <Input
                               value={selectedDraft.claudeDefaultSonnetModel}
+                              readOnly={
+                                selectedDraft.claudeAuthMode ===
+                                "model_provider"
+                              }
                               onChange={(event) => {
                                 handleImportantConfigChange(
                                   "claudeDefaultSonnetModel",
@@ -7374,13 +7702,17 @@ supports_websockets = true`}
                             </label>
                             <Input
                               value={selectedDraft.claudeDefaultOpusModel}
+                              readOnly={
+                                selectedDraft.claudeAuthMode ===
+                                "model_provider"
+                              }
                               onChange={(event) => {
                                 handleImportantConfigChange(
                                   "claudeDefaultOpusModel",
                                   event.target.value
                                 )
                               }}
-                              placeholder="claude-opus-4-6"
+                              placeholder="claude-opus-4-8"
                             />
                           </div>
                         </div>
@@ -7412,9 +7744,7 @@ supports_websockets = true`}
                               </SelectItem>
                               {CLAUDE_EFFORT_LEVEL_VALUES.map((value) => (
                                 <SelectItem key={value} value={value}>
-                                  {value === "max"
-                                    ? t("claude.effortLevelMax")
-                                    : t(`claude.effortLevel_${value}`)}
+                                  {t(`claude.effortLevel_${value}`)}
                                 </SelectItem>
                               ))}
                             </SelectContent>
@@ -7428,6 +7758,7 @@ supports_websockets = true`}
                         </label>
                         <Input
                           value={selectedDraft.model}
+                          readOnly={selectedDraft.modelProviderId != null}
                           onChange={(event) => {
                             handleImportantConfigChange(
                               "model",
@@ -7495,8 +7826,7 @@ supports_websockets = true`}
                                 "[Settings] save config management failed:",
                                 err
                               )
-                              const message =
-                                err instanceof Error ? err.message : String(err)
+                              const message = toErrorMessage(err)
                               toast.error(
                                 t("toasts.saveConfigManagementFailed"),
                                 {
@@ -7622,6 +7952,66 @@ supports_websockets = true`}
                   {t("actions.confirmUninstall")}
                 </>
               )}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={Boolean(customInstallAgent)}
+        onOpenChange={(open) => {
+          if (!open) setCustomInstallAgent(null)
+        }}
+      >
+        <AlertDialogContent size="sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t("dialogs.customInstallTitle", {
+                name: customInstallAgent?.name ?? "Agent",
+              })}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("dialogs.customInstallDescription")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-1.5">
+            <label
+              htmlFor="custom-version-input"
+              className="text-xs font-medium"
+            >
+              {t("dialogs.customInstallVersionLabel")}
+            </label>
+            <Input
+              id="custom-version-input"
+              autoFocus
+              value={customVersionInput}
+              placeholder={customInstallAgent?.registry_version ?? "1.0.0"}
+              onChange={(e) => setCustomVersionInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (
+                  e.key === "Enter" &&
+                  isValidCustomVersion(customVersionInput)
+                ) {
+                  e.preventDefault()
+                  confirmCustomInstall()
+                }
+              }}
+            />
+            {customVersionInput.trim() !== "" &&
+              !isValidCustomVersion(customVersionInput) && (
+                <p className="text-[11px] text-red-500">
+                  {t("dialogs.customInstallInvalid")}
+                </p>
+              )}
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("actions.cancel")}</AlertDialogCancel>
+            <Button
+              onClick={confirmCustomInstall}
+              disabled={!isValidCustomVersion(customVersionInput)}
+            >
+              <PackagePlus className="h-3.5 w-3.5" />
+              {t("dialogs.customInstallSubmit")}
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>

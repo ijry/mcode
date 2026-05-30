@@ -63,7 +63,7 @@ export function ModelProviderSettings() {
 
   const filteredProviders = useMemo(() => {
     if (!filter) return providers
-    return providers.filter((p) => p.agent_types.includes(filter))
+    return providers.filter((p) => p.agent_type === filter)
   }, [providers, filter])
 
   const handleDelete = useCallback(async () => {
@@ -93,7 +93,7 @@ export function ModelProviderSettings() {
 
   return (
     <ScrollArea className="h-full">
-      <section className="space-y-3">
+      <section className="space-y-3 px-3 pt-3 md:px-4 md:pt-4">
         <div>
           <h1 className="text-sm font-semibold">{t("sectionTitle")}</h1>
           <p className="text-sm text-muted-foreground">
@@ -102,7 +102,7 @@ export function ModelProviderSettings() {
         </div>
       </section>
 
-      <section className="mt-4 space-y-2">
+      <section className="mt-4 space-y-2 px-3 pb-3 md:px-4 md:pb-4">
         <div className="flex items-center justify-between gap-2">
           <Select
             value={filter ?? "__all__"}
@@ -156,15 +156,12 @@ export function ModelProviderSettings() {
                     </div>
                   </div>
                   <div className="flex shrink-0 gap-1">
-                    {p.agent_types.map((at) => (
-                      <Badge
-                        key={at}
-                        variant="secondary"
-                        className="text-[10px] px-1.5 py-0"
-                      >
-                        {AGENT_LABELS[at as AgentType] ?? at}
-                      </Badge>
-                    ))}
+                    <Badge
+                      variant="secondary"
+                      className="text-[10px] px-1.5 py-0"
+                    >
+                      {AGENT_LABELS[p.agent_type] ?? p.agent_type}
+                    </Badge>
                   </div>
                 </div>
                 <div className="flex shrink-0 gap-1">

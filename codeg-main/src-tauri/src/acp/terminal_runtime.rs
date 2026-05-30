@@ -1,6 +1,7 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::process::Stdio;
 use std::sync::Arc;
+use std::time::Duration;
 
 use sacp::schema::{
     CreateTerminalRequest, CreateTerminalResponse, KillTerminalRequest, KillTerminalResponse,
@@ -9,9 +10,16 @@ use sacp::schema::{
 };
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
 
 type TerminalMap = HashMap<String, Arc<TerminalInstance>>;
 const DEFAULT_OUTPUT_BYTE_LIMIT: u64 = 1_000_000;
+/// After the child process exits, wait up to this long for the stdout/stderr
+/// reader tasks to drain naturally before aborting them. Needed because a
+/// grandchild process (e.g. Node spawned from a `.cmd` shim on Windows) can
+/// inherit the pipe handle and keep it open long after the direct child
+/// exits, turning `wait_for_exit` into a silent hang.
+const READER_DRAIN_GRACE: Duration = Duration::from_millis(200);
 
 #[derive(Debug)]
 pub enum TerminalRuntimeError {
@@ -41,6 +49,7 @@ struct TerminalInstance {
     output_limit: Option<usize>,
     child: Mutex<Option<tokio::process::Child>>,
     snapshot: Mutex<TerminalSnapshot>,
+    reader_handles: Mutex<Vec<JoinHandle<()>>>,
 }
 
 impl TerminalInstance {
@@ -50,6 +59,23 @@ impl TerminalInstance {
             output_limit: output_limit.and_then(|v| usize::try_from(v).ok()),
             child: Mutex::new(Some(child)),
             snapshot: Mutex::new(TerminalSnapshot::default()),
+            reader_handles: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Wait briefly for stdout/stderr reader tasks to finish; abort any that
+    /// remain. Must be called after the direct child has already exited —
+    /// otherwise we would abort readers that are still making progress.
+    async fn drain_readers(&self) {
+        let handles: Vec<JoinHandle<()>> = std::mem::take(&mut *self.reader_handles.lock().await);
+        for handle in handles {
+            let abort = handle.abort_handle();
+            if tokio::time::timeout(READER_DRAIN_GRACE, handle)
+                .await
+                .is_err()
+            {
+                abort.abort();
+            }
         }
     }
 
@@ -96,6 +122,16 @@ impl TerminalInstance {
         };
 
         if let Some(status) = maybe_status {
+            // Drain readers BEFORE exposing exit_status. Otherwise a caller
+            // polling `terminal/output` can see `exit_status = Some(...)` while
+            // a grandchild process (e.g. Node spawned from a `.cmd` shim on
+            // Windows) still holds the stdout/stderr pipe and is flushing
+            // tail output. If the agent treats exit_status as "terminal done",
+            // the trailing bytes never reach the UI. Draining here upholds the
+            // invariant: whenever an external observer sees exit_status, the
+            // snapshot already contains (or has explicitly given up on) all
+            // reader output.
+            self.drain_readers().await;
             let mut snapshot = self.snapshot.lock().await;
             snapshot.exit_status = Some(map_exit_status(status));
         }
@@ -105,11 +141,10 @@ impl TerminalInstance {
 
     async fn wait_for_exit(&self) -> Result<TerminalExitStatus, TerminalRuntimeError> {
         self.refresh_exit_status().await?;
-        {
-            let snapshot = self.snapshot.lock().await;
-            if let Some(exit_status) = snapshot.exit_status.clone() {
-                return Ok(exit_status);
-            }
+        let cached_exit = self.snapshot.lock().await.exit_status.clone();
+        if let Some(exit_status) = cached_exit {
+            self.drain_readers().await;
+            return Ok(exit_status);
         }
 
         let exit_status = {
@@ -128,6 +163,8 @@ impl TerminalInstance {
             map_exit_status(status)
         };
 
+        self.drain_readers().await;
+
         let mut snapshot = self.snapshot.lock().await;
         snapshot.exit_status = Some(exit_status.clone());
         Ok(exit_status)
@@ -135,11 +172,10 @@ impl TerminalInstance {
 
     async fn kill_command(&self) -> Result<(), TerminalRuntimeError> {
         self.refresh_exit_status().await?;
-        {
-            let snapshot = self.snapshot.lock().await;
-            if snapshot.exit_status.is_some() {
-                return Ok(());
-            }
+        let already_exited = self.snapshot.lock().await.exit_status.is_some();
+        if already_exited {
+            self.drain_readers().await;
+            return Ok(());
         }
 
         let exit_status = {
@@ -163,6 +199,8 @@ impl TerminalInstance {
             map_exit_status(status)
         };
 
+        self.drain_readers().await;
+
         let mut snapshot = self.snapshot.lock().await;
         snapshot.exit_status = Some(exit_status);
         Ok(())
@@ -175,6 +213,14 @@ impl TerminalInstance {
 
 pub struct TerminalRuntime {
     terminals: Mutex<TerminalMap>,
+    /// Base environment merged into every spawned terminal command before
+    /// the agent's per-request `env` is applied. This is where the codeg
+    /// git credential helper (`GIT_CONFIG_*`) lives so an agent that runs
+    /// `git push` via the ACP `terminal/create` tool inherits the same
+    /// auth path the agent process itself does. Per-request env from the
+    /// agent overrides on key collision so an agent can still scrub or
+    /// override anything explicitly.
+    base_env: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone)]
@@ -187,9 +233,14 @@ pub struct TerminalOutputDelta {
 }
 
 impl TerminalRuntime {
-    pub fn new() -> Self {
+    /// Construct a runtime where every spawned command starts with `base_env`
+    /// applied, before the agent's per-request env overrides are layered on
+    /// top. Use this to propagate process-level invariants like the git
+    /// credential helper across `terminal/create` invocations.
+    pub fn with_base_env(base_env: BTreeMap<String, String>) -> Self {
         Self {
             terminals: Mutex::new(HashMap::new()),
+            base_env,
         }
     }
 
@@ -225,6 +276,12 @@ impl TerminalRuntime {
             command.current_dir(cwd);
         }
 
+        // Apply the runtime's base env first (e.g. `GIT_CONFIG_*` for the
+        // codeg credential helper), then layer the agent's request env on
+        // top so agents can still override or scrub specific keys.
+        for (key, value) in &self.base_env {
+            command.env(key, value);
+        }
         for env_var in &request.env {
             command.env(&env_var.name, &env_var.value);
         }
@@ -246,18 +303,23 @@ impl TerminalRuntime {
             child,
         ));
 
+        let mut handles: Vec<JoinHandle<()>> = Vec::new();
         if let Some(reader) = stdout {
             let terminal_ref = terminal.clone();
-            tokio::spawn(async move {
+            handles.push(tokio::spawn(async move {
                 read_stream(reader, terminal_ref).await;
-            });
+            }));
         }
 
         if let Some(reader) = stderr {
             let terminal_ref = terminal.clone();
-            tokio::spawn(async move {
+            handles.push(tokio::spawn(async move {
                 read_stream(reader, terminal_ref).await;
-            });
+            }));
+        }
+
+        if !handles.is_empty() {
+            terminal.reader_handles.lock().await.extend(handles);
         }
 
         self.terminals
@@ -511,4 +573,76 @@ fn decode_available_utf8(pending: &mut Vec<u8>) -> String {
         pending.drain(..consumed);
     }
     output
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use sacp::schema::{EnvVariable, SessionId, WaitForTerminalExitRequest};
+
+    /// Regression: when an ACP agent calls `terminal/create` (e.g. to run
+    /// `git push`), the runtime's base env — populated by the connection
+    /// layer with the codeg credential helper's `GIT_CONFIG_*` keys —
+    /// must reach the spawned process. Per-request `env` from the agent
+    /// still wins on key collision so the agent can scrub or override
+    /// specific keys for individual commands.
+    #[tokio::test]
+    async fn base_env_propagates_and_request_env_overrides() {
+        let mut base_env = BTreeMap::new();
+        base_env.insert("CODEG_TEST_BASE_VAR".to_string(), "from_base".to_string());
+        base_env.insert("CODEG_TEST_OVERRIDE".to_string(), "loses".to_string());
+        let runtime = TerminalRuntime::with_base_env(base_env);
+
+        let session_id = SessionId::new("test-session".to_string());
+        let mut request = CreateTerminalRequest::new(session_id.clone(), "/bin/sh".to_string());
+        request.args = vec![
+            "-c".into(),
+            // Print both vars on separate lines so we can match each
+            // independently regardless of shell quoting.
+            "printf '%s\\n' \"$CODEG_TEST_BASE_VAR\" \"$CODEG_TEST_OVERRIDE\"".into(),
+        ];
+        request.env = vec![EnvVariable::new("CODEG_TEST_OVERRIDE", "request_wins")];
+
+        let response = runtime
+            .create_terminal(request)
+            .await
+            .expect("create terminal");
+        let terminal_id = response.terminal_id.clone();
+
+        // Wait for the child to exit so the captured output is final.
+        runtime
+            .wait_for_terminal_exit(WaitForTerminalExitRequest::new(
+                session_id.clone(),
+                terminal_id.clone(),
+            ))
+            .await
+            .expect("wait for exit");
+
+        let out = runtime
+            .terminal_output(TerminalOutputRequest::new(
+                session_id.clone(),
+                terminal_id.clone(),
+            ))
+            .await
+            .expect("get output");
+
+        assert!(
+            out.output.contains("from_base"),
+            "base env did not reach the spawned process; got:\n{}",
+            out.output
+        );
+        assert!(
+            out.output.contains("request_wins"),
+            "per-request env did not override base on key collision; got:\n{}",
+            out.output
+        );
+        assert!(
+            !out.output.contains("loses"),
+            "base value leaked through despite the request override; got:\n{}",
+            out.output
+        );
+
+        // Drop terminal handle so the runtime drops its writer ends.
+        runtime.release_all_for_session(session_id.0.as_ref()).await;
+    }
 }

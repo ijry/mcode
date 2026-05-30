@@ -21,13 +21,7 @@ import {
   getChatChannelHasToken,
 } from "@/lib/api"
 import type { ChatChannelInfo } from "@/lib/types"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { toErrorMessage } from "@/lib/app-error"
 
 interface EditChatChannelDialogProps {
   open: boolean
@@ -52,13 +46,6 @@ export function EditChatChannelDialog({
   const [chatId, setChatId] = useState(config.chat_id ?? "")
   const [appId, setAppId] = useState(config.app_id ?? "")
   const [baseUrl] = useState(config.base_url ?? "")
-  const [mcodeConnectionMode, setMcodeConnectionMode] = useState<
-    "relay" | "direct"
-  >(config.connection_mode ?? "relay")
-  const [mcodeRelayUrl, setMcodeRelayUrl] = useState(config.relay_url ?? "")
-  const [mcodeDirectBaseUrl, setMcodeDirectBaseUrl] = useState(
-    config.direct_base_url ?? ""
-  )
   const [dailyReportEnabled, setDailyReportEnabled] = useState(
     channel.daily_report_enabled
   )
@@ -80,16 +67,7 @@ export function EditChatChannelDialog({
       setError(t("nameRequired"))
       return
     }
-    if (channel.channel_type === "mcode") {
-      if (mcodeConnectionMode === "relay" && !mcodeRelayUrl.trim()) {
-        setError("Relay URL is required.")
-        return
-      }
-      if (mcodeConnectionMode === "direct" && !mcodeDirectBaseUrl.trim()) {
-        setError("Direct base URL is required.")
-        return
-      }
-    } else if (channel.channel_type !== "weixin" && !chatId.trim()) {
+    if (channel.channel_type !== "weixin" && !chatId.trim()) {
       setError(t("chatIdRequired"))
       return
     }
@@ -98,17 +76,7 @@ export function EditChatChannelDialog({
     setError(null)
     try {
       const configJson =
-        channel.channel_type === "mcode"
-          ? JSON.stringify({
-              connection_mode: mcodeConnectionMode,
-              relay_url:
-                mcodeConnectionMode === "relay" ? mcodeRelayUrl.trim() : null,
-              direct_base_url:
-                mcodeConnectionMode === "direct"
-                  ? mcodeDirectBaseUrl.trim()
-                  : null,
-            })
-          : channel.channel_type === "weixin"
+        channel.channel_type === "weixin"
           ? JSON.stringify({ base_url: baseUrl })
           : channel.channel_type === "lark"
             ? JSON.stringify({ app_id: appId, chat_id: chatId })
@@ -130,7 +98,7 @@ export function EditChatChannelDialog({
       onChannelUpdated()
       toast.success(t("editSuccess"))
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err)
+      const msg = toErrorMessage(err)
       setError(msg)
     } finally {
       setLoading(false)
@@ -142,9 +110,6 @@ export function EditChatChannelDialog({
     channel,
     appId,
     baseUrl,
-    mcodeConnectionMode,
-    mcodeRelayUrl,
-    mcodeDirectBaseUrl,
     dailyReportEnabled,
     dailyReportTime,
     onOpenChange,
@@ -180,63 +145,7 @@ export function EditChatChannelDialog({
             </div>
           )}
 
-          {channel.channel_type === "mcode" && (
-            <>
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium">Connection Mode</label>
-                <Select
-                  value={mcodeConnectionMode}
-                  onValueChange={(v) =>
-                    setMcodeConnectionMode(v as "relay" | "direct")
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="relay">Relay</SelectItem>
-                    <SelectItem value="direct">Direct</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {mcodeConnectionMode === "relay" && (
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium">Relay URL</label>
-                  <Input
-                    value={mcodeRelayUrl}
-                    onChange={(e) => setMcodeRelayUrl(e.target.value)}
-                    placeholder="https://relay.example.com"
-                  />
-                </div>
-              )}
-
-              {mcodeConnectionMode === "direct" && (
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium">Direct Base URL</label>
-                  <Input
-                    value={mcodeDirectBaseUrl}
-                    onChange={(e) => setMcodeDirectBaseUrl(e.target.value)}
-                    placeholder="http://127.0.0.1:3080"
-                  />
-                </div>
-              )}
-
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium">Token</label>
-                <Input
-                  type="password"
-                  value={token}
-                  onChange={(e) => setToken(e.target.value)}
-                  placeholder={
-                    hasToken ? t("tokenPlaceholderKeep") : t("tokenRequired")
-                  }
-                />
-              </div>
-            </>
-          )}
-
-          {channel.channel_type !== "weixin" && channel.channel_type !== "mcode" && (
+          {channel.channel_type !== "weixin" && (
             <div className="space-y-1.5">
               <label className="text-xs font-medium">
                 {channel.channel_type === "telegram"
@@ -254,7 +163,7 @@ export function EditChatChannelDialog({
             </div>
           )}
 
-          {channel.channel_type !== "weixin" && channel.channel_type !== "mcode" && (
+          {channel.channel_type !== "weixin" && (
             <div className="space-y-1.5">
               <label className="text-xs font-medium">Chat ID</label>
               <Input

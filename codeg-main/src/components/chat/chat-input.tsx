@@ -88,7 +88,10 @@ export const ChatInput = memo(function ChatInput({
   const isConnecting = status === "connecting"
 
   return (
-    <div className="p-4 pt-0">
+    <div
+      className="px-4 pt-0 pb-1"
+      onContextMenu={(event) => event.stopPropagation()}
+    >
       {queue &&
         queue.length > 0 &&
         onQueueReorder &&
@@ -135,7 +138,7 @@ export const ChatInput = memo(function ChatInput({
               ? t("agentResponding", { agent: agentName ?? "Agent" })
               : t("sendMessage")
         }
-        className="min-h-28 max-h-60"
+        className="min-h-24 max-h-60"
       />
     </div>
   )

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import {
+  AlertCircle,
   Loader2,
   MessageCircle,
   Pencil,
@@ -28,6 +29,12 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
+import {
   listChatChannels,
   deleteChatChannel,
   connectChatChannel,
@@ -42,6 +49,7 @@ import type {
   ChannelStatusInfo,
   ChannelType,
 } from "@/lib/types"
+import { toErrorMessage } from "@/lib/app-error"
 import { AddChatChannelDialog } from "./add-chat-channel-dialog"
 import { EditChatChannelDialog } from "./edit-chat-channel-dialog"
 import { WeixinQrcodeDialog } from "./weixin-qrcode-dialog"
@@ -131,7 +139,7 @@ export function ChannelListTab() {
           // No token or token expired — show QR code dialog
           setQrcodeChannelId(id)
         } else {
-          const msg = err instanceof Error ? err.message : String(err)
+          const msg = toErrorMessage(err)
           toast.error(t("connectFailed") + ": " + msg)
         }
       } finally {
@@ -150,7 +158,7 @@ export function ChannelListTab() {
         toast.success(t("connectSuccess"))
         await loadChannels()
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err)
+        const msg = toErrorMessage(err)
         toast.error(t("connectFailed") + ": " + msg)
       } finally {
         setActionLoading(null)
@@ -182,7 +190,7 @@ export function ChannelListTab() {
         await testChatChannel(id)
         toast.success(t("testSuccess"))
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err)
+        const msg = toErrorMessage(err)
         toast.error(t("testFailed") + ": " + msg)
       } finally {
         setActionLoading(null)
@@ -250,8 +258,30 @@ export function ChannelListTab() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-medium">{ch.name}</span>
-                    <Badge variant="outline" className="text-xs">
+                    <Badge
+                      variant="outline"
+                      className="text-xs inline-flex items-center gap-1"
+                    >
                       {ch.channel_type}
+                      {ch.channel_type === "weixin" && (
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span
+                                role="button"
+                                tabIndex={0}
+                                className="inline-flex cursor-help rounded-sm text-yellow-600 outline-none focus-visible:ring-1 focus-visible:ring-ring dark:text-yellow-500"
+                                aria-label={t("weixinReconnectNotice")}
+                              >
+                                <AlertCircle className="h-3 w-3" />
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent side="top">
+                              {t("weixinReconnectNotice")}
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      )}
                     </Badge>
                     <span
                       className={`inline-block h-2 w-2 rounded-full ${

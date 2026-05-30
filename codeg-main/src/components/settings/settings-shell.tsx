@@ -14,11 +14,13 @@ import {
   Globe,
   Keyboard,
   Menu,
+  MessageSquareText,
   SendHorizontal,
   Palette,
   PlugZap,
   Server,
   Settings,
+  SlidersHorizontal,
   Sparkles,
 } from "lucide-react"
 import { useTranslations } from "next-intl"
@@ -35,12 +37,14 @@ import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
 interface SettingsNavItem {
   href: string
   labelKey:
+    | "general"
     | "appearance"
     | "agents"
     | "model_providers"
     | "mcp"
     | "skills"
     | "experts"
+    | "quick_messages"
     | "shortcuts"
     | "version_control"
     | "chat_channels"
@@ -54,6 +58,11 @@ const SETTINGS_NAV_ITEMS: SettingsNavItem[] = [
     href: "/settings/appearance",
     labelKey: "appearance",
     icon: Palette,
+  },
+  {
+    href: "/settings/general",
+    labelKey: "general",
+    icon: SlidersHorizontal,
   },
   {
     href: "/settings/mcp",
@@ -79,6 +88,11 @@ const SETTINGS_NAV_ITEMS: SettingsNavItem[] = [
     href: "/settings/model-providers",
     labelKey: "model_providers",
     icon: Server,
+  },
+  {
+    href: "/settings/quick-messages",
+    labelKey: "quick_messages",
+    icon: MessageSquareText,
   },
   {
     href: "/settings/shortcuts",
@@ -147,12 +161,19 @@ export function SettingsShell({ children }: SettingsShellProps) {
         return
       }
 
+      // Preserve current query string so the active remote workspace context
+      // (`?remoteConnectionId=N`) carries over to sub-pages — without this,
+      // navigating from /settings/appearance to /settings/mcp drops the
+      // remote id and the next page falls back to the local Tauri backend.
+      const search = window.location.search
+      const fullTarget = search ? `${target}${search}` : target
+
       if (isWindowsRuntime()) {
-        window.location.assign(target)
+        window.location.assign(fullTarget)
         return
       }
 
-      router.push(target)
+      router.push(fullTarget)
       setNavOpen(false)
     },
     [router, setNavOpen]
@@ -236,12 +257,7 @@ export function SettingsShell({ children }: SettingsShellProps) {
           </Sheet>
         )}
 
-        <section
-          className={cn(
-            "flex-1 min-w-0 min-h-0 overflow-auto",
-            isMobile ? "p-3" : "p-4"
-          )}
-        >
+        <section className="flex-1 min-w-0 min-h-0 overflow-hidden">
           {children}
         </section>
       </div>

@@ -53,7 +53,7 @@ import {
   acpListAgents,
   acpListAgentSkills,
   loadFolderHistory,
-  openFolderWindow,
+  openFolder,
   acpReadAgentSkill,
   acpSaveAgentSkill,
 } from "@/lib/api"
@@ -67,6 +67,7 @@ import type {
   AgentType,
   FolderHistoryEntry,
 } from "@/lib/types"
+import { toErrorMessage } from "@/lib/app-error"
 
 type SkillsTranslator = (
   key: string,
@@ -363,7 +364,7 @@ export function SkillsSettings() {
         setIsContentEditing(mode === "edit")
         setIsDrafting(false)
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = toErrorMessage(err)
         toast.error(t("toasts.loadFailed"), { description: message })
       } finally {
         setSkillReading(false)
@@ -404,7 +405,7 @@ export function SkillsSettings() {
         )
         return result
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = toErrorMessage(err)
         setSkillsError(message)
         setSkillsSupported(true)
         setSkillLocation(null)
@@ -441,7 +442,7 @@ export function SkillsSettings() {
 
       setAgents(next.filter((agent) => supported.has(agent.agent_type)))
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = toErrorMessage(err)
       setLoadingError(message)
       setAgents([])
     } finally {
@@ -475,9 +476,9 @@ export function SkillsSettings() {
     async (skill: AgentSkillItem) => {
       const dirPath = skillDirectoryPath(skill)
       try {
-        await openFolderWindow(dirPath)
+        await openFolder(dirPath)
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = toErrorMessage(err)
         toast.error(t("toasts.openFolderFailed"), { description: message })
       }
     },
@@ -548,7 +549,7 @@ export function SkillsSettings() {
         isEditingExisting ? t("toasts.updated") : t("toasts.created")
       )
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = toErrorMessage(err)
       toast.error(t("toasts.saveFailed"), { description: message })
     } finally {
       setSkillSaving(false)
@@ -605,7 +606,7 @@ export function SkillsSettings() {
           setIsDrafting(false)
         }
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = toErrorMessage(err)
         toast.error(t("toasts.deleteFailed"), { description: message })
       } finally {
         setSkillDeletingId(null)
@@ -775,7 +776,7 @@ export function SkillsSettings() {
   }
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="h-full flex flex-col p-3 md:p-4">
       <div className="flex items-center justify-between gap-3 pb-4">
         <div>
           <h2 className="text-base font-semibold">{t("title")}</h2>
@@ -990,6 +991,15 @@ export function SkillsSettings() {
                                 >
                                   {skill.scope}
                                 </Badge>
+                                {skill.read_only && (
+                                  <Badge
+                                    variant="outline"
+                                    title={t("systemHint")}
+                                    className="h-6 px-2 inline-flex items-center gap-1 text-xs leading-none shrink-0 border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                                  >
+                                    {t("systemBadge")}
+                                  </Badge>
+                                )}
                               </div>
                               <div className="text-[11px] text-muted-foreground truncate mt-1">
                                 {skill.path}
@@ -1010,6 +1020,7 @@ export function SkillsSettings() {
                               {t("actions.preview")}
                             </ContextMenuItem>
                             <ContextMenuItem
+                              disabled={skill.read_only}
                               onSelect={() => {
                                 handleEditSkill(skill).catch((err) => {
                                   console.error(
@@ -1034,7 +1045,12 @@ export function SkillsSettings() {
                               {t("actions.openInWindow")}
                             </ContextMenuItem>
                             <ContextMenuItem
-                              disabled={skillSaving || skillReading || deleting}
+                              disabled={
+                                skillSaving ||
+                                skillReading ||
+                                deleting ||
+                                skill.read_only
+                              }
                               onSelect={() => {
                                 handleRequestDeleteSkill(skill)
                               }}
@@ -1097,10 +1113,19 @@ export function SkillsSettings() {
                   selectedSkillId || isDrafting ? (
                     <div className="h-full flex flex-col">
                       <div className="border-b px-4 py-3 flex items-center justify-between gap-3">
-                        <div className="min-w-0">
+                        <div className="min-w-0 flex items-center gap-2">
                           <h3 className="text-sm font-semibold truncate">
                             {skillDraftId.trim() || t("newSkillTitle")}
                           </h3>
+                          {selectedSkill?.read_only && (
+                            <Badge
+                              variant="outline"
+                              title={t("systemHint")}
+                              className="h-5 px-1.5 text-[10px] leading-none shrink-0 border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                            >
+                              {t("systemBadge")}
+                            </Badge>
+                          )}
                         </div>
 
                         <div className="flex items-center gap-1.5 shrink-0">
@@ -1123,7 +1148,11 @@ export function SkillsSettings() {
                                 )
                               })
                             }}
-                            disabled={skillSaving || skillReading}
+                            disabled={
+                              skillSaving ||
+                              skillReading ||
+                              Boolean(selectedSkill?.read_only)
+                            }
                           >
                             {skillSaving ? (
                               <>
@@ -1153,6 +1182,12 @@ export function SkillsSettings() {
                               setSkillDraftId(event.target.value)
                             }}
                             placeholder={t("skillIdPlaceholder")}
+                            // Skill id maps to the on-disk file/directory
+                            // name; renaming would require moving files,
+                            // which the save endpoint doesn't support. Lock
+                            // the field once an existing skill is loaded so
+                            // edits don't silently fork a new skill.
+                            disabled={Boolean(selectedSkill)}
                           />
 
                           {skillsScope === "folder" && !selectedFolderPath ? (
@@ -1189,7 +1224,10 @@ export function SkillsSettings() {
                                 onClick={() => {
                                   setIsContentEditing((prev) => !prev)
                                 }}
-                                disabled={skillReading}
+                                disabled={
+                                  skillReading ||
+                                  Boolean(selectedSkill?.read_only)
+                                }
                               >
                                 {isContentEditing ? (
                                   <>

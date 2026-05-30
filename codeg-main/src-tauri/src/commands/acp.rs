@@ -1,14 +1,14 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "tauri-runtime")]
-use tauri::State;
+use tauri::{Manager, State};
 
 use crate::acp::binary_cache;
 use crate::acp::error::AcpError;
-#[cfg(feature = "tauri-runtime")]
 use crate::acp::manager::ConnectionManager;
 use crate::acp::opencode_plugins::{self, PluginCheckSummary};
 use crate::acp::preflight::{self, PreflightResult};
@@ -26,6 +26,9 @@ use crate::models::agent::AgentType;
 use crate::web::event_bridge::EventEmitter;
 
 const ACP_AGENTS_UPDATED_EVENT: &str = "app://acp-agents-updated";
+const NPM_PREFIX_TIMEOUT: Duration = Duration::from_millis(1500);
+
+static NPM_GLOBAL_PREFIX_CACHE: tokio::sync::OnceCell<PathBuf> = tokio::sync::OnceCell::const_new();
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
@@ -121,11 +124,203 @@ fn package_name_from_spec(package: &str) -> String {
     normalized.to_string()
 }
 
-/// Check whether a command is available on the system PATH.
-/// Uses `which` on unix and `where` on windows — lightweight and does not
-/// invoke the target binary itself, avoiding side-effects or slow startups.
-pub(crate) fn is_cmd_available(cmd: &str) -> bool {
-    which::which(cmd).is_ok()
+/// Validate and normalize a user-supplied custom version for install.
+///
+/// Stricter than [`normalize_version_candidate`]: tolerates a leading `v`/`V`,
+/// then requires the first character to be a digit and the rest to be drawn from
+/// `[0-9A-Za-z.-+]` (covers semver pre-release/build metadata and calendar
+/// versions like `2026.5.20`). This rejects npm dist-tags (`latest`, `next`) and
+/// anything containing whitespace, `@`, or path separators, so the result is
+/// safe to interpolate into an npm package spec (`name@<v>`) and to substitute
+/// into a binary download URL. Returns the version without the leading `v`.
+fn sanitize_custom_version(input: &str) -> Option<String> {
+    let trimmed = input.trim();
+    let normalized = trimmed
+        .strip_prefix('v')
+        .or_else(|| trimmed.strip_prefix('V'))
+        .unwrap_or(trimmed);
+    let mut chars = normalized.chars();
+    if !chars.next()?.is_ascii_digit() {
+        return None;
+    }
+    // Require a dotted version (e.g. `1.2.3`) so the validator agrees with the
+    // detection fallback `version_from_package_spec`, which needs a `.` — and so
+    // a "custom version" is a concrete version rather than an npm range (`2`).
+    if !normalized.contains('.') {
+        return None;
+    }
+    let all_allowed = normalized
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+'));
+    all_allowed.then(|| normalized.to_string())
+}
+
+/// Build the `npm install -g` spec for an agent.
+///
+/// `version_override` of `None` or all-whitespace yields the registry-pinned
+/// `package` spec unchanged (current behavior). A non-empty override is
+/// validated via [`sanitize_custom_version`] and combined with the registry
+/// package *name* (its pinned version is dropped) to form `name@<version>`. An
+/// override that fails validation is rejected with an error.
+fn build_npm_install_spec(package: &str, version_override: Option<&str>) -> Result<String, AcpError> {
+    match version_override {
+        Some(raw) if !raw.trim().is_empty() => {
+            let version = sanitize_custom_version(raw)
+                .ok_or_else(|| AcpError::protocol(format!("invalid custom version: {}", raw.trim())))?;
+            Ok(format!("{}@{version}", package_name_from_spec(package)))
+        }
+        _ => Ok(package.to_string()),
+    }
+}
+
+/// Substitute a custom version into a registry binary download URL by replacing
+/// every occurrence of the registry version string. The registry version is
+/// embedded in the GitHub release URL (the path tag, and for some agents the
+/// asset filename), so a plain replace yields the URL for the requested version
+/// — assuming the upstream release reuses the same asset-naming convention.
+fn apply_custom_version_to_url(url: &str, registry_version: &str, custom_version: &str) -> String {
+    url.replace(registry_version, custom_version)
+}
+
+/// Check whether an NPX agent command is spawnable.
+/// Uses PATH first, then falls back to the current npm global prefix to handle
+/// GUI environments that don't inherit the user's shell PATH.
+pub(crate) async fn is_cmd_available(cmd: &str) -> bool {
+    resolve_npx_command(cmd).await.is_some()
+}
+
+fn resolve_command_on_path(cmd: &str) -> Option<PathBuf> {
+    which::which(cmd).ok()
+}
+
+pub(crate) async fn resolve_npx_command(cmd: &str) -> Option<PathBuf> {
+    if let Some(path) = resolve_command_on_path(cmd) {
+        return Some(path);
+    }
+    resolve_npx_command_from_current_npm_prefix(cmd).await
+}
+
+#[derive(Default)]
+struct NpxCommandResolver {
+    per_cmd_cache: HashMap<String, Option<PathBuf>>,
+    request_npm_prefix: Option<Option<PathBuf>>,
+}
+
+impl NpxCommandResolver {
+    async fn resolve_for_list(&mut self, cmd: &str) -> Option<PathBuf> {
+        if let Some(cached) = self.per_cmd_cache.get(cmd) {
+            return cached.clone();
+        }
+
+        let resolved = if let Some(path) = resolve_command_on_path(cmd) {
+            Some(path)
+        } else {
+            let prefix = if let Some(prefix) = &self.request_npm_prefix {
+                prefix.clone()
+            } else {
+                let resolved_prefix = cached_npm_global_prefix().await;
+                self.request_npm_prefix = Some(resolved_prefix.clone());
+                resolved_prefix
+            };
+            prefix.and_then(|p| resolve_npx_command_from_npm_prefix(cmd, &p))
+        };
+
+        self.per_cmd_cache.insert(cmd.to_string(), resolved.clone());
+        resolved
+    }
+}
+
+async fn resolve_npx_command_from_current_npm_prefix(cmd: &str) -> Option<PathBuf> {
+    let prefix = cached_npm_global_prefix().await?;
+    resolve_npx_command_from_npm_prefix(cmd, &prefix)
+}
+
+async fn cached_npm_global_prefix() -> Option<PathBuf> {
+    cached_npm_global_prefix_with(&NPM_GLOBAL_PREFIX_CACHE, resolve_current_npm_global_prefix).await
+}
+
+async fn cached_npm_global_prefix_with<F, Fut>(
+    cache: &tokio::sync::OnceCell<PathBuf>,
+    resolve: F,
+) -> Option<PathBuf>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Option<PathBuf>>,
+{
+    if let Some(prefix) = cache.get() {
+        return Some(prefix.clone());
+    }
+
+    let resolved = resolve().await?;
+    match cache.set(resolved.clone()) {
+        Ok(()) => Some(resolved),
+        Err(_) => cache.get().cloned(),
+    }
+}
+
+async fn resolve_current_npm_global_prefix() -> Option<PathBuf> {
+    let npm_path = which::which("npm").ok()?;
+    let mut cmd = crate::process::tokio_command(npm_path);
+    cmd.arg("prefix").arg("-g").kill_on_drop(true);
+    let output = tokio::time::timeout(NPM_PREFIX_TIMEOUT, cmd.output())
+        .await
+        .ok()?
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    npm_global_prefix_from_stdout(&output.stdout)
+}
+
+fn npm_global_prefix_from_stdout(stdout: &[u8]) -> Option<PathBuf> {
+    let stdout_text = String::from_utf8_lossy(stdout);
+    let prefix = stdout_text.lines().next()?.trim();
+    if prefix.is_empty() {
+        return None;
+    }
+    Some(PathBuf::from(prefix))
+}
+
+fn npm_prefix_bin_dir(prefix: &Path) -> PathBuf {
+    if cfg!(windows) {
+        prefix.to_path_buf()
+    } else {
+        prefix.join("bin")
+    }
+}
+
+fn resolve_npx_command_from_npm_prefix(cmd: &str, prefix: &Path) -> Option<PathBuf> {
+    let bin_dir = npm_prefix_bin_dir(prefix);
+
+    #[cfg(windows)]
+    let candidates = [
+        bin_dir.join(format!("{cmd}.cmd")),
+        bin_dir.join(format!("{cmd}.exe")),
+        bin_dir.join(cmd),
+    ];
+
+    #[cfg(not(windows))]
+    let candidates = [bin_dir.join(cmd)];
+
+    candidates
+        .into_iter()
+        .find(|path| is_npm_command_candidate(path))
+}
+
+#[cfg(windows)]
+fn is_npm_command_candidate(path: &Path) -> bool {
+    path.is_file()
+}
+
+#[cfg(not(windows))]
+fn is_npm_command_candidate(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+
+    path.is_file()
+        && path
+            .metadata()
+            .map(|m| m.permissions().mode() & 0o111 != 0)
+            .unwrap_or(false)
 }
 
 /// Verify that the agent SDK / binary is installed and usable.
@@ -135,14 +330,14 @@ pub(crate) fn is_cmd_available(cmd: &str) -> bool {
 /// agent isn't ready we return `AcpError::SdkNotInstalled` immediately
 /// and let the frontend prompt the user to install from Agent Settings.
 ///
-/// For NPX agents: checks the command exists on PATH.
+/// For NPX agents: checks the command is spawnable in this process environment.
 /// For Binary agents: checks platform support and that the binary is
 /// already cached locally.
-pub(crate) fn verify_agent_installed(agent_type: AgentType) -> Result<(), AcpError> {
+pub(crate) async fn verify_agent_installed(agent_type: AgentType) -> Result<(), AcpError> {
     let meta = registry::get_agent_meta(agent_type);
     match meta.distribution {
         registry::AgentDistribution::Npx { cmd, .. } => {
-            if !is_cmd_available(cmd) {
+            if !is_cmd_available(cmd).await {
                 // INVARIANT: the substring "is not installed" is matched
                 // verbatim by the frontend catch block in
                 // `src/contexts/acp-connections-context.tsx` to surface a
@@ -233,7 +428,7 @@ async fn detect_local_version(agent_type: AgentType) -> Option<String> {
     let meta = registry::get_agent_meta(agent_type);
     match meta.distribution {
         registry::AgentDistribution::Npx { cmd, package, .. } => {
-            if !is_cmd_available(cmd) {
+            if !is_cmd_available(cmd).await {
                 return None;
             }
             // Try `npm list -g <package_name> --json` to get the real installed version.
@@ -1397,6 +1592,13 @@ pub(crate) fn skill_storage_spec(agent_type: AgentType) -> Option<SkillStorageSp
             kind: SkillStorageKind::SkillDirectoryOrMarkdownFile,
             global_dirs: vec![
                 codex_home_dir().join("skills"),
+                // `.system` is where Codex CLI stores its own bundled
+                // skills (imagegen, skill-creator, etc.). The directory
+                // name is a Codex convention, not a stable contract —
+                // if Codex renames it we'll silently stop listing them.
+                // `is_read_only_skill_path` mirrors this path to prevent
+                // edit/delete from clobbering CLI assets.
+                codex_home_dir().join("skills").join(".system"),
                 home_dir_or_default().join(".agents").join("skills"),
             ],
             project_rel_dirs: vec![".codex/skills", ".agents/skills"],
@@ -1520,19 +1722,103 @@ fn skill_name_from_id(id: &str) -> String {
     id.to_string()
 }
 
+/// Best-effort extraction of a one-line skill description from a markdown
+/// file's YAML frontmatter. Prefers `short-description` (commonly nested under
+/// a `metadata:` block) and falls back to a top-level `description`. Only the
+/// first 4 KiB is read; frontmatter always fits, and skill bodies can be large.
+fn read_skill_description(content_path: &Path) -> Option<String> {
+    use std::io::Read;
+    let mut file = fs::File::open(content_path).ok()?;
+    let mut buf = [0u8; 4096];
+    let n = file.read(&mut buf).ok()?;
+    let head = std::str::from_utf8(&buf[..n]).ok()?;
+
+    let mut lines = head.lines();
+    if lines.next()?.trim() != "---" {
+        return None;
+    }
+
+    let mut short: Option<String> = None;
+    let mut long: Option<String> = None;
+    for line in lines {
+        let trimmed_end = line.trim_end();
+        if trimmed_end == "---" || trimmed_end == "..." {
+            break;
+        }
+        let is_top_level = !line.starts_with(|c: char| c.is_whitespace());
+        let stripped = line.trim();
+
+        // `short-description` is allowed at any indent so it resolves when
+        // nested under `metadata:` (Codex's `.system` skills follow this).
+        if short.is_none() {
+            if let Some(rest) = stripped.strip_prefix("short-description:") {
+                if let Some(val) = parse_frontmatter_scalar(rest) {
+                    short = Some(val);
+                    break;
+                }
+            }
+        }
+        // `description` is only honored at the top level to avoid colliding
+        // with unrelated nested `description:` keys.
+        if is_top_level && long.is_none() {
+            if let Some(rest) = line.strip_prefix("description:") {
+                if let Some(val) = parse_frontmatter_scalar(rest) {
+                    long = Some(val);
+                }
+            }
+        }
+    }
+    short.or(long)
+}
+
+/// Read a single-line YAML scalar (with optional matching quotes). Returns
+/// `None` for empty values or block-scalar markers (`|` / `>`) we can't span.
+fn parse_frontmatter_scalar(rest: &str) -> Option<String> {
+    let val = rest.trim();
+    if val.starts_with('|') || val.starts_with('>') {
+        return None;
+    }
+    let unquoted = val
+        .strip_prefix('"')
+        .and_then(|s| s.strip_suffix('"'))
+        .or_else(|| val.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')))
+        .unwrap_or(val)
+        .trim();
+    if unquoted.is_empty() {
+        None
+    } else {
+        Some(unquoted.to_string())
+    }
+}
+
 fn build_skill_item(
     id: String,
     scope: AgentSkillScope,
     layout: AgentSkillLayout,
     path: PathBuf,
 ) -> AgentSkillItem {
+    let description = read_skill_description(&skill_content_path(layout, &path));
     AgentSkillItem {
         name: skill_name_from_id(&id),
         id,
         scope,
         layout,
         path: path.to_string_lossy().to_string(),
+        description,
+        read_only: false,
     }
+}
+
+/// Codex ships a handful of built-in skills under `~/.codex/skills/.system/`
+/// (imagegen, skill-creator, etc.). We scan that directory so users see
+/// these in the `$` autocomplete and the Skills settings list — but any
+/// write to those files would clobber the CLI's own assets.
+fn is_read_only_skill_path(agent_type: AgentType, skill_path: &Path) -> bool {
+    if agent_type != AgentType::Codex {
+        return false;
+    }
+    let ro_root = codex_home_dir().join("skills").join(".system");
+    skill_path.starts_with(&ro_root)
 }
 
 fn skill_content_path(layout: AgentSkillLayout, skill_path: &Path) -> PathBuf {
@@ -1819,17 +2105,104 @@ pub(crate) async fn apply_model_provider_env(
     }
 }
 
+/// Claude Code provider-model JSON keys → ANTHROPIC_*_MODEL env var names.
+const CLAUDE_MODEL_KEY_MAP: &[(&str, &str)] = &[
+    ("main", "ANTHROPIC_MODEL"),
+    ("reasoning", "ANTHROPIC_REASONING_MODEL"),
+    ("haiku", "ANTHROPIC_DEFAULT_HAIKU_MODEL"),
+    ("sonnet", "ANTHROPIC_DEFAULT_SONNET_MODEL"),
+    ("opus", "ANTHROPIC_DEFAULT_OPUS_MODEL"),
+];
+
+/// Parse the model field stored on a model_provider into the env-var actions to
+/// apply on the dependent agent's `env_json` / local config file.
+///
+/// The provider's model field is authoritative: every env key relevant to the
+/// agent type is returned, with `Some(value)` meaning "set" and `None` meaning
+/// "clear". This lets the caller overwrite even when the provider's value is
+/// empty.
+///
+/// - Claude: returns 5 entries (one per ANTHROPIC_*_MODEL). Each entry is `None`
+///   when the provider's JSON omits that key or has an empty value.
+/// - Gemini: returns `GEMINI_MODEL`.
+/// - Codex: returns `OPENAI_MODEL` so the provider can override env_json (the
+///   root `model` in `config.toml` is handled separately by
+///   `provider_codex_model_action`).
+/// - Others: returns `OPENAI_MODEL`.
+pub(crate) fn parse_provider_model(
+    agent_type: AgentType,
+    raw: Option<&str>,
+) -> BTreeMap<String, Option<String>> {
+    let mut out: BTreeMap<String, Option<String>> = BTreeMap::new();
+    let trimmed_raw = raw.map(str::trim).filter(|s| !s.is_empty());
+    match agent_type {
+        AgentType::ClaudeCode => {
+            let parsed = trimmed_raw
+                .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+                .and_then(|v| v.as_object().cloned());
+            for (key, env_name) in CLAUDE_MODEL_KEY_MAP {
+                let value = parsed
+                    .as_ref()
+                    .and_then(|obj| obj.get(*key))
+                    .and_then(|x| x.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string);
+                out.insert((*env_name).to_string(), value);
+            }
+        }
+        AgentType::Gemini => {
+            out.insert("GEMINI_MODEL".to_string(), trimmed_raw.map(str::to_string));
+        }
+        _ => {
+            out.insert("OPENAI_MODEL".to_string(), trimmed_raw.map(str::to_string));
+        }
+    }
+    out
+}
+
+/// Action to apply to the Codex `config.toml` root `model` key.
+pub(crate) enum CodexModelAction {
+    /// Not a Codex agent — leave the toml untouched.
+    NoOp,
+    /// Set the `model` key to this value.
+    Set(String),
+    /// Remove the `model` key.
+    Clear,
+}
+
+pub(crate) fn provider_codex_model_action(
+    agent_type: AgentType,
+    raw: Option<&str>,
+) -> CodexModelAction {
+    if agent_type != AgentType::Codex {
+        return CodexModelAction::NoOp;
+    }
+    match raw.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(v) => CodexModelAction::Set(v.to_string()),
+        None => CodexModelAction::Clear,
+    }
+}
+
 /// Update on-disk config files for a single agent when model provider credentials change.
 /// Uses `agent_env_keys` to determine the correct env var names per agent type.
+///
+/// For `model_env`: entries with `Some(value)` are written; entries with `None`
+/// are explicitly cleared (overwritten with empty string in the env-patch, so
+/// `persist_agent_local_config_json` removes them).
 fn cascade_update_agent_config(
     agent_type: AgentType,
     api_url: &str,
     api_key: &str,
+    model_env: &BTreeMap<String, Option<String>>,
+    codex_model: &CodexModelAction,
 ) -> Result<(), AcpError> {
     let (url_key, key_key, _) = agent_env_keys(agent_type);
     match agent_type {
         AgentType::ClaudeCode | AgentType::Gemini => {
-            // Write into config.env (not root-level)
+            // Write into config.env (not root-level). For model entries, use
+            // JSON-null for "clear" — `merge_json_values` interprets null as
+            // "remove this key".
             let mut env = serde_json::Map::new();
             env.insert(
                 url_key.to_string(),
@@ -1839,6 +2212,13 @@ fn cascade_update_agent_config(
                 key_key.to_string(),
                 serde_json::Value::String(api_key.to_string()),
             );
+            for (k, v) in model_env {
+                let value = match v {
+                    Some(s) => serde_json::Value::String(s.clone()),
+                    None => serde_json::Value::Null,
+                };
+                env.insert(k.clone(), value);
+            }
             let patch = serde_json::json!({ "env": env });
             let patch_str =
                 serde_json::to_string(&patch).map_err(|e| AcpError::protocol(e.to_string()))?;
@@ -1874,15 +2254,68 @@ fn cascade_update_agent_config(
             } else {
                 toml::Value::Table(toml::map::Map::new())
             };
-            if let Some(table) = toml_value.as_table_mut() {
-                if api_url.trim().is_empty() {
-                    table.remove("api_base_url");
-                } else {
-                    table.insert(
-                        "api_base_url".to_string(),
-                        toml::Value::String(api_url.to_string()),
-                    );
+            let table = toml_value
+                .as_table_mut()
+                .ok_or_else(|| AcpError::protocol("codex config root must be a TOML table"))?;
+            table.remove("api_base_url");
+
+            let provider_name = table
+                .get("model_provider")
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+                .unwrap_or_else(|| "codeg".to_string());
+            table.insert(
+                "model_provider".to_string(),
+                toml::Value::String(provider_name.clone()),
+            );
+
+            let providers_item = table
+                .entry("model_providers".to_string())
+                .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
+            if !providers_item.is_table() {
+                *providers_item = toml::Value::Table(toml::map::Map::new());
+            }
+            let providers = providers_item
+                .as_table_mut()
+                .ok_or_else(|| AcpError::protocol("invalid model_providers table"))?;
+            let provider_item = providers
+                .entry(provider_name.clone())
+                .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
+            if !provider_item.is_table() {
+                *provider_item = toml::Value::Table(toml::map::Map::new());
+            }
+            let provider_table = provider_item
+                .as_table_mut()
+                .ok_or_else(|| AcpError::protocol("invalid model provider table"))?;
+            if api_url.trim().is_empty() {
+                provider_table.remove("base_url");
+            } else {
+                provider_table.insert(
+                    "base_url".to_string(),
+                    toml::Value::String(api_url.to_string()),
+                );
+            }
+            if provider_name == "codeg" {
+                provider_table.insert("name".to_string(), toml::Value::String("codeg".to_string()));
+                provider_table.insert(
+                    "wire_api".to_string(),
+                    toml::Value::String("responses".to_string()),
+                );
+                provider_table.insert(
+                    "requires_openai_auth".to_string(),
+                    toml::Value::Boolean(true),
+                );
+            }
+            match codex_model {
+                CodexModelAction::Set(model) => {
+                    table.insert("model".to_string(), toml::Value::String(model.to_string()));
                 }
+                CodexModelAction::Clear => {
+                    table.remove("model");
+                }
+                CodexModelAction::NoOp => {}
             }
             let toml_str = toml::to_string_pretty(&toml_value)
                 .map_err(|e| AcpError::protocol(e.to_string()))?;
@@ -1917,12 +2350,14 @@ fn cascade_update_agent_config(
     Ok(())
 }
 
-/// Cascade model provider credential changes to all dependent agent settings and config files.
+/// Cascade model provider changes (credentials + model) to all dependent agent settings
+/// and config files.
 pub(crate) async fn cascade_update_model_provider(
     db: &AppDatabase,
     provider_id: i32,
     new_api_url: &str,
     new_api_key: &str,
+    new_model: Option<&str>,
     emitter: &EventEmitter,
 ) -> Result<(), AcpError> {
     let dependents = agent_setting_service::find_by_model_provider_id(&db.conn, provider_id)
@@ -1950,6 +2385,18 @@ pub(crate) async fn cascade_update_model_provider(
             env_map.insert(key_key.to_string(), new_api_key.to_string());
         }
 
+        let model_env = parse_provider_model(agent_type, new_model);
+        for (k, v) in &model_env {
+            match v {
+                Some(value) => {
+                    env_map.insert(k.clone(), value.clone());
+                }
+                None => {
+                    env_map.remove(k);
+                }
+            }
+        }
+
         let patch = agent_setting_service::AgentSettingsUpdate {
             enabled: setting.enabled,
             env_json: serialize_env_map(&env_map)?,
@@ -1960,7 +2407,14 @@ pub(crate) async fn cascade_update_model_provider(
             .map_err(|e| AcpError::protocol(e.to_string()))?;
 
         // 2. Update on-disk config files
-        if let Err(e) = cascade_update_agent_config(agent_type, new_api_url, new_api_key) {
+        let codex_action = provider_codex_model_action(agent_type, new_model);
+        if let Err(e) = cascade_update_agent_config(
+            agent_type,
+            new_api_url,
+            new_api_key,
+            &model_env,
+            &codex_action,
+        ) {
             eprintln!(
                 "[ModelProvider] cascade_update_agent_config({agent_type}) failed: {e}, skipping config update"
             );
@@ -1982,17 +2436,32 @@ pub async fn acp_preflight(
     Ok(preflight::run_preflight(agent_type).await)
 }
 
-#[cfg(feature = "tauri-runtime")]
-#[cfg_attr(feature = "tauri-runtime", tauri::command)]
-pub async fn acp_connect(
+/// Resolve the full runtime env every ACP spawn should receive — settings
+/// override, model provider credentials, git credential helper, OpenClaw
+/// reset flag. Returns `AcpError::protocol("...disabled in settings")` when
+/// the user has disabled the agent.
+///
+/// This is the **single source of truth** for "what env does an agent
+/// process see". Three call sites depend on it:
+///
+///   1. `acp_connect` — the user-initiated session entry point.
+///   2. `ConnectionManagerSpawner::spawn` — used by the delegation broker
+///      to spawn subagents. Before this helper existed, delegation passed
+///      `BTreeMap::new()`, silently bypassing settings/credentials and
+///      letting disabled agents still be invoked through delegation.
+///   3. `probe_agent_options` — the live settings-page probe. Must match
+///      delegation's env exactly so what the user sees in the panel is
+///      what `delegate_to_agent` will actually receive.
+///
+/// Diverging any of these from the others reintroduces the
+/// "[UI shows options] != [delegation gets options]" inconsistency that
+/// the multi-agent settings panel was designed to prevent.
+pub(crate) async fn build_session_runtime_env(
+    db: &AppDatabase,
     agent_type: AgentType,
-    working_dir: Option<String>,
-    session_id: Option<String>,
-    manager: State<'_, ConnectionManager>,
-    db: State<'_, AppDatabase>,
-    app_handle: tauri::AppHandle,
-    window: tauri::WebviewWindow,
-) -> Result<String, AcpError> {
+    session_id: Option<&str>,
+    data_dir: &Path,
+) -> Result<BTreeMap<String, String>, AcpError> {
     let setting = agent_setting_service::get_by_agent_type(&db.conn, agent_type)
         .await
         .map_err(|e| AcpError::protocol(e.to_string()))?;
@@ -2005,23 +2474,56 @@ pub async fn acp_connect(
             "{agent_type} is disabled in settings"
         )));
     }
+
     let local_config_json = load_agent_local_config_json(agent_type);
     let mut runtime_env =
         build_runtime_env_from_setting(agent_type, setting.as_ref(), local_config_json.as_deref());
-
-    // Resolve model provider credentials if configured.
     apply_model_provider_env(agent_type, setting.as_ref(), &mut runtime_env, &db.conn).await;
 
-    // For OpenClaw: when creating a new conversation (no session_id to resume),
-    // signal that we want a fresh transcript via --reset-session.
+    if let Some(cred_env) = crate::commands::terminal::prepare_credential_env(data_dir) {
+        for (key, value) in cred_env {
+            runtime_env.insert(key, value);
+        }
+    }
+
     if agent_type == AgentType::OpenClaw && session_id.is_none() {
         runtime_env.insert("OPENCLAW_RESET_SESSION".into(), "1".into());
     }
 
+    Ok(runtime_env)
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+#[allow(clippy::too_many_arguments)]
+pub async fn acp_connect(
+    agent_type: AgentType,
+    working_dir: Option<String>,
+    session_id: Option<String>,
+    preferred_mode_id: Option<String>,
+    preferred_config_values: Option<BTreeMap<String, String>>,
+    manager: State<'_, ConnectionManager>,
+    db: State<'_, AppDatabase>,
+    app_handle: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<String, AcpError> {
+    // Resolve through the effective data dir so a custom `CODEG_DATA_DIR`
+    // reaches the credential helper script the agent's git subprocess
+    // will execute. `acp_connect` may be called before the app data dir
+    // exists on disk (first launch); fall back to a sentinel that the
+    // credential helper treats as "no credentials configured".
+    let app_data_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map(|p| crate::paths::resolve_effective_data_dir(&p))
+        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let runtime_env =
+        build_session_runtime_env(&db, agent_type, session_id.as_deref(), &app_data_dir).await?;
+
     // Guard: the session page must never trigger a download or install.
     // If the agent isn't ready, return SdkNotInstalled here so the frontend
     // can prompt the user to install it from Agent Settings.
-    verify_agent_installed(agent_type)?;
+    verify_agent_installed(agent_type).await?;
 
     let emitter = EventEmitter::Tauri(app_handle);
     manager
@@ -2032,6 +2534,8 @@ pub async fn acp_connect(
             runtime_env,
             window.label().to_string(),
             emitter,
+            preferred_mode_id,
+            preferred_config_values.unwrap_or_default(),
         )
         .await
 }
@@ -2041,9 +2545,22 @@ pub async fn acp_connect(
 pub async fn acp_prompt(
     connection_id: String,
     blocks: Vec<PromptInputBlock>,
+    folder_id: Option<i32>,
+    conversation_id: Option<i32>,
+    db: State<'_, crate::db::AppDatabase>,
     manager: State<'_, ConnectionManager>,
 ) -> Result<(), AcpError> {
-    manager.send_prompt(&connection_id, blocks).await
+    manager
+        .send_prompt_linked(
+            &db,
+            &connection_id,
+            blocks,
+            folder_id,
+            conversation_id,
+            None,
+        )
+        .await
+        .map(|_| ())
 }
 
 #[cfg(feature = "tauri-runtime")]
@@ -2069,22 +2586,69 @@ pub async fn acp_set_config_option(
         .await
 }
 
+/// Spawn a transient ACP connection for `agent_type` with a silent emitter,
+/// read whatever `SessionConfigOptions` / `SessionModes` the agent advertises,
+/// and tear it down. The returned snapshot drives the delegation-settings UI
+/// so the user picks from the exact option set the agent will accept when
+/// codeg-mcp later spawns a subagent.
+///
+/// Does NOT touch the chat-side `selectorsCache`, `localStorage` preferences,
+/// or any active connection state — see `ConnectionManager::probe_agent_options`
+/// for the isolation guarantees.
+pub async fn acp_describe_agent_options_core(
+    manager: &ConnectionManager,
+    db: &AppDatabase,
+    data_dir: &Path,
+    agent_type: AgentType,
+    working_dir: Option<String>,
+) -> Result<crate::acp::types::AgentOptionsSnapshot, AcpError> {
+    verify_agent_installed(agent_type).await?;
+    // Build the same runtime env delegation/acp_connect would build so
+    // probe sees exactly what `delegate_to_agent` will see at runtime.
+    // Without this, the settings UI could show options that the agent
+    // never advertises in production (settings override an API URL,
+    // model_provider injects a different model list, etc.).
+    let runtime_env = build_session_runtime_env(db, agent_type, None, data_dir).await?;
+    manager
+        .probe_agent_options(agent_type, working_dir, runtime_env)
+        .await
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn acp_describe_agent_options(
+    agent_type: AgentType,
+    working_dir: Option<String>,
+    manager: State<'_, ConnectionManager>,
+    db: State<'_, AppDatabase>,
+    app_handle: tauri::AppHandle,
+) -> Result<crate::acp::types::AgentOptionsSnapshot, AcpError> {
+    let app_data_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map(|p| crate::paths::resolve_effective_data_dir(&p))
+        .unwrap_or_else(|_| PathBuf::from("."));
+    acp_describe_agent_options_core(&manager, &db, &app_data_dir, agent_type, working_dir).await
+}
+
 #[cfg(feature = "tauri-runtime")]
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
 pub async fn acp_cancel(
     connection_id: String,
+    db: State<'_, AppDatabase>,
     manager: State<'_, ConnectionManager>,
 ) -> Result<(), AcpError> {
-    manager.cancel(&connection_id).await
+    manager.cancel(&db.conn, &connection_id).await
 }
 
 #[cfg(feature = "tauri-runtime")]
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
 pub async fn acp_fork(
     connection_id: String,
+    db: State<'_, AppDatabase>,
     manager: State<'_, ConnectionManager>,
 ) -> Result<ForkResultInfo, AcpError> {
-    manager.fork_session(&connection_id).await
+    manager.fork_session(&db, &connection_id).await
 }
 
 #[cfg(feature = "tauri-runtime")]
@@ -2111,10 +2675,61 @@ pub async fn acp_disconnect(
 
 #[cfg(feature = "tauri-runtime")]
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn acp_touch_connection(
+    connection_id: String,
+    manager: State<'_, ConnectionManager>,
+) -> Result<bool, AcpError> {
+    Ok(manager.touch(&connection_id).await)
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
 pub async fn acp_list_connections(
     manager: State<'_, ConnectionManager>,
 ) -> Result<Vec<ConnectionInfo>, AcpError> {
     Ok(manager.list_connections().await)
+}
+
+pub(crate) async fn acp_get_session_snapshot_core(
+    manager: &ConnectionManager,
+    connection_id: &str,
+) -> Result<Option<crate::acp::LiveSessionSnapshot>, AcpError> {
+    let Some(state) = manager.get_state(connection_id).await else {
+        return Ok(None);
+    };
+    let snap = state.read().await.to_snapshot();
+    Ok(Some(snap))
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn acp_get_session_snapshot(
+    connection_id: String,
+    manager: State<'_, ConnectionManager>,
+) -> Result<Option<crate::acp::LiveSessionSnapshot>, AcpError> {
+    acp_get_session_snapshot_core(&manager, &connection_id).await
+}
+
+pub(crate) async fn acp_get_session_snapshot_by_conversation_core(
+    manager: &ConnectionManager,
+    conversation_id: i32,
+) -> Result<Option<crate::acp::LiveSessionSnapshot>, AcpError> {
+    let Some(conn_id) = manager
+        .find_connection_by_conversation_id(conversation_id)
+        .await
+    else {
+        return Ok(None);
+    };
+    acp_get_session_snapshot_core(manager, &conn_id).await
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn acp_get_session_snapshot_by_conversation(
+    conversation_id: i32,
+    manager: State<'_, ConnectionManager>,
+) -> Result<Option<crate::acp::LiveSessionSnapshot>, AcpError> {
+    acp_get_session_snapshot_by_conversation_core(&manager, conversation_id).await
 }
 
 pub(crate) async fn acp_get_agent_status_core(
@@ -2128,9 +2743,11 @@ pub(crate) async fn acp_get_agent_status_core(
         .map_err(|e| AcpError::protocol(e.to_string()))?;
 
     let (available, installed_version) = match &meta.distribution {
-        registry::AgentDistribution::Npx { .. } => (
+        registry::AgentDistribution::Npx { cmd, .. } => (
             true,
-            setting.as_ref().and_then(|m| m.installed_version.clone()),
+            resolve_npx_command(cmd)
+                .await
+                .and_then(|_| setting.as_ref().and_then(|m| m.installed_version.clone())),
         ),
         registry::AgentDistribution::Binary { platforms, cmd, .. } => {
             let detected = binary_cache::detect_installed_version(agent_type, cmd)
@@ -2181,13 +2798,19 @@ pub(crate) async fn acp_list_agents_core(db: &AppDatabase) -> Result<Vec<AcpAgen
         .map_err(|e| AcpError::protocol(e.to_string()))?;
 
     let mut agents = Vec::new();
+    let mut npx_resolver = NpxCommandResolver::default();
     for (idx, agent_type) in agent_types.into_iter().enumerate() {
         let setting = settings_map.get(&agent_type);
         let meta = registry::get_agent_meta(agent_type);
         let (available, dist_type, local_installed_version) = match &meta.distribution {
-            registry::AgentDistribution::Npx { .. } => {
-                // Use DB cached version for fast loading; updated during install/upgrade
-                let cached = setting.and_then(|m| m.installed_version.clone());
+            registry::AgentDistribution::Npx { cmd, .. } => {
+                // Keep the list path bounded: each list request probes npm
+                // global prefix at most once, then reuses the result across
+                // all NPX agents in the loop.
+                let cached = npx_resolver
+                    .resolve_for_list(cmd)
+                    .await
+                    .and_then(|_| setting.and_then(|m| m.installed_version.clone()));
                 (true, "npx", cached)
             }
             registry::AgentDistribution::Binary { platforms, cmd, .. } => {
@@ -2466,16 +3089,98 @@ pub(crate) async fn acp_update_agent_env_core(
         .await
         .map_err(|e| AcpError::protocol(e.to_string()))?;
 
+    // If a provider is selected, the provider's model field is authoritative:
+    // each relevant env key is set when the provider has a value and cleared
+    // (removed) when empty. Codex's root `model` in config.toml is handled the
+    // same way.
+    let mut merged_env = env;
+    let mut codex_action = CodexModelAction::NoOp;
+    if let Some(pid) = model_provider_id {
+        let provider = crate::db::service::model_provider_service::get_by_id(&db.conn, pid)
+            .await
+            .map_err(|e| AcpError::protocol(e.to_string()))?
+            .ok_or_else(|| AcpError::protocol(format!("model provider not found: {pid}")))?;
+
+        // Reject cross-type binding: provider.model is formatted for its declared
+        // agent_type (Claude = JSON, Codex/Gemini/others = plain string). Binding
+        // a mismatched provider would parse the model under the wrong format and
+        // silently write invalid env / config.toml entries.
+        let provider_agent_type: AgentType =
+            serde_json::from_value(serde_json::Value::String(provider.agent_type.clone()))
+                .map_err(|_| {
+                    AcpError::protocol(format!(
+                        "model provider {pid} has invalid agent_type: {}",
+                        provider.agent_type
+                    ))
+                })?;
+        if provider_agent_type != agent_type {
+            return Err(AcpError::protocol(format!(
+                "model provider {pid} is for {provider_agent_type}, cannot be bound to {agent_type}"
+            )));
+        }
+
+        let model_env = parse_provider_model(agent_type, provider.model.as_deref());
+        for (k, v) in model_env {
+            match v {
+                Some(value) => {
+                    merged_env.insert(k, value);
+                }
+                None => {
+                    merged_env.remove(&k);
+                }
+            }
+        }
+        codex_action = provider_codex_model_action(agent_type, provider.model.as_deref());
+    }
+
     let patch = agent_setting_service::AgentSettingsUpdate {
         enabled,
-        env_json: serialize_env_map(&env)?,
+        env_json: serialize_env_map(&merged_env)?,
         model_provider_id,
     };
     agent_setting_service::update(&db.conn, agent_type, patch)
         .await
         .map_err(|e| AcpError::protocol(e.to_string()))?;
 
+    if let Err(e) = apply_codex_root_model_action(&codex_action) {
+        eprintln!("[acp_update_agent_env] apply_codex_root_model_action failed: {e}");
+    }
+
     emit_acp_agents_updated(emitter, "env_updated", Some(agent_type));
+    Ok(())
+}
+
+/// Apply a `CodexModelAction` to the `model` field at the root of
+/// `~/.codex/config.toml`, preserving everything else.
+fn apply_codex_root_model_action(action: &CodexModelAction) -> Result<(), AcpError> {
+    if matches!(action, CodexModelAction::NoOp) {
+        return Ok(());
+    }
+    let config_path = codex_config_toml_path();
+    let mut toml_value = if config_path.exists() {
+        fs::read_to_string(&config_path)
+            .ok()
+            .and_then(|raw| raw.parse::<toml::Value>().ok())
+            .filter(|v| v.is_table())
+            .unwrap_or_else(|| toml::Value::Table(toml::map::Map::new()))
+    } else {
+        toml::Value::Table(toml::map::Map::new())
+    };
+    let table = toml_value
+        .as_table_mut()
+        .ok_or_else(|| AcpError::protocol("codex config root must be a TOML table"))?;
+    match action {
+        CodexModelAction::Set(model) => {
+            table.insert("model".to_string(), toml::Value::String(model.clone()));
+        }
+        CodexModelAction::Clear => {
+            table.remove("model");
+        }
+        CodexModelAction::NoOp => unreachable!(),
+    }
+    let toml_str =
+        toml::to_string_pretty(&toml_value).map_err(|e| AcpError::protocol(e.to_string()))?;
+    persist_codex_native_config_files(None, Some(&toml_str))?;
     Ok(())
 }
 
@@ -2595,6 +3300,7 @@ pub async fn acp_update_agent_config(
 
 pub(crate) async fn acp_download_agent_binary_core(
     agent_type: AgentType,
+    version_override: Option<String>,
     task_id: String,
     emitter: &EventEmitter,
 ) -> Result<(), AcpError> {
@@ -2608,6 +3314,16 @@ pub(crate) async fn acp_download_agent_binary_core(
             platforms,
             ..
         } => {
+            // A custom version substitutes into the pinned download URL and the
+            // cache key; `None`/empty keeps the registry-pinned version.
+            let custom = match version_override.as_deref() {
+                Some(raw) if !raw.trim().is_empty() => Some(sanitize_custom_version(raw)
+                    .ok_or_else(|| {
+                        AcpError::protocol(format!("invalid custom version: {}", raw.trim()))
+                    })?),
+                _ => None,
+            };
+
             let platform = registry::current_platform();
             let fallback = platforms
                 .iter()
@@ -2619,19 +3335,25 @@ pub(crate) async fn acp_download_agent_binary_core(
                     ))
                 })?;
 
+            let effective_version = custom.as_deref().unwrap_or(version);
+            let archive_url = match &custom {
+                Some(c) => apply_custom_version_to_url(fallback.url, version, c),
+                None => fallback.url.to_string(),
+            };
+
             emit_agent_install_event(
                 emitter,
                 &task_id,
                 AgentInstallEventKind::Log,
-                format!("Downloading {} v{version} for {platform}", meta.name),
+                format!("Downloading {} v{effective_version} for {platform}", meta.name),
             );
 
             let emitter_clone = emitter.clone();
             let task_id_clone = task_id.clone();
             let _ = binary_cache::ensure_binary_for_agent_with_progress(
                 agent_type,
-                version,
-                fallback.url,
+                effective_version,
+                &archive_url,
                 cmd,
                 move |msg| {
                     emit_agent_install_event(
@@ -2676,11 +3398,12 @@ pub(crate) async fn acp_download_agent_binary_core(
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
 pub async fn acp_download_agent_binary(
     agent_type: AgentType,
+    version: Option<String>,
     task_id: String,
     app: tauri::AppHandle,
 ) -> Result<(), AcpError> {
     let emitter = EventEmitter::Tauri(app);
-    acp_download_agent_binary_core(agent_type, task_id, &emitter).await
+    acp_download_agent_binary_core(agent_type, version, task_id, &emitter).await
 }
 
 pub(crate) async fn acp_detect_agent_local_version_core(
@@ -2693,6 +3416,22 @@ pub(crate) async fn acp_detect_agent_local_version_core(
             agent_setting_service::set_installed_version(conn, agent_type, Some(version.clone()))
                 .await;
         return Ok(Some(version));
+    }
+
+    // Binary agents detect their version purely from the on-disk cache, so a
+    // `None` here means the binary is genuinely absent (cleared cache, or a
+    // failed custom/upgrade install). Return `None` authoritatively rather than
+    // falling back to the DB, which would resurrect a removed version as a
+    // phantom that can no longer be launched. The returned value does NOT depend
+    // on the mirror write below, so a swallowed write cannot reintroduce the
+    // phantom. (NPX detection runs `npm list`, which can fail transiently, so
+    // for npx we keep the DB value as a best-effort fallback.)
+    if matches!(
+        registry::get_agent_meta(agent_type).distribution,
+        registry::AgentDistribution::Binary { .. }
+    ) {
+        let _ = agent_setting_service::set_installed_version(conn, agent_type, None).await;
+        return Ok(None);
     }
 
     let fallback = agent_setting_service::get_by_agent_type(conn, agent_type)
@@ -2715,6 +3454,8 @@ pub async fn acp_detect_agent_local_version(
 pub(crate) async fn acp_prepare_npx_agent_core(
     agent_type: AgentType,
     registry_version: Option<String>,
+    version_override: Option<String>,
+    clean_first: bool,
     task_id: String,
     db: &AppDatabase,
     emitter: &EventEmitter,
@@ -2724,6 +3465,10 @@ pub(crate) async fn acp_prepare_npx_agent_core(
     let meta = registry::get_agent_meta(agent_type);
     let result = match meta.distribution {
         registry::AgentDistribution::Npx { package, .. } => {
+            // `version_override` of None/empty keeps the registry-pinned spec;
+            // a custom version installs `<name>@<version>` instead.
+            let install_spec = build_npm_install_spec(package, version_override.as_deref())?;
+
             let default = agent_setting_service::AgentDefaultInput {
                 agent_type,
                 registry_id: registry::registry_id_for(agent_type).to_string(),
@@ -2739,13 +3484,37 @@ pub(crate) async fn acp_prepare_npx_agent_core(
                 .flatten()
                 .and_then(|m| m.installed_version);
 
+            // Best-effort uninstall before reinstall. Forces npm to re-resolve
+            // the dependency graph from scratch, which is required for
+            // platform-specific optionalDependencies (e.g. native CLI binaries
+            // shipped as `<pkg>-darwin-x64`) to be picked up after an upgrade.
+            // Failures here are logged and swallowed so we still attempt the
+            // install — for example when nothing is currently installed.
+            if clean_first {
+                let package_name = package_name_from_spec(package);
+                emit_agent_install_event(
+                    emitter,
+                    &task_id,
+                    AgentInstallEventKind::Log,
+                    format!("$ npm uninstall -g {package_name} (clean reinstall)"),
+                );
+                if let Err(e) = uninstall_npm_global_package(package).await {
+                    emit_agent_install_event(
+                        emitter,
+                        &task_id,
+                        AgentInstallEventKind::Log,
+                        format!("(warning) uninstall step failed, continuing: {e}"),
+                    );
+                }
+            }
+
             emit_agent_install_event(
                 emitter,
                 &task_id,
                 AgentInstallEventKind::Log,
-                format!("Installing {} ({package})", meta.name),
+                format!("Installing {} ({install_spec})", meta.name),
             );
-            install_npm_global_package_streaming(package, &task_id, emitter).await?;
+            install_npm_global_package_streaming(&install_spec, &task_id, emitter).await?;
 
             emit_agent_install_event(
                 emitter,
@@ -2755,7 +3524,7 @@ pub(crate) async fn acp_prepare_npx_agent_core(
             );
             let resolved = detect_local_version(agent_type)
                 .await
-                .or_else(|| version_from_package_spec(package))
+                .or_else(|| version_from_package_spec(&install_spec))
                 .or_else(|| {
                     registry_version
                         .as_deref()
@@ -2793,6 +3562,23 @@ pub(crate) async fn acp_prepare_npx_agent_core(
             );
         }
         Err(e) => {
+            // When clean_first was true the uninstall step may already have
+            // succeeded by the time install failed, leaving the DB pointing at
+            // a version that no longer exists on disk. Resync the DB to the
+            // actual filesystem state so the UI doesn't mislead the user into
+            // thinking they can connect.
+            if clean_first {
+                let detected = detect_local_version(agent_type).await;
+                if let Err(sync_err) =
+                    agent_setting_service::set_installed_version(&db.conn, agent_type, detected)
+                        .await
+                {
+                    eprintln!(
+                        "[acp] failed to resync installed_version after clean upgrade failure: {sync_err}"
+                    );
+                }
+                emit_acp_agents_updated(emitter, "npx_prepare_failed", Some(agent_type));
+            }
             emit_agent_install_event(
                 emitter,
                 &task_id,
@@ -2809,12 +3595,23 @@ pub(crate) async fn acp_prepare_npx_agent_core(
 pub async fn acp_prepare_npx_agent(
     agent_type: AgentType,
     registry_version: Option<String>,
+    version: Option<String>,
+    clean_first: Option<bool>,
     task_id: String,
     db: State<'_, AppDatabase>,
     app: tauri::AppHandle,
 ) -> Result<String, AcpError> {
     let emitter = EventEmitter::Tauri(app);
-    acp_prepare_npx_agent_core(agent_type, registry_version, task_id, &db, &emitter).await
+    acp_prepare_npx_agent_core(
+        agent_type,
+        registry_version,
+        version,
+        clean_first.unwrap_or(false),
+        task_id,
+        &db,
+        &emitter,
+    )
+    .await
 }
 
 pub(crate) async fn acp_uninstall_agent_core(
@@ -2967,6 +3764,11 @@ pub async fn acp_list_agent_skills(
     }
 
     let mut skills = skills_by_key.into_values().collect::<Vec<_>>();
+    for skill in &mut skills {
+        if is_read_only_skill_path(agent_type, Path::new(&skill.path)) {
+            skill.read_only = true;
+        }
+    }
     skills.sort_by(|a, b| {
         scope_rank(a.scope)
             .cmp(&scope_rank(b.scope))
@@ -2996,8 +3798,11 @@ pub async fn acp_read_agent_skill(
     let id = validate_skill_id(&skill_id)?;
     let dirs = scoped_skill_dirs(agent_type, scope, workspace_path.as_deref())?;
 
-    let skill = locate_existing_skill_across_dirs(&dirs, spec.kind, &id, scope)
+    let mut skill = locate_existing_skill_across_dirs(&dirs, spec.kind, &id, scope)
         .ok_or_else(|| AcpError::protocol(format!("skill not found: {id}")))?;
+    if is_read_only_skill_path(agent_type, Path::new(&skill.path)) {
+        skill.read_only = true;
+    }
     let content_path = skill_content_path(skill.layout, Path::new(&skill.path));
     let content = fs::read_to_string(&content_path)
         .map_err(|e| AcpError::protocol(format!("failed to read skill content: {e}")))?;
@@ -3026,7 +3831,14 @@ pub async fn acp_save_agent_skill(
         .map_err(|e| AcpError::protocol(format!("failed to create skills directory: {e}")))?;
 
     let existing = locate_existing_skill_across_dirs(&dirs, spec.kind, &id, scope);
-    let skill = if let Some(item) = existing {
+    if let Some(ref item) = existing {
+        if is_read_only_skill_path(agent_type, Path::new(&item.path)) {
+            return Err(AcpError::protocol(format!(
+                "skill '{id}' is a built-in system skill and cannot be modified"
+            )));
+        }
+    }
+    let mut skill = if let Some(item) = existing {
         item
     } else {
         let new_layout = match spec.kind {
@@ -3061,6 +3873,8 @@ pub async fn acp_save_agent_skill(
     fs::write(&content_path, content)
         .map_err(|e| AcpError::protocol(format!("failed to write skill content: {e}")))?;
 
+    skill.description = read_skill_description(&content_path);
+
     Ok(skill)
 }
 
@@ -3081,6 +3895,11 @@ pub async fn acp_delete_agent_skill(
 
     let skill = locate_existing_skill_across_dirs(&dirs, spec.kind, &id, scope)
         .ok_or_else(|| AcpError::protocol(format!("skill not found: {id}")))?;
+    if is_read_only_skill_path(agent_type, Path::new(&skill.path)) {
+        return Err(AcpError::protocol(format!(
+            "skill '{id}' is a built-in system skill and cannot be deleted"
+        )));
+    }
     let skill_path = PathBuf::from(&skill.path);
     remove_skill_entry(&skill_path)
         .map_err(|e| AcpError::protocol(format!("failed to delete skill entry: {e}")))?;
@@ -3088,7 +3907,7 @@ pub async fn acp_delete_agent_skill(
 }
 
 pub(crate) async fn opencode_list_plugins_core() -> Result<PluginCheckSummary, AcpError> {
-    opencode_plugins::check_opencode_plugins(None).map_err(|e| AcpError::Protocol(e))
+    opencode_plugins::check_opencode_plugins(None).map_err(AcpError::Protocol)
 }
 
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
@@ -3103,7 +3922,7 @@ pub(crate) async fn opencode_install_plugins_core(
 ) -> Result<(), AcpError> {
     opencode_plugins::install_missing_plugins(names, task_id, emitter)
         .await
-        .map_err(|e| AcpError::Protocol(e))
+        .map_err(AcpError::Protocol)
 }
 
 #[cfg(feature = "tauri-runtime")]
@@ -3122,7 +3941,7 @@ pub(crate) async fn opencode_uninstall_plugin_core(
 ) -> Result<PluginCheckSummary, AcpError> {
     opencode_plugins::uninstall_plugin(name)
         .await
-        .map_err(|e| AcpError::Protocol(e))
+        .map_err(AcpError::Protocol)
 }
 
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
@@ -3345,4 +4164,285 @@ pub(crate) async fn codex_poll_device_code_core(
         refresh_token: Some(tokens.refresh_token),
         account_id: Some(account_id),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn unique_test_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("codeg-acp-{name}-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("create test directory");
+        dir
+    }
+
+    #[test]
+    fn sanitize_custom_version_accepts_version_like_inputs() {
+        assert_eq!(sanitize_custom_version("0.44.1").as_deref(), Some("0.44.1"));
+        assert_eq!(
+            sanitize_custom_version("  v1.2.3 ").as_deref(),
+            Some("1.2.3")
+        );
+        assert_eq!(
+            sanitize_custom_version("2026.5.20").as_deref(),
+            Some("2026.5.20")
+        );
+        assert_eq!(
+            sanitize_custom_version("1.2.3-beta.1").as_deref(),
+            Some("1.2.3-beta.1")
+        );
+        assert_eq!(
+            sanitize_custom_version("1.0.0+build.5").as_deref(),
+            Some("1.0.0+build.5")
+        );
+    }
+
+    #[test]
+    fn sanitize_custom_version_rejects_invalid_inputs() {
+        for bad in [
+            "",
+            "   ",
+            "latest",
+            "next",
+            "v",
+            "2",
+            "v9",
+            "1.2 .3",
+            "1.2.3@evil",
+            "../etc",
+        ] {
+            assert_eq!(sanitize_custom_version(bad), None, "expected {bad:?} rejected");
+        }
+    }
+
+    #[test]
+    fn build_npm_install_spec_uses_registry_when_no_override() {
+        assert_eq!(
+            build_npm_install_spec("@google/gemini-cli@0.44.1", None).unwrap(),
+            "@google/gemini-cli@0.44.1"
+        );
+        assert_eq!(
+            build_npm_install_spec("@google/gemini-cli@0.44.1", Some("  ")).unwrap(),
+            "@google/gemini-cli@0.44.1"
+        );
+    }
+
+    #[test]
+    fn build_npm_install_spec_applies_custom_version() {
+        assert_eq!(
+            build_npm_install_spec("@google/gemini-cli@0.44.1", Some("0.43.0")).unwrap(),
+            "@google/gemini-cli@0.43.0"
+        );
+        // Scoped/plain package name is preserved; a leading `v` is stripped.
+        assert_eq!(
+            build_npm_install_spec("cline@3.0.9", Some("v2.0.0")).unwrap(),
+            "cline@2.0.0"
+        );
+    }
+
+    #[test]
+    fn build_npm_install_spec_rejects_invalid_override() {
+        assert!(build_npm_install_spec("cline@3.0.9", Some("latest")).is_err());
+    }
+
+    #[test]
+    fn apply_custom_version_to_url_substitutes_all_occurrences() {
+        // Codex URL embeds the version twice (path tag + asset filename).
+        let codex = "https://github.com/zed-industries/codex-acp/releases/download/v0.15.0/codex-acp-0.15.0-aarch64-apple-darwin.tar.gz";
+        assert_eq!(
+            apply_custom_version_to_url(codex, "0.15.0", "0.14.0"),
+            "https://github.com/zed-industries/codex-acp/releases/download/v0.14.0/codex-acp-0.14.0-aarch64-apple-darwin.tar.gz"
+        );
+
+        // OpenCode URL embeds the version once (path tag only).
+        let opencode = "https://github.com/anomalyco/opencode/releases/download/v1.15.12/opencode-darwin-arm64.zip";
+        assert_eq!(
+            apply_custom_version_to_url(opencode, "1.15.12", "1.16.0"),
+            "https://github.com/anomalyco/opencode/releases/download/v1.16.0/opencode-darwin-arm64.zip"
+        );
+    }
+
+    #[test]
+    fn parses_npm_global_prefix_stdout() {
+        let prefix = npm_global_prefix_from_stdout(b"npm-prefix\n");
+        assert_eq!(prefix.as_deref(), Some(Path::new("npm-prefix")));
+
+        assert_eq!(npm_global_prefix_from_stdout(b"\n"), None);
+    }
+
+    #[test]
+    fn resolves_npx_command_from_npm_prefix_bin_dir() {
+        let prefix = unique_test_dir("npm-prefix");
+        let bin_dir = npm_prefix_bin_dir(&prefix);
+        std::fs::create_dir_all(&bin_dir).expect("create npm prefix bin directory");
+
+        #[cfg(windows)]
+        let command_path = bin_dir.join("gemini.cmd");
+        #[cfg(not(windows))]
+        let command_path = bin_dir.join("gemini");
+
+        std::fs::write(&command_path, "").expect("write command shim");
+        #[cfg(not(windows))]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            let mut permissions = std::fs::metadata(&command_path)
+                .expect("read command shim metadata")
+                .permissions();
+            permissions.set_mode(0o755);
+            std::fs::set_permissions(&command_path, permissions)
+                .expect("mark command shim executable");
+        }
+
+        let resolved = resolve_npx_command_from_npm_prefix("gemini", &prefix);
+
+        assert_eq!(resolved.as_deref(), Some(command_path.as_path()));
+        let _ = std::fs::remove_dir_all(prefix);
+    }
+
+    #[tokio::test]
+    async fn does_not_cache_failed_npm_global_prefix_resolution() {
+        let cache = tokio::sync::OnceCell::const_new();
+        let first = cached_npm_global_prefix_with(&cache, || async { None }).await;
+        assert_eq!(first, None);
+
+        let expected = PathBuf::from("npm-prefix");
+        let second =
+            cached_npm_global_prefix_with(&cache, || async { Some(expected.clone()) }).await;
+
+        assert_eq!(second, Some(expected));
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn ignores_non_executable_npx_command_from_npm_prefix_bin_dir() {
+        let prefix = unique_test_dir("npm-prefix-non-executable");
+        let bin_dir = npm_prefix_bin_dir(&prefix);
+        std::fs::create_dir_all(&bin_dir).expect("create npm prefix bin directory");
+        let command_path = bin_dir.join("gemini");
+        std::fs::write(&command_path, "").expect("write command shim");
+
+        let resolved = resolve_npx_command_from_npm_prefix("gemini", &prefix);
+
+        assert_eq!(resolved, None);
+        let _ = std::fs::remove_dir_all(prefix);
+    }
+
+    fn write_skill_md(name: &str, body: &str) -> (PathBuf, PathBuf) {
+        let dir = unique_test_dir(name);
+        let path = dir.join("SKILL.md");
+        std::fs::write(&path, body).expect("write skill markdown");
+        (dir, path)
+    }
+
+    #[test]
+    fn frontmatter_scalar_strips_quotes_and_rejects_blocks() {
+        assert_eq!(
+            parse_frontmatter_scalar(" \"hello world\"  ").as_deref(),
+            Some("hello world")
+        );
+        assert_eq!(
+            parse_frontmatter_scalar(" 'single quoted' ").as_deref(),
+            Some("single quoted")
+        );
+        assert_eq!(
+            parse_frontmatter_scalar("  unquoted value  ").as_deref(),
+            Some("unquoted value")
+        );
+        assert_eq!(parse_frontmatter_scalar("   ").as_deref(), None);
+        assert_eq!(parse_frontmatter_scalar(" |").as_deref(), None);
+        assert_eq!(parse_frontmatter_scalar(" > folded").as_deref(), None);
+    }
+
+    #[test]
+    fn skill_description_reads_top_level_description() {
+        let (dir, path) = write_skill_md(
+            "skill-top-desc",
+            "---\nname: demo\ndescription: top level desc\n---\nbody\n",
+        );
+        assert_eq!(
+            read_skill_description(&path).as_deref(),
+            Some("top level desc")
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn skill_description_prefers_nested_short_description() {
+        let (dir, path) = write_skill_md(
+            "skill-short-desc",
+            "---\nname: demo\ndescription: long fallback\nmetadata:\n  short-description: pithy summary\n---\nbody\n",
+        );
+        assert_eq!(
+            read_skill_description(&path).as_deref(),
+            Some("pithy summary")
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn skill_description_falls_back_when_no_short() {
+        let (dir, path) = write_skill_md(
+            "skill-fallback",
+            "---\nname: demo\ndescription: \"quoted fallback\"\nmetadata:\n  other: value\n---\nbody\n",
+        );
+        assert_eq!(
+            read_skill_description(&path).as_deref(),
+            Some("quoted fallback")
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn skill_description_ignores_nested_description_key() {
+        // A nested `description:` (e.g. inside `metadata:` or a tool block)
+        // must not be picked up as the top-level fallback.
+        let (dir, path) = write_skill_md(
+            "skill-nested-desc",
+            "---\nname: demo\nmetadata:\n  description: nested only\n---\nbody\n",
+        );
+        assert_eq!(read_skill_description(&path), None);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn skill_description_requires_frontmatter_fence() {
+        let (dir, path) = write_skill_md(
+            "skill-no-fence",
+            "name: demo\ndescription: not really frontmatter\n",
+        );
+        assert_eq!(read_skill_description(&path), None);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn skill_description_stops_at_closing_fence() {
+        let (dir, path) = write_skill_md(
+            "skill-closed",
+            "---\nname: demo\n---\ndescription: in body, not frontmatter\n",
+        );
+        assert_eq!(read_skill_description(&path), None);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn skill_description_handles_utf8_content() {
+        let (dir, path) = write_skill_md(
+            "skill-utf8",
+            "---\nname: demo\ndescription: 中文 描述 🚀\n---\nbody\n",
+        );
+        assert_eq!(
+            read_skill_description(&path).as_deref(),
+            Some("中文 描述 🚀")
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn skill_description_returns_none_for_missing_file() {
+        let dir = unique_test_dir("skill-missing");
+        let path = dir.join("does-not-exist.md");
+        assert_eq!(read_skill_description(&path), None);
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }

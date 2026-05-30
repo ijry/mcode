@@ -104,17 +104,34 @@ fn ts_to_datetime(ts: i64) -> DateTime<Utc> {
     Utc.timestamp_millis_opt(ts).single().unwrap_or_default()
 }
 
-pub struct ClineParser;
+pub struct ClineParser {
+    base_dir: PathBuf,
+}
+
+impl Default for ClineParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl ClineParser {
     pub fn new() -> Self {
-        Self
+        Self {
+            base_dir: cline_data_dir(),
+        }
+    }
+
+    /// Test-only constructor that lets callers point the parser at a fixture
+    /// directory instead of `~/.cline/data`.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn with_base_dir(base_dir: PathBuf) -> Self {
+        Self { base_dir }
     }
 }
 
 impl AgentParser for ClineParser {
     fn list_conversations(&self) -> Result<Vec<ConversationSummary>, ParseError> {
-        let history_path = cline_data_dir().join("state").join("taskHistory.json");
+        let history_path = self.base_dir.join("state").join("taskHistory.json");
         if !history_path.exists() {
             return Ok(vec![]);
         }
@@ -124,7 +141,7 @@ impl AgentParser for ClineParser {
 
         let mut summaries = Vec::new();
         for entry in entries {
-            let tasks_dir = cline_data_dir().join("tasks").join(&entry.id);
+            let tasks_dir = self.base_dir.join("tasks").join(&entry.id);
             if !tasks_dir.exists() {
                 continue;
             }
@@ -170,6 +187,9 @@ impl AgentParser for ClineParser {
                 message_count,
                 model,
                 git_branch: None,
+                parent_id: None,
+                parent_tool_use_id: None,
+                delegation_call_id: None,
             });
         }
 
@@ -177,7 +197,7 @@ impl AgentParser for ClineParser {
     }
 
     fn get_conversation(&self, conversation_id: &str) -> Result<ConversationDetail, ParseError> {
-        let tasks_dir = cline_data_dir().join("tasks").join(conversation_id);
+        let tasks_dir = self.base_dir.join("tasks").join(conversation_id);
         if !tasks_dir.exists() {
             return Err(ParseError::ConversationNotFound(
                 conversation_id.to_string(),
@@ -206,7 +226,7 @@ impl AgentParser for ClineParser {
             .and_then(|u| u.model_id.clone());
 
         // Read taskHistory for cwd and title
-        let history_path = cline_data_dir().join("state").join("taskHistory.json");
+        let history_path = self.base_dir.join("state").join("taskHistory.json");
         let history_entry = fs::read_to_string(&history_path)
             .ok()
             .and_then(|raw| serde_json::from_str::<Vec<TaskHistoryEntry>>(&raw).ok())
@@ -262,6 +282,7 @@ impl AgentParser for ClineParser {
                         usage,
                         duration_ms: None,
                         model,
+                        completed_at: Some(timestamp),
                     });
                 }
                 "user" => {
@@ -281,6 +302,7 @@ impl AgentParser for ClineParser {
                             usage: None,
                             duration_ms: None,
                             model: None,
+                            completed_at: Some(timestamp),
                         });
                     }
 
@@ -295,6 +317,7 @@ impl AgentParser for ClineParser {
                             usage: None,
                             duration_ms: None,
                             model: None,
+                            completed_at: Some(timestamp),
                         });
                     }
                 }
@@ -318,6 +341,9 @@ impl AgentParser for ClineParser {
             message_count: turns.len() as u32,
             model: default_model,
             git_branch: None,
+            parent_id: None,
+            parent_tool_use_id: None,
+            delegation_call_id: None,
         };
 
         Ok(ConversationDetail {
@@ -360,6 +386,7 @@ fn parse_user_message_parts(content: &serde_json::Value) -> UserMessageParts {
                 tool_use_id: None,
                 output_preview: Some(truncate_str(&output, 2000)),
                 is_error,
+                agent_stats: None,
             });
 
             // If the tool result also contains <feedback>, extract it
@@ -531,6 +558,7 @@ fn parse_content_blocks(content: &serde_json::Value) -> Vec<ContentBlock> {
                             tool_use_id,
                             tool_name,
                             input_preview,
+                            meta: None,
                         });
                     }
                     "tool_result" => {
@@ -550,6 +578,7 @@ fn parse_content_blocks(content: &serde_json::Value) -> Vec<ContentBlock> {
                             tool_use_id,
                             output_preview,
                             is_error,
+                            agent_stats: None,
                         });
                     }
                     "thinking" => {

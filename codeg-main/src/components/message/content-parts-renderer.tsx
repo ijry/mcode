@@ -1,13 +1,25 @@
 import { memo, useMemo, useState, type ReactNode } from "react"
 import type { AdaptedContentPart } from "@/lib/adapters/ai-elements-adapter"
+import {
+  classifyToolKind,
+  TOOL_KIND_ORDER,
+  type ToolKindLabel,
+} from "@/lib/adapters/tool-kind-classifier"
 import type { MessageRole } from "@/lib/types"
 import { normalizeToolName } from "@/lib/tool-call-normalization"
 import { useTranslations } from "next-intl"
+import { cn } from "@/lib/utils"
 import {
   countUnifiedDiffLineChanges,
   estimateChangedLineStats,
 } from "@/lib/line-change-stats"
 import { MessageResponse } from "@/components/ai-elements/message"
+import { Shimmer } from "@/components/ai-elements/shimmer"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
 import {
   Tool,
   ToolHeader,
@@ -18,11 +30,15 @@ import { Terminal } from "@/components/ai-elements/terminal"
 import { CodeBlock } from "@/components/ai-elements/code-block"
 import { UnifiedDiffPreview } from "@/components/diff/unified-diff-preview"
 import { generateUnifiedDiff } from "@/lib/unified-diff-generator"
+import { FilePathLink } from "@/components/ai-elements/link-safety"
 import {
   Reasoning,
   ReasoningTrigger,
   ReasoningContent,
 } from "@/components/ai-elements/reasoning"
+import { AgentToolCallPart } from "./agent-tool-call"
+import { DelegatedSubThread } from "./delegated-sub-thread"
+import { GeneratedImagesBlock } from "./generated-images-block"
 import {
   FileTextIcon,
   FilePenLineIcon,
@@ -40,12 +56,14 @@ import {
   MinusIcon,
   PlusIcon,
   WrenchIcon,
+  ChevronRightIcon,
+  BrainIcon,
 } from "lucide-react"
 
 // ── helpers ────────────────────────────────────────────────────────────
 
 /** Try JSON.parse; return null on failure. */
-function tryParseJson(s: string): Record<string, unknown> | null {
+export function tryParseJson(s: string): Record<string, unknown> | null {
   try {
     const v = JSON.parse(s)
     return typeof v === "object" && v !== null && !Array.isArray(v) ? v : null
@@ -55,7 +73,7 @@ function tryParseJson(s: string): Record<string, unknown> | null {
 }
 
 /** Regex-extract a JSON string value for a given key (works on truncated JSON). */
-function extractJsonField(input: string, key: string): string | null {
+export function extractJsonField(input: string, key: string): string | null {
   const re = new RegExp(`"${key}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`)
   const m = input.match(re)
   return m?.[1]?.replace(/\\"/g, '"').replace(/\\\\/g, "\\") ?? null
@@ -191,7 +209,7 @@ function shortPath(p: string): string {
 }
 
 /** Truncate text to maxLen, appending "…" if truncated. */
-function ellipsis(s: string, maxLen: number): string {
+export function ellipsis(s: string, maxLen: number): string {
   return s.length > maxLen ? s.slice(0, maxLen - 1) + "…" : s
 }
 
@@ -809,6 +827,7 @@ function getToolIcon(
   if (name === "apply_patch") return <FilePenLineIcon className={ICON_CLASS} />
   if (name === "glob" || name === "grep")
     return <SearchIcon className={ICON_CLASS} />
+  if (name === "memory_recall") return <BrainIcon className={ICON_CLASS} />
   if (name === "webfetch" || name === "websearch")
     return <GlobeIcon className={ICON_CLASS} />
   if (name === "todowrite") return <ListTodoIcon className={ICON_CLASS} />
@@ -1191,7 +1210,9 @@ function EditToolInput({ input }: { input: Record<string, unknown> }) {
     )
   }, [oldString, newString, filePath, startLine])
 
-  return diffCode ? <UnifiedDiffPreview diffText={diffCode} /> : null
+  return diffCode ? (
+    <UnifiedDiffPreview diffText={diffCode} clickableFilePath />
+  ) : null
 }
 
 /** Edit tool (changes payload): combined diff view */
@@ -1220,7 +1241,9 @@ function EditChangesToolInput({ changes }: { changes: EditChangePreview[] }) {
     return diffParts.join("\n").trim()
   }, [changes])
 
-  return diffCode ? <UnifiedDiffPreview diffText={diffCode} /> : null
+  return diffCode ? (
+    <UnifiedDiffPreview diffText={diffCode} clickableFilePath />
+  ) : null
 }
 
 /** Bash / exec_command: terminal-style command display */
@@ -1280,16 +1303,23 @@ function parseReadOutput(raw: string): { startLine: number; content: string } {
 function FileContentLines({
   content,
   startLine = 1,
+  highlight,
 }: {
   content: string
   startLine?: number
+  /** "added" tints every line green to indicate new content (e.g. Write tool). */
+  highlight?: "added"
 }) {
   const lines = useMemo(() => content.split("\n"), [content])
+  const rowClass =
+    highlight === "added"
+      ? "flex bg-green-500/10 text-green-900 dark:text-green-300"
+      : "flex"
 
   return (
     <div className="inline-block min-w-full font-mono text-[12px] leading-[20px]">
       {lines.map((line, i) => (
-        <div key={i} className="flex">
+        <div key={i} className={rowClass}>
           <span className="w-[3.5rem] shrink-0 select-none pr-1 text-right text-muted-foreground/40">
             {startLine + i}
           </span>
@@ -1347,12 +1377,18 @@ function FileToolInput({
         <span className="shrink-0 rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground">
           {isRead ? "READ" : "WRITE"}
         </span>
-        <span
-          className="min-w-0 flex-1 truncate font-mono text-foreground"
-          title={filePath ?? undefined}
-        >
-          {filePath ?? t("unknown")}
-        </span>
+        {filePath ? (
+          <FilePathLink
+            filePath={filePath}
+            className="min-w-0 flex-1 font-mono text-foreground"
+          >
+            {filePath}
+          </FilePathLink>
+        ) : (
+          <span className="min-w-0 flex-1 truncate font-mono text-foreground">
+            {t("unknown")}
+          </span>
+        )}
         {badges.length > 0 && (
           <span className="ml-auto inline-flex shrink-0 items-center gap-2 text-[10px] text-muted-foreground">
             {badges.map((b) => (
@@ -1363,7 +1399,11 @@ function FileToolInput({
       </header>
       {displayContent && (
         <div className="overflow-auto">
-          <FileContentLines content={displayContent} startLine={startLine} />
+          <FileContentLines
+            content={displayContent}
+            startLine={startLine}
+            highlight={isRead ? undefined : "added"}
+          />
         </div>
       )}
     </section>
@@ -1577,7 +1617,7 @@ function TodoWriteToolInput({ input }: { input: Record<string, unknown> }) {
 }
 
 function ApplyPatchToolInput({ input }: { input: string }) {
-  return <UnifiedDiffPreview diffText={input} />
+  return <UnifiedDiffPreview diffText={input} clickableFilePath />
 }
 
 // ── Switch mode (plan) input ──────────────────────────────────────────
@@ -1630,7 +1670,7 @@ const HIDDEN_FIELDS = new Set(["dangerouslyDisableSandbox"])
 
 function GenericToolInput({ input }: { input: string }) {
   const t = useTranslations("Folder.chat.contentParts")
-  const parsed = tryParseJson(input)
+  const parsed = useMemo(() => tryParseJson(input), [input])
 
   if (!parsed) {
     return (
@@ -1715,7 +1755,7 @@ function StructuredToolInput({
 }) {
   const t = useTranslations("Folder.chat.contentParts")
   const name = toolName.toLowerCase()
-  const parsed = tryParseJson(input)
+  const parsed = useMemo(() => tryParseJson(input), [input])
   const truncated =
     (name === "edit" || name === "write" || name === "apply_patch") &&
     isTruncatedInput(input)
@@ -1782,7 +1822,7 @@ function StructuredToolInput({
       return (
         <>
           {truncationBanner}
-          <UnifiedDiffPreview diffText={output} />
+          <UnifiedDiffPreview diffText={output} clickableFilePath />
         </>
       )
     }
@@ -2058,7 +2098,7 @@ const TextPart = memo(function TextPart({
   }
 
   return (
-    <div className="break-words text-sm prose prose-sm dark:prose-invert max-w-none [&_ul]:list-inside [&_ol]:list-inside">
+    <div className='break-words text-sm prose prose-sm dark:prose-invert max-w-none [&_ul]:list-inside [&_ol]:list-inside [&_[data-streamdown="code-block-body"]]:max-h-96 [&_[data-streamdown="code-block-body"]]:overflow-auto'>
       <MessageResponse>{text}</MessageResponse>
     </div>
   )
@@ -2240,6 +2280,45 @@ const ToolCallPart = memo(function ToolCallPart({
       toolNameLower === "exitplanmode" ||
       isFileTool) &&
     !part.errorText
+  // Agent/subagent tools get a dedicated container rendering
+  if (toolNameLower === "agent") {
+    return (
+      <AgentToolCallPart
+        part={part}
+        renderToolCall={(p, key) => (
+          // Strip agentStats to prevent recursive Agent nesting
+          <ToolCallPart key={key} part={{ ...p, agentStats: undefined }} />
+        )}
+      />
+    )
+  }
+
+  // Multi-agent delegation tool: surfaces an inline DelegatedSubThread
+  // bound to the child sub-session via parent_tool_use_id. Matches the
+  // bare `delegate_to_agent` (post-normalization) plus any host-specific
+  // server-prefixed form (`mcp__<server>__delegate_to_agent`,
+  // `<server>/delegate_to_agent`, `<server>.delegate_to_agent`, etc.)
+  // as a defensive fallback in case the value reaches the renderer
+  // un-normalized. Falls through to the normal renderer when no
+  // toolCallId is available (snapshot replays without a live binding)
+  // so the user still sees the tool input/output.
+  if (
+    (toolNameLower === "delegate_to_agent" ||
+      /[^a-z0-9]delegate_to_agent$/.test(toolNameLower)) &&
+    part.toolCallId
+  ) {
+    return (
+      <DelegatedSubThread
+        parentToolUseId={part.toolCallId}
+        input={part.input ?? null}
+        output={part.output ?? null}
+        errorText={part.errorText ?? null}
+        state={part.state}
+        meta={part.meta ?? null}
+      />
+    )
+  }
+
   // Cline: attempt_completion — render as an expanded card with result + progress
   if (toolNameLower === "attempt_completion") {
     const parsedCompletion = tryParseJson(part.input ?? "")
@@ -2297,8 +2376,7 @@ const ToolCallPart = memo(function ToolCallPart({
             output={part.output}
           />
         )}
-        {(toolNameLower === "task" || toolNameLower === "agent") &&
-        part.output ? (
+        {toolNameLower === "task" && part.output ? (
           <div className="text-sm prose prose-sm dark:prose-invert max-w-none [&_ul]:list-inside [&_ol]:list-inside">
             <MessageResponse>{part.output}</MessageResponse>
           </div>
@@ -2355,11 +2433,105 @@ const ReasoningPart = memo(function ReasoningPart({
 }: {
   part: Extract<AdaptedContentPart, { type: "reasoning" }>
 }) {
+  const hasContent = part.content.trim().length > 0
+  const expandable = hasContent || part.isStreaming
   return (
-    <Reasoning isStreaming={part.isStreaming}>
+    <Reasoning isStreaming={part.isStreaming} expandable={expandable}>
       <ReasoningTrigger />
-      <ReasoningContent>{part.content}</ReasoningContent>
+      {expandable && <ReasoningContent>{part.content}</ReasoningContent>}
     </Reasoning>
+  )
+})
+
+const ToolGroupPart = memo(function ToolGroupPart({
+  part,
+}: {
+  part: Extract<AdaptedContentPart, { type: "tool-group" }>
+}) {
+  const t = useTranslations("Folder.chat.contentParts.toolGroup")
+  const [open, setOpen] = useState(false)
+
+  const { phrases, errorPhrase } = useMemo(() => {
+    const counts = TOOL_KIND_ORDER.reduce(
+      (acc, kind) => {
+        acc[kind] = 0
+        return acc
+      },
+      {} as Record<ToolKindLabel, number>
+    )
+    let errors = 0
+    for (const item of part.items) {
+      counts[classifyToolKind(item.toolName)] += 1
+      if (item.state === "output-error" || item.errorText) errors += 1
+    }
+    const built: string[] = []
+    for (const kind of TOOL_KIND_ORDER) {
+      const count = counts[kind]
+      if (count <= 0) continue
+      built.push(t(kind, { count }))
+    }
+    if (built.length === 0) {
+      built.push(t("other", { count: part.items.length }))
+    }
+    return {
+      phrases: built,
+      errorPhrase: errors > 0 ? t("errorSuffix", { count: errors }) : null,
+    }
+  }, [part, t])
+
+  if (part.items.length === 0) return null
+
+  const joiner = t("joiner")
+  const titleText = phrases.join(joiner)
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen} className="w-full">
+      <CollapsibleTrigger
+        className={cn(
+          "group inline-flex max-w-full items-center gap-1.5 rounded-full bg-muted/60 px-3.5 py-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        )}
+      >
+        <ChevronRightIcon
+          aria-hidden="true"
+          className={cn(
+            "size-3 shrink-0 opacity-60 transition-transform",
+            open && "rotate-90"
+          )}
+        />
+        <span className="min-w-0 truncate">
+          {part.isStreaming ? (
+            <Shimmer as="span" duration={1} shineColor="var(--primary)">
+              {titleText}
+            </Shimmer>
+          ) : (
+            titleText
+          )}
+          {errorPhrase && (
+            <span className="text-destructive">
+              {joiner}
+              {errorPhrase}
+            </span>
+          )}
+        </span>
+      </CollapsibleTrigger>
+      <CollapsibleContent
+        className={cn(
+          "w-full outline-none",
+          "data-[state=open]:animate-in data-[state=closed]:animate-out",
+          "data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
+          "data-[state=closed]:slide-out-to-top-1 data-[state=open]:slide-in-from-top-1"
+        )}
+      >
+        <div className="mt-3 w-full space-y-3">
+          {part.items.map((item, idx) => (
+            <ToolCallPart
+              key={`grouped-tc-${item.toolCallId ?? idx}-${idx}`}
+              part={item}
+            />
+          ))}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
   )
 })
 
@@ -2391,6 +2563,10 @@ export const ContentPartsRenderer = memo(function ContentPartsRenderer({
           return <ToolCallPart key={`tc-${part.toolCallId ?? i}`} part={part} />
         }
 
+        if (part.type === "tool-group") {
+          return <ToolGroupPart key={`tg-${i}`} part={part} />
+        }
+
         if (part.type === "tool-result") {
           return (
             <ToolResultPart key={`tr-${part.toolCallId ?? i}`} part={part} />
@@ -2399,6 +2575,17 @@ export const ContentPartsRenderer = memo(function ContentPartsRenderer({
 
         if (part.type === "reasoning") {
           return <ReasoningPart key={`reasoning-${i}`} part={part} />
+        }
+
+        if (part.type === "generated-image") {
+          return (
+            <GeneratedImagesBlock
+              key={`gimg-${i}`}
+              revisedPrompt={part.revisedPrompt}
+              image={part.image}
+              status={part.status}
+            />
+          )
         }
 
         return null

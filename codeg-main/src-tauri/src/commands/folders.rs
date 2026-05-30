@@ -17,13 +17,11 @@ use walkdir::WalkDir;
 use tauri::Manager;
 
 use crate::app_error::AppCommandError;
-#[cfg(feature = "tauri-runtime")]
 use crate::db::error::DbError;
 use crate::db::service::folder_service;
 use crate::db::AppDatabase;
 use crate::models::GitCredentials;
-#[cfg(feature = "tauri-runtime")]
-use crate::models::{FolderDetail, FolderHistoryEntry, OpenedConversation};
+use crate::models::{FolderDetail, FolderHistoryEntry};
 use crate::web::event_bridge::EventEmitter;
 
 /// Configure a git command for remote operations:
@@ -307,6 +305,8 @@ fn git_command_error(operation: &str, stderr: &[u8]) -> AppCommandError {
     AppCommandError::external_command(format!("git {operation} failed"), stderr)
 }
 
+use crate::git_repo::ensure_git_repo;
+
 async fn detect_conflicts(path: &str) -> Result<Vec<String>, AppCommandError> {
     let output = crate::process::tokio_command("git")
         .args(["-c", "core.quotePath=false"])
@@ -447,15 +447,159 @@ async fn estimate_push_commit_count(path: &str) -> usize {
     parse_count_from_output(&output.stdout).unwrap_or(0)
 }
 
+// ---------------------------------------------------------------------------
+// Shared core functions (used by both Tauri commands and web handlers)
+// ---------------------------------------------------------------------------
+
+pub async fn get_folder_core(db: &AppDatabase, folder_id: i32) -> Result<FolderDetail, DbError> {
+    folder_service::get_folder_by_id(&db.conn, folder_id)
+        .await?
+        .ok_or_else(|| DbError::Migration(format!("Folder {} not found", folder_id)))
+}
+
+pub async fn load_folder_history_core(
+    db: &AppDatabase,
+) -> Result<Vec<FolderHistoryEntry>, AppCommandError> {
+    folder_service::list_folders(&db.conn)
+        .await
+        .map_err(AppCommandError::from)
+}
+
+pub async fn add_folder_to_history_core(
+    db: &AppDatabase,
+    path: String,
+) -> Result<FolderHistoryEntry, DbError> {
+    folder_service::add_folder(&db.conn, &path).await
+}
+
+pub async fn remove_folder_from_history_core(
+    db: &AppDatabase,
+    path: String,
+) -> Result<(), AppCommandError> {
+    folder_service::remove_folder(&db.conn, &path)
+        .await
+        .map_err(AppCommandError::from)
+}
+
+pub async fn list_open_folders_core(
+    db: &AppDatabase,
+) -> Result<Vec<FolderHistoryEntry>, AppCommandError> {
+    folder_service::list_open_folders(&db.conn)
+        .await
+        .map_err(AppCommandError::from)
+}
+
+pub async fn list_open_folder_details_core(
+    db: &AppDatabase,
+) -> Result<Vec<FolderDetail>, AppCommandError> {
+    folder_service::list_open_folder_details(&db.conn)
+        .await
+        .map_err(AppCommandError::from)
+}
+
+pub async fn list_all_folder_details_core(
+    db: &AppDatabase,
+) -> Result<Vec<FolderDetail>, AppCommandError> {
+    folder_service::list_all_folder_details(&db.conn)
+        .await
+        .map_err(AppCommandError::from)
+}
+
+pub async fn open_folder_core(
+    db: &AppDatabase,
+    path: String,
+) -> Result<FolderDetail, AppCommandError> {
+    let entry = folder_service::add_folder(&db.conn, &path)
+        .await
+        .map_err(AppCommandError::from)?;
+    folder_service::get_folder_by_id(&db.conn, entry.id)
+        .await
+        .map_err(AppCommandError::from)?
+        .ok_or_else(|| AppCommandError::not_found("Folder not found after add"))
+}
+
+/// Open a folder into the workspace and announce it so the workspace window
+/// can surface it. Used by the project launcher, which lives in its own
+/// window/tab and can't reach the workspace's React state directly. Emitting
+/// through the shared `EventEmitter` routes the signal correctly in every
+/// runtime — Tauri events (desktop), the WebSocket broadcaster (server), and
+/// the remote server's broadcaster (remote desktop) — so only windows talking
+/// to this same backend react.
+pub async fn open_folder_in_workspace_core(
+    emitter: &EventEmitter,
+    db: &AppDatabase,
+    path: String,
+) -> Result<FolderDetail, AppCommandError> {
+    let detail = open_folder_core(db, path).await?;
+    crate::web::event_bridge::emit_event(emitter, "folder://open-in-workspace", &detail);
+    Ok(detail)
+}
+
+pub async fn open_folder_by_id_core(
+    db: &AppDatabase,
+    folder_id: i32,
+) -> Result<FolderDetail, AppCommandError> {
+    folder_service::set_folder_open(&db.conn, folder_id, true)
+        .await
+        .map_err(AppCommandError::from)?;
+    folder_service::get_folder_by_id(&db.conn, folder_id)
+        .await
+        .map_err(AppCommandError::from)?
+        .ok_or_else(|| AppCommandError::not_found(format!("Folder {folder_id} not found")))
+}
+
+pub async fn remove_folder_from_workspace_core(
+    db: &AppDatabase,
+    folder_id: i32,
+) -> Result<(), AppCommandError> {
+    use crate::db::service::tab_service;
+    tab_service::delete_tabs_for_folder(&db.conn, folder_id)
+        .await
+        .map_err(AppCommandError::from)?;
+    folder_service::set_folder_open(&db.conn, folder_id, false)
+        .await
+        .map_err(AppCommandError::from)
+}
+
+pub async fn reorder_folders_core(db: &AppDatabase, ids: Vec<i32>) -> Result<(), AppCommandError> {
+    folder_service::reorder_folders(&db.conn, ids)
+        .await
+        .map_err(AppCommandError::from)
+}
+
+pub async fn update_folder_color_core(
+    db: &AppDatabase,
+    folder_id: i32,
+    color: String,
+) -> Result<FolderDetail, AppCommandError> {
+    folder_service::update_folder_color(&db.conn, folder_id, &color)
+        .await
+        .map_err(AppCommandError::from)?
+        .ok_or_else(|| AppCommandError::not_found("Folder not found"))
+}
+
+pub async fn update_folder_default_agent_core(
+    db: &AppDatabase,
+    folder_id: i32,
+    default_agent_type: Option<crate::models::agent::AgentType>,
+) -> Result<FolderDetail, AppCommandError> {
+    folder_service::update_folder_default_agent(&db.conn, folder_id, default_agent_type)
+        .await
+        .map_err(AppCommandError::from)?
+        .ok_or_else(|| AppCommandError::not_found("Folder not found"))
+}
+
+// ---------------------------------------------------------------------------
+// Tauri command wrappers (thin shims over _core)
+// ---------------------------------------------------------------------------
+
 #[cfg(feature = "tauri-runtime")]
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
 pub async fn get_folder(
     db: tauri::State<'_, AppDatabase>,
     folder_id: i32,
 ) -> Result<FolderDetail, DbError> {
-    folder_service::get_folder_by_id(&db.conn, folder_id)
-        .await?
-        .ok_or_else(|| DbError::Migration(format!("Folder {} not found", folder_id)))
+    get_folder_core(&db, folder_id).await
 }
 
 #[cfg(feature = "tauri-runtime")]
@@ -463,9 +607,7 @@ pub async fn get_folder(
 pub async fn load_folder_history(
     db: tauri::State<'_, AppDatabase>,
 ) -> Result<Vec<FolderHistoryEntry>, AppCommandError> {
-    folder_service::list_folders(&db.conn)
-        .await
-        .map_err(AppCommandError::from)
+    load_folder_history_core(&db).await
 }
 
 #[cfg(feature = "tauri-runtime")]
@@ -474,41 +616,7 @@ pub async fn add_folder_to_history(
     db: tauri::State<'_, AppDatabase>,
     path: String,
 ) -> Result<FolderHistoryEntry, DbError> {
-    folder_service::add_folder(&db.conn, &path).await
-}
-
-pub(crate) async fn set_folder_parent_branch_core(
-    conn: &sea_orm::DatabaseConnection,
-    path: &str,
-    parent_branch: Option<String>,
-) -> Result<(), AppCommandError> {
-    use crate::db::entities::folder;
-    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-    let row = folder::Entity::find()
-        .filter(folder::Column::Path.eq(path))
-        .filter(folder::Column::DeletedAt.is_null())
-        .one(conn)
-        .await
-        .map_err(|e| {
-            AppCommandError::database_error("Failed to query folder").with_detail(e.to_string())
-        })?;
-
-    if let Some(folder_model) = row {
-        folder_service::set_folder_parent_branch(conn, folder_model.id, parent_branch)
-            .await
-            .map_err(AppCommandError::from)?;
-    }
-    Ok(())
-}
-
-#[cfg(feature = "tauri-runtime")]
-#[cfg_attr(feature = "tauri-runtime", tauri::command)]
-pub async fn set_folder_parent_branch(
-    db: tauri::State<'_, AppDatabase>,
-    path: String,
-    parent_branch: Option<String>,
-) -> Result<(), AppCommandError> {
-    set_folder_parent_branch_core(&db.conn, &path, parent_branch).await
+    add_folder_to_history_core(&db, path).await
 }
 
 #[cfg(feature = "tauri-runtime")]
@@ -517,19 +625,90 @@ pub async fn remove_folder_from_history(
     db: tauri::State<'_, AppDatabase>,
     path: String,
 ) -> Result<(), AppCommandError> {
-    folder_service::remove_folder(&db.conn, &path)
-        .await
-        .map_err(AppCommandError::from)
+    remove_folder_from_history_core(&db, path).await
 }
 
 #[cfg(feature = "tauri-runtime")]
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
-pub async fn save_folder_opened_conversations(
+pub async fn list_open_folder_details(
+    db: tauri::State<'_, AppDatabase>,
+) -> Result<Vec<FolderDetail>, AppCommandError> {
+    list_open_folder_details_core(&db).await
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn list_all_folder_details(
+    db: tauri::State<'_, AppDatabase>,
+) -> Result<Vec<FolderDetail>, AppCommandError> {
+    list_all_folder_details_core(&db).await
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn open_folder(
+    db: tauri::State<'_, AppDatabase>,
+    path: String,
+) -> Result<FolderDetail, AppCommandError> {
+    open_folder_core(&db, path).await
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn open_folder_in_workspace(
+    app: tauri::AppHandle,
+    db: tauri::State<'_, AppDatabase>,
+    path: String,
+) -> Result<FolderDetail, AppCommandError> {
+    let emitter = EventEmitter::Tauri(app);
+    open_folder_in_workspace_core(&emitter, &db, path).await
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn open_folder_by_id(
     db: tauri::State<'_, AppDatabase>,
     folder_id: i32,
-    items: Vec<OpenedConversation>,
-) -> Result<(), DbError> {
-    folder_service::save_opened_conversations(&db.conn, folder_id, items).await
+) -> Result<FolderDetail, AppCommandError> {
+    open_folder_by_id_core(&db, folder_id).await
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn remove_folder_from_workspace(
+    db: tauri::State<'_, AppDatabase>,
+    folder_id: i32,
+) -> Result<(), AppCommandError> {
+    remove_folder_from_workspace_core(&db, folder_id).await
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn reorder_folders(
+    db: tauri::State<'_, AppDatabase>,
+    ids: Vec<i32>,
+) -> Result<(), AppCommandError> {
+    reorder_folders_core(&db, ids).await
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn update_folder_color(
+    db: tauri::State<'_, AppDatabase>,
+    folder_id: i32,
+    color: String,
+) -> Result<FolderDetail, AppCommandError> {
+    update_folder_color_core(&db, folder_id, color).await
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn update_folder_default_agent(
+    db: tauri::State<'_, AppDatabase>,
+    folder_id: i32,
+    default_agent_type: Option<crate::models::agent::AgentType>,
+) -> Result<FolderDetail, AppCommandError> {
+    update_folder_default_agent_core(&db, folder_id, default_agent_type).await
 }
 
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
@@ -582,6 +761,10 @@ pub async fn clone_repository(
     let data_dir = app_handle.path().app_data_dir().map_err(|e| {
         AppCommandError::external_command("Failed to resolve app data dir", e.to_string())
     })?;
+    // Resolve through the effective data dir so a custom
+    // `CODEG_DATA_DIR` reaches the git credential helper invoked by
+    // this subprocess.
+    let data_dir = crate::paths::resolve_effective_data_dir(&data_dir);
     clone_repository_core(&url, &target_dir, credentials.as_ref(), &db, &data_dir).await
 }
 
@@ -825,6 +1008,10 @@ pub async fn git_pull(
     let data_dir = app_handle.path().app_data_dir().map_err(|e| {
         AppCommandError::external_command("Failed to resolve app data dir", e.to_string())
     })?;
+    // Resolve through the effective data dir so a custom
+    // `CODEG_DATA_DIR` reaches the git credential helper invoked by
+    // this subprocess.
+    let data_dir = crate::paths::resolve_effective_data_dir(&data_dir);
     git_pull_core(&path, credentials.as_ref(), &db, &data_dir).await
 }
 
@@ -897,11 +1084,17 @@ pub async fn git_fetch(
     let data_dir = app_handle.path().app_data_dir().map_err(|e| {
         AppCommandError::external_command("Failed to resolve app data dir", e.to_string())
     })?;
+    // Resolve through the effective data dir so a custom
+    // `CODEG_DATA_DIR` reaches the git credential helper invoked by
+    // this subprocess.
+    let data_dir = crate::paths::resolve_effective_data_dir(&data_dir);
     git_fetch_core(&path, credentials.as_ref(), &db, &data_dir).await
 }
 
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
 pub async fn git_push_info(path: String) -> Result<GitPushInfo, AppCommandError> {
+    ensure_git_repo(&path)?;
+
     // Get current branch name
     let branch_output = crate::process::tokio_command("git")
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
@@ -1054,6 +1247,10 @@ pub async fn git_push(
     let data_dir = app.path().app_data_dir().map_err(|e| {
         AppCommandError::external_command("Failed to resolve app data dir", e.to_string())
     })?;
+    // Resolve through the effective data dir so a custom
+    // `CODEG_DATA_DIR` reaches the git credential helper invoked by
+    // this subprocess.
+    let data_dir = crate::paths::resolve_effective_data_dir(&data_dir);
     let emitter = EventEmitter::Tauri(app.clone());
     git_push_core(
         &data_dir,
@@ -1182,6 +1379,8 @@ pub async fn git_reset(path: String, commit: String, mode: String) -> Result<(),
 
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
 pub async fn git_list_branches(path: String) -> Result<Vec<String>, AppCommandError> {
+    ensure_git_repo(&path)?;
+
     let output = crate::process::tokio_command("git")
         .args(["branch", "--format=%(refname:short)"])
         .current_dir(&path)
@@ -1397,12 +1596,17 @@ pub async fn git_status(
     path: String,
     show_all_untracked: Option<bool>,
 ) -> Result<Vec<GitStatusEntry>, AppCommandError> {
+    ensure_git_repo(&path)?;
+
     let untracked_mode = if show_all_untracked.unwrap_or(false) {
         "-uall"
     } else {
         "-unormal"
     };
+    // `--no-optional-locks` keeps this read-only query from contending with
+    // concurrent agent writes on `.git/index.lock`. See PR #215 follow-up.
     let output = crate::process::tokio_command("git")
+        .arg("--no-optional-locks")
         .args(["-c", "core.quotePath=false"])
         .args(["status", "--porcelain=v1", untracked_mode])
         .current_dir(&path)
@@ -1442,6 +1646,8 @@ pub async fn git_is_tracked(path: String, file: String) -> Result<bool, AppComma
 
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
 pub async fn git_diff(path: String, file: Option<String>) -> Result<String, AppCommandError> {
+    ensure_git_repo(&path)?;
+
     let literal_file = file.as_deref().map(to_git_literal_pathspec);
     let mut args = vec!["diff".to_string(), "HEAD".to_string()];
     if let Some(ref f) = literal_file {
@@ -1481,6 +1687,8 @@ pub async fn git_diff_with_branch(
     branch: String,
     file: Option<String>,
 ) -> Result<String, AppCommandError> {
+    ensure_git_repo(&path)?;
+
     let target_branch = branch.trim();
     if target_branch.is_empty() {
         return Err(AppCommandError::invalid_input(
@@ -1523,6 +1731,8 @@ pub async fn git_show_diff(
     commit: String,
     file: Option<String>,
 ) -> Result<String, AppCommandError> {
+    ensure_git_repo(&path)?;
+
     let literal_file = file.as_deref().map(to_git_literal_pathspec);
     let mut args = vec![
         "show".to_string(),
@@ -1555,6 +1765,8 @@ pub async fn git_show_file(
     file: String,
     ref_name: Option<String>,
 ) -> Result<String, AppCommandError> {
+    ensure_git_repo(&path)?;
+
     let git_ref = ref_name.unwrap_or_else(|| "HEAD".to_string());
     let file_spec = format!("{}:{}", git_ref, file);
 
@@ -1779,6 +1991,8 @@ pub async fn git_add_files(path: String, files: Vec<String>) -> Result<(), AppCo
 
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
 pub async fn git_list_all_branches(path: String) -> Result<GitBranchList, AppCommandError> {
+    ensure_git_repo(&path)?;
+
     let local_fut = crate::process::tokio_command("git")
         .args(["branch", "--format=%(refname:short)"])
         .current_dir(&path)
@@ -1853,6 +2067,8 @@ pub async fn git_list_all_branches(path: String) -> Result<GitBranchList, AppCom
 
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
 pub async fn git_list_remotes(path: String) -> Result<Vec<GitRemote>, AppCommandError> {
+    ensure_git_repo(&path)?;
+
     let output = crate::process::tokio_command("git")
         .args(["remote", "-v"])
         .current_dir(&path)
@@ -1917,6 +2133,10 @@ pub async fn git_fetch_remote(
     let data_dir = app_handle.path().app_data_dir().map_err(|e| {
         AppCommandError::external_command("Failed to resolve app data dir", e.to_string())
     })?;
+    // Resolve through the effective data dir so a custom
+    // `CODEG_DATA_DIR` reaches the git credential helper invoked by
+    // this subprocess.
+    let data_dir = crate::paths::resolve_effective_data_dir(&data_dir);
     git_fetch_remote_core(&path, &name, credentials.as_ref(), &db, &data_dir).await
 }
 
@@ -2111,6 +2331,10 @@ pub async fn git_delete_remote_branch(
     let data_dir = app_handle.path().app_data_dir().map_err(|e| {
         AppCommandError::external_command("Failed to resolve app data dir", e.to_string())
     })?;
+    // Resolve through the effective data dir so a custom
+    // `CODEG_DATA_DIR` reaches the git credential helper invoked by
+    // this subprocess.
+    let data_dir = crate::paths::resolve_effective_data_dir(&data_dir);
     git_delete_remote_branch_core(
         &path,
         &remote,
@@ -2605,9 +2829,92 @@ pub async fn list_directory_entries(path: String) -> Result<Vec<DirectoryEntry>,
     }
 
     // Sort by name, case-insensitive
-    entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    entries.sort_by_key(|a| a.name.to_lowercase());
 
     Ok(entries)
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DirectoryItem {
+    pub name: String,
+    pub path: String,
+    pub is_dir: bool,
+    /// Only meaningful when `is_dir` is true.
+    pub has_children: bool,
+    /// File size in bytes; `None` for directories.
+    pub size: Option<u64>,
+}
+
+/// List immediate children of `path`, returning both directories and files.
+/// Mirrors `list_directory_entries` but does not filter out files, used by the
+/// "attach server file" picker.
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn list_directory_with_files(
+    path: String,
+) -> Result<Vec<DirectoryItem>, AppCommandError> {
+    let root = PathBuf::from(&path);
+    if !root.is_dir() {
+        return Err(AppCommandError::io_error("Path is not a directory").with_detail(path));
+    }
+
+    let mut items: Vec<DirectoryItem> = Vec::new();
+    let read_dir = std::fs::read_dir(&root).map_err(|e| {
+        AppCommandError::io_error("Failed to read directory").with_detail(e.to_string())
+    })?;
+
+    for entry in read_dir {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        let file_type = match entry.file_type() {
+            Ok(ft) => ft,
+            Err(_) => continue,
+        };
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.starts_with('.') {
+            continue;
+        }
+        // Follow symlinks for the dir/file classification.
+        let is_dir = if file_type.is_symlink() {
+            entry.path().is_dir()
+        } else {
+            file_type.is_dir()
+        };
+        let abs_path = entry.path().to_string_lossy().to_string();
+
+        let (has_children, size) = if is_dir {
+            let has = match std::fs::read_dir(entry.path()) {
+                Ok(sub) => sub.filter_map(|e| e.ok()).any(|e| {
+                    let sub_name = e.file_name().to_string_lossy().to_string();
+                    !sub_name.starts_with('.')
+                }),
+                Err(_) => false,
+            };
+            (has, None)
+        } else {
+            let size = entry.metadata().ok().map(|m| m.len());
+            (false, size)
+        };
+
+        items.push(DirectoryItem {
+            name,
+            path: abs_path,
+            is_dir,
+            has_children,
+            size,
+        });
+    }
+
+    // Sort: directories first, then files; each group by name case-insensitive.
+    items.sort_by(|a, b| match (a.is_dir, b.is_dir) {
+        (true, false) => std::cmp::Ordering::Less,
+        (false, true) => std::cmp::Ordering::Greater,
+        _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+    });
+
+    Ok(items)
 }
 
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
@@ -3109,16 +3416,36 @@ pub async fn delete_file_tree_entry(
     }
 
     let target = resolve_tree_path(&root, &path)?;
-    if !target.exists() {
-        return Err(AppCommandError::not_found("Target file does not exist"));
-    }
+    // `Path::exists` follows symlinks and silently returns false on a
+    // dangling link or any I/O error along the resolve chain, which gave
+    // us "Target file does not exist" toasts even for files that were
+    // physically present (case-only mismatches against a case-preserving
+    // FS, NFD/NFC mismatches on macOS, files under a non-traversable
+    // ancestor). `symlink_metadata` only stats the leaf and surfaces the
+    // real OS error code in `detail`, which is what we want to diagnose
+    // those reports.
+    let meta = match std::fs::symlink_metadata(&target) {
+        Ok(m) => m,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return Err(AppCommandError::not_found("Target file does not exist")
+                .with_detail(format!("resolved={} relative={}", target.display(), path)));
+        }
+        Err(err) => {
+            return Err(
+                AppCommandError::io_error("Failed to stat target").with_detail(format!(
+                    "resolved={} relative={} error={}",
+                    target.display(),
+                    path,
+                    err
+                )),
+            );
+        }
+    };
     if target == root {
         return Err(AppCommandError::invalid_input(
             "Cannot delete workspace root",
         ));
     }
-
-    let meta = std::fs::symlink_metadata(&target).map_err(AppCommandError::io)?;
     if meta.is_dir() {
         std::fs::remove_dir_all(&target).map_err(AppCommandError::io)?;
     } else {
@@ -3197,6 +3524,8 @@ pub async fn git_log(
     branch: Option<String>,
     remote: Option<String>,
 ) -> Result<GitLogResult, AppCommandError> {
+    ensure_git_repo(&path)?;
+
     const COMMIT_META_PREFIX: &str = "__COMMIT__\0";
     const MESSAGE_END_MARKER: &str = "__COMMIT_MESSAGE_END__";
 
@@ -3313,6 +3642,8 @@ pub async fn git_commit_branches(
     path: String,
     commit: String,
 ) -> Result<Vec<String>, AppCommandError> {
+    ensure_git_repo(&path)?;
+
     let contains_arg = format!("--contains={commit}");
     let output = crate::process::tokio_command("git")
         .args([
@@ -3618,4 +3949,103 @@ async fn get_unpushed_hashes(
         .collect::<HashSet<_>>();
 
     Ok((Some(hashes), has_upstream))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::test_helpers::fresh_in_memory_db;
+    use crate::models::agent::AgentType;
+
+    #[tokio::test]
+    async fn add_folder_to_history_core_derives_name_from_path() {
+        let db = fresh_in_memory_db().await;
+        let entry = add_folder_to_history_core(&db, "/tmp/codeg-test-project".into())
+            .await
+            .expect("add folder");
+        assert_eq!(entry.name, "codeg-test-project");
+        assert_eq!(entry.path, "/tmp/codeg-test-project");
+    }
+
+    #[tokio::test]
+    async fn add_folder_to_history_core_upserts_on_duplicate_path() {
+        let db = fresh_in_memory_db().await;
+        let path = "/tmp/codeg-dup-test".to_string();
+        let first = add_folder_to_history_core(&db, path.clone())
+            .await
+            .expect("add 1st");
+        let second = add_folder_to_history_core(&db, path.clone())
+            .await
+            .expect("add 2nd");
+        assert_eq!(first.id, second.id, "duplicate path must reuse id");
+
+        let history = load_folder_history_core(&db).await.expect("history");
+        assert_eq!(
+            history.iter().filter(|f| f.path == path).count(),
+            1,
+            "no duplicate rows for same path"
+        );
+    }
+
+    #[tokio::test]
+    async fn remove_folder_from_history_core_soft_deletes() {
+        let db = fresh_in_memory_db().await;
+        let path = "/tmp/codeg-remove-test".to_string();
+        add_folder_to_history_core(&db, path.clone())
+            .await
+            .expect("add");
+        remove_folder_from_history_core(&db, path.clone())
+            .await
+            .expect("remove");
+        let history = load_folder_history_core(&db).await.expect("history");
+        assert!(
+            history.iter().all(|f| f.path != path),
+            "soft-deleted folder must not appear in list"
+        );
+    }
+
+    #[tokio::test]
+    async fn open_folder_by_id_core_errors_when_missing() {
+        let db = fresh_in_memory_db().await;
+        let err = open_folder_by_id_core(&db, 99_999)
+            .await
+            .expect_err("missing id should error");
+        // Either the not_found wrapper (when set_folder_open returns Ok(()) on no-op)
+        // or the underlying DbError propagates — both are acceptable for "missing".
+        let msg = format!("{err:?}");
+        assert!(
+            msg.to_lowercase().contains("not found") || msg.to_lowercase().contains("99999"),
+            "expected not-found-ish error, got: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn update_folder_color_core_roundtrips() {
+        let db = fresh_in_memory_db().await;
+        let entry = add_folder_to_history_core(&db, "/tmp/codeg-color-test".into())
+            .await
+            .expect("add");
+        let updated = update_folder_color_core(&db, entry.id, "#ff8800".into())
+            .await
+            .expect("update color");
+        assert_eq!(updated.color, "#ff8800");
+        let read_back = get_folder_core(&db, entry.id).await.expect("get");
+        assert_eq!(read_back.color, "#ff8800");
+    }
+
+    #[tokio::test]
+    async fn update_folder_default_agent_core_set_then_clear() {
+        let db = fresh_in_memory_db().await;
+        let entry = add_folder_to_history_core(&db, "/tmp/codeg-agent-test".into())
+            .await
+            .expect("add");
+        let set = update_folder_default_agent_core(&db, entry.id, Some(AgentType::ClaudeCode))
+            .await
+            .expect("set agent");
+        assert_eq!(set.default_agent_type, Some(AgentType::ClaudeCode));
+        let cleared = update_folder_default_agent_core(&db, entry.id, None)
+            .await
+            .expect("clear agent");
+        assert_eq!(cleared.default_agent_type, None);
+    }
 }

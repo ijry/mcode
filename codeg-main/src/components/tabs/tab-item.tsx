@@ -1,12 +1,12 @@
 "use client"
 
-import { memo, useCallback, useRef } from "react"
+import { memo, useCallback, useMemo, useRef } from "react"
 import { Reorder } from "motion/react"
 import { X } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
-import { STATUS_COLORS } from "@/lib/types"
 import type { ConversationStatus } from "@/lib/types"
+import { ConversationStatusDot } from "@/components/conversations/conversation-status-dot"
 import {
   ContextMenu,
   ContextMenuContent,
@@ -14,34 +14,51 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
+import { useLongPressDrag } from "@/hooks/use-long-press-drag"
 import type { TabItem as TabItemData } from "@/contexts/tab-context"
 
 interface TabItemProps {
   tab: TabItemData
   isActive: boolean
   isTileMode: boolean
+  folderName: string | null
+  folderBranch: string | null
   onSwitch: (tabId: string) => void
   onClose: (tabId: string) => void
   onCloseOthers: (tabId: string) => void
   onCloseAll: () => void
   onPin: (tabId: string) => void
   onToggleTile: () => void
+  isCoarsePointer: boolean
+  isTouchSorting: boolean
+  onTouchSortingStart: (tabId: string) => void
+  onTouchSortingEnd: () => void
 }
 
 export const TabItem = memo(function TabItem({
   tab,
   isActive,
   isTileMode,
+  folderName,
+  folderBranch,
   onSwitch,
   onClose,
   onCloseOthers,
   onCloseAll,
   onPin,
   onToggleTile,
+  isCoarsePointer,
+  isTouchSorting,
+  onTouchSortingStart,
+  onTouchSortingEnd,
 }: TabItemProps) {
   const t = useTranslations("Folder.tabs")
-  const isDragging = useRef(false)
   const itemRef = useRef<HTMLDivElement>(null)
+
+  const resolvedFolderName = folderName ?? String(tab.folderId)
+  const tooltip = folderBranch
+    ? `${resolvedFolderName} · ${folderBranch}  —  ${tab.title}`
+    : `${resolvedFolderName}  —  ${tab.title}`
 
   const clearResidualStyles = useCallback(() => {
     const el = itemRef.current
@@ -52,13 +69,23 @@ export const TabItem = memo(function TabItem({
     el.style.userSelect = ""
   }, [])
 
+  const handleLongPressStart = useCallback(
+    () => onTouchSortingStart(tab.id),
+    [onTouchSortingStart, tab.id]
+  )
+
+  const { dragControls, gestureHandlers } = useLongPressDrag({
+    enabled: isCoarsePointer,
+    onStart: handleLongPressStart,
+    onEnd: onTouchSortingEnd,
+    onDragSettle: clearResidualStyles,
+  })
+
   const handleClick = useCallback(() => {
-    if (isDragging.current) return
     onSwitch(tab.id)
   }, [onSwitch, tab.id])
 
   const handleDoubleClick = useCallback(() => {
-    if (isDragging.current) return
     if (!tab.isPinned) {
       onPin(tab.id)
     }
@@ -72,26 +99,28 @@ export const TabItem = memo(function TabItem({
     onCloseOthers(tab.id)
   }, [onCloseOthers, tab.id])
 
+  const whileDrag = useMemo(() => ({ scale: 1.03 }), [])
+
   return (
     <Reorder.Item
       ref={itemRef}
       as="div"
       value={tab}
       data-tab-id={tab.id}
-      onDragStart={() => {
-        isDragging.current = true
-      }}
-      onDragEnd={() => {
-        setTimeout(() => {
-          isDragging.current = false
-          clearResidualStyles()
-        }, 200)
-      }}
+      drag="x"
+      dragControls={dragControls}
+      dragListener={!isCoarsePointer}
+      whileDrag={whileDrag}
+      {...gestureHandlers}
       onLayoutAnimationComplete={clearResidualStyles}
-      className="shrink-0 rounded-full cursor-grab active:cursor-grabbing active:opacity-90 active:shadow-md active:z-50"
+      className={cn(
+        "shrink-0 rounded-full cursor-grab active:cursor-grabbing",
+        !isCoarsePointer && "active:opacity-90 active:shadow-md active:z-50",
+        isTouchSorting && "z-50 opacity-90 shadow-md ring-1 ring-primary/25"
+      )}
     >
       <ContextMenu>
-        <ContextMenuTrigger asChild>
+        <ContextMenuTrigger asChild disabled={isTouchSorting}>
           <div
             role="tab"
             aria-selected={isActive}
@@ -106,20 +135,15 @@ export const TabItem = memo(function TabItem({
                 : "text-muted-foreground"
             )}
           >
-            <span
-              className={cn(
-                "w-2 h-2 rounded-full shrink-0",
-                tab.status
-                  ? STATUS_COLORS[tab.status as ConversationStatus]
-                  : "bg-gray-400 dark:bg-gray-500"
-              )}
+            <ConversationStatusDot
+              status={tab.status as ConversationStatus | undefined}
             />
             <span
               className={cn(
                 "truncate max-w-[140px]",
                 !tab.isPinned && "[font-style:oblique]"
               )}
-              title={tab.title}
+              title={tooltip}
             >
               {tab.title}
             </span>

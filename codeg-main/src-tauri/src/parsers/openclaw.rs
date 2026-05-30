@@ -342,12 +342,25 @@ pub struct OpenClawParser {
     base_dir: PathBuf,
 }
 
+impl Default for OpenClawParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OpenClawParser {
     pub fn new() -> Self {
         let base_dir = dirs::home_dir()
             .unwrap_or_default()
             .join(".openclaw")
             .join("agents");
+        Self { base_dir }
+    }
+
+    /// Test-only constructor that lets callers point the parser at a fixture
+    /// directory instead of `~/.openclaw/agents`.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn with_base_dir(base_dir: PathBuf) -> Self {
         Self { base_dir }
     }
 
@@ -482,6 +495,9 @@ impl OpenClawParser {
                 message_count,
                 model: session_meta.and_then(|m| m.model.clone()),
                 git_branch: None,
+                parent_id: None,
+                parent_tool_use_id: None,
+                delegation_call_id: None,
             });
         }
 
@@ -598,6 +614,7 @@ impl OpenClawParser {
                         usage: None,
                         duration_ms: None,
                         model: None,
+                        completed_at: Some(timestamp),
                     });
                 }
                 "assistant" => {
@@ -620,6 +637,7 @@ impl OpenClawParser {
                         usage,
                         duration_ms: None,
                         model: msg_model,
+                        completed_at: Some(timestamp),
                     });
                 }
                 "toolResult" => {
@@ -632,6 +650,7 @@ impl OpenClawParser {
                         usage: None,
                         duration_ms: None,
                         model: None,
+                        completed_at: Some(timestamp),
                     });
                 }
                 _ => {}
@@ -672,6 +691,9 @@ impl OpenClawParser {
             message_count: turns.len() as u32,
             model,
             git_branch: None,
+            parent_id: None,
+            parent_tool_use_id: None,
+            delegation_call_id: None,
         };
 
         Ok(ConversationDetail {
@@ -846,7 +868,7 @@ impl AgentParser for OpenClawParser {
             }
         }
 
-        conversations.sort_by(|a, b| b.started_at.cmp(&a.started_at));
+        conversations.sort_by_key(|b| std::cmp::Reverse(b.started_at));
         Ok(conversations)
     }
 
@@ -994,6 +1016,7 @@ fn extract_assistant_content(value: &serde_json::Value) -> Vec<ContentBlock> {
                         tool_use_id,
                         tool_name,
                         input_preview,
+                        meta: None,
                     });
                 }
                 _ => {}
@@ -1048,6 +1071,7 @@ fn extract_tool_result_content(value: &serde_json::Value) -> Vec<ContentBlock> {
         tool_use_id,
         output_preview: output,
         is_error,
+        agent_stats: None,
     });
 
     blocks
@@ -1084,6 +1108,7 @@ fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn> {
                 usage: None,
                 duration_ms: None,
                 model: None,
+                completed_at: msg.completed_at,
             });
             i += 1;
         } else if matches!(msg.role, MessageRole::System) {
@@ -1095,6 +1120,7 @@ fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn> {
                 usage: None,
                 duration_ms: None,
                 model: None,
+                completed_at: msg.completed_at,
             });
             i += 1;
         } else {
@@ -1104,6 +1130,7 @@ fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn> {
             let duration_ms = msg.duration_ms;
             let turn_model = msg.model.clone();
             let timestamp = msg.timestamp;
+            let mut completed_at = msg.completed_at;
             i += 1;
 
             // Only absorb immediately following Tool messages
@@ -1112,6 +1139,9 @@ fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn> {
                 blocks.extend(messages[i].content.clone());
                 if usage.is_none() {
                     usage = messages[i].usage.clone();
+                }
+                if messages[i].completed_at.is_some() {
+                    completed_at = messages[i].completed_at;
                 }
                 i += 1;
             }
@@ -1124,6 +1154,7 @@ fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn> {
                 usage,
                 duration_ms,
                 model: turn_model,
+                completed_at,
             });
         }
     }
@@ -1154,8 +1185,12 @@ mod tests {
         let text =
             "[Tue 2026-03-17 12:58 GMT+8] [Working directory: ~/forway/agent-workspace]\n\nHello";
         let wd = extract_working_dir(text).unwrap();
-        let home = dirs::home_dir().unwrap().to_string_lossy().to_string();
-        assert_eq!(wd, format!("{}/forway/agent-workspace", home));
+        let expected = dirs::home_dir()
+            .unwrap()
+            .join("forway/agent-workspace")
+            .to_string_lossy()
+            .to_string();
+        assert_eq!(wd, expected);
     }
 
     #[test]
@@ -1233,7 +1268,7 @@ mod tests {
         assert_eq!(blocks.len(), 1);
         assert!(matches!(
             &blocks[0],
-            ContentBlock::ToolResult { tool_use_id, output_preview, is_error }
+            ContentBlock::ToolResult { tool_use_id, output_preview, is_error, .. }
             if tool_use_id.as_deref() == Some("call_123")
                 && output_preview.as_deref() == Some("file contents here")
                 && !is_error

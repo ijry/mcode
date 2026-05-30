@@ -6,18 +6,20 @@ import { enUS, zhCN, zhTW } from "date-fns/locale"
 import { File, Folder } from "lucide-react"
 import { useLocale, useTranslations } from "next-intl"
 import { useAuxPanelContext } from "@/contexts/aux-panel-context"
-import { useFolderContext } from "@/contexts/folder-context"
+import { useActiveFolder } from "@/contexts/active-folder-context"
+import { useAppWorkspace } from "@/contexts/app-workspace-context"
 import { useTabContext } from "@/contexts/tab-context"
 import { useWorkspaceContext } from "@/contexts/workspace-context"
-import { listFolderConversations } from "@/lib/api"
+import { listAllConversations } from "@/lib/api"
 import type {
   AgentType,
   ConversationStatus,
   DbConversationSummary,
 } from "@/lib/types"
 import { useFileTree, type FlatFileEntry } from "@/hooks/use-file-tree"
-import { AGENT_LABELS, STATUS_COLORS, compareAgentType } from "@/lib/types"
+import { AGENT_LABELS, compareAgentType } from "@/lib/types"
 import { AgentIcon } from "@/components/agent-icon"
+import { ConversationStatusDot } from "@/components/conversations/conversation-status-dot"
 import {
   CommandDialog,
   CommandInput,
@@ -43,7 +45,16 @@ export function SearchCommandDialog({
   const locale = useLocale()
   const dateFnsLocale =
     locale === "zh-CN" ? zhCN : locale === "zh-TW" ? zhTW : enUS
-  const { folderId, folder, conversations } = useFolderContext()
+  const { activeFolder: folder, activeFolderId } = useActiveFolder()
+  const { conversations: allConversations } = useAppWorkspace()
+  const folderId = activeFolderId ?? 0
+  const conversations = useMemo(
+    () =>
+      activeFolderId == null
+        ? []
+        : allConversations.filter((c) => c.folder_id === activeFolderId),
+    [allConversations, activeFolderId]
+  )
   const { openTab } = useTabContext()
   const { openFilePreview } = useWorkspaceContext()
   const { revealInFileTree } = useAuxPanelContext()
@@ -96,8 +107,8 @@ export function SearchCommandDialog({
       }
       setSearching(true)
       try {
-        const data = await listFolderConversations({
-          folder_id: folderId,
+        const data = await listAllConversations({
+          folder_ids: folderId > 0 ? [folderId] : null,
           search: q.trim() || null,
           agent_type: agent,
         })
@@ -136,7 +147,7 @@ export function SearchCommandDialog({
 
   const handleSelectConversation = useCallback(
     (conv: DbConversationSummary) => {
-      openTab(conv.id, conv.agent_type, true)
+      openTab(conv.folder_id, conv.id, conv.agent_type, true)
       onOpenChange(false)
     },
     [openTab, onOpenChange]
@@ -164,11 +175,25 @@ export function SearchCommandDialog({
 
   return (
     <CommandDialog
-      title={t("dialogTitle")}
+      title={
+        folder
+          ? t("dialogTitleWithFolder", { name: folder.name })
+          : t("dialogTitle")
+      }
       open={open}
       onOpenChange={onOpenChange}
       shouldFilter={activeTab === "conversations"}
     >
+      {/* Folder context header */}
+      {folder && (
+        <div className="flex items-center gap-2 border-b px-4 py-2.5">
+          <Folder className="w-4 h-4 shrink-0 text-muted-foreground" />
+          <span className="text-sm font-medium truncate">
+            {t("dialogTitleWithFolder", { name: folder.name })}
+          </span>
+        </div>
+      )}
+
       {/* Tabs */}
       <div className="flex items-center gap-0 border-b px-3">
         <button
@@ -258,12 +283,8 @@ export function SearchCommandDialog({
                     value={`${conv.id}-${conv.title ?? ""}`}
                     onSelect={() => handleSelectConversation(conv)}
                   >
-                    <span
-                      className={cn(
-                        "w-2 h-2 rounded-full shrink-0",
-                        STATUS_COLORS[conv.status as ConversationStatus] ??
-                          "bg-gray-400"
-                      )}
+                    <ConversationStatusDot
+                      status={conv.status as ConversationStatus}
                     />
                     <span className="flex-1 truncate">
                       {conv.title || t("untitledConversation")}

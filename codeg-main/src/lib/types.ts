@@ -11,6 +11,7 @@ export type AppErrorCode =
   | "configuration_missing"
   | "configuration_invalid"
   | "not_found"
+  | "not_a_git_repository"
   | "already_exists"
   | "permission_denied"
   | "dependency_missing"
@@ -27,6 +28,26 @@ export interface AppCommandError {
   code: AppErrorCode
   message: string
   detail?: string | null
+  /** Optional dotted i18n key used to render a localized message. */
+  i18n_key?: string | null
+  /** Optional named parameters substituted into the localized template. */
+  i18n_params?: Record<string, string> | null
+}
+
+export interface RemoteWorkspaceConnection {
+  id: number
+  name: string
+  base_url: string
+  token: string
+  sort_order: number
+  created_at: string
+  updated_at: string
+}
+
+export interface RemoteWorkspaceConnectionInput {
+  name: string
+  baseUrl: string
+  token: string
 }
 
 export interface ConversationSummary {
@@ -44,6 +65,40 @@ export interface ConversationSummary {
 
 export type MessageRole = "user" | "assistant" | "system" | "tool"
 
+export interface AgentToolCall {
+  tool_name: string
+  input_preview?: string | null
+  output_preview?: string | null
+  is_error: boolean
+}
+
+export interface AgentExecutionStats {
+  agent_type?: string | null
+  status?: string | null
+  total_duration_ms?: number | null
+  total_tokens?: number | null
+  total_tool_use_count?: number | null
+  read_count?: number | null
+  search_count?: number | null
+  bash_count?: number | null
+  edit_file_count?: number | null
+  lines_added?: number | null
+  lines_removed?: number | null
+  other_tool_count?: number | null
+  tool_calls?: AgentToolCall[]
+}
+
+/**
+ * Image payload shared across `ContentBlock::Image` /
+ * `ContentBlock::ImageGeneration` / ACP wire `ToolCallImageInfo`. Mirror of
+ * Rust `models::message::ImageData`.
+ */
+export interface ImageData {
+  data: string
+  mime_type: string
+  uri?: string | null
+}
+
 export type ContentBlock =
   | { type: "text"; text: string }
   | {
@@ -53,16 +108,48 @@ export type ContentBlock =
       uri?: string | null
     }
   | {
+      /**
+       * codex-acp v0.14+ image generation. Distinct from `image` because
+       * codex-acp positions image generation as a first-class
+       * `ToolCall(title="Image generation")` carrying revised_prompt + image.
+       * Rendered with the dedicated `<GeneratedImagesBlock>` component, not
+       * mixed with regular tool-call cards.
+       *
+       * Singular `image` (not array): codex-acp emits exactly one image per
+       * `ToolCall`. Multi-image turns produce N separate ToolCalls. `null`
+       * during the in-flight placeholder window between
+       * `ImageGenerationBegin` and `ImageGenerationEnd`.
+       *
+       * `status` mirrors the underlying ToolCallStatus during live streaming
+       * so the renderer can distinguish in-flight vs. failed when no image
+       * arrives. Absent on Rust-emitted blocks (JSONL replay only emits
+       * blocks with a present image, so absence is treated as success).
+       */
+      type: "image_generation"
+      revised_prompt?: string | null
+      image?: ImageData | null
+      status?: ToolCallStatus | null
+    }
+  | {
       type: "tool_use"
       tool_use_id: string | null
       tool_name: string
       input_preview: string | null
+      /**
+       * ACP extensibility metadata for this tool call. Opaque pass-through
+       * — both the live snapshot (`ToolCallState.meta`) and the persisted
+       * message-row variant carry the same shape. Delegation writes
+       * `meta["codeg.delegation"] = { status, child_connection_id,
+       * child_conversation_id, error_code? }` here.
+       */
+      meta?: Record<string, unknown> | null
     }
   | {
       type: "tool_result"
       tool_use_id: string | null
       output_preview: string | null
       is_error: boolean
+      agent_stats?: AgentExecutionStats | null
     }
   | { type: "thinking"; text: string }
 
@@ -92,6 +179,12 @@ export interface MessageTurn {
   usage?: TurnUsage | null
   duration_ms?: number | null
   model?: string | null
+  /** Wall-clock completion time (ISO). Each Rust parser sets this to its
+   * own end-marker (e.g. OpenCode's `time.completed`, or just the event-log
+   * `timestamp` for agents that log post-generation). Notably this is NOT
+   * `timestamp + duration_ms` — those two fields encode unrelated spans in
+   * most parsers. */
+  completed_at?: string | null
 }
 
 export interface ConversationDetail {
@@ -135,14 +228,16 @@ export interface FolderDetail {
   name: string
   path: string
   git_branch: string | null
-  parent_branch: string | null
   default_agent_type: AgentType | null
   last_opened_at: string
-  opened_conversations: OpenedConversation[]
+  sort_order: number
+  color: string
 }
 
-export interface OpenedConversation {
-  conversation_id: number
+export interface OpenedTab {
+  id: number
+  folder_id: number
+  conversation_id: number | null
   agent_type: AgentType
   position: number
   is_active: boolean
@@ -161,6 +256,9 @@ export interface DbConversationSummary {
   message_count: number
   created_at: string
   updated_at: string
+  parent_id?: number | null
+  parent_tool_use_id?: string | null
+  delegation_call_id?: string | null
 }
 
 export interface ImportResult {
@@ -195,8 +293,8 @@ export const STATUS_LABELS: Record<ConversationStatus, string> = {
 }
 
 export const STATUS_COLORS: Record<ConversationStatus, string> = {
-  in_progress: "bg-blue-500",
-  pending_review: "bg-orange-500",
+  in_progress: "bg-yellow-400",
+  pending_review: "bg-blue-500",
   completed: "bg-green-500",
   cancelled: "bg-red-500",
 }
@@ -341,6 +439,16 @@ export interface SessionConfigOptionInfo {
   kind: SessionConfigKindInfo
 }
 
+export interface AgentOptionsSnapshot {
+  modes: SessionModeStateInfo | null
+  config_options: SessionConfigOptionInfo[]
+}
+
+export interface AgentDelegationDefaults {
+  mode_id?: string | null
+  config_values: Record<string, string>
+}
+
 export interface PlanEntryInfo {
   content: string
   priority: string
@@ -358,19 +466,28 @@ export interface SessionUsageUpdateInfo {
   size: number
 }
 
+/**
+ * Wire-level image attached to a tool call (e.g. codex image generation).
+ * Mirrors Rust's `ToolCallImageInfo`. Reused by snapshot endpoints and
+ * live `tool_call(_update)` events.
+ */
+export interface ToolCallImageWire {
+  data: string
+  mime_type: string
+  uri?: string | null
+}
+
 // ACP events pushed from Rust backend (discriminated by "type" field)
 export type AcpEvent =
-  | { type: "content_delta"; connection_id: string; text: string }
-  | { type: "thinking"; connection_id: string; text: string }
+  | { type: "content_delta"; text: string }
+  | { type: "thinking"; text: string }
   | {
       type: "claude_sdk_message"
-      connection_id: string
       session_id: string
       message: unknown
     }
   | {
       type: "tool_call"
-      connection_id: string
       tool_call_id: string
       title: string
       kind: string
@@ -378,10 +495,13 @@ export type AcpEvent =
       content: string | null
       raw_input: string | null
       raw_output: string | null
+      locations?: unknown
+      meta?: unknown
+      /** Present iff agent attached images (e.g. codex-acp v0.14+ image gen). */
+      images?: ToolCallImageWire[]
     }
   | {
       type: "tool_call_update"
-      connection_id: string
       tool_call_id: string
       title: string | null
       status: string | null
@@ -389,83 +509,240 @@ export type AcpEvent =
       raw_input: string | null
       raw_output: string | null
       raw_output_append?: boolean
+      locations?: unknown
+      meta?: unknown
+      /**
+       * Wire-level partial update: present means "replace prior images with
+       * this vec", absent means "preserve prior images". Mirrors the
+       * `Option<Vec<...>>` semantics on the Rust side.
+       */
+      images?: ToolCallImageWire[]
     }
   | {
       type: "permission_request"
-      connection_id: string
       request_id: string
       tool_call: unknown
       options: PermissionOptionInfo[]
     }
   | {
+      type: "permission_resolved"
+      request_id: string
+    }
+  | {
       type: "turn_complete"
-      connection_id: string
       session_id: string
       stop_reason: string
     }
   | {
       type: "session_started"
-      connection_id: string
       session_id: string
     }
   | {
+      type: "conversation_linked"
+      conversation_id: number
+      folder_id: number
+    }
+  | {
+      type: "conversation_status_changed"
+      conversation_id: number
+      status: ConversationStatus
+    }
+  | {
       type: "session_modes"
-      connection_id: string
       modes: SessionModeStateInfo
     }
   | {
       type: "session_config_options"
-      connection_id: string
       config_options: SessionConfigOptionInfo[]
     }
   | {
       type: "selectors_ready"
-      connection_id: string
     }
   | {
       type: "prompt_capabilities"
-      connection_id: string
       prompt_capabilities: PromptCapabilitiesInfo
     }
   | {
       type: "fork_supported"
-      connection_id: string
       supported: boolean
     }
   | {
       type: "mode_changed"
-      connection_id: string
       mode_id: string
     }
   | {
       type: "plan_update"
-      connection_id: string
       entries: PlanEntryInfo[]
     }
   | {
       type: "status_changed"
-      connection_id: string
       status: ConnectionStatus
     }
   | {
       type: "error"
-      connection_id: string
       message: string
       agent_type: string
       /** Stable backend error identifier for localization (e.g. "initialize_timeout"). */
       code: string | null
     }
   | {
+      type: "session_load_failed"
+      session_id: string
+      message: string
+      /** Stable backend identifier — currently `"resource_not_found"`. */
+      code: string
+    }
+  | {
       type: "available_commands"
-      connection_id: string
       commands: AvailableCommandInfo[]
     }
   | {
       type: "usage_update"
-      connection_id: string
       used: number
       size: number
     }
+  /**
+   * A `delegate_to_agent` MCP tool call from the parent agent has spawned a
+   * child sub-session and the child's prompt is in flight. Emitted as soon as
+   * the broker registers the pending call. Frontend uses this to build the
+   * parent ↔ child mapping for inline ToolCallBlock rendering.
+   */
+  | {
+      type: "delegation_started"
+      parent_connection_id: string
+      parent_tool_use_id: string
+      child_connection_id: string
+      child_conversation_id: number
+      agent_type: AgentType
+    }
+  /**
+   * The child sub-session has finished (or errored / timed out / been
+   * canceled). The MCP tool_result has been delivered to the parent agent;
+   * frontend updates the ToolCallBlock badge from "running" to ok/err.
+   */
+  | {
+      type: "delegation_completed"
+      parent_connection_id: string
+      parent_tool_use_id: string
+      child_connection_id: string
+      child_conversation_id: number
+      result: DelegationResultSummary
+    }
+
+/**
+ * Mirror of Rust `DelegationResultSummary`. `kind` discriminates Ok vs Err;
+ * Ok carries `duration_ms` (broker-measured), Err carries a stable code from
+ * the `DelegationError` taxonomy (e.g. `"timeout"`, `"canceled"`).
+ */
+export type DelegationResultSummary =
+  | { kind: "ok"; duration_ms: number }
+  | { kind: "err"; error_code: string }
+
+/**
+ * Wire envelope for all ACP events. JSON shape is flat via Rust's serde
+ * flatten: { seq, connection_id, type, ...variant fields }. Expressed in TS
+ * as an intersection that distributes over the AcpEvent discriminated union,
+ * so `envelope.type` narrows the variant fields just like on AcpEvent.
+ *
+ * `seq` is a monotonically-increasing per-connection sequence number. Phase 0
+ * always emits 0 (placeholder); Phase 1 wires it to the real counter, after
+ * which clients use it as a dedup anchor between snapshot fetches and the
+ * live event stream (drop events with seq <= last_event_seq from snapshot).
+ *
+ * 所有 ACP 事件统一通过此 envelope 发出，详见 spec phase 0/1。
+ */
+export type EventEnvelope = {
+  seq: number
+  connection_id: string
+} & AcpEvent
+
+// --- LiveSessionSnapshot wire types (mirror src-tauri/src/acp/session_state.rs) ---
+
+export type ToolCallStatus = "pending" | "in_progress" | "completed" | "failed"
+
+export type ToolKind =
+  | "read"
+  | "edit"
+  | "delete"
+  | "move"
+  | "search"
+  | "execute"
+  | "think"
+  | "fetch"
+  | "other"
+
+export type ToolCallOutput =
+  | { kind: "text"; content: string }
+  | { kind: "error"; message: string }
+  | { kind: "json"; value: unknown }
+
+export interface ToolCallState {
+  id: string
+  kind: ToolKind
+  label: string
+  status: ToolCallStatus
+  input: unknown | null
+  output: ToolCallOutput | null
+  content: string | null
+  /** File locations affected by this tool call. Opaque pass-through. */
+  locations: unknown | null
+  /** ACP extensibility metadata. Opaque pass-through. */
+  meta: Record<string, unknown> | null
+  /**
+   * Images attached to this tool call (e.g. codex-acp v0.14+ image gen).
+   * Persisted on the snapshot so a frontend reconnecting mid-turn / after
+   * refresh sees the same image. May be absent on older snapshots.
+   */
+  images?: ToolCallImageWire[]
+}
+
+export type LiveContentBlock =
+  | { kind: "text"; text: string }
+  | { kind: "thinking"; text: string }
+  | { kind: "tool_call_ref"; tool_call_id: string }
+  | { kind: "plan"; entries: unknown }
+
+export interface LiveMessage {
+  id: string
+  role: MessageRole
+  content: LiveContentBlock[]
+  started_at: string
+}
+
+export interface PendingPermissionState {
+  request_id: string
+  tool_call_id: string
+  /**
+   * Raw ACP tool_call JSON forwarded from the agent (rawInput / content /
+   * locations / patch / plan all preserved). Frontend's
+   * `parsePermissionToolCall` consumes this directly to render the approval
+   * dialog after a refresh; flattening to a description loses everything
+   * except the title.
+   */
+  tool_call: unknown
+  options: PermissionOptionInfo[]
+  created_at: string
+}
+
+export interface LiveSessionSnapshot {
+  connection_id: string
+  conversation_id: number | null
+  folder_id: number | null
+  status: ConnectionStatus
+  external_id: string | null
+  live_message: LiveMessage | null
+  active_tool_calls: ToolCallState[]
+  pending_permission: PendingPermissionState | null
+  modes: SessionModeStateInfo | null
+  current_mode: string | null
+  config_options: SessionConfigOptionInfo[] | null
+  prompt_capabilities: PromptCapabilitiesInfo | null
+  usage: SessionUsageUpdateInfo | null
+  fork_supported: boolean
+  available_commands: AvailableCommandInfo[]
+  selectors_ready: boolean
+  event_seq: number
+}
 
 // Connection info returned by acp_list_connections
 export interface ConnectionInfo {
@@ -519,6 +796,8 @@ export interface AgentSkillItem {
   scope: AgentSkillScope
   layout: AgentSkillLayout
   path: string
+  description: string | null
+  read_only: boolean
 }
 
 export interface AgentSkillsListResult {
@@ -593,6 +872,27 @@ export type LanguageMode = "system" | "manual"
 export interface SystemLanguageSettings {
   mode: LanguageMode
   language: AppLocale
+}
+
+export interface SystemTerminalSettings {
+  default_shell: string | null
+}
+
+export interface TerminalShellOption {
+  id: string
+  label_key: string
+  value: string | null
+  exists: boolean
+  accepts_custom_path: boolean
+}
+
+export interface AvailableTerminalShells {
+  options: TerminalShellOption[]
+  resolved_shell: string
+}
+
+export interface SystemRenderingSettings {
+  disable_hardware_acceleration: boolean
 }
 
 // --- Version Control ---
@@ -731,6 +1031,15 @@ export interface FolderCommand {
   updated_at: string
 }
 
+export interface QuickMessage {
+  id: number
+  title: string
+  content: string
+  sort_order: number
+  created_at: string
+  updated_at: string
+}
+
 export interface GitStatusEntry {
   status: string
   file: string
@@ -811,6 +1120,21 @@ export interface DirectoryEntry {
   hasChildren: boolean
 }
 
+export interface DirectoryItem {
+  name: string
+  path: string
+  isDir: boolean
+  hasChildren: boolean
+  size: number | null
+}
+
+export interface UploadAttachmentResult {
+  path: string
+  name: string
+  size: number
+  mimeType: string | null
+}
+
 export interface FilePreviewContent {
   path: string
   content: string
@@ -850,6 +1174,7 @@ export interface WorkspaceDeltaEnvelope {
   kind: "fs_delta" | "git_delta" | "meta" | "resync_hint" | string
   payload: WorkspaceDelta[]
   requires_resync: boolean
+  changed_paths?: string[]
 }
 
 export interface WorkspaceStateEvent {
@@ -859,6 +1184,7 @@ export interface WorkspaceStateEvent {
   kind: "fs_delta" | "git_delta" | "meta" | "resync_hint" | string
   payload: WorkspaceDelta[]
   requires_resync: boolean
+  changed_paths?: string[]
 }
 
 export interface WorkspaceSnapshotResponse {
@@ -869,6 +1195,8 @@ export interface WorkspaceSnapshotResponse {
   tree_snapshot: FileTreeNode[] | null
   git_snapshot: WorkspaceGitEntry[] | null
   deltas: WorkspaceDeltaEnvelope[]
+  degraded: boolean
+  is_git_repo: boolean
 }
 
 export interface GitLogResult {
@@ -984,7 +1312,7 @@ export interface AgentInstallEvent {
 
 // ─── Chat Channels ───
 
-export type ChannelType = "lark" | "telegram" | "weixin" | "mcode"
+export type ChannelType = "lark" | "telegram" | "weixin"
 
 export type ChannelConnectionStatus =
   | "connected"
@@ -1029,7 +1357,58 @@ export interface ModelProviderInfo {
   api_url: string
   api_key: string
   api_key_masked: string
-  agent_types: AgentType[]
+  agent_type: AgentType
+  /**
+   * Model value, interpretation depends on agent_type:
+   * - claude_code: JSON string of {main, reasoning, haiku, sonnet, opus}
+   * - codex / gemini / others: plain model name string
+   */
+  model: string | null
   created_at: string
   updated_at: string
+}
+
+export interface ClaudeProviderModel {
+  main?: string
+  reasoning?: string
+  haiku?: string
+  sonnet?: string
+  opus?: string
+}
+
+export function parseClaudeProviderModel(
+  raw: string | null
+): ClaudeProviderModel {
+  if (!raw) return {}
+  try {
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed !== "object") return {}
+    const out: ClaudeProviderModel = {}
+    const keys: (keyof ClaudeProviderModel)[] = [
+      "main",
+      "reasoning",
+      "haiku",
+      "sonnet",
+      "opus",
+    ]
+    for (const k of keys) {
+      const v = (parsed as Record<string, unknown>)[k]
+      if (typeof v === "string" && v.trim()) out[k] = v.trim()
+    }
+    return out
+  } catch {
+    return {}
+  }
+}
+
+export function serializeClaudeProviderModel(
+  obj: ClaudeProviderModel
+): string | null {
+  const cleaned: ClaudeProviderModel = {}
+  if (obj.main?.trim()) cleaned.main = obj.main.trim()
+  if (obj.reasoning?.trim()) cleaned.reasoning = obj.reasoning.trim()
+  if (obj.haiku?.trim()) cleaned.haiku = obj.haiku.trim()
+  if (obj.sonnet?.trim()) cleaned.sonnet = obj.sonnet.trim()
+  if (obj.opus?.trim()) cleaned.opus = obj.opus.trim()
+  return Object.keys(cleaned).length === 0 ? null : JSON.stringify(cleaned)
 }

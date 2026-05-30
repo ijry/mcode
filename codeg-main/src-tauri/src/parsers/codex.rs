@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
@@ -14,9 +15,22 @@ pub struct CodexParser {
     base_dir: PathBuf,
 }
 
+impl Default for CodexParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CodexParser {
     pub fn new() -> Self {
         let base_dir = resolve_codex_home_dir().join("sessions");
+        Self { base_dir }
+    }
+
+    /// Test-only constructor that lets callers point the parser at a fixture
+    /// directory instead of `~/.codex/sessions`.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn with_base_dir(base_dir: PathBuf) -> Self {
         Self { base_dir }
     }
 
@@ -84,14 +98,12 @@ impl CodexParser {
                             .map(|s| s.to_string());
                     }
                 }
-                "turn_context" => {
-                    if model.is_none() {
-                        model = value
-                            .get("payload")
-                            .and_then(|p| p.get("model"))
-                            .and_then(|m| m.as_str())
-                            .map(|s| s.to_string());
-                    }
+                "turn_context" if model.is_none() => {
+                    model = value
+                        .get("payload")
+                        .and_then(|p| p.get("model"))
+                        .and_then(|m| m.as_str())
+                        .map(|s| s.to_string());
                 }
                 "event_msg" => {
                     if let Some(payload) = value.get("payload") {
@@ -157,6 +169,9 @@ impl CodexParser {
             message_count,
             model,
             git_branch,
+            parent_id: None,
+            parent_tool_use_id: None,
+            delegation_call_id: None,
         }))
     }
 }
@@ -202,7 +217,7 @@ impl AgentParser for CodexParser {
             }
         }
 
-        conversations.sort_by(|a, b| b.started_at.cmp(&a.started_at));
+        conversations.sort_by_key(|b| std::cmp::Reverse(b.started_at));
         Ok(conversations)
     }
 
@@ -231,6 +246,65 @@ impl AgentParser for CodexParser {
         Err(ParseError::ConversationNotFound(
             conversation_id.to_string(),
         ))
+    }
+}
+
+fn parse_codex_json_arg(payload: &serde_json::Value) -> Option<serde_json::Value> {
+    let args = payload.get("arguments").or_else(|| payload.get("input"))?;
+    if let Some(s) = args.as_str() {
+        serde_json::from_str(s).ok()
+    } else if args.is_object() || args.is_array() {
+        Some(args.clone())
+    } else {
+        None
+    }
+}
+
+fn parse_codex_json_output(payload: &serde_json::Value) -> Option<serde_json::Value> {
+    let output = payload.get("output")?;
+    if let Some(s) = output.as_str() {
+        serde_json::from_str(s).ok()
+    } else if output.is_object() || output.is_array() {
+        Some(output.clone())
+    } else {
+        None
+    }
+}
+
+fn clean_codex_exec_output(text: &str) -> String {
+    let mut cmd_line: Option<&str> = None;
+    let mut in_output = false;
+    let mut output_lines = Vec::new();
+
+    for line in text.lines() {
+        if cmd_line.is_none() && line.starts_with("$ ") {
+            cmd_line = Some(line);
+            continue;
+        }
+        if line == "Output:" || line == "Output: " {
+            in_output = true;
+            continue;
+        }
+        if in_output {
+            output_lines.push(line);
+        }
+    }
+
+    let mut result = String::new();
+    if let Some(cmd) = cmd_line {
+        result.push_str(cmd);
+    }
+    if !output_lines.is_empty() {
+        if !result.is_empty() {
+            result.push('\n');
+        }
+        result.push_str(&output_lines.join("\n"));
+    }
+
+    if result.is_empty() {
+        text.to_string()
+    } else {
+        result
     }
 }
 
@@ -414,6 +488,184 @@ fn infer_tool_call_output_is_error(
         .unwrap_or(false)
 }
 
+fn parse_codex_subagent_stats(
+    session_dir: &std::path::Path,
+    agent_id: &str,
+) -> Option<AgentExecutionStats> {
+    if agent_id.len() > 64 || agent_id.contains("..") || agent_id.contains('/') {
+        return None;
+    }
+
+    // Try exact filename first (e.g., "agent-{agent_id}.jsonl"), then fall
+    // back to files whose stem ends with the agent_id. Collect and sort
+    // candidates to ensure deterministic selection across platforms.
+    let exact_path = session_dir.join(format!("agent-{}.jsonl", agent_id));
+    let session_file = if exact_path.is_file() {
+        exact_path
+    } else {
+        let mut candidates: Vec<_> = fs::read_dir(session_dir)
+            .ok()?
+            .filter_map(|entry| {
+                let path = entry.ok()?.path();
+                if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+                    return None;
+                }
+                let stem = path.file_stem()?.to_string_lossy().into_owned();
+                // Match only if the stem ends with the agent_id after a separator
+                // (e.g., "session-abc123" matches agent_id "abc123")
+                if stem == agent_id
+                    || stem
+                        .strip_suffix(agent_id)
+                        .is_some_and(|prefix| prefix.ends_with('-') || prefix.ends_with('_'))
+                {
+                    Some(path)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        candidates.sort();
+        candidates.into_iter().next()?
+    };
+
+    let file = fs::File::open(&session_file).ok()?;
+    let reader = BufReader::new(file);
+
+    let mut tool_calls = Vec::new();
+    let mut pending_calls: HashMap<String, AgentToolCall> = HashMap::new();
+    let mut first_ts: Option<DateTime<Utc>> = None;
+    let mut last_ts: Option<DateTime<Utc>> = None;
+
+    for line in reader.lines().map_while(Result::ok) {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let value: serde_json::Value = match serde_json::from_str(&line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        if let Some(ts) = parse_codex_timestamp(&value) {
+            if first_ts.is_none() {
+                first_ts = Some(ts);
+            }
+            last_ts = Some(ts);
+        }
+
+        if value.get("type").and_then(|t| t.as_str()) != Some("response_item") {
+            continue;
+        }
+        let payload = match value.get("payload") {
+            Some(p) => p,
+            None => continue,
+        };
+        let payload_type = payload.get("type").and_then(|t| t.as_str()).unwrap_or("");
+
+        match payload_type {
+            "function_call" | "custom_tool_call" => {
+                let call_id = payload
+                    .get("call_id")
+                    .or_else(|| payload.get("tool_call_id"))
+                    .or_else(|| payload.get("id"))
+                    .and_then(|id| id.as_str())
+                    .map(|s| s.to_string());
+                let tool_name = payload
+                    .get("name")
+                    .or_else(|| payload.get("tool_name"))
+                    .and_then(|n| n.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+
+                let input_preview = if tool_name == "exec_command" {
+                    parse_codex_json_arg(payload)
+                        .and_then(|a| a.get("cmd").and_then(|v| v.as_str()).map(|s| s.to_string()))
+                        .or_else(|| {
+                            value_to_preview(
+                                payload.get("arguments").or_else(|| payload.get("input")),
+                            )
+                        })
+                } else {
+                    value_to_preview(payload.get("arguments").or_else(|| payload.get("input")))
+                };
+
+                let tc = AgentToolCall {
+                    tool_name,
+                    input_preview: input_preview.map(|s| truncate_str(&s, 500)),
+                    output_preview: None,
+                    is_error: false,
+                };
+                if let Some(id) = call_id {
+                    pending_calls.insert(id, tc);
+                } else {
+                    tool_calls.push(tc);
+                }
+            }
+            "function_call_output" | "custom_tool_call_output" => {
+                let call_id = payload
+                    .get("call_id")
+                    .or_else(|| payload.get("tool_call_id"))
+                    .or_else(|| payload.get("id"))
+                    .and_then(|id| id.as_str());
+
+                if let Some(id) = call_id {
+                    if let Some(mut tc) = pending_calls.remove(id) {
+                        let output_value = payload.get("output");
+                        let raw_output = value_to_preview(output_value);
+                        if tc.tool_name == "exec_command" {
+                            tc.output_preview =
+                                raw_output.map(|s| truncate_str(&clean_codex_exec_output(&s), 500));
+                        } else {
+                            tc.output_preview = raw_output.map(|s| truncate_str(&s, 500));
+                        }
+                        tc.is_error = infer_tool_call_output_is_error(
+                            payload,
+                            output_value,
+                            tc.output_preview.as_deref(),
+                        );
+                        tool_calls.push(tc);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    tool_calls.extend(pending_calls.into_values());
+
+    let total_duration_ms = match (first_ts, last_ts) {
+        (Some(f), Some(l)) => {
+            let dur = (l - f).num_milliseconds();
+            if dur > 0 {
+                Some(dur as u64)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    };
+
+    let tool_count = tool_calls.len() as u32;
+    Some(AgentExecutionStats {
+        agent_type: None,
+        status: None,
+        total_duration_ms,
+        total_tokens: None,
+        total_tool_use_count: if tool_count > 0 {
+            Some(tool_count)
+        } else {
+            None
+        },
+        read_count: None,
+        search_count: None,
+        bash_count: None,
+        edit_file_count: None,
+        lines_added: None,
+        lines_removed: None,
+        other_tool_count: None,
+        tool_calls,
+    })
+}
+
 impl CodexParser {
     fn parse_conversation_detail(
         &self,
@@ -436,6 +688,20 @@ impl CodexParser {
 
         let mut first_timestamp: Option<DateTime<Utc>> = None;
         let mut last_timestamp: Option<DateTime<Utc>> = None;
+
+        // Agent subagent tracking (spawn_agent / wait_agent / close_agent)
+        let mut spawn_agent_call_ids: HashSet<String> = HashSet::new();
+        let mut agent_id_to_spawn_call_id: HashMap<String, String> = HashMap::new();
+        let mut agent_final_results: HashMap<String, String> = HashMap::new();
+        let mut wait_agent_call_ids: HashSet<String> = HashSet::new();
+        let mut close_agent_call_ids: HashSet<String> = HashSet::new();
+        let mut close_agent_targets: HashMap<String, String> = HashMap::new();
+        let mut active_agent_count: u32 = 0;
+        let mut call_id_tool_names: HashMap<String, String> = HashMap::new();
+        // Codex 0.129+ writes a generated image both as `event_msg.image_generation_end`
+        // and as `response_item.image_generation_call`, sharing the same call_id/id.
+        // Emit at most one ContentBlock::Image per id to avoid duplicate display.
+        let mut emitted_image_ids: HashSet<String> = HashSet::new();
 
         for line in reader.lines() {
             let line = match line {
@@ -477,6 +743,8 @@ impl CodexParser {
                     }
                 }
                 "turn_context" => {
+                    // A new API turn means any prior agent lifecycle is complete.
+                    active_agent_count = 0;
                     if model.is_none() {
                         model = value
                             .get("payload")
@@ -494,14 +762,12 @@ impl CodexParser {
                         let timestamp = parse_codex_timestamp(&value).unwrap_or_else(Utc::now);
 
                         match payload_type {
-                            "task_started" => {
-                                if context_window_max_tokens.is_none() {
-                                    context_window_max_tokens = payload
-                                        .get("model_context_window")
-                                        .and_then(|v| v.as_u64());
-                                }
+                            "task_started" if context_window_max_tokens.is_none() => {
+                                context_window_max_tokens =
+                                    payload.get("model_context_window").and_then(|v| v.as_u64());
                             }
                             "user_message" => {
+                                active_agent_count = 0;
                                 let text = payload
                                     .get("message")
                                     .and_then(|m| m.as_str())
@@ -555,9 +821,10 @@ impl CodexParser {
                                     usage: None,
                                     duration_ms: None,
                                     model: None,
+                                    completed_at: Some(timestamp),
                                 });
                             }
-                            "agent_message" => {
+                            "agent_message" if active_agent_count == 0 => {
                                 let text = payload
                                     .get("message")
                                     .and_then(|m| m.as_str())
@@ -571,9 +838,10 @@ impl CodexParser {
                                     usage: None,
                                     duration_ms: None,
                                     model: None,
+                                    completed_at: Some(timestamp),
                                 });
                             }
-                            "agent_reasoning" => {
+                            "agent_reasoning" if active_agent_count == 0 => {
                                 let text = payload
                                     .get("text")
                                     .and_then(|t| t.as_str())
@@ -588,7 +856,60 @@ impl CodexParser {
                                         usage: None,
                                         duration_ms: None,
                                         model: None,
+                                        completed_at: Some(timestamp),
                                     });
+                                }
+                            }
+                            "image_generation_end" => {
+                                if active_agent_count > 0 {
+                                    continue;
+                                }
+                                let call_id = payload
+                                    .get("call_id")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("")
+                                    .to_string();
+                                let result =
+                                    payload.get("result").and_then(|v| v.as_str()).unwrap_or("");
+                                if result.is_empty() {
+                                    continue;
+                                }
+                                if !call_id.is_empty() && emitted_image_ids.contains(&call_id) {
+                                    continue;
+                                }
+                                let mime_type = payload
+                                    .get("mime_type")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("image/png")
+                                    .to_string();
+                                let uri = payload
+                                    .get("saved_path")
+                                    .and_then(|v| v.as_str())
+                                    .map(|s| s.to_string());
+                                let revised_prompt = payload
+                                    .get("revised_prompt")
+                                    .and_then(|v| v.as_str())
+                                    .map(|s| s.to_string())
+                                    .filter(|s| !s.trim().is_empty());
+                                messages.push(UnifiedMessage {
+                                    id: format!("assistant-imagegen-{}", messages.len()),
+                                    role: MessageRole::Assistant,
+                                    content: vec![ContentBlock::ImageGeneration {
+                                        revised_prompt,
+                                        image: Some(ImageData {
+                                            data: result.to_string(),
+                                            mime_type,
+                                            uri,
+                                        }),
+                                    }],
+                                    timestamp,
+                                    usage: None,
+                                    duration_ms: None,
+                                    model: None,
+                                    completed_at: Some(timestamp),
+                                });
+                                if !call_id.is_empty() {
+                                    emitted_image_ids.insert(call_id);
                                 }
                             }
                             "token_count" => {
@@ -675,28 +996,117 @@ impl CodexParser {
                                     .or_else(|| payload.get("id"))
                                     .and_then(|id| id.as_str())
                                     .map(|s| s.to_string());
-                                let tool_name = payload
+                                let raw_tool_name = payload
                                     .get("name")
                                     .or_else(|| payload.get("tool_name"))
                                     .and_then(|n| n.as_str())
-                                    .unwrap_or("unknown")
-                                    .to_string();
-                                let input_preview = value_to_preview(
-                                    payload.get("arguments").or_else(|| payload.get("input")),
-                                );
-                                messages.push(UnifiedMessage {
-                                    id: format!("tool-{}", messages.len()),
-                                    role: MessageRole::Assistant,
-                                    content: vec![ContentBlock::ToolUse {
-                                        tool_use_id,
-                                        tool_name,
-                                        input_preview,
-                                    }],
-                                    timestamp,
-                                    usage: None,
-                                    duration_ms: None,
-                                    model: None,
-                                });
+                                    .unwrap_or("unknown");
+
+                                match raw_tool_name {
+                                    "spawn_agent" => {
+                                        let args = parse_codex_json_arg(payload);
+                                        let agent_type = args
+                                            .as_ref()
+                                            .and_then(|a| a.get("agent_type"))
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("agent");
+                                        let message = args
+                                            .as_ref()
+                                            .and_then(|a| a.get("message"))
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("");
+                                        let description =
+                                            truncate_str(message.lines().next().unwrap_or(""), 60);
+
+                                        if let Some(ref id) = tool_use_id {
+                                            spawn_agent_call_ids.insert(id.clone());
+                                        }
+                                        active_agent_count += 1;
+
+                                        let agent_input = serde_json::json!({
+                                            "subagent_type": agent_type,
+                                            "prompt": message,
+                                            "description": description,
+                                        });
+
+                                        messages.push(UnifiedMessage {
+                                            id: format!("tool-{}", messages.len()),
+                                            role: MessageRole::Assistant,
+                                            content: vec![ContentBlock::ToolUse {
+                                                tool_use_id,
+                                                tool_name: "Agent".to_string(),
+                                                input_preview: Some(agent_input.to_string()),
+                                                meta: None,
+                                            }],
+                                            timestamp,
+                                            usage: None,
+                                            duration_ms: None,
+                                            model: None,
+                                            completed_at: Some(timestamp),
+                                        });
+                                    }
+                                    "wait_agent" => {
+                                        if let Some(ref id) = tool_use_id {
+                                            wait_agent_call_ids.insert(id.clone());
+                                        }
+                                    }
+                                    "close_agent" => {
+                                        if let Some(ref id) = tool_use_id {
+                                            close_agent_call_ids.insert(id.clone());
+                                            let target =
+                                                parse_codex_json_arg(payload).and_then(|a| {
+                                                    a.get("target")
+                                                        .and_then(|v| v.as_str())
+                                                        .map(|s| s.to_string())
+                                                });
+                                            if let Some(target) = target {
+                                                close_agent_targets.insert(id.clone(), target);
+                                            }
+                                        }
+                                    }
+                                    _ => {
+                                        if let Some(ref id) = tool_use_id {
+                                            call_id_tool_names
+                                                .insert(id.clone(), raw_tool_name.to_string());
+                                        }
+                                        let input_preview = if raw_tool_name == "exec_command" {
+                                            parse_codex_json_arg(payload)
+                                                .and_then(|a| {
+                                                    a.get("cmd")
+                                                        .and_then(|v| v.as_str())
+                                                        .map(|s| s.to_string())
+                                                })
+                                                .or_else(|| {
+                                                    value_to_preview(
+                                                        payload
+                                                            .get("arguments")
+                                                            .or_else(|| payload.get("input")),
+                                                    )
+                                                })
+                                        } else {
+                                            value_to_preview(
+                                                payload
+                                                    .get("arguments")
+                                                    .or_else(|| payload.get("input")),
+                                            )
+                                        };
+                                        messages.push(UnifiedMessage {
+                                            id: format!("tool-{}", messages.len()),
+                                            role: MessageRole::Assistant,
+                                            content: vec![ContentBlock::ToolUse {
+                                                tool_use_id,
+                                                tool_name: raw_tool_name.to_string(),
+                                                input_preview,
+                                                meta: None,
+                                            }],
+                                            timestamp,
+                                            usage: None,
+                                            duration_ms: None,
+                                            model: None,
+                                            completed_at: Some(timestamp),
+                                        });
+                                    }
+                                }
                             }
                             "function_call_output" | "custom_tool_call_output" => {
                                 let tool_use_id = payload
@@ -705,31 +1115,116 @@ impl CodexParser {
                                     .or_else(|| payload.get("id"))
                                     .and_then(|id| id.as_str())
                                     .map(|s| s.to_string());
-                                let output_value = payload.get("output");
-                                let output = value_to_preview(output_value);
-                                let is_error = infer_tool_call_output_is_error(
-                                    payload,
-                                    output_value,
-                                    output.as_deref(),
-                                );
-                                messages.push(UnifiedMessage {
-                                    id: format!("tool-result-{}", messages.len()),
-                                    role: MessageRole::Tool,
-                                    content: vec![ContentBlock::ToolResult {
-                                        tool_use_id,
-                                        output_preview: output,
-                                        is_error,
-                                    }],
-                                    timestamp,
-                                    usage: None,
-                                    duration_ms: None,
-                                    model: None,
-                                });
+
+                                let is_spawn = tool_use_id
+                                    .as_ref()
+                                    .is_some_and(|id| spawn_agent_call_ids.contains(id));
+                                let is_wait = tool_use_id
+                                    .as_ref()
+                                    .is_some_and(|id| wait_agent_call_ids.contains(id));
+                                let is_close = tool_use_id
+                                    .as_ref()
+                                    .is_some_and(|id| close_agent_call_ids.contains(id));
+
+                                if is_spawn {
+                                    if let Some(output_obj) = parse_codex_json_output(payload) {
+                                        if let (Some(agent_id), Some(call_id)) = (
+                                            output_obj.get("agent_id").and_then(|v| v.as_str()),
+                                            tool_use_id.as_ref(),
+                                        ) {
+                                            agent_id_to_spawn_call_id
+                                                .insert(agent_id.to_string(), call_id.clone());
+                                        }
+                                    }
+                                    messages.push(UnifiedMessage {
+                                        id: format!("tool-result-{}", messages.len()),
+                                        role: MessageRole::Tool,
+                                        content: vec![ContentBlock::ToolResult {
+                                            tool_use_id,
+                                            output_preview: None,
+                                            is_error: false,
+                                            agent_stats: None,
+                                        }],
+                                        timestamp,
+                                        usage: None,
+                                        duration_ms: None,
+                                        model: None,
+                                        completed_at: Some(timestamp),
+                                    });
+                                } else if is_wait {
+                                    if let Some(output_obj) = parse_codex_json_output(payload) {
+                                        if let Some(status) =
+                                            output_obj.get("status").and_then(|s| s.as_object())
+                                        {
+                                            for (agent_id, result) in status {
+                                                if let Some(text) =
+                                                    result.get("completed").and_then(|v| v.as_str())
+                                                {
+                                                    agent_final_results
+                                                        .entry(agent_id.clone())
+                                                        .or_insert_with(|| text.to_string());
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else if is_close {
+                                    active_agent_count = active_agent_count.saturating_sub(1);
+                                    if let Some(output_obj) = parse_codex_json_output(payload) {
+                                        if let Some(agent_id) = tool_use_id
+                                            .as_ref()
+                                            .and_then(|id| close_agent_targets.get(id))
+                                        {
+                                            if let Some(text) = output_obj
+                                                .get("previous_status")
+                                                .and_then(|s| s.get("completed"))
+                                                .and_then(|v| v.as_str())
+                                            {
+                                                agent_final_results
+                                                    .entry(agent_id.clone())
+                                                    .or_insert_with(|| text.to_string());
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    let is_exec = tool_use_id.as_ref().is_some_and(|id| {
+                                        call_id_tool_names
+                                            .get(id)
+                                            .is_some_and(|n| n == "exec_command")
+                                    });
+                                    let output_value = payload.get("output");
+                                    let raw_output = value_to_preview(output_value);
+                                    let output = if is_exec {
+                                        raw_output.map(|s| clean_codex_exec_output(&s))
+                                    } else {
+                                        raw_output
+                                    };
+                                    let is_error = infer_tool_call_output_is_error(
+                                        payload,
+                                        output_value,
+                                        output.as_deref(),
+                                    );
+                                    messages.push(UnifiedMessage {
+                                        id: format!("tool-result-{}", messages.len()),
+                                        role: MessageRole::Tool,
+                                        content: vec![ContentBlock::ToolResult {
+                                            tool_use_id,
+                                            output_preview: output,
+                                            is_error,
+                                            agent_stats: None,
+                                        }],
+                                        timestamp,
+                                        usage: None,
+                                        duration_ms: None,
+                                        model: None,
+                                        completed_at: Some(timestamp),
+                                    });
+                                }
                             }
                             "message" => {
                                 let role =
                                     payload.get("role").and_then(|r| r.as_str()).unwrap_or("");
                                 if role == "user" {
+                                    active_agent_count = 0;
                                     if let Some(blocks) =
                                         extract_response_item_user_image_blocks(payload)
                                     {
@@ -756,8 +1251,66 @@ impl CodexParser {
                                             usage: None,
                                             duration_ms: None,
                                             model: None,
+                                            completed_at: Some(timestamp),
                                         });
                                     }
+                                }
+                            }
+                            "image_generation_call" => {
+                                // codex 0.129+ writes the same generated image as both an
+                                // `event_msg.image_generation_end` (earlier in the file) and
+                                // a `response_item.image_generation_call` (here). They share
+                                // the same id; emit at most once via emitted_image_ids.
+                                // Subagent suppression mirrors the event_msg arm: parent
+                                // timeline must not host children's generated images.
+                                if active_agent_count > 0 {
+                                    continue;
+                                }
+                                let id = payload
+                                    .get("id")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("")
+                                    .to_string();
+                                if !id.is_empty() && emitted_image_ids.contains(&id) {
+                                    continue;
+                                }
+                                let result =
+                                    payload.get("result").and_then(|v| v.as_str()).unwrap_or("");
+                                if result.is_empty() {
+                                    continue;
+                                }
+                                let mime_type = payload
+                                    .get("mime_type")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("image/png")
+                                    .to_string();
+                                let revised_prompt = payload
+                                    .get("revised_prompt")
+                                    .and_then(|v| v.as_str())
+                                    .map(|s| s.to_string())
+                                    .filter(|s| !s.trim().is_empty());
+                                messages.push(UnifiedMessage {
+                                    id: format!("assistant-imagegen-{}", messages.len()),
+                                    role: MessageRole::Assistant,
+                                    content: vec![ContentBlock::ImageGeneration {
+                                        revised_prompt,
+                                        image: Some(ImageData {
+                                            data: result.to_string(),
+                                            mime_type,
+                                            // response_item.image_generation_call has no
+                                            // saved_path; event_msg.image_generation_end is
+                                            // the only carrier of the on-disk file URI.
+                                            uri: None,
+                                        }),
+                                    }],
+                                    timestamp,
+                                    usage: None,
+                                    duration_ms: None,
+                                    model: None,
+                                    completed_at: Some(timestamp),
+                                });
+                                if !id.is_empty() {
+                                    emitted_image_ids.insert(id);
                                 }
                             }
                             _ => {}
@@ -765,6 +1318,44 @@ impl CodexParser {
                     }
                 }
                 _ => {}
+            }
+        }
+
+        // Fill in agent final results and subagent tool call stats
+        if !agent_id_to_spawn_call_id.is_empty() {
+            let spawn_call_to_agent: HashMap<&str, &str> = agent_id_to_spawn_call_id
+                .iter()
+                .map(|(agent_id, call_id)| (call_id.as_str(), agent_id.as_str()))
+                .collect();
+
+            let session_dir = path.parent();
+            let mut agent_stats_cache: HashMap<String, Option<AgentExecutionStats>> =
+                HashMap::new();
+
+            for msg in &mut messages {
+                for block in &mut msg.content {
+                    if let ContentBlock::ToolResult {
+                        tool_use_id: Some(ref id),
+                        ref mut output_preview,
+                        ref mut agent_stats,
+                        ..
+                    } = block
+                    {
+                        if let Some(&agent_id) = spawn_call_to_agent.get(id.as_str()) {
+                            if let Some(result) = agent_final_results.get(agent_id) {
+                                *output_preview = Some(result.clone());
+                            }
+                            if let Some(dir) = session_dir {
+                                let stats = agent_stats_cache
+                                    .entry(agent_id.to_string())
+                                    .or_insert_with(|| parse_codex_subagent_stats(dir, agent_id));
+                                if stats.is_some() {
+                                    *agent_stats = stats.clone();
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -795,6 +1386,9 @@ impl CodexParser {
             message_count: turns.len() as u32,
             model,
             git_branch,
+            parent_id: None,
+            parent_tool_use_id: None,
+            delegation_call_id: None,
         };
 
         Ok(ConversationDetail {
@@ -1173,6 +1767,7 @@ fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn> {
                 usage: None,
                 duration_ms: None,
                 model: None,
+                completed_at: msg.completed_at,
             });
             i += 1;
         } else if matches!(msg.role, MessageRole::System) {
@@ -1184,6 +1779,7 @@ fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn> {
                 usage: None,
                 duration_ms: None,
                 model: None,
+                completed_at: msg.completed_at,
             });
             i += 1;
         } else {
@@ -1193,6 +1789,7 @@ fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn> {
             let mut duration_ms = msg.duration_ms;
             let mut turn_model = msg.model.clone();
             let timestamp = msg.timestamp;
+            let mut completed_at = msg.completed_at;
             i += 1;
 
             // Only absorb immediately following Tool messages
@@ -1208,6 +1805,9 @@ fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn> {
                 if turn_model.is_none() {
                     turn_model = messages[i].model.clone();
                 }
+                if messages[i].completed_at.is_some() {
+                    completed_at = messages[i].completed_at;
+                }
                 i += 1;
             }
 
@@ -1219,6 +1819,7 @@ fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn> {
                 usage,
                 duration_ms,
                 model: turn_model,
+                completed_at,
             });
         }
     }
@@ -1238,8 +1839,10 @@ mod tests {
     use super::should_skip_duplicate_user_message;
     use super::strip_blocked_resource_mentions;
     use super::CodexParser;
-    use crate::models::{ContentBlock, MessageRole, SessionStats, TurnUsage, UnifiedMessage};
-    use chrono::{Duration, Utc};
+    use crate::models::{
+        ContentBlock, MessageRole, SessionStats, TurnRole, TurnUsage, UnifiedMessage,
+    };
+    use chrono::{DateTime, Duration, Utc};
     use std::env;
     use std::fs;
     use std::path::PathBuf;
@@ -1322,6 +1925,7 @@ mod tests {
             usage: None,
             duration_ms: None,
             model: None,
+            completed_at: Some(now),
         }];
 
         assert!(should_skip_duplicate_user_message(
@@ -1517,6 +2121,50 @@ mod tests {
     }
 
     #[test]
+    fn parse_detail_completion_time_uses_agent_message_timestamp_not_added_turn_span() {
+        // Regression: in Codex `duration_ms` is computed from the
+        // turn_context → token_count span, while `timestamp` on the
+        // assistant `UnifiedMessage` is the agent_message event time
+        // (already near turn end). Adding them double-counts the entire
+        // turn span. completed_at must reflect the agent_message arrival.
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time ok")
+            .as_nanos();
+        let path: PathBuf = env::temp_dir().join(format!("codeg-codex-completed-{nanos}.jsonl"));
+
+        let content = concat!(
+            "{\"timestamp\":\"2026-03-01T10:00:00Z\",\"type\":\"session_meta\",\"payload\":{\"id\":\"completed-1\",\"cwd\":\"/tmp/demo\"}}\n",
+            // Turn starts here.
+            "{\"timestamp\":\"2026-03-01T10:00:00.522Z\",\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-5-codex\"}}\n",
+            // Assistant message arrives ~9.5s into the turn.
+            "{\"timestamp\":\"2026-03-01T10:00:10.081Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"agent_message\",\"message\":\"done\"}}\n",
+            // token_count fires shortly after, bringing duration_ms = 9.7s.
+            "{\"timestamp\":\"2026-03-01T10:00:10.268Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"total_tokens\":100,\"input_tokens\":80,\"cached_input_tokens\":0,\"output_tokens\":20},\"last_token_usage\":{\"input_tokens\":80,\"cached_input_tokens\":0,\"output_tokens\":20,\"total_tokens\":100},\"model_context_window\":258400}}}\n"
+        );
+        fs::write(&path, content).expect("write test jsonl");
+
+        let parser = CodexParser::new();
+        let detail = parser
+            .parse_conversation_detail(&path, "completed-1")
+            .expect("parse detail ok");
+
+        let assistant = detail
+            .turns
+            .iter()
+            .find(|t| matches!(t.role, TurnRole::Assistant))
+            .expect("assistant turn");
+        let completed_at = assistant.completed_at.expect("completed_at populated");
+        let expected = "2026-03-01T10:00:10.081Z".parse::<DateTime<Utc>>().unwrap();
+        assert_eq!(completed_at, expected);
+        // The naive `timestamp + duration_ms` would produce ~10.00:19.827Z.
+        let wrong = "2026-03-01T10:00:19.827Z".parse::<DateTime<Utc>>().unwrap();
+        assert_ne!(completed_at, wrong);
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
     fn codex_home_env_overrides_default_home() {
         let resolved = resolve_codex_home_dir_from(
             Some(std::ffi::OsString::from("/tmp/custom-codex-home")),
@@ -1529,5 +2177,260 @@ mod tests {
     fn codex_home_defaults_to_home_dot_codex() {
         let resolved = resolve_codex_home_dir_from(None, Some(PathBuf::from("/Users/default")));
         assert_eq!(resolved, PathBuf::from("/Users/default/.codex"));
+    }
+
+    /// codex 0.129+ writes a generated image both as `event_msg.image_generation_end`
+    /// and `response_item.image_generation_call`, sharing the same call_id/id.
+    /// The parser must surface exactly one ContentBlock::ImageGeneration per id.
+    #[test]
+    fn image_generation_end_and_call_dedupe_by_id() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time ok")
+            .as_nanos();
+        let path: PathBuf = env::temp_dir().join(format!("codeg-codex-img-dedupe-{nanos}.jsonl"));
+
+        let content = concat!(
+            "{\"timestamp\":\"2026-05-05T12:35:00Z\",\"type\":\"session_meta\",\"payload\":{\"id\":\"ig-test\",\"cwd\":\"/tmp/demo\"}}\n",
+            "{\"timestamp\":\"2026-05-05T12:35:01Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"draw a cat\"}]}}\n",
+            "{\"timestamp\":\"2026-05-05T12:35:17Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"image_generation_end\",\"call_id\":\"ig_abc\",\"status\":\"generating\",\"revised_prompt\":\"a fluffy ginger kitten\",\"result\":\"AAAA_BASE64\",\"saved_path\":\"/tmp/cat.png\"}}\n",
+            "{\"timestamp\":\"2026-05-05T12:35:18Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"image_generation_call\",\"id\":\"ig_abc\",\"status\":\"generating\",\"revised_prompt\":\"a fluffy ginger kitten\",\"result\":\"AAAA_BASE64\"}}\n"
+        );
+        fs::write(&path, content).expect("write test jsonl");
+
+        let parser = CodexParser::new();
+        let detail = parser
+            .parse_conversation_detail(&path, "ig-test")
+            .expect("parse ok");
+
+        let imagegen_blocks: Vec<&ContentBlock> = detail
+            .turns
+            .iter()
+            .flat_map(|t| t.blocks.iter())
+            .filter(|b| matches!(b, ContentBlock::ImageGeneration { .. }))
+            .collect();
+        assert_eq!(
+            imagegen_blocks.len(),
+            1,
+            "Same image must appear once across event_msg.image_generation_end + response_item.image_generation_call (got {} image-generation blocks)",
+            imagegen_blocks.len()
+        );
+        // The first emit (event_msg.image_generation_end) wins, so saved_path
+        // and revised_prompt are preserved.
+        match imagegen_blocks[0] {
+            ContentBlock::ImageGeneration {
+                revised_prompt,
+                image,
+            } => {
+                assert_eq!(revised_prompt.as_deref(), Some("a fluffy ginger kitten"));
+                let image = image.as_ref().expect("image present on completed event");
+                assert_eq!(image.data, "AAAA_BASE64");
+                assert_eq!(image.mime_type, "image/png");
+                assert_eq!(image.uri.as_deref(), Some("/tmp/cat.png"));
+            }
+            other => panic!("expected ContentBlock::ImageGeneration, got {other:?}"),
+        }
+
+        let _ = fs::remove_file(path);
+    }
+
+    /// `event_msg.image_generation_end` ought to honor an explicit `mime_type`
+    /// field when codex writes one (defensive fallback to image/png otherwise).
+    #[test]
+    fn image_generation_end_honors_explicit_mime_type() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time ok")
+            .as_nanos();
+        let path: PathBuf = env::temp_dir().join(format!("codeg-codex-img-mime-{nanos}.jsonl"));
+
+        let content = concat!(
+            "{\"timestamp\":\"2026-05-05T12:35:00Z\",\"type\":\"session_meta\",\"payload\":{\"id\":\"ig-mime\",\"cwd\":\"/tmp/demo\"}}\n",
+            "{\"timestamp\":\"2026-05-05T12:35:01Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"hi\"}]}}\n",
+            "{\"timestamp\":\"2026-05-05T12:35:17Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"image_generation_end\",\"call_id\":\"ig_jpeg\",\"status\":\"generating\",\"mime_type\":\"image/jpeg\",\"result\":\"JPEGDATA\"}}\n"
+        );
+        fs::write(&path, content).expect("write test jsonl");
+
+        let parser = CodexParser::new();
+        let detail = parser
+            .parse_conversation_detail(&path, "ig-mime")
+            .expect("parse ok");
+
+        let mime = detail
+            .turns
+            .iter()
+            .flat_map(|t| t.blocks.iter())
+            .find_map(|b| match b {
+                ContentBlock::ImageGeneration {
+                    image: Some(img), ..
+                } if img.data == "JPEGDATA" => Some(img.mime_type.clone()),
+                _ => None,
+            })
+            .expect("jpeg image should be present");
+        assert_eq!(mime, "image/jpeg");
+
+        let _ = fs::remove_file(path);
+    }
+
+    /// Manual smoke check against a real codex JSONL captured locally.
+    /// `#[ignore]` so it doesn't run in CI; activate with
+    /// `cargo test image_generation_smoke_real_session -- --ignored --nocapture`
+    /// while iterating on the parser locally.
+    #[test]
+    #[ignore]
+    fn image_generation_smoke_real_session() {
+        let path = PathBuf::from(
+            "/Users/xggz/.codex/sessions/2026/05/10/rollout-2026-05-10T06-13-43-019e0ecd-b954-7e33-8011-053d08baa62e.jsonl"
+        );
+        if !path.exists() {
+            eprintln!("session not found at {}; skipping", path.display());
+            return;
+        }
+        let parser = CodexParser::new();
+        let detail = parser
+            .parse_conversation_detail(&path, "smoke")
+            .expect("parse ok");
+
+        let mut imagegen_count = 0usize;
+        let mut prompt_chars = 0usize;
+        let mut total_bytes = 0usize;
+        for turn in &detail.turns {
+            for b in &turn.blocks {
+                if let ContentBlock::ImageGeneration {
+                    revised_prompt,
+                    image,
+                } = b
+                {
+                    imagegen_count += 1;
+                    if let Some(p) = revised_prompt {
+                        prompt_chars += p.chars().count();
+                    }
+                    if let Some(img) = image {
+                        total_bytes += img.data.len();
+                    }
+                }
+            }
+        }
+        eprintln!("image_generation_blocks={imagegen_count}");
+        eprintln!("revised_prompt_total_chars={prompt_chars}");
+        eprintln!("total_image_base64_bytes={total_bytes}");
+        assert!(
+            imagegen_count >= 1,
+            "expected at least 1 ContentBlock::ImageGeneration in the smoke session"
+        );
+    }
+
+    /// When `revised_prompt` is absent in the payload, the parser must emit
+    /// `revised_prompt: None` (codex's `imagegen` skill does not always echo
+    /// the prompt back, e.g. when status="failed").
+    #[test]
+    fn image_generation_end_omits_revised_prompt_when_missing() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time ok")
+            .as_nanos();
+        let path: PathBuf = env::temp_dir().join(format!("codeg-codex-img-noprompt-{nanos}.jsonl"));
+
+        let content = concat!(
+            "{\"timestamp\":\"2026-05-05T12:35:00Z\",\"type\":\"session_meta\",\"payload\":{\"id\":\"ig-noprompt\",\"cwd\":\"/tmp/demo\"}}\n",
+            "{\"timestamp\":\"2026-05-05T12:35:17Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"image_generation_end\",\"call_id\":\"ig_np\",\"status\":\"generating\",\"result\":\"NOPROMPT_DATA\"}}\n"
+        );
+        fs::write(&path, content).expect("write test jsonl");
+
+        let parser = CodexParser::new();
+        let detail = parser
+            .parse_conversation_detail(&path, "ig-noprompt")
+            .expect("parse ok");
+
+        let block = detail
+            .turns
+            .iter()
+            .flat_map(|t| t.blocks.iter())
+            .find(|b| matches!(b, ContentBlock::ImageGeneration { .. }))
+            .expect("image generation block present");
+        match block {
+            ContentBlock::ImageGeneration {
+                revised_prompt,
+                image,
+            } => {
+                assert!(revised_prompt.is_none());
+                let image = image.as_ref().expect("image present on completed event");
+                assert_eq!(image.data, "NOPROMPT_DATA");
+            }
+            _ => unreachable!(),
+        }
+
+        let _ = fs::remove_file(path);
+    }
+
+    /// Subagents in codex run inside the parent's JSONL — their
+    /// agent_message / agent_reasoning events are filtered while
+    /// `active_agent_count > 0`. image_generation events must follow the
+    /// same rule, otherwise a subagent's generated image leaks into the
+    /// parent timeline as an inline ContentBlock::ImageGeneration.
+    #[test]
+    fn image_generation_inside_subagent_is_suppressed_in_parent() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time ok")
+            .as_nanos();
+        let path: PathBuf = env::temp_dir().join(format!("codeg-codex-img-subagent-{nanos}.jsonl"));
+
+        // Sequence:
+        //   1. user msg
+        //   2. parent calls spawn_agent           → active_agent_count = 1
+        //   3. spawn_agent output (assigns agent_id)
+        //   4. SUBAGENT generates an image (event_msg + response_item)
+        //   5. parent calls close_agent
+        //   6. close_agent output                  → active_agent_count = 0
+        //   7. PARENT generates an image after the subagent finished
+        //
+        // Only step 7's image must surface; step 4 is the subagent's and
+        // belongs to the subagent's own transcript, not the parent timeline.
+        let content = concat!(
+            "{\"timestamp\":\"2026-05-05T12:00:00Z\",\"type\":\"session_meta\",\"payload\":{\"id\":\"ig-subagent\",\"cwd\":\"/tmp/demo\"}}\n",
+            "{\"timestamp\":\"2026-05-05T12:00:01Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"go\"}]}}\n",
+            "{\"timestamp\":\"2026-05-05T12:00:02Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"call_id\":\"spawn_call_1\",\"name\":\"spawn_agent\",\"arguments\":\"{\\\"agent_type\\\":\\\"researcher\\\",\\\"message\\\":\\\"do work\\\"}\"}}\n",
+            "{\"timestamp\":\"2026-05-05T12:00:03Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call_output\",\"call_id\":\"spawn_call_1\",\"output\":\"{\\\"agent_id\\\":\\\"agent_a\\\"}\"}}\n",
+            "{\"timestamp\":\"2026-05-05T12:00:04Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"image_generation_end\",\"call_id\":\"ig_subagent_x\",\"status\":\"generating\",\"revised_prompt\":\"subagent painted this\",\"result\":\"SUBAGENT_BYTES\",\"saved_path\":\"/tmp/sub.png\"}}\n",
+            "{\"timestamp\":\"2026-05-05T12:00:05Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"image_generation_call\",\"id\":\"ig_subagent_y\",\"status\":\"generating\",\"revised_prompt\":\"subagent painted this too\",\"result\":\"SUBAGENT_BYTES_2\"}}\n",
+            "{\"timestamp\":\"2026-05-05T12:00:06Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"call_id\":\"close_call_1\",\"name\":\"close_agent\",\"arguments\":\"{\\\"target\\\":\\\"agent_a\\\"}\"}}\n",
+            "{\"timestamp\":\"2026-05-05T12:00:07Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call_output\",\"call_id\":\"close_call_1\",\"output\":\"{}\"}}\n",
+            "{\"timestamp\":\"2026-05-05T12:00:08Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"image_generation_end\",\"call_id\":\"ig_parent\",\"status\":\"generating\",\"revised_prompt\":\"parent painted this\",\"result\":\"PARENT_BYTES\",\"saved_path\":\"/tmp/parent.png\"}}\n"
+        );
+        fs::write(&path, content).expect("write test jsonl");
+
+        let parser = CodexParser::new();
+        let detail = parser
+            .parse_conversation_detail(&path, "ig-subagent")
+            .expect("parse ok");
+
+        let imagegen_blocks: Vec<&ContentBlock> = detail
+            .turns
+            .iter()
+            .flat_map(|t| t.blocks.iter())
+            .filter(|b| matches!(b, ContentBlock::ImageGeneration { .. }))
+            .collect();
+
+        assert_eq!(
+            imagegen_blocks.len(),
+            1,
+            "only the parent's post-subagent image must surface ({} blocks)",
+            imagegen_blocks.len()
+        );
+        match imagegen_blocks[0] {
+            ContentBlock::ImageGeneration {
+                revised_prompt,
+                image,
+            } => {
+                assert_eq!(revised_prompt.as_deref(), Some("parent painted this"));
+                let image = image.as_ref().expect("parent image present");
+                assert_eq!(image.data, "PARENT_BYTES");
+                assert_eq!(image.uri.as_deref(), Some("/tmp/parent.png"));
+            }
+            other => panic!("expected ContentBlock::ImageGeneration, got {other:?}"),
+        }
+
+        let _ = fs::remove_file(path);
     }
 }

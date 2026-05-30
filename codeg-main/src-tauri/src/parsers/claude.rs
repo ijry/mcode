@@ -223,9 +223,22 @@ pub struct ClaudeParser {
     base_dir: PathBuf,
 }
 
+impl Default for ClaudeParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ClaudeParser {
     pub fn new() -> Self {
         let base_dir = resolve_claude_config_dir().join("projects");
+        Self { base_dir }
+    }
+
+    /// Test-only constructor that lets callers point the parser at a fixture
+    /// directory instead of `~/.claude/projects`.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn with_base_dir(base_dir: PathBuf) -> Self {
         Self { base_dir }
     }
 
@@ -356,6 +369,9 @@ impl ClaudeParser {
             message_count,
             model,
             git_branch,
+            parent_id: None,
+            parent_tool_use_id: None,
+            delegation_call_id: None,
         }))
     }
 }
@@ -425,7 +441,7 @@ impl AgentParser for ClaudeParser {
             }
         }
 
-        conversations.sort_by(|a, b| b.started_at.cmp(&a.started_at));
+        conversations.sort_by_key(|b| std::cmp::Reverse(b.started_at));
         Ok(conversations)
     }
 
@@ -558,7 +574,7 @@ impl ClaudeParser {
                         MessageRole::User
                     };
 
-                    // Check toolUseResult.structuredPatch for real line numbers
+                    // Check toolUseResult for structured patch and agent execution stats
                     if let Some(tur) = value.get("toolUseResult") {
                         if let Some(sp) = tur.get("structuredPatch") {
                             let fp = tur
@@ -581,6 +597,38 @@ impl ClaudeParser {
                                 }
                             }
                         }
+
+                        // Extract agent execution stats from toolUseResult
+                        if tur.get("agentType").is_some() {
+                            let mut stats = extract_agent_execution_stats(tur);
+                            // Load tool calls from subagent's own JSONL transcript
+                            if let Some(agent_id) = tur.get("agentId").and_then(|v| v.as_str()) {
+                                // Reject path traversal: agentId must be alphanumeric
+                                if !agent_id.is_empty()
+                                    && !agent_id.contains('/')
+                                    && !agent_id.contains('\\')
+                                    && !agent_id.contains("..")
+                                {
+                                    let subagent_dir = path.with_extension("").join("subagents");
+                                    let subagent_path =
+                                        subagent_dir.join(format!("agent-{}.jsonl", agent_id));
+                                    if subagent_path.exists() {
+                                        stats.tool_calls =
+                                            parse_subagent_tool_calls(&subagent_path);
+                                    }
+                                }
+                            }
+                            for block in content.iter_mut() {
+                                if let ContentBlock::ToolResult {
+                                    ref mut agent_stats,
+                                    ..
+                                } = block
+                                {
+                                    *agent_stats = Some(stats);
+                                    break;
+                                }
+                            }
+                        }
                     }
 
                     messages.push(UnifiedMessage {
@@ -591,6 +639,7 @@ impl ClaudeParser {
                         usage: None,
                         duration_ms: None,
                         model: None,
+                        completed_at: Some(timestamp),
                     });
                 }
                 "assistant" => {
@@ -622,6 +671,7 @@ impl ClaudeParser {
                         usage,
                         duration_ms: None,
                         model: msg_model,
+                        completed_at: Some(timestamp),
                     });
                 }
                 "system" => {
@@ -660,6 +710,7 @@ impl ClaudeParser {
                             tool_use_id: Some(synthetic_id),
                             tool_name,
                             input_preview,
+                            meta: None,
                         });
                     } else {
                         messages.push(UnifiedMessage {
@@ -669,11 +720,13 @@ impl ClaudeParser {
                                 tool_use_id: Some(synthetic_id),
                                 tool_name,
                                 input_preview,
+                                meta: None,
                             }],
                             timestamp,
                             usage: None,
                             duration_ms: None,
                             model: None,
+                            completed_at: Some(timestamp),
                         });
                     }
                 }
@@ -774,8 +827,10 @@ impl ClaudeParser {
                             tool_use_id: matching_id,
                             output_preview,
                             is_error,
+                            agent_stats: None,
                         });
                     } else {
+                        let timestamp = parse_timestamp(&value).unwrap_or_else(Utc::now);
                         messages.push(UnifiedMessage {
                             id: format!("synth-result-{}", messages.len()),
                             role: MessageRole::Assistant,
@@ -783,11 +838,13 @@ impl ClaudeParser {
                                 tool_use_id: matching_id,
                                 output_preview,
                                 is_error,
+                                agent_stats: None,
                             }],
-                            timestamp: parse_timestamp(&value).unwrap_or_else(Utc::now),
+                            timestamp,
                             usage: None,
                             duration_ms: None,
                             model: None,
+                            completed_at: Some(timestamp),
                         });
                     }
                 }
@@ -822,6 +879,9 @@ impl ClaudeParser {
             message_count: turns.len() as u32,
             model,
             git_branch,
+            parent_id: None,
+            parent_tool_use_id: None,
+            delegation_call_id: None,
         };
 
         Ok(ConversationDetail {
@@ -910,6 +970,7 @@ fn extract_user_content(value: &serde_json::Value) -> Vec<ContentBlock> {
                         tool_use_id,
                         output_preview: output,
                         is_error,
+                        agent_stats: None,
                     });
                 }
                 _ => {}
@@ -1023,6 +1084,7 @@ fn extract_assistant_content(value: &serde_json::Value) -> Vec<ContentBlock> {
                         tool_use_id,
                         tool_name,
                         input_preview,
+                        meta: None,
                     });
                 }
                 _ => {}
@@ -1053,6 +1115,156 @@ fn extract_usage(value: &serde_json::Value) -> Option<TurnUsage> {
             .and_then(|v| v.as_u64())
             .unwrap_or(0),
     })
+}
+
+fn extract_agent_execution_stats(tur: &serde_json::Value) -> AgentExecutionStats {
+    let tool_stats = tur.get("toolStats");
+    AgentExecutionStats {
+        agent_type: tur
+            .get("agentType")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        status: tur
+            .get("status")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        total_duration_ms: tur.get("totalDurationMs").and_then(|v| v.as_u64()),
+        total_tokens: tur.get("totalTokens").and_then(|v| v.as_u64()),
+        total_tool_use_count: tur
+            .get("totalToolUseCount")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32),
+        read_count: tool_stats
+            .and_then(|s| s.get("readCount"))
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32),
+        search_count: tool_stats
+            .and_then(|s| s.get("searchCount"))
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32),
+        bash_count: tool_stats
+            .and_then(|s| s.get("bashCount"))
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32),
+        edit_file_count: tool_stats
+            .and_then(|s| s.get("editFileCount"))
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32),
+        lines_added: tool_stats
+            .and_then(|s| s.get("linesAdded"))
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32),
+        lines_removed: tool_stats
+            .and_then(|s| s.get("linesRemoved"))
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32),
+        other_tool_count: tool_stats
+            .and_then(|s| s.get("otherToolCount"))
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32),
+        tool_calls: Vec::new(),
+    }
+}
+
+/// Parse a subagent's JSONL transcript and extract its tool calls.
+///
+/// The subagent JSONL has the same format as the main session:
+/// assistant messages with tool_use blocks, followed by user messages
+/// with tool_result blocks. We pair them by tool_use_id and produce
+/// a compact list of `AgentToolCall` records.
+fn parse_subagent_tool_calls(path: &PathBuf) -> Vec<AgentToolCall> {
+    let file = match fs::File::open(path) {
+        Ok(f) => f,
+        Err(_) => return Vec::new(),
+    };
+    let reader = BufReader::new(file);
+
+    // Collect tool_use entries and build a result map
+    let mut calls: Vec<(String, String, Option<String>)> = Vec::new(); // (id, name, input)
+    let mut results: std::collections::HashMap<String, (Option<String>, bool)> =
+        std::collections::HashMap::new();
+
+    for line in reader.lines() {
+        let line = match line {
+            Ok(l) => l,
+            Err(_) => continue,
+        };
+        if line.trim().is_empty() {
+            continue;
+        }
+        let value: serde_json::Value = match serde_json::from_str(&line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        let msg_type = value.get("type").and_then(|t| t.as_str()).unwrap_or("");
+
+        if msg_type == "assistant" {
+            if let Some(content) = value
+                .get("message")
+                .and_then(|m| m.get("content"))
+                .and_then(|c| c.as_array())
+            {
+                for item in content {
+                    let block_type = item.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                    if block_type == "tool_use" || block_type == "server_tool_use" {
+                        let id = item
+                            .get("id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let name = item
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown")
+                            .to_string();
+                        let input = item.get("input").map(|v| truncate_str(&v.to_string(), 500));
+                        if !id.is_empty() {
+                            calls.push((id, name, input));
+                        }
+                    }
+                }
+            }
+        } else if msg_type == "user" {
+            if let Some(content) = value
+                .get("message")
+                .and_then(|m| m.get("content"))
+                .and_then(|c| c.as_array())
+            {
+                for item in content {
+                    let block_type = item.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                    if block_type == "tool_result" || block_type == "server_tool_result" {
+                        let id = item
+                            .get("tool_use_id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let is_error = item
+                            .get("is_error")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
+                        let output = extract_tool_result_text(item).map(|s| truncate_str(&s, 500));
+                        if !id.is_empty() {
+                            results.insert(id, (output, is_error));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    calls
+        .into_iter()
+        .map(|(id, name, input)| {
+            let (output, is_error) = results.remove(&id).unwrap_or((None, false));
+            AgentToolCall {
+                tool_name: name,
+                input_preview: input,
+                output_preview: output,
+                is_error,
+            }
+        })
+        .collect()
 }
 
 fn extract_tool_result_text(item: &serde_json::Value) -> Option<String> {
@@ -1108,12 +1320,21 @@ fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn> {
             let usage = msg.usage.clone();
             let duration_ms = msg.duration_ms;
             let turn_model = msg.model.clone();
+            // Track the latest event time across the assistant message and
+            // any tool-result-only user messages absorbed below; that's the
+            // turn's true completion moment, not `timestamp + duration_ms`
+            // (turn_duration encodes the entire turn span and adding it to
+            // the assistant event time double-counts).
+            let mut completed_at = msg.completed_at;
             i += 1;
 
             // Only absorb immediately following tool-result-only user msgs
             // (stop at the next assistant message to keep turns small for virtualization)
             while i < messages.len() && is_tool_result_only(&messages[i]) {
                 blocks.extend(messages[i].content.clone());
+                if messages[i].completed_at.is_some() {
+                    completed_at = messages[i].completed_at;
+                }
                 i += 1;
             }
 
@@ -1125,6 +1346,7 @@ fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn> {
                 usage,
                 duration_ms,
                 model: turn_model,
+                completed_at,
             });
         } else if matches!(msg.role, MessageRole::System) {
             turns.push(MessageTurn {
@@ -1135,6 +1357,7 @@ fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn> {
                 usage: None,
                 duration_ms: None,
                 model: None,
+                completed_at: msg.completed_at,
             });
             i += 1;
         } else {
@@ -1146,6 +1369,7 @@ fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn> {
                 usage: None,
                 duration_ms: None,
                 model: None,
+                completed_at: msg.completed_at,
             });
             i += 1;
         }
@@ -1178,7 +1402,7 @@ mod tests {
     fn defaults_context_limit_for_claude_models() {
         assert_eq!(
             claude_context_window_max_tokens_for_model(Some("claude-sonnet-4-6")),
-            Some(200_000)
+            Some(1_000_000)
         );
         assert_eq!(
             claude_context_window_max_tokens_for_model(Some("custom-model-x")),
@@ -1203,6 +1427,7 @@ mod tests {
                 }),
                 duration_ms: None,
                 model: None,
+                completed_at: None,
             },
             MessageTurn {
                 id: "turn-1".to_string(),
@@ -1217,6 +1442,7 @@ mod tests {
                 }),
                 duration_ms: None,
                 model: None,
+                completed_at: None,
             },
         ];
 
@@ -1281,11 +1507,89 @@ mod tests {
 
         let stats = detail.session_stats.expect("session stats");
         assert_eq!(stats.context_window_used_tokens, Some(1700));
-        assert_eq!(stats.context_window_max_tokens, Some(200_000));
+        assert_eq!(stats.context_window_max_tokens, Some(1_000_000));
         let percent = stats
             .context_window_usage_percent
             .expect("context window usage percent");
-        assert!((percent - 0.85).abs() < f64::EPSILON);
+        assert!((percent - 0.17).abs() < 0.01);
+    }
+
+    #[test]
+    fn parse_detail_completion_time_uses_event_log_timestamp_not_added_duration() {
+        // Regression: turn_duration encodes the *entire* turn span, so
+        // adding it to the assistant event timestamp lands far in the
+        // future. completed_at must reflect when the message actually
+        // finished, i.e. the assistant event timestamp itself (or the
+        // turn_duration system event's timestamp ≈ same instant).
+        let path = std::env::temp_dir().join(format!(
+            "codeg-claude-completed-{}.jsonl",
+            uuid::Uuid::new_v4()
+        ));
+        let mut file = fs::File::create(&path).expect("create temp jsonl");
+        writeln!(
+            file,
+            "{}",
+            serde_json::json!({
+                "type": "user",
+                "sessionId": "session-completed",
+                "timestamp": "2026-03-01T10:00:00Z",
+                "uuid": "u1",
+                "cwd": "/tmp/demo",
+                "gitBranch": "main",
+                "message": {"content": [{"type": "text", "text": "hi"}]}
+            })
+        )
+        .expect("write user line");
+        writeln!(
+            file,
+            "{}",
+            serde_json::json!({
+                "type": "assistant",
+                "sessionId": "session-completed",
+                "timestamp": "2026-03-01T10:03:19.301Z",
+                "uuid": "a1",
+                "message": {
+                    "model": "claude-sonnet-4-6",
+                    "content": [{"type": "text", "text": "ok"}]
+                }
+            })
+        )
+        .expect("write assistant line");
+        writeln!(
+            file,
+            "{}",
+            serde_json::json!({
+                "type": "system",
+                "subtype": "turn_duration",
+                "sessionId": "session-completed",
+                "timestamp": "2026-03-01T10:03:19.353Z",
+                "uuid": "s1",
+                "durationMs": 199_033u64
+            })
+        )
+        .expect("write turn_duration line");
+
+        let parser = ClaudeParser {
+            base_dir: PathBuf::new(),
+        };
+        let detail = parser
+            .parse_conversation_detail(&path, "session-completed")
+            .expect("parse conversation detail");
+        fs::remove_file(&path).expect("cleanup temp jsonl");
+
+        let assistant = detail
+            .turns
+            .iter()
+            .find(|t| matches!(t.role, TurnRole::Assistant))
+            .expect("assistant turn");
+        let completed_at = assistant.completed_at.expect("completed_at populated");
+        // The assistant event's own timestamp.
+        let expected = "2026-03-01T10:03:19.301Z".parse::<DateTime<Utc>>().unwrap();
+        assert_eq!(completed_at, expected);
+        // Sanity: ensure we did NOT compute timestamp + duration_ms
+        // (which would have landed at 10:06:38.334Z, ~3min 19s later).
+        let wrong = "2026-03-01T10:06:38.334Z".parse::<DateTime<Utc>>().unwrap();
+        assert_ne!(completed_at, wrong);
     }
 
     #[test]
@@ -1395,7 +1699,7 @@ mod tests {
         // Stats should reflect only the real assistant usage
         let stats = detail.session_stats.expect("session stats");
         assert_eq!(stats.context_window_used_tokens, Some(1700));
-        assert_eq!(stats.context_window_max_tokens, Some(200_000));
+        assert_eq!(stats.context_window_max_tokens, Some(1_000_000));
         let total = stats.total_tokens.expect("total tokens");
         assert_eq!(total, 1900); // 1000 + 200 + 300 + 400
     }

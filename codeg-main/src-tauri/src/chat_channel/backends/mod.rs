@@ -1,5 +1,4 @@
 pub mod lark;
-pub mod mcode;
 pub mod telegram;
 pub mod weixin;
 
@@ -45,12 +44,6 @@ pub fn create_backend(
                 token,
                 cfg.base_url,
             )))
-        }
-        ChannelType::Mcode => {
-            let cfg: McodeConfig = serde_json::from_value(config.clone()).map_err(|e| {
-                ChatChannelError::ConfigurationInvalid(format!("Invalid Mcode config: {e}"))
-            })?;
-            Ok(Box::new(mcode::McodeBackend::new(channel_id, token, cfg)?))
         }
         ChannelType::Lark => {
             let cfg: LarkConfig = serde_json::from_value(config.clone()).map_err(|e| {

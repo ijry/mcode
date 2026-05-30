@@ -50,8 +50,15 @@ const EXACT_TOOL_NAME_ALIASES: Record<string, string> = {
   browser_action: "webfetch",
   use_mcp_tool: "tool",
   // Codex
+  spawn_agent: "agent",
+  wait_agent: "task",
+  close_agent: "task",
   update_plan: "task",
   request_user_input: "question",
+  // codeg multi-agent delegation MCP tool (varies by server prefix)
+  delegate_to_agent: "delegate_to_agent",
+  "mcp__codeg-delegate__delegate_to_agent": "delegate_to_agent",
+  mcp__codeg__delegate_to_agent: "delegate_to_agent",
   // OpenCode
   delegate_task: "task",
   call_omo_agent: "agent",
@@ -197,7 +204,10 @@ function inferFromInput(
 
   if (hasAnyKey(parsed, ["question"])) return "question"
 
-  if (hasAnyKey(parsed, ["subagent_type", "taskId", "task_id", "subject"])) {
+  if (hasAnyKey(parsed, ["subagent_type"])) {
+    return "agent"
+  }
+  if (hasAnyKey(parsed, ["taskId", "task_id", "subject"])) {
     return "task"
   }
 
@@ -250,6 +260,13 @@ export function normalizeToolName(toolName: string): string {
   const alias = EXACT_TOOL_NAME_ALIASES[canonical]
   if (alias) return alias
 
+  // Multi-agent delegation MCP tool. Server prefix AND separator both
+  // vary by host: Claude Code uses `mcp__<server>__delegate_to_agent`,
+  // Codex live ACP exposes `<server>/delegate_to_agent`, others use `.`
+  // or `:`. Match `delegate_to_agent` after any non-alphanumeric
+  // separator so every form collapses to the same canonical name.
+  if (/[^a-z0-9]delegate_to_agent$/.test(canonical)) return "delegate_to_agent"
+
   const freeform = inferFromFreeformName(trimmed)
   if (freeform) return freeform
 
@@ -266,9 +283,37 @@ export function inferLiveToolName(params: {
   title?: string | null
   kind?: string | null
   rawInput?: string | null
+  meta?: Record<string, unknown> | null
 }): string {
+  // The backend (e.g. ACP connection layer for OpenCode sub-agent task
+  // calls) may set `title="agent"` as an *authoritative* sentinel after
+  // running agent-specific detection. This must win over `inferFromInput`'s
+  // input-shape heuristics, which otherwise classify sub-agent payloads
+  // as "bash" / "edit" / etc. when their input objects happen to carry a
+  // `command`/`args`/`changes`/... key alongside the real `subagent_type`
+  // marker.
+  //
+  // Match the sentinel by *literal* equality after trimming/lowercasing —
+  // NOT via `normalizeToolName`, whose freeform `\bagent\b` matcher would
+  // misclassify any title containing the word "agent" (e.g. "Inspect agent
+  // config") as an Agent card before raw_input is even consulted.
+  if ((params.title ?? "").trim().toLowerCase() === "agent") return "agent"
+
+  // Input-shape detection runs FIRST so cross-agent heuristics (Claude Code
+  // `Task` tool routed via `subagent_type`, OpenCode sub-agent calls, etc.)
+  // keep priority. The meta-tool-name override below only kicks in when the
+  // input shape is silent — i.e. synthesized events with no `rawInput`.
   const byInput = inferFromInput(params.rawInput, params.kind, params.title)
   if (byInput) return byInput
+
+  // Claude-Code-only override: claude-agent-acp >=0.37 embeds the SDK tool
+  // name under `_meta.claudeCode.toolName`. We only need it for synthesized
+  // events like `memory_recall` (kind="read" + title="Recalled N memories"),
+  // where neither the input shape nor the human title carries the real
+  // identity. Placed below `inferFromInput` so the more specific
+  // subagent_type / patch / command heuristics keep winning when present.
+  const metaToolName = extractClaudeCodeToolName(params.meta)
+  if (metaToolName) return metaToolName
 
   const byTitle = normalizeToolName(params.title ?? "")
   if (byTitle !== "tool") return byTitle
@@ -277,4 +322,16 @@ export function inferLiveToolName(params: {
   if (byKind !== "tool") return byKind
 
   return "tool"
+}
+
+function extractClaudeCodeToolName(
+  meta: Record<string, unknown> | null | undefined
+): string | null {
+  if (!meta || typeof meta !== "object") return null
+  const cc = (meta as Record<string, unknown>).claudeCode
+  if (!cc || typeof cc !== "object") return null
+  const tn = (cc as Record<string, unknown>).toolName
+  if (typeof tn !== "string") return null
+  const trimmed = tn.trim()
+  return trimmed.length > 0 ? trimmed : null
 }

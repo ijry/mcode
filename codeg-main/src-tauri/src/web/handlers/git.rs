@@ -423,9 +423,10 @@ pub struct GitDeleteBranchParams {
 
 pub async fn git_delete_branch(
     Json(params): Json<GitDeleteBranchParams>,
-) -> Result<Json<()>, AppCommandError> {
-    folder_commands::git_delete_branch(params.path, params.branch_name, params.force).await?;
-    Ok(Json(()))
+) -> Result<Json<String>, AppCommandError> {
+    let result =
+        folder_commands::git_delete_branch(params.path, params.branch_name, params.force).await?;
+    Ok(Json(result))
 }
 
 #[derive(Deserialize)]

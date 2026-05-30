@@ -5,8 +5,11 @@ import dynamic from "next/dynamic"
 import { ChevronDown, ChevronRight, FileCode2, FileIcon } from "lucide-react"
 import type { editor as MonacoEditorNs } from "monaco-editor"
 import { useTranslations } from "next-intl"
-import { useFolderContext } from "@/contexts/folder-context"
-import { useWorkspaceContext } from "@/contexts/workspace-context"
+import { useActiveFolder } from "@/contexts/active-folder-context"
+import {
+  useWorkspaceContext,
+  type FileWorkspaceTab,
+} from "@/contexts/workspace-context"
 import { ImagePreview } from "@/components/files/image-preview"
 import { DiffViewer } from "@/components/diff/diff-viewer"
 import { UnifiedDiffPreview } from "@/components/diff/unified-diff-preview"
@@ -24,7 +27,10 @@ import { Streamdown } from "streamdown"
 import { readFileBase64 } from "@/lib/api"
 import { normalizeMathDelimiters } from "@/components/ai-elements/message"
 import { defineMonacoThemes, useMonacoThemeSync } from "@/lib/monaco-themes"
+import { useZoomLevel } from "@/hooks/use-appearance"
 import { ScrollArea } from "@/components/ui/scroll-area"
+
+const EDITOR_BASE_FONT_SIZE = 13
 import "@/lib/monaco-local"
 
 const math = createMathPlugin({ singleDollarTextMath: true })
@@ -198,6 +204,20 @@ function buildMonacoModelPath(path: string | null, id: string): string {
   const normalized = path.replace(/\\/g, "/")
   const encoded = normalized.split("/").map(encodeURIComponent).join("/")
   return `file:///${encoded}`
+}
+
+// True once a tab has *something* to render. Drives the rendering predicate
+// so that a refresh on a loaded tab keeps the previous content visible
+// (and the loading state is signalled by the subtle top-right badge),
+// matching VS Code / IntelliJ "non-destructive refresh" behaviour. Only
+// a true cold load (no content yet) falls back to the full-pane placeholder.
+function hasTabContent(tab: FileWorkspaceTab): boolean {
+  if (tab.kind === "rich-diff") {
+    return (
+      tab.originalContent !== undefined || tab.modifiedContent !== undefined
+    )
+  }
+  return tab.content !== ""
 }
 
 interface DiffOutlineFile {
@@ -763,13 +783,14 @@ export function FileWorkspacePanel() {
     saveActiveFile,
     updateActiveFileContent,
   } = useWorkspaceContext()
-  const { folder } = useFolderContext()
+  const { activeFolder: folder } = useActiveFolder()
   const folderPath = folder?.path ?? null
   const activeScope = activeFileTab?.id ?? "__default__"
   const editorRef = useRef<MonacoEditorNs.IStandaloneCodeEditor | null>(null)
   const cursorListenerRef = useRef<{ dispose: () => void } | null>(null)
   const gitChangeDecorationsRef = useRef<string[]>([])
   const editorTheme = useMonacoThemeSync()
+  const { zoomLevel } = useZoomLevel()
   const [editorMountVersion, setEditorMountVersion] = useState(0)
   const [cursorLine, setCursorLine] = useState(1)
   const [collapsedFiles, setCollapsedFiles] = useState<Record<string, boolean>>(
@@ -1253,6 +1274,8 @@ export function FileWorkspacePanel() {
         ? t("unsaved")
         : t("workingTree")
 
+    const richDiffColdLoad =
+      activeFileTab.loading && !hasTabContent(activeFileTab)
     return (
       <div className="h-full relative">
         {activeFileTab.loading && (
@@ -1260,7 +1283,11 @@ export function FileWorkspacePanel() {
             {t("loading")}
           </div>
         )}
-        {!activeFileTab.loading && (
+        {richDiffColdLoad ? (
+          <div className="h-full flex items-center justify-center text-xs text-muted-foreground">
+            {t("loading")}
+          </div>
+        ) : (
           <DiffViewer
             key={activeFileTab.id}
             original={activeFileTab.originalContent ?? ""}
@@ -1279,6 +1306,8 @@ export function FileWorkspacePanel() {
     activeFileTab.kind === "diff" &&
     activeFileTab.id.startsWith("diff:session:")
   ) {
+    const sessionDiffColdLoad =
+      activeFileTab.loading && !hasTabContent(activeFileTab)
     return (
       <div className="h-full relative">
         {activeFileTab.loading && (
@@ -1286,10 +1315,16 @@ export function FileWorkspacePanel() {
             {t("loading")}
           </div>
         )}
-        <UnifiedDiffPreview
-          diffText={activeFileTab.content}
-          className="h-full p-3"
-        />
+        {sessionDiffColdLoad ? (
+          <div className="h-full flex items-center justify-center text-xs text-muted-foreground">
+            {t("loading")}
+          </div>
+        ) : (
+          <UnifiedDiffPreview
+            diffText={activeFileTab.content}
+            className="h-full p-3"
+          />
+        )}
       </div>
     )
   }
@@ -1334,6 +1369,8 @@ export function FileWorkspacePanel() {
       await openWorkingTreeDiff(path)
     }
 
+    const diffListColdLoad =
+      activeFileTab.loading && !hasTabContent(activeFileTab)
     return (
       <div className="h-full relative">
         {activeFileTab.loading && (
@@ -1341,7 +1378,11 @@ export function FileWorkspacePanel() {
             {t("loading")}
           </div>
         )}
-        {!activeFileTab.loading && (
+        {diffListColdLoad ? (
+          <div className="h-full flex items-center justify-center text-xs text-muted-foreground">
+            {t("loading")}
+          </div>
+        ) : (
           <DiffFileList
             diffOutline={diffOutline}
             badge={badge}
@@ -1375,6 +1416,8 @@ export function FileWorkspacePanel() {
       preprocessMarkdownPaths(renderedContent, relativeFileDir)
     )
 
+    const markdownColdLoad =
+      activeFileTab.loading && !hasTabContent(activeFileTab)
     return (
       <div className="h-full relative">
         {activeFileTab.loading && (
@@ -1382,57 +1425,64 @@ export function FileWorkspacePanel() {
             {t("loading")}
           </div>
         )}
-        <div className="h-full overflow-auto p-6 [&_a_img]:inline">
-          <Streamdown
-            plugins={previewPlugins}
-            components={{
-              // eslint-disable-next-line @typescript-eslint/no-unused-vars
-              img: ({ node, ...imgProps }) => (
-                <PreviewImage
-                  {...imgProps}
-                  fileDir={fileDir}
-                  folderPath={folderPath}
-                />
-              ),
-              // eslint-disable-next-line @typescript-eslint/no-unused-vars
-              a: ({ node, href, children, ...aProps }) => {
-                const isRelative = href && !/^[a-z][a-z0-9+.-]*:|^#/i.test(href)
-                if (isRelative && href) {
+        {markdownColdLoad ? (
+          <div className="h-full flex items-center justify-center text-xs text-muted-foreground">
+            {t("loading")}
+          </div>
+        ) : (
+          <div className="h-full overflow-auto p-6 [&_a_img]:inline">
+            <Streamdown
+              plugins={previewPlugins}
+              components={{
+                // eslint-disable-next-line @typescript-eslint/no-unused-vars
+                img: ({ node, ...imgProps }) => (
+                  <PreviewImage
+                    {...imgProps}
+                    fileDir={fileDir}
+                    folderPath={folderPath}
+                  />
+                ),
+                // eslint-disable-next-line @typescript-eslint/no-unused-vars
+                a: ({ node, href, children, ...aProps }) => {
+                  const isRelative =
+                    href && !/^[a-z][a-z0-9+.-]*:|^#/i.test(href)
+                  if (isRelative && href) {
+                    return (
+                      <a
+                        {...aProps}
+                        href="#"
+                        onClick={(e) => {
+                          e.preventDefault()
+                          // After preprocessing + rehype-harden, paths are
+                          // root-relative like "/docs/images/foo.png"
+                          const clean = href.replace(/[#?].*$/, "")
+                          const target = clean
+                            .replace(/^\/+/, "")
+                            .replace(/\/\/+/g, "/")
+                          openFilePreview(target)
+                        }}
+                      >
+                        {children}
+                      </a>
+                    )
+                  }
                   return (
                     <a
                       {...aProps}
-                      href="#"
-                      onClick={(e) => {
-                        e.preventDefault()
-                        // After preprocessing + rehype-harden, paths are
-                        // root-relative like "/docs/images/foo.png"
-                        const clean = href.replace(/[#?].*$/, "")
-                        const target = clean
-                          .replace(/^\/+/, "")
-                          .replace(/\/\/+/g, "/")
-                        openFilePreview(target)
-                      }}
+                      href={href}
+                      target="_blank"
+                      rel="noopener noreferrer"
                     >
                       {children}
                     </a>
                   )
-                }
-                return (
-                  <a
-                    {...aProps}
-                    href={href}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    {children}
-                  </a>
-                )
-              },
-            }}
-          >
-            {preprocessedContent}
-          </Streamdown>
-        </div>
+                },
+              }}
+            >
+              {preprocessedContent}
+            </Streamdown>
+          </div>
+        )}
       </div>
     )
   }
@@ -1585,11 +1635,7 @@ export function FileWorkspacePanel() {
           </div>
         )}
         <div className="flex-1 min-h-0">
-          {activeFileTab.loading ? (
-            <div className="h-full flex items-center justify-center text-xs text-muted-foreground">
-              {t("loadingEditor")}
-            </div>
-          ) : (
+          {hasTabContent(activeFileTab) || !activeFileTab.loading ? (
             <MonacoEditor
               beforeMount={defineMonacoThemes}
               onMount={handleEditorMount}
@@ -1607,10 +1653,15 @@ export function FileWorkspacePanel() {
                 </div>
               }
               options={{
-                readOnly: !canEdit,
+                // Lock the editor while a refresh is in flight. Otherwise
+                // keystrokes that arrive during the refresh window survive
+                // in Monaco's internal model but get clobbered by the
+                // value-prop sync when the fetch resolves, silently
+                // dropping user input.
+                readOnly: !canEdit || activeFileTab.loading,
                 minimap: { enabled: false },
                 automaticLayout: true,
-                fontSize: 13,
+                fontSize: (EDITOR_BASE_FONT_SIZE * zoomLevel) / 100,
                 lineNumbersMinChars,
                 lineDecorationsWidth: 10,
                 wordWrap: "off",
@@ -1622,6 +1673,10 @@ export function FileWorkspacePanel() {
                 },
               }}
             />
+          ) : (
+            <div className="h-full flex items-center justify-center text-xs text-muted-foreground">
+              {t("loadingEditor")}
+            </div>
           )}
         </div>
       </div>

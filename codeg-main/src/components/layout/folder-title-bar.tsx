@@ -1,34 +1,28 @@
 "use client"
 
+import { useCallback, useEffect, useState } from "react"
 import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type KeyboardEvent as ReactKeyboardEvent,
-} from "react"
-import {
-  Columns2,
   EllipsisVertical,
-  FileCode2,
   Menu,
-  MessageSquare,
   PanelLeft,
   PanelRight,
+  PawPrint,
   Search,
   Settings,
   SquareTerminal,
 } from "lucide-react"
 import { useTranslations } from "next-intl"
-import { getGitBranch, openFolderWindow, openSettingsWindow } from "@/lib/api"
+import { openSettingsWindow } from "@/lib/api"
+import { getPetSettings, openPetWindow } from "@/lib/pet/api"
+import { useAppWorkspace } from "@/contexts/app-workspace-context"
+import { useActiveFolder } from "@/contexts/active-folder-context"
 import { isDesktop, openFileDialog } from "@/lib/platform"
-import { useFolderContext } from "@/contexts/folder-context"
+import { getActiveRemoteConnectionId } from "@/lib/transport"
 import { Button } from "@/components/ui/button"
 import { useSidebarContext } from "@/contexts/sidebar-context"
 import { useAuxPanelContext } from "@/contexts/aux-panel-context"
 import { useTerminalContext } from "@/contexts/terminal-context"
 import { useTabContext } from "@/contexts/tab-context"
-import { useWorkspaceContext } from "@/contexts/workspace-context"
 import { useIsMac } from "@/hooks/use-is-mac"
 import { useShortcutSettings } from "@/hooks/use-shortcut-settings"
 import {
@@ -36,12 +30,12 @@ import {
   matchShortcutEvent,
 } from "@/lib/keyboard-shortcuts"
 import { AppTitleBar } from "./app-title-bar"
-import { FolderNameDropdown } from "./folder-name-dropdown"
 import { BranchDropdown } from "./branch-dropdown"
 import { CommandDropdown } from "./command-dropdown"
+import { NewFolderDropdown } from "./new-folder-dropdown"
+import { RemoteWorkspaceDropdown } from "./remote-workspace-dropdown"
 import { SearchCommandDialog } from "@/components/conversations/search-command-dialog"
 import { DirectoryBrowserDialog } from "@/components/shared/directory-browser-dialog"
-import { cn } from "@/lib/utils"
 import { useIsMobile } from "@/hooks/use-mobile"
 import {
   DropdownMenu,
@@ -50,46 +44,46 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 
-const MODE_TABS = [
-  {
-    mode: "conversation",
-    titleKey: "conversation",
-    icon: MessageSquare,
-  },
-  {
-    mode: "fusion",
-    titleKey: "fusion",
-    icon: Columns2,
-  },
-  {
-    mode: "files",
-    titleKey: "files",
-    icon: FileCode2,
-  },
-] as const
-
 export function FolderTitleBar() {
-  const tModes = useTranslations("Folder.modes")
   const tTitleBar = useTranslations("Folder.folderTitleBar")
-  const { folder } = useFolderContext()
+  const tPet = useTranslations("Pet")
+  const { openFolder } = useAppWorkspace()
+  const { activeFolder } = useActiveFolder()
   const { isOpen, toggle } = useSidebarContext()
   const { isOpen: auxPanelOpen, toggle: toggleAuxPanel } = useAuxPanelContext()
   const { isOpen: terminalOpen, toggle: toggleTerminal } = useTerminalContext()
   const { openNewConversationTab } = useTabContext()
-  const { mode, setMode } = useWorkspaceContext()
   const isMac = useIsMac()
   const { shortcuts } = useShortcutSettings()
-  const [branch, setBranch] = useState<string | null>(null)
   const [searchOpen, setSearchOpen] = useState(false)
   const [browserOpen, setBrowserOpen] = useState(false)
-  const intervalRef = useRef<ReturnType<typeof setInterval> | undefined>(
-    undefined
-  )
 
-  const folderPath = folder?.path ?? ""
+  const handleOpenPet = useCallback(async () => {
+    if (!isDesktop()) return
+    try {
+      const settings = await getPetSettings()
+      if (!settings.activePetId) {
+        await openSettingsWindow("appearance")
+        return
+      }
+      await openPetWindow()
+    } catch {
+      // No active pet or window error — route the user to the manager.
+      try {
+        await openSettingsWindow("appearance")
+      } catch (err) {
+        console.warn("[Pet] open settings failed:", err)
+      }
+    }
+  }, [])
 
   const handleOpenFolder = useCallback(async () => {
-    if (isDesktop()) {
+    // See NewFolderDropdown / SidebarConversationList for the same logic:
+    // the native Tauri dialog browses the LOCAL filesystem, so when the
+    // user is bound to a remote workspace we must fall through to the
+    // in-app DirectoryBrowserDialog (which browses the remote host via
+    // the proxied `list_directory_entries`).
+    if (isDesktop() && getActiveRemoteConnectionId() === null) {
       try {
         const result = await openFileDialog({
           directory: true,
@@ -97,54 +91,20 @@ export function FolderTitleBar() {
         })
         if (!result) return
         const selected = Array.isArray(result) ? result[0] : result
-        await openFolderWindow(selected, { newWindow: true })
+        await openFolder(selected)
       } catch (err) {
         console.error("[FolderTitleBar] failed to open folder:", err)
       }
     } else {
       setBrowserOpen(true)
     }
-  }, [])
+  }, [openFolder])
 
   const handleOpenSettings = useCallback(() => {
     openSettingsWindow().catch((err) => {
       console.error("[FolderTitleBar] failed to open settings:", err)
     })
   }, [])
-
-  useEffect(() => {
-    if (!folderPath) return
-    let cancelled = false
-
-    async function doFetch() {
-      if (document.visibilityState !== "visible") return
-
-      try {
-        const b = await getGitBranch(folderPath)
-        if (!cancelled) setBranch(b)
-      } catch {
-        if (!cancelled) setBranch(null)
-      }
-    }
-
-    function handleVisibilityChange() {
-      if (document.visibilityState === "visible") {
-        void doFetch()
-      }
-    }
-
-    void doFetch()
-    intervalRef.current = setInterval(() => {
-      void doFetch()
-    }, 10_000)
-    document.addEventListener("visibilitychange", handleVisibilityChange)
-
-    return () => {
-      cancelled = true
-      clearInterval(intervalRef.current)
-      document.removeEventListener("visibilitychange", handleVisibilityChange)
-    }
-  }, [folderPath])
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -169,9 +129,9 @@ export function FolderTitleBar() {
         return
       }
       if (matchShortcutEvent(e, shortcuts.new_conversation)) {
-        if (!folderPath) return
+        if (!activeFolder) return
         e.preventDefault()
-        openNewConversationTab(folderPath)
+        openNewConversationTab(activeFolder.id, activeFolder.path)
         return
       }
       if (matchShortcutEvent(e, shortcuts.open_folder)) {
@@ -187,7 +147,7 @@ export function FolderTitleBar() {
     document.addEventListener("keydown", handleKeyDown)
     return () => document.removeEventListener("keydown", handleKeyDown)
   }, [
-    folderPath,
+    activeFolder,
     handleOpenFolder,
     handleOpenSettings,
     openNewConversationTab,
@@ -197,140 +157,10 @@ export function FolderTitleBar() {
     toggleTerminal,
   ])
 
-  const refreshBranch = useCallback(async () => {
-    if (!folderPath) return
-    try {
-      setBranch(await getGitBranch(folderPath))
-    } catch {
-      setBranch(null)
-    }
-  }, [folderPath])
   const isMobile = useIsMobile()
-  const modeContainerRef = useRef<HTMLDivElement>(null)
-  const modeItemRefs = useRef<Map<string, HTMLDivElement>>(new Map())
-  const [modeIndicator, setModeIndicator] = useState<{
-    left: number
-    width: number
-  } | null>(null)
-
-  useEffect(() => {
-    const container = modeContainerRef.current
-    if (!container) return
-
-    const measure = () => {
-      const btn = modeItemRefs.current.get(mode)
-      if (!btn || !container) {
-        setModeIndicator(null)
-        return
-      }
-      const containerRect = container.getBoundingClientRect()
-      const btnRect = btn.getBoundingClientRect()
-      setModeIndicator({
-        left: btnRect.left - containerRect.left,
-        width: btnRect.width,
-      })
-    }
-
-    const ro = new ResizeObserver(() => measure())
-    for (const btn of modeItemRefs.current.values()) {
-      ro.observe(btn)
-    }
-    ro.observe(container)
-    measure()
-
-    return () => {
-      ro.disconnect()
-    }
-  }, [mode])
-
-  const handleModeKeyDown = useCallback(
-    (event: ReactKeyboardEvent<HTMLDivElement>, nextMode: typeof mode) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault()
-        setMode(nextMode)
-      }
-    },
-    [setMode]
-  )
-
-  const modeTabsElement = (
-    <div
-      ref={modeContainerRef}
-      role="tablist"
-      aria-label={tModes("workspaceModesAria")}
-      className="relative inline-flex h-[27px] items-center rounded-full border border-border/50 bg-muted/50 p-0.5"
-    >
-      {modeIndicator && (
-        <div
-          className="pointer-events-none absolute top-0.5 bottom-0.5 rounded-full bg-background shadow-sm ring-1 ring-border/50 transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]"
-          style={{
-            left: modeIndicator.left,
-            width: modeIndicator.width,
-          }}
-        />
-      )}
-      {MODE_TABS.map((item) => {
-        const Icon = item.icon
-        const isActive = mode === item.mode
-        const title = tModes(item.titleKey)
-        return (
-          <div
-            key={item.mode}
-            ref={(el) => {
-              if (el) {
-                modeItemRefs.current.set(item.mode, el)
-              } else {
-                modeItemRefs.current.delete(item.mode)
-              }
-            }}
-            role="tab"
-            tabIndex={0}
-            className={cn(
-              "relative z-10 m-0 flex h-[23px] cursor-pointer select-none items-center justify-center gap-1 rounded-full border-0 bg-transparent p-0 align-middle text-xs font-medium leading-none transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
-              isActive ? "px-2.5" : "px-2",
-              isActive
-                ? "text-foreground"
-                : "text-muted-foreground hover:text-foreground/70"
-            )}
-            onClick={() => setMode(item.mode)}
-            onKeyDown={(event) => handleModeKeyDown(event, item.mode)}
-            onMouseDown={(event) => event.preventDefault()}
-            title={!isActive ? title : undefined}
-            aria-label={title}
-            aria-selected={isActive}
-          >
-            <Icon
-              className="block h-3 w-3 shrink-0"
-              shapeRendering="geometricPrecision"
-            />
-            {/* Hide text labels on mobile to save space */}
-            {!isMobile && (
-              <span
-                className={cn(
-                  "grid transition-[grid-template-columns] duration-300",
-                  isActive ? "grid-cols-[1fr]" : "grid-cols-[0fr]"
-                )}
-              >
-                <span
-                  className={cn(
-                    "min-w-0 overflow-hidden whitespace-nowrap transition-opacity duration-300",
-                    isActive ? "opacity-100" : "opacity-0"
-                  )}
-                >
-                  {title}
-                </span>
-              </span>
-            )}
-          </div>
-        )
-      })}
-    </div>
-  )
-
   return (
     <>
       <AppTitleBar
-        centerInteractive
         left={
           isMobile ? (
             <div className="flex min-w-0 items-center gap-2">
@@ -342,26 +172,45 @@ export function FolderTitleBar() {
               >
                 <Menu className="h-4 w-4" />
               </Button>
-              <FolderNameDropdown />
-              <BranchDropdown
-                branch={branch}
-                parentBranch={folder?.parent_branch ?? null}
-                onBranchChange={refreshBranch}
-              />
+              <NewFolderDropdown />
+              <RemoteWorkspaceDropdown />
+              <BranchDropdown />
             </div>
           ) : (
-            <div className="flex min-w-0 items-center gap-4">
-              <FolderNameDropdown />
-              <BranchDropdown
-                branch={branch}
-                parentBranch={folder?.parent_branch ?? null}
-                onBranchChange={refreshBranch}
-              />
+            <div className="flex h-8 flex-1 items-center gap-6">
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 hover:text-foreground/80"
+                  onClick={toggle}
+                  title={tTitleBar("withShortcut", {
+                    label: tTitleBar(isOpen ? "hideSidebar" : "showSidebar"),
+                    shortcut: formatShortcutLabel(
+                      shortcuts.toggle_sidebar,
+                      isMac
+                    ),
+                  })}
+                >
+                  <PanelLeft className="h-3.5 w-3.5" />
+                </Button>
+                <NewFolderDropdown />
+                <RemoteWorkspaceDropdown />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 hover:text-foreground/80"
+                  onClick={handleOpenPet}
+                  title={tPet("manager.summon")}
+                >
+                  <PawPrint className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+              <BranchDropdown />
               <div data-tauri-drag-region className="h-8 flex-1" />
             </div>
           )
         }
-        center={isMobile ? undefined : modeTabsElement}
         right={
           isMobile ? (
             <div className="flex items-center gap-1">
@@ -382,11 +231,17 @@ export function FolderTitleBar() {
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={toggleAuxPanel}>
+                  <DropdownMenuItem
+                    onClick={toggleAuxPanel}
+                    disabled={!activeFolder}
+                  >
                     <PanelRight className="h-3.5 w-3.5" />
                     {tTitleBar("toggleAuxPanel")}
                   </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => toggleTerminal()}>
+                  <DropdownMenuItem
+                    onClick={() => toggleTerminal()}
+                    disabled={!activeFolder}
+                  >
                     <SquareTerminal className="h-3.5 w-3.5" />
                     {tTitleBar("toggleTerminal")}
                   </DropdownMenuItem>
@@ -406,38 +261,9 @@ export function FolderTitleBar() {
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-6 w-6 hover:text-foreground/80"
-                  onClick={toggle}
-                  title={tTitleBar("withShortcut", {
-                    label: tTitleBar(isOpen ? "hideSidebar" : "showSidebar"),
-                    shortcut: formatShortcutLabel(
-                      shortcuts.toggle_sidebar,
-                      isMac
-                    ),
-                  })}
-                >
-                  <PanelLeft className="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className={`h-6 w-6 hover:text-foreground/80 ${auxPanelOpen ? "bg-accent" : ""}`}
-                  onClick={toggleAuxPanel}
-                  title={tTitleBar("withShortcut", {
-                    label: tTitleBar("toggleAuxPanel"),
-                    shortcut: formatShortcutLabel(
-                      shortcuts.toggle_aux_panel,
-                      isMac
-                    ),
-                  })}
-                >
-                  <PanelRight className="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
                   className={`h-6 w-6 hover:text-foreground/80 ${terminalOpen ? "bg-accent" : ""}`}
                   onClick={() => toggleTerminal()}
+                  disabled={!activeFolder}
                   title={tTitleBar("withShortcut", {
                     label: tTitleBar("toggleTerminal"),
                     shortcut: formatShortcutLabel(
@@ -447,6 +273,22 @@ export function FolderTitleBar() {
                   })}
                 >
                   <SquareTerminal className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className={`h-6 w-6 hover:text-foreground/80 ${auxPanelOpen ? "bg-accent" : ""}`}
+                  onClick={toggleAuxPanel}
+                  disabled={!activeFolder}
+                  title={tTitleBar("withShortcut", {
+                    label: tTitleBar("toggleAuxPanel"),
+                    shortcut: formatShortcutLabel(
+                      shortcuts.toggle_aux_panel,
+                      isMac
+                    ),
+                  })}
+                >
+                  <PanelRight className="h-3.5 w-3.5" />
                 </Button>
                 <Button
                   variant="ghost"
@@ -488,7 +330,7 @@ export function FolderTitleBar() {
         open={browserOpen}
         onOpenChange={setBrowserOpen}
         onSelect={(path) => {
-          openFolderWindow(path, { newWindow: true }).catch((err) => {
+          openFolder(path).catch((err) => {
             console.error("[FolderTitleBar] failed to open folder:", err)
           })
         }}

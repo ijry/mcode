@@ -23,6 +23,7 @@ import {
 import { Switch } from "@/components/ui/switch"
 import { createChatChannel, saveChatChannelToken } from "@/lib/api"
 import type { ChannelType } from "@/lib/types"
+import { toErrorMessage } from "@/lib/app-error"
 
 interface AddChatChannelDialogProps {
   open: boolean
@@ -45,11 +46,6 @@ export function AddChatChannelDialog({
   const [chatId, setChatId] = useState("")
   const [appId, setAppId] = useState("")
   const [baseUrl, setBaseUrl] = useState("https://ilinkai.weixin.qq.com")
-  const [mcodeConnectionMode, setMcodeConnectionMode] = useState<
-    "relay" | "direct"
-  >("relay")
-  const [mcodeRelayUrl, setMcodeRelayUrl] = useState("")
-  const [mcodeDirectBaseUrl, setMcodeDirectBaseUrl] = useState("")
   const [dailyReportEnabled, setDailyReportEnabled] = useState(false)
   const [dailyReportTime, setDailyReportTime] = useState("18:00")
 
@@ -60,9 +56,6 @@ export function AddChatChannelDialog({
     setChatId("")
     setAppId("")
     setBaseUrl("https://ilinkai.weixin.qq.com")
-    setMcodeConnectionMode("relay")
-    setMcodeRelayUrl("")
-    setMcodeDirectBaseUrl("")
     setDailyReportEnabled(false)
     setDailyReportTime("18:00")
     setError(null)
@@ -81,20 +74,11 @@ export function AddChatChannelDialog({
       setError(t("nameRequired"))
       return
     }
-    if (channelType === "mcode") {
-      if (mcodeConnectionMode === "relay" && !mcodeRelayUrl.trim()) {
-        setError("Relay URL is required.")
-        return
-      }
-      if (mcodeConnectionMode === "direct" && !mcodeDirectBaseUrl.trim()) {
-        setError("Direct base URL is required.")
-        return
-      }
-    } else if (!token.trim()) {
+    if (channelType !== "weixin" && !token.trim()) {
       setError(t("tokenRequired"))
       return
     }
-    if (channelType !== "weixin" && channelType !== "mcode" && !chatId.trim()) {
+    if (channelType !== "weixin" && !chatId.trim()) {
       setError(t("chatIdRequired"))
       return
     }
@@ -103,17 +87,7 @@ export function AddChatChannelDialog({
     setError(null)
     try {
       const configJson =
-        channelType === "mcode"
-          ? JSON.stringify({
-              connection_mode: mcodeConnectionMode,
-              relay_url:
-                mcodeConnectionMode === "relay" ? mcodeRelayUrl.trim() : null,
-              direct_base_url:
-                mcodeConnectionMode === "direct"
-                  ? mcodeDirectBaseUrl.trim()
-                  : null,
-            })
-          : channelType === "weixin"
+        channelType === "weixin"
           ? JSON.stringify({ base_url: baseUrl })
           : channelType === "lark"
             ? JSON.stringify({ app_id: appId, chat_id: chatId })
@@ -128,14 +102,14 @@ export function AddChatChannelDialog({
         dailyReportTime: dailyReportEnabled ? dailyReportTime : null,
       })
 
-      if (token.trim()) {
+      if (channelType !== "weixin" && token.trim()) {
         await saveChatChannelToken(channel.id, token.trim())
       }
 
       handleOpenChange(false)
       onChannelAdded()
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
+      const msg = toErrorMessage(err)
       setError(msg)
     } finally {
       setLoading(false)
@@ -147,9 +121,6 @@ export function AddChatChannelDialog({
     channelType,
     appId,
     baseUrl,
-    mcodeConnectionMode,
-    mcodeRelayUrl,
-    mcodeDirectBaseUrl,
     dailyReportEnabled,
     dailyReportTime,
     handleOpenChange,
@@ -187,64 +158,9 @@ export function AddChatChannelDialog({
                 <SelectItem value="telegram">Telegram</SelectItem>
                 <SelectItem value="lark">{t("lark")}</SelectItem>
                 <SelectItem value="weixin">{t("weixin")}</SelectItem>
-                <SelectItem value="mcode">MCode</SelectItem>
               </SelectContent>
             </Select>
           </div>
-
-          {channelType === "mcode" && (
-            <>
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium">Connection Mode</label>
-                <Select
-                  value={mcodeConnectionMode}
-                  onValueChange={(v) =>
-                    setMcodeConnectionMode(v as "relay" | "direct")
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="relay">Relay</SelectItem>
-                    <SelectItem value="direct">Direct</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {mcodeConnectionMode === "relay" && (
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium">Relay URL</label>
-                  <Input
-                    value={mcodeRelayUrl}
-                    onChange={(e) => setMcodeRelayUrl(e.target.value)}
-                    placeholder="https://relay.example.com"
-                  />
-                </div>
-              )}
-
-              {mcodeConnectionMode === "direct" && (
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium">Direct Base URL</label>
-                  <Input
-                    value={mcodeDirectBaseUrl}
-                    onChange={(e) => setMcodeDirectBaseUrl(e.target.value)}
-                    placeholder="http://127.0.0.1:3080"
-                  />
-                </div>
-              )}
-
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium">Token</label>
-                <Input
-                  type="password"
-                  value={token}
-                  onChange={(e) => setToken(e.target.value)}
-                  placeholder="Access Token"
-                />
-              </div>
-            </>
-          )}
 
           {channelType === "lark" && (
             <div className="space-y-1.5">
@@ -257,7 +173,7 @@ export function AddChatChannelDialog({
             </div>
           )}
 
-          {channelType !== "weixin" && channelType !== "mcode" && (
+          {channelType !== "weixin" && (
             <div className="space-y-1.5">
               <label className="text-xs font-medium">
                 {channelType === "telegram" ? "Bot Token" : "App Secret"}
@@ -273,7 +189,7 @@ export function AddChatChannelDialog({
             </div>
           )}
 
-          {channelType !== "weixin" && channelType !== "mcode" && (
+          {channelType !== "weixin" && (
             <div className="space-y-1.5">
               <label className="text-xs font-medium">Chat ID</label>
               <Input

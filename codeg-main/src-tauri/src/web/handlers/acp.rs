@@ -13,7 +13,6 @@ use crate::acp::types::{
 use crate::app_error::AppCommandError;
 use crate::app_state::AppState;
 use crate::commands::acp as acp_commands;
-use crate::db::service::agent_setting_service;
 use crate::models::agent::AgentType;
 
 #[derive(Deserialize)]
@@ -49,6 +48,10 @@ pub struct AcpConnectParams {
     pub agent_type: AgentType,
     pub working_dir: Option<String>,
     pub session_id: Option<String>,
+    #[serde(default)]
+    pub preferred_mode_id: Option<String>,
+    #[serde(default)]
+    pub preferred_config_values: Option<BTreeMap<String, String>>,
 }
 
 pub async fn acp_connect(
@@ -58,44 +61,20 @@ pub async fn acp_connect(
     let db = &state.db;
     let manager = &state.connection_manager;
 
-    let setting = agent_setting_service::get_by_agent_type(&db.conn, params.agent_type)
-        .await
-        .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
-    let disabled = setting
-        .as_ref()
-        .map(|model| !model.enabled)
-        .unwrap_or(false);
-    if disabled {
-        return Err(AppCommandError::task_execution_failed(format!(
-            "{} is disabled in settings",
-            params.agent_type
-        )));
-    }
-
-    let local_config_json = acp_commands::load_agent_local_config_json(params.agent_type);
-    let mut runtime_env = acp_commands::build_runtime_env_from_setting(
+    let runtime_env = acp_commands::build_session_runtime_env(
+        db,
         params.agent_type,
-        setting.as_ref(),
-        local_config_json.as_deref(),
-    );
-
-    // Resolve model provider credentials if configured.
-    acp_commands::apply_model_provider_env(
-        params.agent_type,
-        setting.as_ref(),
-        &mut runtime_env,
-        &db.conn,
+        params.session_id.as_deref(),
+        &state.data_dir,
     )
-    .await;
-
-    if params.agent_type == AgentType::OpenClaw && params.session_id.is_none() {
-        runtime_env.insert("OPENCLAW_RESET_SESSION".into(), "1".into());
-    }
+    .await
+    .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
 
     // Guard: the session page must never trigger a download or install.
     // If the agent isn't ready, return SdkNotInstalled here so the frontend
     // can prompt the user to install it from Agent Settings.
     acp_commands::verify_agent_installed(params.agent_type)
+        .await
         .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
 
     let emitter = state.emitter.clone();
@@ -107,6 +86,8 @@ pub async fn acp_connect(
             runtime_env,
             "web".to_string(),
             emitter,
+            params.preferred_mode_id,
+            params.preferred_config_values.unwrap_or_default(),
         )
         .await
         .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
@@ -134,18 +115,41 @@ pub async fn acp_disconnect(
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AcpTouchConnectionParams {
+    pub connection_id: String,
+}
+
+pub async fn acp_touch_connection(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<AcpTouchConnectionParams>,
+) -> Result<Json<bool>, AppCommandError> {
+    let touched = state.connection_manager.touch(&params.connection_id).await;
+    Ok(Json(touched))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AcpPromptParams {
     pub connection_id: String,
     pub blocks: Vec<crate::acp::types::PromptInputBlock>,
+    pub folder_id: Option<i32>,
+    pub conversation_id: Option<i32>,
 }
 
 pub async fn acp_prompt(
     Extension(state): Extension<Arc<AppState>>,
     Json(params): Json<AcpPromptParams>,
 ) -> Result<Json<()>, AppCommandError> {
-    let manager = &state.connection_manager;
-    manager
-        .send_prompt(&params.connection_id, params.blocks)
+    state
+        .connection_manager
+        .send_prompt_linked(
+            &state.db,
+            &params.connection_id,
+            params.blocks,
+            params.folder_id,
+            params.conversation_id,
+            None,
+        )
         .await
         .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
     Ok(Json(()))
@@ -314,13 +318,37 @@ pub async fn acp_set_config_option(
     Ok(Json(()))
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpDescribeAgentOptionsParams {
+    pub agent_type: crate::models::AgentType,
+    #[serde(default)]
+    pub working_dir: Option<String>,
+}
+
+pub async fn acp_describe_agent_options(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<AcpDescribeAgentOptionsParams>,
+) -> Result<Json<crate::acp::types::AgentOptionsSnapshot>, AppCommandError> {
+    let snapshot = crate::commands::acp::acp_describe_agent_options_core(
+        &state.connection_manager,
+        &state.db,
+        &state.data_dir,
+        params.agent_type,
+        params.working_dir,
+    )
+    .await
+    .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
+    Ok(Json(snapshot))
+}
+
 pub async fn acp_cancel(
     Extension(state): Extension<Arc<AppState>>,
     Json(params): Json<AcpConnectionIdParams>,
 ) -> Result<Json<()>, AppCommandError> {
     let manager = &state.connection_manager;
     manager
-        .cancel(&params.connection_id)
+        .cancel(&state.db.conn, &params.connection_id)
         .await
         .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
     Ok(Json(()))
@@ -332,7 +360,7 @@ pub async fn acp_fork(
 ) -> Result<Json<ForkResultInfo>, AppCommandError> {
     let manager = &state.connection_manager;
     let result = manager
-        .fork_session(&params.connection_id)
+        .fork_session(&state.db, &params.connection_id)
         .await
         .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
     Ok(Json(result))
@@ -364,6 +392,44 @@ pub async fn acp_list_connections(
     let manager = &state.connection_manager;
     let result = manager.list_connections().await;
     Ok(Json(result))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpGetSessionSnapshotParams {
+    pub connection_id: String,
+}
+
+pub async fn acp_get_session_snapshot(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<AcpGetSessionSnapshotParams>,
+) -> Result<Json<Option<crate::acp::LiveSessionSnapshot>>, AppCommandError> {
+    let snap = acp_commands::acp_get_session_snapshot_core(
+        &state.connection_manager,
+        &params.connection_id,
+    )
+    .await
+    .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
+    Ok(Json(snap))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpGetSessionSnapshotByConversationParams {
+    pub conversation_id: i32,
+}
+
+pub async fn acp_get_session_snapshot_by_conversation(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<AcpGetSessionSnapshotByConversationParams>,
+) -> Result<Json<Option<crate::acp::LiveSessionSnapshot>>, AppCommandError> {
+    let snap = acp_commands::acp_get_session_snapshot_by_conversation_core(
+        &state.connection_manager,
+        params.conversation_id,
+    )
+    .await
+    .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
+    Ok(Json(snap))
 }
 
 // --- Pattern B+: Core function handlers ---
@@ -462,6 +528,8 @@ pub async fn acp_update_agent_config(
 #[serde(rename_all = "camelCase")]
 pub struct AcpDownloadAgentBinaryParams {
     pub agent_type: AgentType,
+    #[serde(default)]
+    pub version: Option<String>,
     pub task_id: String,
 }
 
@@ -470,9 +538,14 @@ pub async fn acp_download_agent_binary(
     Json(params): Json<AcpDownloadAgentBinaryParams>,
 ) -> Result<Json<()>, AppCommandError> {
     let emitter = state.emitter.clone();
-    acp_commands::acp_download_agent_binary_core(params.agent_type, params.task_id, &emitter)
-        .await
-        .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
+    acp_commands::acp_download_agent_binary_core(
+        params.agent_type,
+        params.version,
+        params.task_id,
+        &emitter,
+    )
+    .await
+    .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
     Ok(Json(()))
 }
 
@@ -492,6 +565,10 @@ pub async fn acp_detect_agent_local_version(
 pub struct AcpPrepareNpxAgentParams {
     pub agent_type: AgentType,
     pub registry_version: Option<String>,
+    #[serde(default)]
+    pub version: Option<String>,
+    #[serde(default)]
+    pub clean_first: bool,
     pub task_id: String,
 }
 
@@ -504,6 +581,8 @@ pub async fn acp_prepare_npx_agent(
     let result = acp_commands::acp_prepare_npx_agent_core(
         params.agent_type,
         params.registry_version,
+        params.version,
+        params.clean_first,
         params.task_id,
         db,
         &emitter,
@@ -568,7 +647,10 @@ pub async fn opencode_install_plugins(
     Extension(state): Extension<Arc<AppState>>,
     Json(params): Json<OpencodeInstallPluginsParams>,
 ) -> Result<Json<()>, AppCommandError> {
-    let emitter = crate::web::event_bridge::EventEmitter::WebOnly(state.event_broadcaster.clone());
+    let emitter = crate::web::event_bridge::EventEmitter::web_only(
+        state.event_broadcaster.clone(),
+        state.acp_event_bus.clone(),
+    );
     acp_commands::opencode_install_plugins_core(params.names, params.task_id, &emitter)
         .await
         .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;

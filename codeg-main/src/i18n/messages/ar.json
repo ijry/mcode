@@ -12,54 +12,6 @@
     "portuguese": "البرتغالية",
     "arabic": "العربية"
   },
-  "WelcomePage": {
-    "title": "مرحبًا بك في Codeg",
-    "openSettings": "فتح الإعدادات",
-    "searchPlaceholder": "ابحث في المجلدات...",
-    "loading": "جارٍ التحميل...",
-    "emptyFolders": "لا توجد مجلدات بعد",
-    "removeFromHistory": "إزالة من السجل",
-    "openFolder": "فتح مجلد",
-    "cloneRepository": "استنساخ المستودع",
-    "projectBoot": "مُنشئ المشروع",
-    "softwareVersion": "الإصدار {version}",
-    "toasts": {
-      "loadFolderHistoryFailed": "فشل تحميل سجل المجلدات",
-      "openFolderFailed": "فشل فتح المجلد",
-      "removeFromHistoryFailed": "فشل إزالة المجلد من السجل",
-      "openSettingsFailed": "فشل فتح الإعدادات",
-      "cloneFailed": "فشل استنساخ المستودع",
-      "openProjectBootFailed": "فشل فتح مُنشئ المشروع"
-    },
-    "errors": {
-      "unknown": "حدث خطأ غير متوقع",
-      "invalidInput": "إدخال غير صالح.",
-      "notFound": "المورد غير موجود.",
-      "alreadyExists": "المورد موجود بالفعل.",
-      "dependencyMissing": "هناك اعتماد مطلوب مفقود.",
-      "databaseError": "فشلت عملية قاعدة البيانات.",
-      "ioError": "فشلت عملية الملف.",
-      "externalCommandFailed": "فشل تنفيذ الأمر الخارجي.",
-      "windowOperationFailed": "فشلت عملية النافذة.",
-      "gitNotInstalled": "Git غير مثبت. يرجى تثبيت Git أولًا.",
-      "targetDirectoryNotEmpty": "مجلد الهدف موجود بالفعل وليس فارغًا.",
-      "repositoryNotFound": "المستودع غير موجود. تحقق من الرابط وصلاحيات الوصول.",
-      "networkUnavailable": "الشبكة غير متاحة. تحقق من الاتصال وحاول مرة أخرى.",
-      "authenticationFailed": "فشلت المصادقة. تحقق من بيانات الاعتماد أو مفتاح SSH.",
-      "permissionDenied": "تم رفض الإذن. تحقق من صلاحيات المجلد."
-    },
-    "cloneDialog": {
-      "title": "استنساخ مستودع",
-      "repositoryUrl": "رابط المستودع",
-      "repositoryUrlPlaceholder": "https://github.com/user/repo.git",
-      "directory": "المجلد",
-      "directoryPlaceholder": "اختر مجلد الهدف...",
-      "browseDirectory": "تصفح المجلد",
-      "cancel": "إلغاء",
-      "clone": "استنساخ",
-      "clonePath": "مسار الاستنساخ: {path}"
-    }
-  },
   "GitCredentialDialog": {
     "title": "المصادقة مطلوبة",
     "description": "يتطلب الخادم البعيد بيانات اعتماد. أدخل اسم المستخدم وكلمة المرور (أو رمز الوصول الشخصي).",
@@ -85,6 +37,7 @@
     "title": "الإعدادات",
     "preferences": "التفضيلات",
     "nav": {
+      "general": "عام",
       "appearance": "المظهر",
       "agents": "الوكلاء",
       "mcp": "MCP",
@@ -95,7 +48,8 @@
       "chat_channels": "قنوات المحادثة",
       "web_service": "خدمة الويب",
       "model_providers": "مزودو النماذج",
-      "experts": "الخبراء"
+      "experts": "الخبراء",
+      "quick_messages": "رسائل سريعة"
     }
   },
   "AppearanceSettings": {
@@ -137,9 +91,7 @@
       "placeholder": "اختر مستوى التكبير",
       "default": "افتراضي",
       "current": "التكبير الحالي: {zoom}%"
-    },
-    "resetToDefaults": "إعادة الضبط",
-    "resetHint": "إعادة ضبط لون السمة وتكبير النافذة إلى الإعدادات الافتراضية."
+    }
   },
   "SystemSettings": {
     "loading": "جارٍ التحميل...",
@@ -174,6 +126,7 @@
     "updating": "جارٍ التثبيت...",
     "downloading": "جارٍ التنزيل...",
     "upgradeTo": "الترقية إلى v{version}",
+    "viewRelease": "عرض إصدار v{version}",
     "foundUpdate": "تم العثور على إصدار جديد v{version}",
     "alreadyLatest": "أنت على أحدث إصدار",
     "checkUpdateFailed": "فشل التحقق من التحديثات: {message}",
@@ -310,7 +263,7 @@
       },
       "close_all_file_tabs": {
         "title": "إغلاق جميع تبويبات الملفات",
-        "description": "إغلاق جميع تبويبات الملفات في وضع الملفات فقط"
+        "description": "إغلاق جميع تبويبات الملفات المفتوحة عندما تكون لوحة الملفات نشطة"
       },
       "send_message": {
         "title": "إرسال الرسالة",
@@ -349,6 +302,8 @@
     "loadingSkill": "جارٍ تحميل Skill...",
     "emptyNoAgents": "لا يوجد وكيل متاح.",
     "noSelectionHint": "اختر Skill من اليسار، أو انقر على \"Skill جديد\" لإنشاء واحد.",
+    "systemBadge": "نظام",
+    "systemHint": "Skill مدمج في CLI · للقراءة فقط",
     "scope": {
       "global": "عام",
       "folder": "مجلد",
@@ -390,7 +345,7 @@
       "gemini": "---\nname: example-skill\ndescription: Describe when this skill should be used.\n---\n\n# Skill Name\n\nInstructions for the agent when this skill is active.\n\n## Workflow\n\n1. Add actionable step one.\n2. Add actionable step two.\n",
       "openCode": "---\nname: example-skill\ndescription: Describe when this skill should be used.\n---\n\n# Purpose\n\nDescribe what this skill helps with.\n\n# Steps\n\n1. Add actionable step one.\n2. Add actionable step two.\n",
       "openClaw": "---\nname: example-skill\ndescription: Describe when this skill should be used.\nuser-invocable: true\ndisable-model-invocation: false\n---\n\n# Purpose\n\nDescribe what this skill helps with.\n\n# Instructions\n\n1. Add actionable instruction one.\n2. Add actionable instruction two.\n",
-      "default": "# Skill: example-skill\n\n## When to use\n\n- Describe trigger conditions.\n\n## Instructions\n\n1. Add actionable instruction one.\n2. Add actionable instruction two.\n"
+      "default": "---\nname: example-skill\ndescription: Describe when this skill should be used.\n---\n\n# Skill: example-skill\n\n## When to use\n\n- Describe trigger conditions.\n\n## Instructions\n\n1. Add actionable instruction one.\n2. Add actionable instruction two.\n"
     }
   },
   "McpSettings": {
@@ -412,7 +367,15 @@
       "fieldOutOfRange": "قيمة {field} خارج النطاق المسموح",
       "jsonEmpty": "{name} لا يمكن أن يكون فارغًا",
       "jsonInvalid": "{name} ليس JSON صالحًا: {message}",
-      "jsonMustBeObject": "{name} يجب أن يكون كائن JSON"
+      "jsonMustBeObject": "{name} يجب أن يكون كائن JSON",
+      "specMustBeObject": "يجب أن يكون إعداد MCP كائن JSON.",
+      "missingType": "حقل type غير موجود في إعداد MCP. حدد أحد القيم: stdio أو http (الأسماء البديلة: streamable-http و streamableHttp) أو sse.",
+      "unsupportedType": "نوع MCP غير مدعوم {type}. المدعوم: stdio و http (الأسماء البديلة: streamable-http و streamableHttp) و sse.",
+      "codexEntryUnsupportedType": "إدخال Codex MCP {id} له نوع غير مدعوم {type}. المدعوم: stdio و http (الأسماء البديلة: streamable-http و streamableHttp) و sse.",
+      "unsupportedTransportType": "نوع transport غير مدعوم {type}. المدعوم: http (الأسماء البديلة: streamable-http و streamableHttp) و sse.",
+      "stdioCommandRequired": "يتطلب MCP من نوع stdio حقل command غير فارغ.",
+      "remoteUrlRequired": "تتطلب MCP البعيدة حقل url غير فارغ.",
+      "appsRequired": "حدد تطبيقاً مستهدفاً واحداً على الأقل."
     },
     "jsonNames": {
       "localConfig": "إعداد MCP",
@@ -425,7 +388,10 @@
       "saveSuccess": "تم الحفظ",
       "saveFailed": "فشل الحفظ: {message}",
       "installed": "تم تثبيت {name}",
-      "installFailed": "فشل التثبيت: {message}"
+      "installFailed": "فشل التثبيت: {message}",
+      "serverIdRequired": "معرّف الخادم مطلوب",
+      "serverIdExists": "معرّف الخادم \"{id}\" موجود بالفعل. عدّل العنصر الحالي أو اختر اسماً آخر.",
+      "created": "تم إنشاء MCP"
     },
     "installDialog": {
       "title": "تأكيد تثبيت MCP",
@@ -447,7 +413,11 @@
       "viewDetails": "عرض التفاصيل",
       "save": "حفظ",
       "saving": "جارٍ الحفظ",
-      "install": "تثبيت"
+      "install": "تثبيت",
+      "refresh": "تحديث",
+      "newMcp": "MCP جديد",
+      "create": "إنشاء",
+      "creating": "جارٍ الإنشاء..."
     },
     "tabs": {
       "local": "MCP المحلي",
@@ -459,7 +429,13 @@
       "empty": "لم يتم اكتشاف MCP محلي.",
       "description": "يمكن تعديل إعداد MCP المحلي وحفظه مباشرة.",
       "enabledApps": "التطبيقات المفعلة",
-      "configJson": "إعداد MCP (JSON)"
+      "configJson": "إعداد MCP (JSON)",
+      "draftTitle": "MCP جديد",
+      "draftDescription": "أدخل معرّف الخادم والإعدادات لإنشاء خادم MCP محلي.",
+      "serverIdLabel": "معرّف الخادم",
+      "serverIdPlaceholder": "معرّف الخادم (مثل: my-mcp)",
+      "typeHint": "الأنواع المدعومة: stdio و http (الأسماء البديلة: streamable-http و streamableHttp) و sse. يُستخدم env مع stdio فقط؛ خوادم MCP البعيدة تحمل رموز المصادقة عبر headers.",
+      "envOnRemoteWarning": "تم اكتشاف env على MCP بعيد. يُستخدم env مع stdio فقط؛ خوادم MCP البعيدة تحمل رموز المصادقة عبر headers، لذا سيتم تجاهل env عند الحفظ."
     },
     "market": {
       "selectMarketplace": "اختر السوق",
@@ -498,6 +474,29 @@
     "modelHintDefault": "اتركه فارغًا لاستخدام النموذج الافتراضي للنظام.",
     "generalConfigDescriptionClaude": "يدعم الإعداد السريع لـ API URL وAPI Key ونماذج Claude، ويتزامن مع إعداد JSON الأصلي.",
     "generalConfigDescriptionDefault": "يدعم إدخال الإعدادات المهمة (API URL وAPI Key وModel) وإدارة إعداد JSON الأصلي.",
+    "multiAgent": {
+      "title": "تعاون متعدد الوكلاء",
+      "description": "اسمح للوكلاء النشطين بتفويض المهام الفرعية إلى وكلاء آخرين.",
+      "enable": "تفعيل التفويض",
+      "enableHint": "عند الإيقاف، يتم إخفاء أداة delegate_to_agent من قائمة أدوات MCP الخاصة بالوكيل.",
+      "depthLimit": "أقصى عمق للتفويض",
+      "depthHint": "النطاق المسموح: {min}–{max}. يحدّ من عمق سلسلة التفويض (جذر ← فرعي ← حفيد …).",
+      "save": "حفظ",
+      "saving": "جارٍ الحفظ…",
+      "saved": "تم حفظ إعدادات التفويض",
+      "saveFailed": "فشل حفظ إعدادات التفويض",
+      "loadFailed": "فشل تحميل إعدادات التفويض: {detail}",
+      "tabGeneral": "عام",
+      "tabAgentDefaults": "إعدادات الوكيل الفرعي",
+      "agentDefaultsDescription": "تجاوزات لكل وكيل تُطبَّق عندما يقوم التعاون متعدد الوكلاء بتشغيل وكيل فرعي لاستدعاء تفويض. تأتي الخيارات المعروضة هنا من فحص حي، لذا فإن ما تختاره هو بالضبط ما سيقبله الوكيل.",
+      "probing": "جارٍ تحميل الخيارات المتاحة من الوكيل…",
+      "probeFailed": "فشل تحميل الخيارات: {detail}",
+      "retry": "إعادة المحاولة",
+      "noConfigAvailable": "لا يحتوي هذا الوكيل على خيارات قابلة للضبط.",
+      "modeLabel": "الوضع",
+      "agentDefaultHint": "افتراضي الوكيل: {value}",
+      "defaultOptionLabel": "افتراضي ({value})"
+    },
     "actions": {
       "dragSort": "اسحب لإعادة الترتيب",
       "dragSortAgent": "اسحب لإعادة ترتيب {name}",
@@ -528,7 +527,8 @@
       "deleting": "جارٍ الحذف...",
       "confirmDelete": "تأكيد الحذف",
       "confirmUninstall": "تأكيد إزالة التثبيت",
-      "saveClineConfig": "حفظ تكوين Cline"
+      "saveClineConfig": "حفظ تكوين Cline",
+      "customInstall": "تثبيت مخصص"
     },
     "status": {
       "enabled": "مفعّل",
@@ -602,7 +602,6 @@
       "emptyProvider": "لا يوجد مزود بعد. أدخل معرّفًا ثم انقر \"إضافة مزود\".",
       "providerEnabledState": "حالة تفعيل {providerId}",
       "selectProviderNpm": "اختر provider.npm",
-      "notSet": "غير مضبوط",
       "modelManagement": "إدارة النماذج",
       "modelCount": "{count} نماذج",
       "modelDescription": "متوافق مع `provider.models` في OpenCode. الإدارة السريعة تدعم حاليًا `name` / `id`؛ بينما تُحفظ الحقول المتقدمة الأخرى ويمكن تعديلها في JSON الأصلي أدناه.",
@@ -629,7 +628,7 @@
     "authModeCustomEndpointHint": "تكوين عنوان API ومفتاح API يدوياً لنقطة نهاية مخصصة.",
     "authModeModelProvider": "مزود النموذج",
     "modelProvider": "مزود النموذج",
-    "modelProviderHint": "استخدم عنوان API ومفتاح API من مزود نموذج مُعدّ.",
+    "modelProviderHint": "استخدم عنوان API ومفتاح API والنموذج من مزود نموذج مُعدّ.",
     "selectModelProvider": "اختر مزود النموذج",
     "noModelProviderAvailable": "لا يوجد مزود نموذج مُعدّ لهذا الوكيل. انتقل إلى إعدادات مزود النموذج لإضافة واحد.",
     "claude": {
@@ -646,13 +645,18 @@
       "effortLevel_low": "منخفض",
       "effortLevel_medium": "متوسط",
       "effortLevel_high": "مرتفع",
-      "effortLevelMax": "الأقصى (Opus فقط)"
+      "effortLevel_xhigh": "مرتفع جداً"
     },
     "dialogs": {
       "confirmDeleteProvider": "حذف المزود {providerId}؟",
       "confirmDeleteProviderDescription": "سيتم تحديث إعداد OpenCode وauth JSON معًا. لا يمكن التراجع عن هذا الإجراء.",
       "confirmUninstall": "إزالة تثبيت {name}؟",
-      "confirmUninstallDescription": "سيؤدي هذا إلى إزالة الإصدار المثبت محليًا. يمكنك إعادة التثبيت لاحقًا."
+      "confirmUninstallDescription": "سيؤدي هذا إلى إزالة الإصدار المثبت محليًا. يمكنك إعادة التثبيت لاحقًا.",
+      "customInstallTitle": "تثبيت مخصص لـ {name}",
+      "customInstallDescription": "أدخل الإصدار المراد تثبيته. سيؤدي ذلك إلى إعادة التثبيت واستبدال الإصدار المثبت حاليًا.",
+      "customInstallVersionLabel": "رقم الإصدار",
+      "customInstallInvalid": "أدخل رقم إصدار صالحًا، مثل 1.2.3.",
+      "customInstallSubmit": "تثبيت"
     },
     "errors": {
       "nativeJsonMustBeObject": "يجب أن يكون إعداد JSON الأصلي كائنًا",
@@ -662,9 +666,9 @@
       "authMustBeObject": "يجب أن يكون auth.json كائن JSON",
       "authInvalid": "خطأ في تنسيق auth.json: {message}",
       "providerIdPattern": "يدعم معرّف المزود الأحرف والأرقام والشرطة السفلية والنقطة والشرطة فقط",
-      "providerExists": "المزوّد '{providerId}' موجود بالفعل",
+      "providerExists": "المزوّد {providerId} موجود بالفعل",
       "modelIdPattern": "يدعم معرّف النموذج الأحرف والأرقام والشرطة السفلية والنقطة والنقطتين والشرطة فقط",
-      "modelExists": "النموذج '{modelId}' موجود بالفعل"
+      "modelExists": "النموذج {modelId} موجود بالفعل"
     },
     "warnings": {
       "nativeJsonRecoveredStructured": "إعداد JSON الأصلي غير صالح؛ تمت إعادة التعيين إلى إعداد مُهيكل",
@@ -737,6 +741,47 @@
   "SettingsPages": {
     "agentsLoading": "جارٍ تحميل إعدادات الوكلاء..."
   },
+  "GeneralSettings": {
+    "loading": "جارٍ التحميل...",
+    "sectionTitle": "عام",
+    "sectionDescription": "تفضيلات موحّدة للطرفية الافتراضية وتسريع العرض وتفويض الوكلاء المتعدّدين.",
+    "terminalTitle": "الطرفية الافتراضية",
+    "terminalDescription": "اختر الصدفة المستخدمة عند فتح علامات تبويب طرفية جديدة من شريط الطرفية أو شجرة الملفات.",
+    "defaultTerminalShell": "الصدفة الافتراضية",
+    "terminalSystemDefault": "افتراضي النظام",
+    "terminalPowerShell7": "PowerShell 7 (pwsh)",
+    "terminalWindowsPowerShell": "Windows PowerShell",
+    "terminalCmd": "موجّه الأوامر (cmd)",
+    "terminalSaveFailed": "فشل حفظ إعدادات الطرفية: {message}",
+    "terminalShellCustom": "مسار مخصص",
+    "terminalShellCustomPath": "مسار الصدفة",
+    "terminalShellCustomPlaceholder": "/usr/local/bin/fish",
+    "terminalShellCustomSave": "حفظ",
+    "terminalShellCustomHint": "أدخل مساراً مطلقاً أو اسماً يمكن حلّه عبر PATH.",
+    "terminalShellNotInstalled": "غير مثبّت",
+    "terminalShellNotFoundWarning": "هذا المسار غير موجود على هذا المضيف.",
+    "terminalCurrentShell": "قيد الاستخدام: {path}",
+    "renderingTitle": "العرض",
+    "renderingDescription": "أوقف تشغيل تسريع الأجهزة إذا ظهرت شاشة سوداء أو أخطاء في العرض (شائع على بعض كروت AMD أو كروت Intel المدمجة). يسري على إصدار سطح المكتب لويندوز فقط.",
+    "disableHardwareAcceleration": "تعطيل تسريع الأجهزة",
+    "renderingSaveFailed": "فشل حفظ إعدادات العرض: {message}",
+    "restartRequired": "تم الحفظ. أعد تشغيل التطبيق ليصبح التغيير نافذًا.",
+    "restartNow": "إعادة التشغيل الآن",
+    "restartFailed": "فشل إعادة التشغيل: {message}",
+    "loadFailed": "فشل التحميل: {message}"
+  },
+  "LoginPage": {
+    "documentTitle": "تسجيل الدخول - codeg",
+    "brand": "Codeg",
+    "subtitle": "أدخل رمز الوصول للاتصال بتطبيق سطح المكتب",
+    "tokenPlaceholder": "رمز الوصول",
+    "connect": "اتصال",
+    "connecting": "جارٍ الاتصال...",
+    "helpText": "يمكنك الحصول على الرمز من تطبيق سطح المكتب عبر الإعدادات → خدمة الويب",
+    "invalidToken": "رمز غير صالح. يرجى التحقق والمحاولة مرة أخرى.",
+    "connectionFailed": "فشل الاتصال (HTTP {status})",
+    "networkError": "تعذر الاتصال بالخادم"
+  },
   "CommitPage": {
     "title": "التزام",
     "invalidFolderId": "معرّف المجلد غير صالح",
@@ -769,6 +814,12 @@
     "applyRightNonConflicting": "تطبيق البعيد"
   },
   "Folder": {
+    "workspaceStatus": {
+      "degradedTitle": "التحديثات الفورية غير متاحة",
+      "degradedHint": "فشل تشغيل المراقب (مثل رفض الإذن). قم بالتحديث يدويًا لرؤية التغييرات.",
+      "retry": "إعادة المحاولة",
+      "retrying": "جارٍ إعادة المحاولة..."
+    },
     "common": {
       "all": "الكل",
       "cancel": "إلغاء",
@@ -788,12 +839,6 @@
       "viewDiff": "عرض Diff",
       "push": "دفع..."
     },
-    "modes": {
-      "conversation": "وضع المحادثة",
-      "fusion": "وضع الدمج",
-      "files": "وضع الملفات",
-      "workspaceModesAria": "أوضاع مساحة العمل"
-    },
     "statusLabels": {
       "in_progress": "قيد التنفيذ",
       "pending_review": "مراجعة",
@@ -806,6 +851,7 @@
       "expandAllGroups": "توسيع كل المجموعات",
       "collapseAllGroups": "طي كل المجموعات",
       "newConversation": "محادثة جديدة",
+      "newConversationShort": "جديدة",
       "noConversationsFound": "لم يتم العثور على محادثات.",
       "importLocalSessions": "استيراد الجلسات المحلية",
       "importing": "جارٍ الاستيراد...",
@@ -819,15 +865,74 @@
         "noNewSessionsFound": "لم يتم العثور على جلسات جديدة (تم تخطي {skipped})",
         "importFailed": "فشل الاستيراد: {message}",
         "reviewCompleted": "تم وضع علامة مكتمل على {count, plural, one {# جلسة مراجعة} other {# جلسات مراجعة}}",
-        "completeReviewFailed": "فشل إكمال جلسات المراجعة: {message}"
+        "completeReviewFailed": "فشل إكمال جلسات المراجعة: {message}",
+        "folderOpened": "تم فتح المجلد {name}",
+        "folderRemoved": "تمت إزالة المجلد {name}",
+        "openFolderFailed": "فشل فتح المجلد",
+        "removeFolderFailed": "فشل إزالة المجلد: {message}",
+        "reorderFoldersFailed": "فشل إعادة ترتيب المجلدات: {message}",
+        "changeFolderColorFailed": "فشل تغيير اللون: {message}",
+        "changeFolderDefaultAgentFailed": "فشل تعيين الوكيل الافتراضي: {message}"
+      },
+      "statsLabel": "{folders} مجلدات · {convos} محادثة",
+      "reorderHandle": "اسحب لإعادة الترتيب",
+      "openFolder": "فتح مجلد",
+      "searchPlaceholder": "بحث عن محادثات...",
+      "showCompleted": "عرض المحادثات المكتملة",
+      "moreOptions": "المزيد من الخيارات",
+      "sortBy": "الترتيب حسب",
+      "sortByCreatedAt": "وقت الإنشاء",
+      "sortByUpdatedAt": "وقت التحديث",
+      "statusRunningBadge": "قيد التشغيل",
+      "statusCancelledBadge": "ملغى",
+      "conversationCountUnit": "{count} محادثة",
+      "emptyFolderHint": "لا توجد محادثات",
+      "noMatchingConversations": "لا توجد محادثات مطابقة",
+      "noUnfinishedConversations": "لا توجد محادثات غير مكتملة. يمكنك تفعيل \"عرض المكتملة\" من القائمة في أعلى اليمين.",
+      "removeFolderConfirmTitle": "إزالة المجلد من مساحة العمل؟",
+      "removeFolderConfirmDescription": "إزالة \"{name}\" من مساحة العمل؟ سيتم إغلاق علامات التبويب والمحطات المرتبطة.",
+      "folderHeaderMenu": {
+        "manageConversations": "إدارة المحادثات…",
+        "changeColor": "تغيير اللون",
+        "useThemeColor": "استخدام سمة التطبيق",
+        "setDefaultAgent": "تعيين الوكيل الافتراضي",
+        "defaultAgentNone": "بدون افتراضي (استخدام العام)",
+        "agentUnavailableSuffix": "(غير متاح)",
+        "loadingAgents": "جارٍ تحميل الوكلاء…",
+        "removeFromWorkspace": "إزالة من مساحة العمل"
+      },
+      "manageConversations": {
+        "title": "إدارة المحادثات — {name}",
+        "searchPlaceholder": "البحث بالعنوان…",
+        "agentFilterAll": "جميع الوكلاء",
+        "statusFilterAll": "جميع الحالات",
+        "selectAllVisible": "تحديد الكل",
+        "deselectAll": "إلغاء التحديد",
+        "selectedCount": "{count} محدد",
+        "matchedCount": "{count} مطابق",
+        "messagesShort": "{count} رسالة",
+        "untitledConversation": "محادثة بدون عنوان",
+        "setStatus": "تعيين الحالة…",
+        "deleteSelected": "حذف",
+        "noConversations": "لا توجد محادثات في هذا المجلد.",
+        "noMatchingConversations": "لا توجد محادثات مطابقة للفلاتر.",
+        "confirmDeleteTitle": "حذف {count} محادثة؟",
+        "confirmDeleteDescription": "لا يمكن التراجع عن هذا الإجراء.",
+        "toastDeleted": "تم حذف {count} محادثة",
+        "toastStatusUpdated": "تم تحديث حالة {count} محادثة",
+        "toastOpFailed": "فشلت العملية: {message}"
       }
     },
     "conversation": {
       "reloadFailed": "فشل إعادة تحميل المحادثة: {message}",
       "reloaded": "تمت إعادة تحميل المحادثة",
       "reload": "إعادة تحميل",
+      "activeConversationIndicator": "المحادثة النشطة",
       "newConversation": "محادثة جديدة",
       "closeConversation": "إغلاق المحادثة",
+      "copyText": "نسخ النص",
+      "copyTextSuccess": "تم النسخ",
+      "copyTextFailed": "فشل النسخ",
       "forkSession": "تفريع الجلسة",
       "forkSessionSuccess": "تم تفريع الجلسة بنجاح",
       "forkSessionFailed": "فشل في تفريع الجلسة: {error}",
@@ -874,6 +979,7 @@
     },
     "search": {
       "dialogTitle": "بحث",
+      "dialogTitleWithFolder": "بحث — {name}",
       "tabConversations": "المحادثات",
       "tabFiles": "الملفات",
       "placeholder": "البحث في المحادثات...",
@@ -933,7 +1039,9 @@
         "files": "الملفات",
         "changes": "التغييرات",
         "commits": "الالتزامات"
-      }
+      },
+      "noFolderTitle": "لا يوجد مجلد مفتوح",
+      "noFolderHint": "افتح مجلدا لعرض محتواه هنا"
     },
     "windowControls": {
       "minimizeWindow": "تصغير النافذة",
@@ -960,14 +1068,17 @@
       "closeOthers": "إغلاق البقية",
       "closeAll": "إغلاق الكل",
       "preview": "معاينة",
-      "editSource": "تحرير المصدر"
+      "editSource": "تحرير المصدر",
+      "maximize": "تكبير",
+      "restore": "استعادة"
     },
     "terminal": {
       "rename": "إعادة تسمية",
       "close": "إغلاق",
       "closeOthers": "إغلاق البقية",
       "closeAll": "إغلاق الكل",
-      "hideTerminal": "إخفاء الطرفية ({shortcut})"
+      "hideTerminal": "إخفاء الطرفية ({shortcut})",
+      "openFolderFirst": "افتح مجلدا أولا"
     },
     "sessionFiles": {
       "currentResponse": "الاستجابة الحالية",
@@ -1032,33 +1143,32 @@
         "checkoutTo": "Checkout إلى {branchName}",
         "mergeBranch": "دمج {branchName}",
         "rebaseTo": "Rebase إلى {branchName}",
-        "deleteBranch": "حذف الفرع {branchName}",
         "deleteRemoteBranch": "حذف الفرع البعيد {branchName}",
         "initGitRepo": "تهيئة مستودع Git",
         "pullCode": "سحب الكود",
         "fetchInfo": "جلب المعلومات",
         "pushCode": "دفع الكود",
         "stashChanges": "تخزين التغييرات في stash",
-        "stashPop": "استرجاع stash"
+        "stashPop": "استرجاع stash",
+        "deleteBranch": "حذف الفرع {branchName}"
       },
       "confirm": {
         "mergeTitle": "دمج الفرع",
         "rebaseTitle": "Rebase للفرع",
-        "deleteTitle": "حذف الفرع",
         "mergeDescription": "دمج {branchName} في الفرع الحالي {currentBranch}؟",
         "rebaseDescription": "إجراء rebase للفرع الحالي {currentBranch} على {branchName}؟",
+        "deleteRemoteTitle": "حذف الفرع البعيد",
+        "deleteRemoteDescription": "هل تريد حذف الفرع البعيد {branchName}؟ سيؤدي ذلك إلى إزالته من المستودع البعيد ولا يمكن التراجع عن هذا الإجراء.",
+        "deleteTitle": "حذف الفرع",
         "deleteDescription": "حذف الفرع {branchName}؟ لا يمكن التراجع عن هذا الإجراء.",
         "forceDeleteTitle": "حذف الفرع بالقوة",
-        "forceDeleteDescription": "الفرع {branchName} لم يتم دمجه بالكامل. هل أنت متأكد من أنك تريد حذفه بالقوة؟ لا يمكن التراجع عن هذا الإجراء.",
-        "deleteRemoteTitle": "حذف الفرع البعيد",
-        "deleteRemoteDescription": "هل تريد حذف الفرع البعيد {branchName}؟ سيؤدي ذلك إلى إزالته من المستودع البعيد ولا يمكن التراجع عن هذا الإجراء."
+        "forceDeleteDescription": "الفرع {branchName} لم يتم دمجه بالكامل. هل أنت متأكد من أنك تريد حذفه بالقوة؟ لا يمكن التراجع عن هذا الإجراء."
       },
       "current": "الحالي",
       "switchToBranch": "التبديل إلى هذا الفرع",
       "mergeBranchIntoCurrent": "دمج {branchName} في {currentBranch}",
       "rebaseCurrentToBranch": "Rebase لـ {currentBranch} على {branchName}",
-      "deleteBranch": "حذف الفرع",
-      "versionControl": "التحكم في الإصدارات",
+      "noBranch": "بدون فرع",
       "initGitRepo": "تهيئة مستودع Git",
       "pullCode": "سحب الكود",
       "fetchRemoteBranches": "جلب الفروع البعيدة",
@@ -1073,7 +1183,6 @@
       "noLocalBranches": "لا توجد فروع محلية",
       "remoteBranches": "الفروع البعيدة ({count, plural, one {#} other {#}})",
       "noRemoteBranches": "لا توجد فروع بعيدة",
-      "parentBranchHint": "تم إنشاء الفرع الحالي من {parentBranch}. انقر لدمج {parentBranch} في الفرع الحالي.",
       "dialogs": {
         "newBranchTitle": "فرع جديد",
         "newBranchDescription": "إنشاء فرع جديد من الفرع الحالي {branch}",
@@ -1123,7 +1232,8 @@
         "dropSuccess": "تم حذف التخبئة",
         "confirmApply": "تطبيق التخبئة {ref} على دليل العمل؟",
         "cancel": "إلغاء"
-      }
+      },
+      "deleteBranch": "حذف الفرع"
     },
     "commitDialog": {
       "toasts": {
@@ -1202,6 +1312,8 @@
       "workspace": "مساحة العمل",
       "retry": "إعادة المحاولة",
       "noCommitsFound": "لم يتم العثور على التزامات",
+      "notAGitRepoTitle": "ليس مستودع Git",
+      "notAGitRepoHint": "قم بتهيئة Git من قائمة الفروع أعلاه، أو افتح مستودعًا موجودًا.",
       "hash": "بصمة الالتزام",
       "copyHash": "نسخ الـ hash",
       "copyMessage": "نسخ الرسالة",
@@ -1278,6 +1390,8 @@
     "gitChangesTab": {
       "workspace": "مساحة العمل",
       "noChanges": "لا توجد تغييرات محلية",
+      "notAGitRepoTitle": "ليس مستودع Git",
+      "notAGitRepoHint": "قم بتهيئة Git من قائمة الفروع أعلاه، أو افتح مستودعًا موجودًا.",
       "trackedChanges": "التغييرات المتعقبة ({count})",
       "untrackedFiles": "الملفات غير المتعقبة ({count})",
       "expandTracked": "توسيع التغييرات المتعقبة",
@@ -1351,6 +1465,9 @@
       "newDirectory": "مجلد",
       "openIn": "فتح في",
       "openInTerminal": "فتح في الطرفية",
+      "upload": "رفع ملفات/مجلد",
+      "download": "تنزيل ملف",
+      "downloadAsZip": "تنزيل كملف ZIP",
       "actions": {
         "select": "تحديد",
         "unselect": "إلغاء التحديد",
@@ -1379,7 +1496,9 @@
         "savedAsCopy": "تم الحفظ كنسخة",
         "saveCopyFailed": "فشل الحفظ كنسخة",
         "watchStartFailed": "فشل بدء مراقبة الملفات",
-        "createFailed": "فشل في الإنشاء"
+        "createFailed": "فشل في الإنشاء",
+        "downloadFailed": "فشل تنزيل {name}",
+        "downloadSaved": "تم تنزيل {name}"
       },
       "createDialog": {
         "newFile": "ملف جديد",
@@ -1394,6 +1513,31 @@
         "description": "أدخل اسمًا جديدًا (الاسم فقط، بدون مسار).",
         "placeholderDirectory": "اسم-مجلد-جديد",
         "placeholderFile": "اسم-ملف-جديد.ext"
+      },
+      "uploadDialog": {
+        "title": "رفع إلى مساحة العمل",
+        "description": "اضبط الوجهة عند الحاجة، ثم أضف الملفات أو المجلدات.",
+        "workspaceRoot": "جذر مساحة العمل",
+        "targetPathLabel": "رفع إلى",
+        "targetPathHint": "المسار النهائي: {path}",
+        "dropHint": "اسحب الملفات أو المجلدات هنا، أو استخدم الأزرار أدناه",
+        "dropHintActive": "حرّر للإضافة إلى قائمة الانتظار",
+        "selectFiles": "اختيار ملفات",
+        "selectFolder": "اختيار مجلد",
+        "startUpload": "بدء الرفع",
+        "clearQueue": "مسح المنتهية",
+        "removeItem": "إزالة من قائمة الانتظار",
+        "retry": "إعادة المحاولة",
+        "dropZoneAria": "أفلت الملفات هنا أو نشّط للاستعراض",
+        "folderEmpty": "لم يتم العثور على ملفات في المجلد المسحوب",
+        "summary": "الإجمالي: {total} · نجح: {succeeded} · فشل: {failed}",
+        "status": {
+          "pending": "قيد الانتظار",
+          "uploading": "جاري الرفع",
+          "success": "تم",
+          "error": "فشل",
+          "cancelled": "ملغى"
+        }
       },
       "directoryDialog": {
         "descriptionAdd": "حدد الملفات ضمن المجلد {path} لإضافتها إلى VCS.",
@@ -1503,7 +1647,13 @@
           "initializeTimeout": "انتهت مهلة مصافحة اتصال {agent} (لا استجابة بعد 60 ثانية). افتح الإعدادات للتحقق من إعدادات الوكيل والشبكة.",
           "processExited": "انتهت عملية {agent} بشكل غير متوقع.",
           "spawnFailed": "تعذر بدء تشغيل {agent}: {message}",
-          "downloadFailed": "فشل تنزيل {agent}: {message}"
+          "downloadFailed": "فشل تنزيل {agent}: {message}",
+          "sessionLoadResourceNotFound": "فشل تحميل جلسة {agent}. أعد التحميل لإعادة المحاولة، أو ابدأ محادثة جديدة.",
+          "turnFailedRefusal": "رفض {agent} متابعة هذه الجولة. يدل ذلك غالبًا على خطأ في الخلفية أو البوابة. يرجى مراجعة سجلات الوكيل.",
+          "turnFailedMaxTokens": "بلغ {agent} الحد الأقصى للرموز المسموح بها في هذه الجولة.",
+          "turnFailedMaxTurnRequests": "بلغ {agent} الحد الأقصى لعدد الطلبات المسموح بها في هذه الجولة.",
+          "turnFailedUnknown": "أنهى {agent} الجولة بسبب توقف غير معروف.",
+          "turnFailedEmpty": "أنهى {agent} الجولة دون إنتاج أي رد. يرجى التحقق من إعدادات الوكيل."
         },
         "unableReadAgentConfig": "تعذر قراءة إعدادات الوكيل: {message}",
         "connectFailedTitle": "فشل اتصال {agent}",
@@ -1552,15 +1702,30 @@
         "askAnything": "اسأل أي شيء...",
         "removeAttachmentAria": "إزالة {name}",
         "attachFiles": "إرفاق ملفات",
+        "addActions": "إضافة",
+        "quickMessages": "الرسائل السريعة",
+        "quickMessagesEmpty": "لا توجد رسائل سريعة بعد",
+        "quickMessagesLoading": "جارٍ التحميل...",
+        "quickMessageUntitled": "بدون عنوان",
         "dropFilesToAttach": "أسقط الملفات لإرفاقها",
         "loadingSettings": "جارٍ تحميل الإعدادات...",
         "loadingMode": "جارٍ تحميل الوضع...",
+        "modeLabel": "الوضع",
+        "agentSettings": "إعدادات الوكيل",
         "cancel": "إلغاء",
         "send": "إرسال",
         "forkAndSend": "تفريع وإرسال",
         "slashCommands": "أوامر الشرطة المائلة",
         "expertSkills": "مهارات الخبراء",
-        "expertsEmptyForAgent": "لا يحتوي هذا العميل على خبراء مفعّلين. فعّلهم من الإعدادات > الخبراء."
+        "expertsEmptyForAgent": "لا يحتوي هذا العميل على خبراء مفعّلين. فعّلهم من الإعدادات > الخبراء.",
+        "slashSearchPlaceholder": "البحث عن الأوامر...",
+        "slashSearchEmpty": "لا توجد أوامر مطابقة",
+        "attachLocalUpload": "تحميل ملف محلي",
+        "attachServerFile": "اختيار ملف من الخادم",
+        "attachUploadTooLarge": "{names} يتجاوز حد التحميل {limit}MB وتم تخطيه.",
+        "attachUploadFailed": "فشل تحميل {names}.",
+        "attachUploadNotAFile": "{names} ليس ملفاً عادياً (مجلد أو ملف خاص) وتم تخطيه.",
+        "attachUploadQuotaExceeded": "نفدت مساحة التحميل على الخادم، تعذر رفع {names}."
       },
       "messageQueue": {
         "addToQueue": "إضافة للقائمة",
@@ -1575,6 +1740,28 @@
         "autoConnectAppend": "{message}. انقر لفتح {path} وإدارة التثبيت.",
         "enableAgentFirstPlaceholder": "فعّل وكيلًا واحدًا على الأقل قبل بدء جلسة...",
         "askAnythingPlaceholder": "اسأل أي شيء..."
+      },
+      "welcomePanel": {
+        "greeting": "ماذا تودّ أن <highlight>تفعل اليوم</highlight>؟",
+        "tips": {
+          "tileTabs": "انقر بزر الفأرة الأيمن على تبويب محادثة واختر «عرض متجانب» لمقارنة عدة جلسات جنبًا إلى جنب.",
+          "pinTab": "انقر نقرًا مزدوجًا على تبويب محادثة لتثبيته كي لا تستبدله جلسة جديدة تلقائيًا.",
+          "shortcutsNewSearch": "<shortcut>{newConversation}</shortcut> يفتح محادثة جديدة، و<shortcut>{searchConversations}</shortcut> يبحث في السجل.",
+          "slashAtMention": "اكتب / في حقل الإدخال لتشغيل أوامر السلاش، أو @ للإشارة إلى ملف من المشروع.",
+          "pasteDropFiles": "ألصق لقطة شاشة أو اسحب ملفًا مباشرة إلى حقل الإدخال لإرفاقه.",
+          "queueMessage": "أثناء رد الوكيل، تابع الكتابة — ستوضع رسالتك التالية في الطابور وتُرسل تلقائيًا عند انتهائه.",
+          "draftAutoSave": "تُحفظ المسودات غير المُرسلة تلقائيًا لكل محادثة وتُستعاد عند العودة.",
+          "forkSend": "تتضمن قائمة زر الإرسال المنسدلة «تفرّع وأرسل» لإنشاء فرع من النقطة الحالية في تبويب جديد.",
+          "exportConversation": "انقر بزر الفأرة الأيمن داخل المحادثة لتصديرها بصيغة Markdown أو HTML أو صورة.",
+          "chatChannels": "اربط Telegram / Lark / WeChat من «الإعدادات → قنوات الدردشة» للمتابعة من هاتفك.",
+          "shortcutsAuxPanel": "<shortcut>{toggleAuxPanel}</shortcut> يبدّل اللوحة اليمنى لعرض الملفات المعدّلة وتغييرات Git لهذه الجلسة.",
+          "shortcutsTerminalSidebar": "<shortcut>{toggleTerminal}</shortcut> يفتح الطرفية المدمجة، و<shortcut>{toggleSidebar}</shortcut> يبدّل الشريط الجانبي.",
+          "customShortcuts": "يمكن إعادة تعيين جميع الاختصارات من «الإعدادات → الاختصارات».",
+          "webService": "فعّل «الإعدادات → خدمة الويب» ليتمكن أعضاء الفريق من الوصول إلى نفس codeg عبر المتصفح.",
+          "fusionMode": "افتح ملفًا أو فرقًا لعرضه تلقائيًا بجوار المحادثة.",
+          "quickMessages": "افتح زر + بجانب الإدخال واختر «الرسائل السريعة» لإدراج مقتطف محفوظ (تُدار من «الإعدادات → الرسائل السريعة»).",
+          "experts": "يحتوي زر + على قائمة «مهارات الخبراء» — حمّل أدوارًا مثل التصحيح أو التخطيط بنقرة واحدة."
+        }
       },
       "agentSelector": {
         "noEnabledAgents": "لا يوجد وكلاء مفعّلون",
@@ -1628,28 +1815,38 @@
         "thoughtForSeconds": "تفكير"
       },
       "linkSafety": {
-        "localFileTitle": "فتح ملف محلي؟",
-        "externalLinkTitle": "فتح رابط خارجي؟",
-        "localFileDescription": "أنت على وشك فتح ملف محلي في لوحة الملفات.",
-        "externalLinkDescription": "أنت على وشك زيارة موقع ويب خارجي.",
-        "cancel": "إلغاء",
-        "opening": "جارٍ الفتح…",
-        "openFile": "فتح الملف",
-        "openLink": "فتح الرابط",
         "errorCannotOpen": "تعذر فتح الملف المحلي",
         "errorNoWorkspace": "لا يوجد مجلد مساحة عمل نشط حالياً.",
         "errorOutsideWorkspace": "الملف خارج مجلد مساحة العمل الحالي.",
         "errorFailedOpen": "فشل فتح الملف المحلي",
-        "errorFailedLink": "فشل فتح الرابط"
+        "errorFailedLink": "فشل فتح الرابط",
+        "errorUnsupportedLinkProtocol": "بروتوكول الرابط هذا غير مدعوم."
       },
       "messageList": {
         "attachedResources": "الموارد المرفقة",
         "loading": "جارٍ التحميل...",
         "error": "خطأ: {message}",
+        "errorTitle": "فشل تحميل الجلسة",
+        "errorActionReload": "إعادة تحميل",
+        "errorActionNewSession": "محادثة جديدة",
         "emptyConversation": "لا توجد رسائل في هذه المحادثة.",
         "systemMessage": "رسالة النظام",
         "copyMessage": "نسخ",
-        "copied": "تم النسخ"
+        "copied": "تم النسخ",
+        "downloadImage": "تنزيل الصورة",
+        "downloadFailed": "فشل التنزيل: {message}",
+        "imageGeneration": "إنشاء الصورة",
+        "imageGenerationPending": "جارٍ إنشاء الصورة…",
+        "imageGenerationFailed": "فشل إنشاء الصورة",
+        "model": "النموذج",
+        "tokenStats": "استخدام الرموز",
+        "tokenInput": "الإدخال",
+        "tokenOutput": "الإخراج",
+        "tokenCacheRead": "قراءة التخزين المؤقت",
+        "tokenCacheWrite": "كتابة التخزين المؤقت",
+        "duration": "المدة",
+        "completedAt": "وقت الإنجاز",
+        "jumpToPreviousUserMessage": "الانتقال إلى رسالة المستخدم"
       },
       "liveTurnStats": {
         "thinking": "جارٍ التفكير...",
@@ -1678,6 +1875,34 @@
         "error": "خطأ",
         "result": "النتيجة"
       },
+      "delegation": {
+        "subAgentRunning": "العميل الفرعي قيد التشغيل…",
+        "noDetail": "No detail available yet.",
+        "unknownAgent": "وكيل فرعي",
+        "openDetail": "عرض المحادثة",
+        "detailTitle": "محادثة الوكيل الفرعي",
+        "detailDescription": "عرض للقراءة فقط لمحادثة الوكيل الفرعي المُفوَّض.",
+        "status": {
+          "starting": "قيد البدء",
+          "running": "قيد التشغيل",
+          "ok": "اكتمل",
+          "err": {
+            "default": "فشل",
+            "delegation_disabled": "معطل",
+            "depth_limit": "حد العمق",
+            "invalid_agent_type": "وكيل غير صالح",
+            "spawn_failed": "فشل البدء",
+            "send_failed": "فشل الإرسال",
+            "timeout": "انتهت المهلة",
+            "canceled": "ملغى",
+            "child_refusal": "رفض الوكيل الفرعي",
+            "child_max_tokens": "الوكيل الفرعي: حد الرموز",
+            "child_max_turn_requests": "الوكيل الفرعي: حد الطلبات",
+            "child_empty": "الوكيل الفرعي بدون استجابة",
+            "child_unknown": "الوكيل الفرعي: خطأ"
+          }
+        }
+      },
       "contentParts": {
         "showingTailOutput": "يتم عرض نهاية المخرجات أثناء البث لتحسين الأداء.",
         "result": "النتيجة",
@@ -1704,6 +1929,14 @@
         "subjectLabel": "الموضوع",
         "taskLabel": "المهمة",
         "nameLabel": "الاسم:",
+        "agentPromptLabel": "المطالبة",
+        "agentModelLabel": "النموذج",
+        "agentRunning": "قيد التشغيل...",
+        "agentStatsBash": "الأوامر",
+        "agentStatsRead": "الملفات المقروءة",
+        "agentStatsSearch": "عمليات البحث",
+        "agentStatsEdit": "التعديلات",
+        "agentStatsOther": "أخرى",
         "field": {
           "file": "ملف",
           "notebook": "دفتر",
@@ -1758,6 +1991,20 @@
           "todosProgress": "المهام ({done}/{total})",
           "skillWithName": "Skill: {name}",
           "genericWithContext": "{tool} ({context})"
+        },
+        "toolGroup": {
+          "search": "{count, plural, zero {بحث صفر مرة} one {بحث مرة واحدة} two {بحث مرتين} few {بحث # مرات} many {بحث # مرة} other {بحث # مرة}}",
+          "command": "{count, plural, zero {تنفيذ صفر أمر} one {تنفيذ أمر واحد} two {تنفيذ أمرين} few {تنفيذ # أوامر} many {تنفيذ # أمراً} other {تنفيذ # أمر}}",
+          "read": "{count, plural, zero {قراءة ملفات صفر مرة} one {قراءة ملفات مرة واحدة} two {قراءة ملفات مرتين} few {قراءة ملفات # مرات} many {قراءة ملفات # مرة} other {قراءة ملفات # مرة}}",
+          "memory": "{count, plural, zero {استرجاع صفر ذاكرة} one {استرجاع ذاكرة واحدة} two {استرجاع ذاكرتين} few {استرجاع # ذكريات} many {استرجاع # ذكرى} other {استرجاع # ذكرى}}",
+          "edit": "{count, plural, zero {تعديل ملفات صفر مرة} one {تعديل ملفات مرة واحدة} two {تعديل ملفات مرتين} few {تعديل ملفات # مرات} many {تعديل ملفات # مرة} other {تعديل ملفات # مرة}}",
+          "fetch": "{count, plural, zero {جلب صفر مورد} one {جلب مورد واحد} two {جلب موردين} few {جلب # موارد} many {جلب # مورداً} other {جلب # مورد}}",
+          "think": "{count, plural, zero {تفكير صفر مرة} one {تفكير مرة واحدة} two {تفكير مرتين} few {تفكير # مرات} many {تفكير # مرة} other {تفكير # مرة}}",
+          "todo": "{count, plural, zero {تحديث صفر مهمة} one {تحديث مهمة واحدة} two {تحديث مهمتين} few {تحديث # مهام} many {تحديث # مهمة} other {تحديث # مهمة}}",
+          "task": "{count, plural, zero {تشغيل صفر مهمة} one {تشغيل مهمة واحدة} two {تشغيل مهمتين} few {تشغيل # مهام} many {تشغيل # مهمة} other {تشغيل # مهمة}}",
+          "other": "{count, plural, zero {استخدام صفر أداة} one {استخدام أداة واحدة} two {استخدام أداتين} few {استخدام # أدوات} many {استخدام # أداة} other {استخدام # أداة}}",
+          "errorSuffix": "{count, plural, zero {صفر فشل} one {فشل واحد} two {فشلان} few {# فشلوا} many {# فشلاً} other {# فشل}}",
+          "joiner": " · "
         }
       }
     },
@@ -1771,6 +2018,38 @@
       "hunkLabel": "مقطع {index}",
       "loadingHunk": "جارٍ تحميل hunk...",
       "noDiffData": "لا توجد بيانات diff"
+    },
+    "conversationContextBar": {
+      "folderTitle": "مجلد العمل",
+      "branchTitle": "فرع العمل",
+      "searchFolder": "Search folder...",
+      "searchBranch": "Search branch...",
+      "noFolders": "No folders",
+      "noBranches": "No branches",
+      "noBranch": "(no branch)",
+      "commit": "Commit",
+      "push": "Push",
+      "merge": "Merge",
+      "toasts": {
+        "folderChanged": "Switched to {name}",
+        "openFolderFailed": "Failed to open folder",
+        "openStashFailed": "Failed to open stash window",
+        "openMergeFailed": "Failed to open merge window"
+      }
+    },
+    "cloneDialog": {
+      "title": "استنساخ مستودع",
+      "repositoryUrl": "رابط المستودع",
+      "repositoryUrlPlaceholder": "https://github.com/user/repo.git",
+      "directory": "المجلد",
+      "directoryPlaceholder": "اختر مجلد الهدف...",
+      "browseDirectory": "تصفح المجلد",
+      "cancel": "إلغاء",
+      "clone": "استنساخ",
+      "clonePath": "مسار الاستنساخ: {path}"
+    },
+    "toasts": {
+      "cloneFailed": "فشل استنساخ المستودع"
     }
   },
   "ProjectBoot": {
@@ -1822,7 +2101,8 @@
     },
     "toasts": {
       "createFailed": "فشل إنشاء المشروع",
-      "createSuccess": "تم إنشاء المشروع بنجاح"
+      "createSuccess": "تم إنشاء المشروع بنجاح",
+      "openWorkspaceFailed": "تم إنشاء المشروع، ولكن تعذّر فتحه في مساحة العمل"
     },
     "errors": {
       "directoryExists": "الدليل الهدف موجود بالفعل",
@@ -1834,6 +2114,8 @@
     "sectionDescription": "تفعيل للوصول إلى Codeg عن بُعد عبر المتصفح",
     "port": "المنفذ",
     "status": "الحالة",
+    "autoStart": "تشغيل تلقائي",
+    "autoStartHint": "تشغيل خدمة الويب عند بدء Codeg",
     "running": "قيد التشغيل",
     "stopped": "متوقف",
     "processing": "جارٍ المعالجة...",
@@ -1841,13 +2123,27 @@
     "stop": "إيقاف",
     "startFailed": "فشل التشغيل",
     "stopFailed": "فشل الإيقاف",
+    "saveConfigFailed": "فشل حفظ إعدادات خدمة الويب",
     "open": "فتح",
     "hide": "إخفاء",
     "show": "إظهار",
     "copy": "نسخ",
     "addressLabel": "عنوان الوصول",
     "tokenLabel": "رمز الوصول",
-    "tokenHint": "أدخل هذا الرمز عند الوصول إلى عميل الويب لأول مرة"
+    "tokenHint": "أدخل هذا الرمز عند الوصول إلى عميل الويب لأول مرة",
+    "tokenPlaceholder": "اتركه فارغاً للتوليد التلقائي",
+    "regenerate": "إعادة التوليد",
+    "stalePortOccupiedTitle": "المنفذ {port} مستخدم من قبل عملية أخرى",
+    "stalePortUnknownTitle": "حالة المنفذ {port} غير واضحة",
+    "stalePortHint": "لا يستطيع Codeg الربط قبل تحرير المنفذ. غيّر المنفذ أعلاه، أو أغلق العملية التي تحتفظ به.",
+    "errors": {
+      "alreadyRunning": "خدمة الويب قيد التشغيل بالفعل",
+      "invalidAddress": "تنسيق المضيف أو المنفذ غير صالح",
+      "portInUse": "المنفذ {port} مستخدم بالفعل. أغلق العملية التي تستخدمه أو اختر منفذاً آخر.",
+      "permissionDenied": "الصلاحيات غير كافية. استخدم منفذاً أعلى من 1024 أو شغّل التطبيق بصلاحيات أعلى.",
+      "addressUnavailable": "هذا العنوان غير متاح على هذا الجهاز",
+      "bindFailed": "فشل ربط العنوان"
+    }
   },
   "DirectoryBrowser": {
     "title": "تصفح المجلد",
@@ -1904,6 +2200,7 @@
     "weixinRefreshQrcode": "تحديث",
     "weixinWaitingScan": "في انتظار المسح...",
     "weixinPollError": "الاتصال غير مستقر، جاري إعادة المحاولة...",
+    "weixinReconnectNotice": "بسبب قيود بروتوكول iLink، بعد كل إعادة اتصال يجب عليك إرسال رسالة إلى الروبوت حتى تصبح مشغلات الأحداث فعالة.",
     "connect": "اتصال",
     "disconnect": "قطع الاتصال",
     "test": "اختبار الاتصال",
@@ -1979,6 +2276,17 @@
     "apiKeyKeepCurrent": "اتركه فارغاً للإبقاء على الحالي",
     "agentTypes": "أنواع الوكلاء",
     "agentTypesRequired": "يجب اختيار نوع وكيل واحد على الأقل.",
+    "agentType": "نوع الوكيل",
+    "agentTypeRequired": "نوع الوكيل مطلوب.",
+    "agentTypeImmutableHint": "لا يمكن تغيير نوع الوكيل بعد الإنشاء.",
+    "model": "النموذج",
+    "modelPlaceholderCodex": "gpt-5 / gpt-5-mini",
+    "modelPlaceholderGemini": "gemini-3-pro-preview",
+    "claudeMainModel": "النموذج الرئيسي",
+    "claudeReasoningModel": "نموذج الاستدلال (التفكير)",
+    "claudeHaikuDefaultModel": "نموذج Haiku الافتراضي",
+    "claudeSonnetDefaultModel": "نموذج Sonnet الافتراضي",
+    "claudeOpusDefaultModel": "نموذج Opus الافتراضي",
     "nameRequired": "اسم المزود مطلوب.",
     "apiUrlRequired": "عنوان API مطلوب.",
     "apiKeyRequired": "مفتاح API مطلوب.",
@@ -2039,5 +2347,196 @@
       "disableFailed": "فشل تعطيل الخبير",
       "openFolderFailed": "فشل فتح المجلد"
     }
+  },
+  "QuickMessagesSettings": {
+    "title": "رسائل سريعة",
+    "description": "إدارة مقتطفات الرسائل القابلة لإعادة الاستخدام. اسحب لإعادة الترتيب.",
+    "loading": "جارٍ تحميل الرسائل السريعة…",
+    "emptyList": "لا توجد رسائل سريعة بعد. انقر على \"جديد\" لإنشاء واحدة.",
+    "emptySelection": "اختر رسالة سريعة للتعديل.",
+    "searchPlaceholder": "ابحث حسب العنوان أو المحتوى",
+    "untitled": "بدون عنوان",
+    "actions": {
+      "new": "جديد",
+      "save": "حفظ",
+      "delete": "حذف",
+      "dragSort": "اسحب لإعادة الترتيب",
+      "dragSortMessage": "اسحب لإعادة ترتيب الرسالة السريعة: {name}"
+    },
+    "fields": {
+      "title": "العنوان",
+      "titlePlaceholder": "أعطِ هذه الرسالة عنوانًا قصيرًا",
+      "content": "المحتوى",
+      "contentPlaceholder": "اكتب محتوى الرسالة هنا"
+    },
+    "confirmDelete": {
+      "title": "حذف الرسالة السريعة؟",
+      "message": "سيؤدي ذلك إلى حذف \"{name}\" نهائيًا. هل أنت متأكد؟",
+      "cancel": "إلغاء",
+      "confirm": "حذف"
+    },
+    "toasts": {
+      "loadFailed": "فشل تحميل الرسائل السريعة",
+      "createFailed": "فشل إنشاء الرسالة السريعة",
+      "saveFailed": "فشل حفظ الرسالة السريعة",
+      "deleteFailed": "فشل حذف الرسالة السريعة",
+      "saveOrderFailed": "فشل حفظ الترتيب",
+      "created": "تم إنشاء الرسالة السريعة",
+      "saved": "تم حفظ الرسالة السريعة",
+      "deleted": "تم حذف الرسالة السريعة"
+    }
+  },
+  "Pet": {
+    "menu": {
+      "scale": "الحجم",
+      "openManager": "إدارة الحيوانات الأليفة",
+      "close": "إغلاق"
+    },
+    "loadError": "فشل تحميل الحيوان الأليف",
+    "missingPetIdParam": "لم يتم اختيار حيوان أليف",
+    "summonButton": "حيوان أليف",
+    "manager": {
+      "title": "حيوانات سطح المكتب",
+      "description": "رفقاء عائمون لسطح المكتب باستخدام صفائح سبرايت متوافقة مع Codex.",
+      "addPet": "إضافة حيوان",
+      "importFromCodex": "استيراد من Codex",
+      "noPets": "لا يوجد حيوان أليف. أضف واحدًا أو استورد من Codex.",
+      "setActive": "تفعيل",
+      "active": "نشط",
+      "edit": "تعديل",
+      "delete": "حذف",
+      "deleteConfirm": "حذف الحيوان «{name}»؟ سيُحذف من القرص.",
+      "summon": "استدعاء نافذة الحيوان",
+      "openCodexHelp": "يجب أن توجد حيوانات Codex داخل ~/.codex/pets/. لم يُعثر على شيء.",
+      "specRequirement": "يجب أن يكون السبرايت PNG أو WebP بحجم 1536x1872 مع شفافية.",
+      "form": {
+        "id": "معرف الحيوان",
+        "idHelp": "حروف صغيرة، أرقام، '-' و '_' فقط. حد أقصى 64 حرفًا.",
+        "displayName": "اسم العرض",
+        "description": "الوصف (اختياري)",
+        "spritesheet": "صفيحة السبرايت",
+        "chooseFile": "اختر ملفًا",
+        "replaceFile": "استبدال السبرايت",
+        "saveCreate": "إضافة الحيوان",
+        "saveUpdate": "حفظ التغييرات",
+        "cancel": "إلغاء"
+      },
+      "errors": {
+        "missingId": "المعرف مطلوب",
+        "missingName": "الاسم مطلوب",
+        "missingSpritesheet": "السبرايت مطلوب",
+        "addFailed": "فشل الإضافة",
+        "updateFailed": "فشل التحديث",
+        "deleteFailed": "فشل الحذف",
+        "loadFailed": "فشل تحميل قائمة الحيوانات",
+        "setActiveFailed": "فشل تعيين الحيوان النشط",
+        "summonFailed": "فشل فتح نافذة الحيوان"
+      }
+    },
+    "import": {
+      "title": "استيراد من Codex",
+      "subtitle": "الحيوانات الأليفة المتاحة ضمن ~/.codex/pets/.",
+      "selectAll": "تحديد الكل",
+      "alreadyImported": "تم استيراده مسبقًا",
+      "renameOnConflict": "تسمية المتعارضين بإلحاق -imported",
+      "import": "استيراد المحدد",
+      "noneFound": "لا توجد حيوانات Codex قابلة للاستيراد.",
+      "imported": "تم الاستيراد بنجاح",
+      "failed": "فشل الاستيراد",
+      "close": "إغلاق"
+    },
+    "marketplace": {
+      "openMarketplace": "متجر الحيوانات الأليفة",
+      "title": "متجر الحيوانات الأليفة",
+      "search": "ابحث عن حيوان أليف",
+      "kindFilter": {
+        "all": "الكل",
+        "object": "كائن",
+        "animal": "حيوان",
+        "person": "شخصية",
+        "creature": "مخلوق"
+      },
+      "sortFilter": {
+        "latest": "الأحدث",
+        "popular": "الأكثر شيوعاً",
+        "views": "الأكثر مشاهدة"
+      },
+      "refresh": "تحديث",
+      "install": "تثبيت",
+      "installing": "جاري التثبيت",
+      "reinstall": "إعادة التثبيت",
+      "reinstallConfirm": "هل تريد استبدال الحيوان الأليف المحلي \"{name}\"؟ ستُستبدل البيانات الحالية.",
+      "cancel": "إلغاء",
+      "stats": {
+        "views": "المشاهدات",
+        "downloads": "التنزيلات",
+        "likes": "الإعجابات"
+      },
+      "actions": {
+        "idle": "خامل",
+        "running_right": "ركض يمين",
+        "running_left": "ركض يسار",
+        "waving": "تلويح",
+        "jumping": "قفز",
+        "failed": "فشل",
+        "waiting": "انتظار",
+        "running": "ركض",
+        "review": "مراجعة"
+      },
+      "page": "صفحة {page} من {total}",
+      "prev": "السابق",
+      "next": "التالي",
+      "empty": "لا يوجد حيوان أليف مطابق.",
+      "successInstalled": "تم تثبيت \"{name}\"",
+      "errors": {
+        "loadFailed": "تعذّر تحميل المتجر",
+        "installFailed": "فشل التثبيت",
+        "alreadyInstalled": "هذا الحيوان موجود بالفعل"
+      }
+    }
+  },
+  "RemoteWorkspace": {
+    "openRemoteWorkspace": "Open remote workspace",
+    "manage": "Manage remote workspace",
+    "manageTitle": "Remote Workspace connections",
+    "empty": "No remote connections",
+    "searchPlaceholder": "Search remote workspaces",
+    "orderFailed": "Failed to save remote workspace order",
+    "dragSort": "Drag to sort",
+    "dragSortConnection": "Drag to sort {name}",
+    "newConnection": "New connection",
+    "loading": "Loading",
+    "loadingConnection": "Loading remote connection",
+    "name": "Name",
+    "baseUrl": "Service URL",
+    "token": "Access token",
+    "save": "Save",
+    "delete": "Delete",
+    "confirmDelete": {
+      "title": "Delete remote connection?",
+      "message": "This will remove \"{name}\" from this device. This action cannot be undone.",
+      "cancel": "Cancel",
+      "confirm": "Delete"
+    },
+    "saved": "Remote connection saved.",
+    "deleted": "Remote connection deleted.",
+    "loadFailed": "Failed to load remote connections",
+    "saveFailed": "Failed to save remote connection",
+    "deleteFailed": "Failed to delete remote connection",
+    "openFailed": "Failed to open remote workspace",
+    "connectionLoadFailed": "Failed to load remote connection: {message}",
+    "connectionExpired": "Remote connection \"{name}\" is expired. Update its token and reload this window."
+  },
+  "ServerFileBrowser": {
+    "title": "اختر ملفًا من الخادم",
+    "pathPlaceholder": "أدخل مسار الدليل...",
+    "goHome": "اذهب إلى المجلد الرئيسي",
+    "navigateUp": "اذهب إلى المجلد الأعلى",
+    "select": "اختر",
+    "cancel": "إلغاء",
+    "loading": "جارٍ التحميل...",
+    "emptyDirectory": "هذا المجلد فارغ",
+    "errorLoadingDir": "فشل تحميل المجلد",
+    "selectedCount": "{count} محدد"
   }
 }

@@ -22,7 +22,11 @@ export interface UseConnectionLifecycleReturn {
   selectorsLoading: boolean
   autoConnectError: string | null
   handleFocus: () => void
-  handleSend: (draft: PromptDraft, modeId?: string | null) => void
+  handleSend: (
+    draft: PromptDraft,
+    modeId?: string | null,
+    opts?: { folderId?: number | null; conversationId?: number | null }
+  ) => void
   handleSetConfigOption: (configId: string, valueId: string) => void
   handleCancel: () => void
   handleRespondPermission: (requestId: string, optionId: string) => void
@@ -107,10 +111,6 @@ export function useConnectionLifecycle({
   useEffect(() => {
     connConnectRef.current = connConnect
   }, [connConnect])
-  const agentTypeRef = useRef(agentType)
-  useEffect(() => {
-    agentTypeRef.current = agentType
-  }, [agentType])
   const sessionIdRef = useRef(sessionId)
   useEffect(() => {
     sessionIdRef.current = sessionId
@@ -128,40 +128,40 @@ export function useConnectionLifecycle({
   }, [isActive, contextKey, setActiveKey, touchActivity])
 
   // Auto-connect when tab becomes active and workingDir is available.
-  // Depends on isActive + workingDir so that connections wait for folder
-  // info to load (workingDir transitions from undefined → folder.path).
-  // Status changes must NOT re-trigger this to avoid infinite reconnect
-  // loops on transient errors.
+  // Depends on isActive + workingDir + agentType so that connections wait
+  // for folder info to load (workingDir transitions from undefined →
+  // folder.path), and so that changing folders or agents on an already-
+  // connected tab triggers a reconnect. The context's connect() dedups
+  // same-param calls and disconnects+reconnects when workingDir or
+  // agentType differs. Status changes must NOT re-trigger this to avoid
+  // infinite reconnect loops on transient errors.
   useEffect(() => {
     if (!isActive) return
     if (!workingDir) return
     let cancelled = false
-    const s = statusRef.current
-    if (!s || s === "disconnected" || s === "error") {
-      connConnectRef
-        .current(agentTypeRef.current, workingDir, sessionIdRef.current)
-        .then(() => {
-          if (!cancelled) {
-            setLastAutoConnectError(null)
-          }
-        })
-        .catch((e: unknown) => {
-          if (!cancelled) {
-            setLastAutoConnectError({
-              contextKey: contextKeyRef.current,
-              agentType: agentTypeRef.current,
-              message: normalizeErrorMessage(e),
-            })
-          }
-          if (!isExpectedConnectError(e)) {
-            console.error("[ConnLifecycle] auto-connect:", e)
-          }
-        })
-    }
+    connConnectRef
+      .current(agentType, workingDir, sessionIdRef.current)
+      .then(() => {
+        if (!cancelled) {
+          setLastAutoConnectError(null)
+        }
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) {
+          setLastAutoConnectError({
+            contextKey: contextKeyRef.current,
+            agentType,
+            message: normalizeErrorMessage(e),
+          })
+        }
+        if (!isExpectedConnectError(e)) {
+          console.error("[ConnLifecycle] auto-connect:", e)
+        }
+      })
     return () => {
       cancelled = true
     }
-  }, [isActive, workingDir])
+  }, [isActive, workingDir, agentType])
 
   // Manage task status for connection progress
   const taskIdRef = useRef<string | null>(null)
@@ -264,6 +264,10 @@ export function useConnectionLifecycle({
   }, [removeTask, clearSelectorTask])
 
   const handleFocus = useCallback(() => {
+    // Respect the caller's readiness gate — e.g. historical conversations
+    // set isActive=false until the session's external_id resolves, to
+    // avoid connecting with sessionId=undefined and orphaning context.
+    if (!isActive) return
     touchActivity(contextKey)
     if (!status || status === "disconnected" || status === "error") {
       setLastAutoConnectError(null)
@@ -274,6 +278,7 @@ export function useConnectionLifecycle({
       })
     }
   }, [
+    isActive,
     agentType,
     workingDir,
     sessionId,
@@ -294,7 +299,11 @@ export function useConnectionLifecycle({
   // sendPrompt, connCancel, connRespondPermission are stable (depend
   // only on actions + contextKey), so these callbacks are effectively stable.
   const handleSend = useCallback(
-    (draft: PromptDraft, modeId?: string | null) => {
+    (
+      draft: PromptDraft,
+      modeId?: string | null,
+      opts?: { folderId?: number | null; conversationId?: number | null }
+    ) => {
       touchActivity(contextKey)
       void (async () => {
         const currentModeId = modeIdRef.current
@@ -304,7 +313,7 @@ export function useConnectionLifecycle({
           // calls before CurrentModeUpdate arrives from the agent.
           modeIdRef.current = modeId
         }
-        await sendPrompt(draft.blocks)
+        await sendPrompt(draft.blocks, opts)
       })().catch((e: unknown) =>
         console.error("[ConnLifecycle] sendPrompt:", e)
       )

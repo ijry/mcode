@@ -17,15 +17,17 @@ pub struct FolderDetail {
     pub name: String,
     pub path: String,
     pub git_branch: Option<String>,
-    pub parent_branch: Option<String>,
     pub default_agent_type: Option<AgentType>,
     pub last_opened_at: DateTime<Utc>,
-    pub opened_conversations: Vec<OpenedConversation>,
+    pub sort_order: i32,
+    pub color: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OpenedConversation {
-    pub conversation_id: i32,
+pub struct OpenedTab {
+    pub id: i32,
+    pub folder_id: i32,
+    pub conversation_id: Option<i32>,
     pub agent_type: AgentType,
     pub position: i32,
     pub is_active: bool,

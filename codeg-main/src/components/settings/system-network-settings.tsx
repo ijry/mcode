@@ -9,10 +9,11 @@ import {
   RefreshCw,
   Wifi,
 } from "lucide-react"
-import { Github } from "@lobehub/icons"
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Update = any
 import { useLocale, useTranslations } from "next-intl"
+import ReactMarkdown from "react-markdown"
+import remarkGfm from "remark-gfm"
 import { toast } from "sonner"
 import { useAppI18n } from "@/components/i18n-provider"
 import { Button } from "@/components/ui/button"
@@ -30,7 +31,7 @@ import {
   updateSystemLanguageSettings,
   updateSystemProxySettings,
 } from "@/lib/api"
-import { openUrl } from "@/lib/platform"
+import { isDesktop, openUrl } from "@/lib/platform"
 import type { AppLocale } from "@/lib/types"
 import {
   checkAppUpdate,
@@ -42,6 +43,22 @@ import {
 } from "@/lib/updater"
 import type { DownloadEvent } from "@/lib/updater"
 import { APP_LOCALES } from "@/lib/i18n"
+import { toErrorMessage } from "@/lib/app-error"
+
+function GithubMarkIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      fill="currentColor"
+      fillRule="evenodd"
+      viewBox="0 0 24 24"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <path d="M12 0c6.63 0 12 5.276 12 11.79-.001 5.067-3.29 9.567-8.175 11.187-.6.118-.825-.25-.825-.56 0-.398.015-1.665.015-3.242 0-1.105-.375-1.813-.81-2.181 2.67-.295 5.475-1.297 5.475-5.822 0-1.297-.465-2.344-1.23-3.169.12-.295.54-1.503-.12-3.125 0 0-1.005-.324-3.3 1.209a11.32 11.32 0 00-3-.398c-1.02 0-2.04.133-3 .398-2.295-1.518-3.3-1.209-3.3-1.209-.66 1.622-.24 2.83-.12 3.125-.765.825-1.23 1.887-1.23 3.169 0 4.51 2.79 5.527 5.46 5.822-.345.294-.66.81-.765 1.577-.69.31-2.415.81-3.495-.973-.225-.354-.9-1.223-1.845-1.209-1.005.015-.405.56.015.781.51.28 1.095 1.327 1.23 1.666.24.663 1.02 1.93 4.035 1.385 0 .988.015 1.916.015 2.196 0 .31-.225.664-.825.56C3.303 21.374-.003 16.867 0 11.791 0 5.276 5.37 0 12 0z" />
+    </svg>
+  )
+}
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -72,6 +89,7 @@ export function SystemNetworkSettings() {
   const [savingLanguage, setSavingLanguage] = useState(false)
   const [enabled, setEnabled] = useState(false)
   const [proxyUrl, setProxyUrl] = useState("")
+  const [proxyUrlError, setProxyUrlError] = useState<string | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [currentVersion, setCurrentVersion] = useState<string>("")
   const [availableUpdate, setAvailableUpdate] = useState<Update | null>(null)
@@ -131,8 +149,8 @@ export function SystemNetworkSettings() {
   }, [availableUpdate?.date, locale])
 
   const updateNotes = useMemo(
-    () => availableUpdate?.body?.trim() || t("none"),
-    [availableUpdate?.body, t]
+    () => availableUpdate?.body?.trim() ?? "",
+    [availableUpdate?.body]
   )
 
   const updateStatusMessage = useMemo(() => {
@@ -157,7 +175,7 @@ export function SystemNetworkSettings() {
       setProxyUrl(proxySettings.proxy_url ?? "")
       setCurrentVersion(version)
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = toErrorMessage(err)
       setLoadError(message)
       console.error("[Settings] load system settings failed:", err)
     } finally {
@@ -197,7 +215,7 @@ export function SystemNetworkSettings() {
         setEnabled(next.enabled)
         setProxyUrl(next.proxy_url ?? "")
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = toErrorMessage(err)
         toast.error(t("saveFailed", { message }))
       } finally {
         setSaving(false)
@@ -218,7 +236,7 @@ export function SystemNetworkSettings() {
 
         setLanguageSettings(next)
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = toErrorMessage(err)
         toast.error(t("languageSaveFailed", { message }))
       } finally {
         setSavingLanguage(false)
@@ -341,7 +359,7 @@ export function SystemNetworkSettings() {
 
   return (
     <ScrollArea className="h-full">
-      <div className="w-full space-y-4">
+      <div className="w-full space-y-4 p-3 md:p-4">
         <section className="space-y-1">
           <div className="flex items-center justify-between">
             <h1 className="text-sm font-semibold">{t("sectionTitle")}</h1>
@@ -350,7 +368,7 @@ export function SystemNetworkSettings() {
               className="size-5 rounded-full"
               onClick={() => openUrl("https://github.com/xintaofei/codeg")}
             >
-              <Github className="size-5" />
+              <GithubMarkIcon className="size-5" />
             </Button>
           </div>
           <p className="text-xs text-muted-foreground">
@@ -394,23 +412,37 @@ export function SystemNetworkSettings() {
                   {t("checking")}
                 </Button>
               ) : availableUpdate ? (
-                <Button
-                  size="sm"
-                  onClick={installUpdate}
-                  disabled={installingUpdate}
-                >
-                  {installingUpdate ? (
-                    <>
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      {t("updating")}
-                    </>
-                  ) : (
-                    <>
-                      <ArrowUpCircle className="h-3.5 w-3.5" />
-                      {t("upgradeTo", { version: availableUpdate.version })}
-                    </>
-                  )}
-                </Button>
+                isDesktop() ? (
+                  <Button
+                    size="sm"
+                    onClick={installUpdate}
+                    disabled={installingUpdate}
+                  >
+                    {installingUpdate ? (
+                      <>
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        {t("updating")}
+                      </>
+                    ) : (
+                      <>
+                        <ArrowUpCircle className="h-3.5 w-3.5" />
+                        {t("upgradeTo", { version: availableUpdate.version })}
+                      </>
+                    )}
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    onClick={() =>
+                      openUrl(
+                        "https://github.com/xintaofei/codeg/releases/latest"
+                      )
+                    }
+                  >
+                    <ArrowUpCircle className="h-3.5 w-3.5" />
+                    {t("viewRelease", { version: availableUpdate.version })}
+                  </Button>
+                )
               ) : (
                 <Button
                   key="check-update"
@@ -476,8 +508,28 @@ export function SystemNetworkSettings() {
                     </span>
                   )}
                 </div>
-                <div className="mt-3 max-h-28 overflow-auto rounded-md border bg-background/70 px-3 py-3 leading-6 whitespace-pre-wrap break-words text-muted-foreground">
-                  {updateNotes}
+                <div
+                  className={
+                    "mt-3 max-h-72 overflow-auto rounded-md border bg-background/70 px-3 py-3 leading-6 break-words text-muted-foreground " +
+                    "[&_h1]:text-sm [&_h1]:font-semibold [&_h1]:mb-2 [&_h1]:text-foreground " +
+                    "[&_h2]:text-sm [&_h2]:font-semibold [&_h2]:mt-3 [&_h2]:mb-2 [&_h2]:text-foreground " +
+                    "[&_h3]:text-xs [&_h3]:font-semibold [&_h3]:mt-2 [&_h3]:mb-1 [&_h3]:text-foreground " +
+                    "[&_p]:mb-2 [&_p:last-child]:mb-0 " +
+                    "[&_ul]:list-disc [&_ul]:pl-5 [&_ul]:mb-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:mb-2 [&_li]:mb-1 " +
+                    "[&_code]:font-mono [&_code]:text-[11px] [&_code]:bg-muted [&_code]:rounded [&_code]:px-1 " +
+                    "[&_pre]:bg-muted [&_pre]:rounded-md [&_pre]:p-2 [&_pre]:overflow-x-auto [&_pre]:mb-2 " +
+                    "[&_a]:text-primary [&_a]:underline [&_a]:underline-offset-2 " +
+                    "[&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground/80 " +
+                    "[&_hr]:my-2 [&_hr]:border-border"
+                  }
+                >
+                  {updateNotes ? (
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {updateNotes}
+                    </ReactMarkdown>
+                  ) : (
+                    t("none")
+                  )}
                 </div>
               </div>
             )}
@@ -513,6 +565,11 @@ export function SystemNetworkSettings() {
               disabled={saving}
               onChange={(event) => {
                 const next = event.target.checked
+                if (next && !proxyUrl.trim()) {
+                  setProxyUrlError(t("proxyRequired"))
+                  return
+                }
+                setProxyUrlError(null)
                 setEnabled(next)
                 saveProxySettings(next, proxyUrl)
               }}
@@ -526,11 +583,25 @@ export function SystemNetworkSettings() {
             </label>
             <Input
               value={proxyUrl}
-              onChange={(event) => setProxyUrl(event.target.value)}
-              onBlur={() => saveProxySettings(enabled, proxyUrl)}
+              onChange={(event) => {
+                setProxyUrl(event.target.value)
+                if (event.target.value.trim()) setProxyUrlError(null)
+              }}
+              onBlur={() => {
+                if (enabled && !proxyUrl.trim()) {
+                  setProxyUrlError(t("proxyRequired"))
+                  return
+                }
+                setProxyUrlError(null)
+                saveProxySettings(enabled, proxyUrl)
+              }}
               placeholder={PROXY_EXAMPLE}
               disabled={saving}
+              aria-invalid={proxyUrlError ? true : undefined}
             />
+            {proxyUrlError && (
+              <p className="text-[11px] text-destructive">{proxyUrlError}</p>
+            )}
             <p className="text-[11px] text-muted-foreground">
               {t("proxyHint", { example: PROXY_EXAMPLE })}
             </p>

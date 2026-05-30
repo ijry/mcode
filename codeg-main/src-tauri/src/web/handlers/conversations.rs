@@ -6,35 +6,73 @@ use serde::Deserialize;
 use crate::app_error::AppCommandError;
 use crate::app_state::AppState;
 use crate::commands::conversations as conv_commands;
-use crate::db::service::{conversation_service, folder_service, import_service};
 use crate::models::*;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
-pub struct ListFolderConversationsParams {
-    pub folder_id: i32,
+pub struct ListAllConversationsParams {
+    pub folder_ids: Option<Vec<i32>>,
     pub agent_type: Option<AgentType>,
     pub search: Option<String>,
     pub sort_by: Option<String>,
     pub status: Option<String>,
+    pub include_children: Option<bool>,
 }
 
-pub async fn list_folder_conversations(
+pub async fn list_all_conversations(
     Extension(state): Extension<Arc<AppState>>,
-    Json(params): Json<ListFolderConversationsParams>,
+    Json(params): Json<ListAllConversationsParams>,
 ) -> Result<Json<Vec<DbConversationSummary>>, AppCommandError> {
-    let db = &state.db;
-    let result = conversation_service::list_by_folder(
-        &db.conn,
-        params.folder_id,
-        params.agent_type,
-        params.search,
-        params.sort_by,
-        params.status,
-    )
-    .await
-    .map_err(AppCommandError::from)?;
-    Ok(Json(result))
+    Ok(Json(
+        conv_commands::list_all_conversations_core(
+            &state.db.conn,
+            params.folder_ids,
+            params.agent_type,
+            params.search,
+            params.sort_by,
+            params.status,
+            params.include_children.unwrap_or(false),
+        )
+        .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListChildConversationsParams {
+    pub parent_conversation_id: i32,
+}
+
+pub async fn list_child_conversations(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<ListChildConversationsParams>,
+) -> Result<Json<Vec<DbConversationSummary>>, AppCommandError> {
+    Ok(Json(
+        conv_commands::list_child_conversations_core(&state.db.conn, params.parent_conversation_id)
+            .await?,
+    ))
+}
+
+pub async fn list_opened_tabs(
+    Extension(state): Extension<Arc<AppState>>,
+) -> Result<Json<Vec<OpenedTab>>, AppCommandError> {
+    Ok(Json(
+        conv_commands::list_opened_tabs_core(&state.db.conn).await?,
+    ))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveOpenedTabsParams {
+    pub items: Vec<OpenedTab>,
+}
+
+pub async fn save_opened_tabs(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<SaveOpenedTabsParams>,
+) -> Result<Json<()>, AppCommandError> {
+    conv_commands::save_opened_tabs_core(&state.db.conn, params.items).await?;
+    Ok(Json(()))
 }
 
 #[derive(Deserialize)]
@@ -114,16 +152,9 @@ pub async fn import_local_conversations(
     Extension(state): Extension<Arc<AppState>>,
     Json(params): Json<ImportLocalConversationsParams>,
 ) -> Result<Json<ImportResult>, AppCommandError> {
-    let db = &state.db;
-    let folder = folder_service::get_folder_by_id(&db.conn, params.folder_id)
-        .await
-        .map_err(AppCommandError::from)?
-        .ok_or_else(|| AppCommandError::not_found("Folder not found"))?;
-    let result =
-        import_service::import_local_conversations(&db.conn, params.folder_id, &folder.path)
-            .await
-            .map_err(AppCommandError::from)?;
-    Ok(Json(result))
+    Ok(Json(
+        conv_commands::import_local_conversations_core(&state.db.conn, params.folder_id).await?,
+    ))
 }
 
 #[derive(Deserialize)]
@@ -160,14 +191,12 @@ pub async fn update_conversation_status(
     Extension(state): Extension<Arc<AppState>>,
     Json(params): Json<UpdateConversationStatusParams>,
 ) -> Result<Json<()>, AppCommandError> {
-    let db = &state.db;
-    let status_enum: crate::db::entities::conversation::ConversationStatus =
-        serde_json::from_value(serde_json::Value::String(params.status)).map_err(|e| {
-            AppCommandError::invalid_input("Invalid conversation status").with_detail(e.to_string())
-        })?;
-    conversation_service::update_status(&db.conn, params.conversation_id, status_enum)
-        .await
-        .map_err(AppCommandError::from)?;
+    conv_commands::update_conversation_status_core(
+        &state.db.conn,
+        params.conversation_id,
+        params.status,
+    )
+    .await?;
     Ok(Json(()))
 }
 
@@ -182,10 +211,12 @@ pub async fn update_conversation_title(
     Extension(state): Extension<Arc<AppState>>,
     Json(params): Json<UpdateConversationTitleParams>,
 ) -> Result<Json<()>, AppCommandError> {
-    let db = &state.db;
-    conversation_service::update_title(&db.conn, params.conversation_id, params.title)
-        .await
-        .map_err(AppCommandError::from)?;
+    conv_commands::update_conversation_title_core(
+        &state.db.conn,
+        params.conversation_id,
+        params.title,
+    )
+    .await?;
     Ok(Json(()))
 }
 
@@ -199,27 +230,6 @@ pub async fn delete_conversation(
     Extension(state): Extension<Arc<AppState>>,
     Json(params): Json<DeleteConversationParams>,
 ) -> Result<Json<()>, AppCommandError> {
-    let db = &state.db;
-    conversation_service::soft_delete(&db.conn, params.conversation_id)
-        .await
-        .map_err(AppCommandError::from)?;
-    Ok(Json(()))
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateConversationExternalIdParams {
-    pub conversation_id: i32,
-    pub external_id: String,
-}
-
-pub async fn update_conversation_external_id(
-    Extension(state): Extension<Arc<AppState>>,
-    Json(params): Json<UpdateConversationExternalIdParams>,
-) -> Result<Json<()>, AppCommandError> {
-    let db = &state.db;
-    conversation_service::update_external_id(&db.conn, params.conversation_id, params.external_id)
-        .await
-        .map_err(AppCommandError::from)?;
+    conv_commands::delete_conversation_core(&state.db.conn, params.conversation_id).await?;
     Ok(Json(()))
 }

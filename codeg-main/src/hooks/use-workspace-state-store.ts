@@ -26,10 +26,20 @@ export interface WorkspaceStateView {
   tree: FileTreeNode[]
   git: WorkspaceGitEntry[]
   error: string | null
+  degraded: boolean
+  isGitRepo: boolean
 }
+
+export type WorkspaceEnvelopeListener = (envelope: {
+  seq: number
+  kind: string
+  changed_paths: string[]
+}) => void
 
 export interface WorkspaceStateResult extends WorkspaceStateView {
   requestResync: (reason?: string) => Promise<void>
+  restart: () => Promise<void>
+  subscribeEnvelopes: (listener: WorkspaceEnvelopeListener) => () => void
 }
 
 const WORKSPACE_PROTOCOL_VERSION = 1
@@ -44,6 +54,8 @@ const EMPTY_STATE: WorkspaceStateView = {
   tree: [],
   git: [],
   error: null,
+  degraded: false,
+  isGitRepo: true,
 }
 
 function normalizeComparePath(path: string): string {
@@ -102,6 +114,8 @@ function applySnapshot(
       tree: snapshot.tree_snapshot ?? [],
       git: snapshot.git_snapshot ?? [],
       error: null,
+      degraded: snapshot.degraded,
+      isGitRepo: snapshot.is_git_repo,
     }
   }
 
@@ -124,6 +138,8 @@ function applySnapshot(
     version: snapshot.version,
     health: "healthy",
     error: null,
+    degraded: snapshot.degraded,
+    isGitRepo: snapshot.is_git_repo,
   }
 }
 
@@ -131,6 +147,7 @@ class WorkspaceStateStore {
   private readonly rootPath: string
   private readonly normalizedRootPath: string
   private listeners = new Set<() => void>()
+  private envelopeListeners = new Set<WorkspaceEnvelopeListener>()
   private state: WorkspaceStateView
   private refCount = 0
   private started = false
@@ -138,6 +155,7 @@ class WorkspaceStateStore {
   private stopping: Promise<void> | null = null
   private unlisten: (() => void) | null = null
   private resyncInFlight: Promise<void> | null = null
+  private restarting: Promise<void> | null = null
   private lifecycleId = 0
   private evictionTimer: ReturnType<typeof setTimeout> | null = null
   private shutdownTimer: ReturnType<typeof setTimeout> | null = null
@@ -161,7 +179,15 @@ class WorkspaceStateStore {
     }
   }
 
+  subscribeEnvelopes = (listener: WorkspaceEnvelopeListener): (() => void) => {
+    this.envelopeListeners.add(listener)
+    return () => {
+      this.envelopeListeners.delete(listener)
+    }
+  }
+
   acquire = () => {
+    const wasShutdownPending = this.shutdownTimer !== null
     this.cancelPendingShutdown()
     this.cancelEviction()
     this.refCount += 1
@@ -174,6 +200,23 @@ class WorkspaceStateStore {
       }
       const lifecycleId = this.lifecycleId
       void this.ensureStarted(lifecycleId)
+
+      // Re-acquired within the shutdown grace window: ensureStarted is a
+      // no-op because `started` is still true, but events fired while
+      // refCount was 0 may have been silently dropped (broadcaster has no
+      // receivers during a brief SSE reconnect, or the event landed during
+      // the grace and got coalesced). Pull a delta-replay snapshot so we
+      // don't keep showing pre-event state — typical symptom is git status
+      // / file tree not updating after the user switched away while an
+      // agent commit was in flight.
+      //
+      // Gated on `started` so we don't race a resync against a still-in-
+      // flight initial start: in that window the backend stream may not
+      // be registered yet and getWorkspaceSnapshot would return not_found,
+      // bouncing us into a needless degraded state.
+      if (wasShutdownPending && this.started) {
+        void this.requestResync("reacquired_within_grace")
+      }
     }
   }
 
@@ -202,6 +245,16 @@ class WorkspaceStateStore {
         this.patchState((prev) => applySnapshot(prev, snapshot))
         if (snapshot.full) {
           this.hasBaselineSnapshot = true
+        } else {
+          // Forward replayed envelopes so downstream cache-invalidation
+          // hooks catch up on FS activity that happened while disconnected.
+          for (const envelope of snapshot.deltas) {
+            this.notifyEnvelope({
+              seq: envelope.seq,
+              kind: envelope.kind,
+              changed_paths: envelope.changed_paths ?? [],
+            })
+          }
         }
       } catch (error) {
         this.patchState((prev) => ({
@@ -217,6 +270,38 @@ class WorkspaceStateStore {
     })
 
     return this.resyncInFlight
+  }
+
+  restart = async (): Promise<void> => {
+    if (this.restarting) return this.restarting
+
+    const run = async () => {
+      const prevLifecycleId = this.lifecycleId
+      this.cancelPendingShutdown()
+      this.cancelEviction()
+
+      this.patchState((prev) => ({
+        ...prev,
+        health: "resyncing",
+      }))
+
+      await this.shutdown(prevLifecycleId)
+
+      this.lifecycleId += 1
+      const nextLifecycleId = this.lifecycleId
+      this.hasBaselineSnapshot = false
+      this.resyncInFlight = null
+
+      if (this.refCount > 0) {
+        await this.ensureStarted(nextLifecycleId)
+      }
+    }
+
+    this.restarting = run().finally(() => {
+      this.restarting = null
+    })
+
+    return this.restarting
   }
 
   private ensureStarted = async (lifecycleId: number) => {
@@ -244,7 +329,18 @@ class WorkspaceStateStore {
           await stopWorkspaceStateStream(this.rootPath).catch(() => {})
           return
         }
-        this.patchState((prev) => applySnapshot(prev, initialSnapshot))
+        // Reset our seq baseline before applying. The backend stream is
+        // brand new (or re-created after stop), so its WorkspaceStateCore
+        // starts at seq=0. If the user previously visited this folder, the
+        // store still holds the prior lifecycle's `state.seq` (e.g. 10),
+        // and applySnapshot's `snapshot.seq < state.seq` guard would drop
+        // the cold-scan payload entirely — leaving git/file tree frozen on
+        // pre-restart cached data even though the disk view is fresh.
+        // Symptom: after switching away while the agent commits and
+        // switching back, changes still render as uncommitted forever.
+        this.patchState((prev) =>
+          applySnapshot({ ...prev, seq: 0 }, initialSnapshot)
+        )
         this.hasBaselineSnapshot = true
 
         const unlisten = await subscribe<WorkspaceStateEvent>(
@@ -273,6 +369,15 @@ class WorkspaceStateStore {
         )
         if (!this.isLifecycleActive(lifecycleId)) return
         this.patchState((prev) => applySnapshot(prev, catchUpSnapshot))
+        if (!catchUpSnapshot.full) {
+          for (const envelope of catchUpSnapshot.deltas) {
+            this.notifyEnvelope({
+              seq: envelope.seq,
+              kind: envelope.kind,
+              changed_paths: envelope.changed_paths ?? [],
+            })
+          }
+        }
       } catch (error) {
         this.patchState((prev) => ({
           ...prev,
@@ -376,6 +481,26 @@ class WorkspaceStateStore {
       health: "healthy",
       error: null,
     }))
+
+    this.notifyEnvelope({
+      seq: event.seq,
+      kind: event.kind,
+      changed_paths: event.changed_paths ?? [],
+    })
+  }
+
+  private notifyEnvelope = (envelope: {
+    seq: number
+    kind: string
+    changed_paths: string[]
+  }) => {
+    for (const listener of this.envelopeListeners) {
+      try {
+        listener(envelope)
+      } catch (error) {
+        console.error("[workspace-state] envelope listener failed", error)
+      }
+    }
   }
 
   private patchState = (
@@ -462,15 +587,32 @@ export function useWorkspaceStateStore(
     [store]
   )
 
+  const restart = useCallback(async () => {
+    if (!store) return
+    await store.restart()
+  }, [store])
+
+  const subscribeEnvelopes = useCallback(
+    (listener: WorkspaceEnvelopeListener) => {
+      if (!store) return () => {}
+      return store.subscribeEnvelopes(listener)
+    },
+    [store]
+  )
+
   if (!rootPath) {
     return {
       ...EMPTY_STATE,
       requestResync,
+      restart,
+      subscribeEnvelopes,
     }
   }
 
   return {
     ...snapshot,
     requestResync,
+    restart,
+    subscribeEnvelopes,
   }
 }

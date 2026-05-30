@@ -12,54 +12,6 @@
     "portuguese": "ポルトガル語",
     "arabic": "アラビア語"
   },
-  "WelcomePage": {
-    "title": "Codegへようこそ",
-    "openSettings": "設定を開く",
-    "searchPlaceholder": "フォルダを検索...",
-    "loading": "読み込み中...",
-    "emptyFolders": "フォルダがありません",
-    "removeFromHistory": "履歴から削除",
-    "openFolder": "フォルダを開く",
-    "cloneRepository": "リポジトリをクローン",
-    "projectBoot": "プロジェクトブート",
-    "softwareVersion": "バージョン {version}",
-    "toasts": {
-      "loadFolderHistoryFailed": "フォルダ履歴の読み込みに失敗しました",
-      "openFolderFailed": "フォルダを開けませんでした",
-      "removeFromHistoryFailed": "履歴からの削除に失敗しました",
-      "openSettingsFailed": "設定を開けませんでした",
-      "cloneFailed": "リポジトリのクローンに失敗しました",
-      "openProjectBootFailed": "プロジェクトブートを開けませんでした"
-    },
-    "errors": {
-      "unknown": "予期しないエラーが発生しました",
-      "invalidInput": "入力が無効です。",
-      "notFound": "リソースが見つかりません。",
-      "alreadyExists": "リソースは既に存在します。",
-      "dependencyMissing": "必要な依存関係が不足しています。",
-      "databaseError": "データベース操作に失敗しました。",
-      "ioError": "ファイル操作に失敗しました。",
-      "externalCommandFailed": "外部コマンドの実行に失敗しました。",
-      "windowOperationFailed": "ウィンドウ操作に失敗しました。",
-      "gitNotInstalled": "Git がインストールされていません。先に Git をインストールしてください。",
-      "targetDirectoryNotEmpty": "対象ディレクトリは既に存在し、空ではありません。",
-      "repositoryNotFound": "リポジトリが見つかりません。URL とアクセス権を確認してください。",
-      "networkUnavailable": "ネットワークに接続できません。接続を確認して再試行してください。",
-      "authenticationFailed": "認証に失敗しました。認証情報または SSH キーを確認してください。",
-      "permissionDenied": "権限がありません。ディレクトリ権限を確認してください。"
-    },
-    "cloneDialog": {
-      "title": "リポジトリをクローン",
-      "repositoryUrl": "リポジトリ URL",
-      "repositoryUrlPlaceholder": "https://github.com/user/repo.git",
-      "directory": "ディレクトリ",
-      "directoryPlaceholder": "保存先ディレクトリを選択...",
-      "browseDirectory": "ディレクトリを参照",
-      "cancel": "キャンセル",
-      "clone": "クローン",
-      "clonePath": "クローンパス: {path}"
-    }
-  },
   "GitCredentialDialog": {
     "title": "認証が必要です",
     "description": "リモートサーバーが認証情報を要求しています。ユーザー名とパスワード（またはアクセストークン）を入力してください。",
@@ -85,6 +37,7 @@
     "title": "設定",
     "preferences": "環境設定",
     "nav": {
+      "general": "一般",
       "appearance": "外観",
       "agents": "エージェント",
       "mcp": "MCP",
@@ -95,7 +48,8 @@
       "chat_channels": "チャットチャンネル",
       "web_service": "Webサービス",
       "model_providers": "モデルプロバイダー",
-      "experts": "エキスパート"
+      "experts": "エキスパート",
+      "quick_messages": "クイックメッセージ"
     }
   },
   "AppearanceSettings": {
@@ -137,9 +91,7 @@
       "placeholder": "ズームレベルを選択",
       "default": "デフォルト",
       "current": "現在のズーム：{zoom}%"
-    },
-    "resetToDefaults": "デフォルトに戻す",
-    "resetHint": "テーマカラーとウィンドウズームをデフォルトに戻します。"
+    }
   },
   "SystemSettings": {
     "loading": "読み込み中...",
@@ -174,6 +126,7 @@
     "updating": "インストール中...",
     "downloading": "ダウンロード中...",
     "upgradeTo": "v{version} にアップグレード",
+    "viewRelease": "v{version} のリリースを表示",
     "foundUpdate": "新しいバージョン v{version} が見つかりました",
     "alreadyLatest": "すでに最新バージョンです",
     "checkUpdateFailed": "更新確認に失敗しました: {message}",
@@ -310,7 +263,7 @@
       },
       "close_all_file_tabs": {
         "title": "すべてのファイルタブを閉じる",
-        "description": "ファイルモードでのみすべてのファイルタブを閉じます"
+        "description": "ファイルペインがアクティブなときに開いているすべてのファイルタブを閉じます"
       },
       "send_message": {
         "title": "メッセージを送信",
@@ -349,6 +302,8 @@
     "loadingSkill": "Skillを読み込み中...",
     "emptyNoAgents": "利用可能なエージェントがありません。",
     "noSelectionHint": "左側から Skill を選択するか、「新規 Skill」をクリックして作成してください。",
+    "systemBadge": "システム",
+    "systemHint": "CLI 組み込み Skill・読み取り専用",
     "scope": {
       "global": "グローバル",
       "folder": "フォルダ",
@@ -390,7 +345,7 @@
       "gemini": "---\nname: example-skill\ndescription: Describe when this skill should be used.\n---\n\n# Skill Name\n\nInstructions for the agent when this skill is active.\n\n## Workflow\n\n1. Add actionable step one.\n2. Add actionable step two.\n",
       "openCode": "---\nname: example-skill\ndescription: Describe when this skill should be used.\n---\n\n# Purpose\n\nDescribe what this skill helps with.\n\n# Steps\n\n1. Add actionable step one.\n2. Add actionable step two.\n",
       "openClaw": "---\nname: example-skill\ndescription: Describe when this skill should be used.\nuser-invocable: true\ndisable-model-invocation: false\n---\n\n# Purpose\n\nDescribe what this skill helps with.\n\n# Instructions\n\n1. Add actionable instruction one.\n2. Add actionable instruction two.\n",
-      "default": "# Skill: example-skill\n\n## When to use\n\n- Describe trigger conditions.\n\n## Instructions\n\n1. Add actionable instruction one.\n2. Add actionable instruction two.\n"
+      "default": "---\nname: example-skill\ndescription: Describe when this skill should be used.\n---\n\n# Skill: example-skill\n\n## When to use\n\n- Describe trigger conditions.\n\n## Instructions\n\n1. Add actionable instruction one.\n2. Add actionable instruction two.\n"
     }
   },
   "McpSettings": {
@@ -412,7 +367,15 @@
       "fieldOutOfRange": "{field} の値が許可範囲外です",
       "jsonEmpty": "{name} は空にできません",
       "jsonInvalid": "{name} は有効なJSONではありません: {message}",
-      "jsonMustBeObject": "{name} はJSONオブジェクトである必要があります"
+      "jsonMustBeObject": "{name} はJSONオブジェクトである必要があります",
+      "specMustBeObject": "MCP 設定は JSON オブジェクトである必要があります。",
+      "missingType": "MCP 設定に type フィールドがありません。stdio、http（エイリアス：streamable-http、streamableHttp）、sse のいずれかを指定してください。",
+      "unsupportedType": "サポートされていない MCP タイプ {type}。対応：stdio、http（エイリアス：streamable-http、streamableHttp）、sse。",
+      "codexEntryUnsupportedType": "Codex MCP エントリ {id} のタイプ {type} はサポートされていません。対応：stdio、http（エイリアス：streamable-http、streamableHttp）、sse。",
+      "unsupportedTransportType": "サポートされていない transport タイプ {type}。対応：http（エイリアス：streamable-http、streamableHttp）、sse。",
+      "stdioCommandRequired": "stdio タイプの MCP には空でない command フィールドが必要です。",
+      "remoteUrlRequired": "リモート MCP には空でない url フィールドが必要です。",
+      "appsRequired": "対象アプリを少なくとも 1 つ選択してください。"
     },
     "jsonNames": {
       "localConfig": "MCP設定",
@@ -425,7 +388,10 @@
       "saveSuccess": "保存しました",
       "saveFailed": "保存に失敗しました: {message}",
       "installed": "{name} をインストールしました",
-      "installFailed": "インストールに失敗しました: {message}"
+      "installFailed": "インストールに失敗しました: {message}",
+      "serverIdRequired": "Server ID は必須です",
+      "serverIdExists": "Server ID \"{id}\" は既に存在します。既存の項目を編集するか、別の名前を選択してください。",
+      "created": "MCP を作成しました"
     },
     "installDialog": {
       "title": "MCPインストールの確認",
@@ -447,7 +413,11 @@
       "viewDetails": "詳細を見る",
       "save": "保存",
       "saving": "保存中",
-      "install": "インストール"
+      "install": "インストール",
+      "refresh": "更新",
+      "newMcp": "新規 MCP",
+      "create": "作成",
+      "creating": "作成中..."
     },
     "tabs": {
       "local": "ローカル MCP",
@@ -459,7 +429,13 @@
       "empty": "ローカルMCPが見つかりません。",
       "description": "ローカルMCP設定は直接編集して保存できます。",
       "enabledApps": "有効なアプリ",
-      "configJson": "MCP設定 (JSON)"
+      "configJson": "MCP設定 (JSON)",
+      "draftTitle": "新規 MCP",
+      "draftDescription": "Server ID と設定を入力してローカル MCP サーバーを作成します。",
+      "serverIdLabel": "Server ID",
+      "serverIdPlaceholder": "Server ID（例：my-mcp）",
+      "typeHint": "対応タイプ：stdio、http（エイリアス streamable-http、streamableHttp）、sse。env は stdio 専用です。リモート MCP の認証トークンは headers で渡してください。",
+      "envOnRemoteWarning": "リモート MCP の設定に env が含まれています。env は stdio のみで使用され、リモート MCP の認証トークンは headers に格納します。env は保存時に無視されます。"
     },
     "market": {
       "selectMarketplace": "マーケットプレイスを選択",
@@ -498,6 +474,29 @@
     "modelHintDefault": "空欄の場合はシステム既定モデルを使用します。",
     "generalConfigDescriptionClaude": "API URL、API Key、Claude モデルをすばやく設定でき、ネイティブ JSON 設定と同期します。",
     "generalConfigDescriptionDefault": "重要な設定入力（API URL、API Key、Model）とネイティブ JSON 設定管理をサポートします。",
+    "multiAgent": {
+      "title": "マルチエージェント連携",
+      "description": "アクティブなエージェントがサブタスクを他のエージェントに委任できるようにします。",
+      "enable": "委任を有効化",
+      "enableHint": "オフにすると、delegate_to_agent ツールはエージェントの MCP ツール一覧から非表示になります。",
+      "depthLimit": "最大委任深度",
+      "depthHint": "許可範囲: {min}–{max}。委任チェーン（ルート → 子 → 孫 …）の再帰深度を制限します。",
+      "save": "保存",
+      "saving": "保存中…",
+      "saved": "委任設定を保存しました",
+      "saveFailed": "委任設定の保存に失敗しました",
+      "loadFailed": "委任設定の読み込みに失敗しました: {detail}",
+      "tabGeneral": "一般",
+      "tabAgentDefaults": "サブエージェント設定",
+      "agentDefaultsDescription": "マルチエージェント連携が委任呼び出しのためにサブエージェントを起動するときに適用される上書き設定です。ここに表示されるオプションはライブプローブで取得しており、選択した内容がそのままエージェントに渡されます。",
+      "probing": "エージェントの利用可能な設定項目を読み込み中…",
+      "probeFailed": "設定項目の読み込みに失敗しました: {detail}",
+      "retry": "再試行",
+      "noConfigAvailable": "このエージェントには設定可能な項目がありません。",
+      "modeLabel": "モード",
+      "agentDefaultHint": "エージェント既定: {value}",
+      "defaultOptionLabel": "既定（{value}）"
+    },
     "actions": {
       "dragSort": "ドラッグして並べ替え",
       "dragSortAgent": "{name} をドラッグして並べ替え",
@@ -528,7 +527,8 @@
       "deleting": "削除中...",
       "confirmDelete": "削除を確認",
       "confirmUninstall": "アンインストールを確認",
-      "saveClineConfig": "Cline設定を保存"
+      "saveClineConfig": "Cline設定を保存",
+      "customInstall": "カスタムインストール"
     },
     "status": {
       "enabled": "有効",
@@ -602,7 +602,6 @@
       "emptyProvider": "まだプロバイダーがありません。ID を入力して「プロバイダーを追加」をクリックしてください。",
       "providerEnabledState": "{providerId} の有効状態",
       "selectProviderNpm": "provider.npm を選択",
-      "notSet": "未設定",
       "modelManagement": "モデル管理",
       "modelCount": "{count} 個のモデル",
       "modelDescription": "OpenCode の `provider.models` に準拠。高速管理では現在 `name` / `id` をサポートし、その他の高度な項目は保持され、下部のネイティブ JSON で編集できます。",
@@ -629,7 +628,7 @@
     "authModeCustomEndpointHint": "API URL と API Key を手動で設定してカスタムエンドポイントに接続します。",
     "authModeModelProvider": "モデルプロバイダー",
     "modelProvider": "モデルプロバイダー",
-    "modelProviderHint": "設定済みモデルプロバイダーの API URL と API Key を使用します。",
+    "modelProviderHint": "設定済みモデルプロバイダーの API URL、API Key、モデルを使用します。",
     "selectModelProvider": "モデルプロバイダーを選択",
     "noModelProviderAvailable": "このエージェントにはモデルプロバイダーが設定されていません。モデルプロバイダー設定で追加してください。",
     "claude": {
@@ -646,13 +645,18 @@
       "effortLevel_low": "低",
       "effortLevel_medium": "中",
       "effortLevel_high": "高",
-      "effortLevelMax": "最大（Opus のみ対応）"
+      "effortLevel_xhigh": "超高"
     },
     "dialogs": {
       "confirmDeleteProvider": "Provider {providerId} を削除しますか？",
       "confirmDeleteProviderDescription": "OpenCode config と auth JSON は同時に更新されます。この操作は元に戻せません。",
       "confirmUninstall": "{name} をアンインストールしますか？",
-      "confirmUninstallDescription": "ローカルにインストールされたバージョンを削除します。後で再インストールできます。"
+      "confirmUninstallDescription": "ローカルにインストールされたバージョンを削除します。後で再インストールできます。",
+      "customInstallTitle": "{name} をカスタムインストール",
+      "customInstallDescription": "インストールするバージョンを入力します。再インストールされ、現在インストールされているバージョンを置き換えます。",
+      "customInstallVersionLabel": "バージョン番号",
+      "customInstallInvalid": "有効なバージョン番号を入力してください（例: 1.2.3）。",
+      "customInstallSubmit": "インストール"
     },
     "errors": {
       "nativeJsonMustBeObject": "ネイティブJSON設定はオブジェクトである必要があります",
@@ -662,9 +666,9 @@
       "authMustBeObject": "auth.json はJSONオブジェクトである必要があります",
       "authInvalid": "auth.json 形式エラー: {message}",
       "providerIdPattern": "Provider ID は英字・数字・アンダースコア・ドット・ハイフンのみ使用できます",
-      "providerExists": "Provider '{providerId}' はすでに存在します",
+      "providerExists": "Provider {providerId} はすでに存在します",
       "modelIdPattern": "Model ID は英字・数字・アンダースコア・ドット・コロン・ハイフンのみ使用できます",
-      "modelExists": "Model '{modelId}' はすでに存在します"
+      "modelExists": "Model {modelId} はすでに存在します"
     },
     "warnings": {
       "nativeJsonRecoveredStructured": "ネイティブJSON設定が不正のため、構造化設定にリセットしました",
@@ -737,6 +741,47 @@
   "SettingsPages": {
     "agentsLoading": "エージェント設定を読み込み中..."
   },
+  "GeneralSettings": {
+    "loading": "読み込み中...",
+    "sectionTitle": "一般",
+    "sectionDescription": "デフォルトターミナル、レンダリング高速化、マルチエージェント委譲などの共通設定をここで一括管理します。",
+    "terminalTitle": "デフォルトターミナル",
+    "terminalDescription": "ターミナルバーやファイルツリーから新しいターミナルタブを開く際に使うシェルを選択します。",
+    "defaultTerminalShell": "デフォルトシェル",
+    "terminalSystemDefault": "システムデフォルト",
+    "terminalPowerShell7": "PowerShell 7 (pwsh)",
+    "terminalWindowsPowerShell": "Windows PowerShell",
+    "terminalCmd": "コマンドプロンプト (cmd)",
+    "terminalSaveFailed": "ターミナル設定の保存に失敗しました: {message}",
+    "terminalShellCustom": "カスタムパス",
+    "terminalShellCustomPath": "Shell パス",
+    "terminalShellCustomPlaceholder": "/usr/local/bin/fish",
+    "terminalShellCustomSave": "保存",
+    "terminalShellCustomHint": "絶対パス、または PATH で解決可能なコマンド名を指定します。",
+    "terminalShellNotInstalled": "未インストール",
+    "terminalShellNotFoundWarning": "このパスはホスト上に存在しません。",
+    "terminalCurrentShell": "現在使用中: {path}",
+    "renderingTitle": "レンダリング",
+    "renderingDescription": "アプリで黒画面や描画不具合が発生する場合（一部の AMD GPU や Intel 内蔵 GPU で報告あり）、ハードウェアアクセラレーションを無効化してください。Windows デスクトップ版のみ有効です。",
+    "disableHardwareAcceleration": "ハードウェアアクセラレーションを無効化",
+    "renderingSaveFailed": "レンダリング設定の保存に失敗しました: {message}",
+    "restartRequired": "保存しました。再起動後に反映されます。",
+    "restartNow": "今すぐ再起動",
+    "restartFailed": "再起動に失敗しました: {message}",
+    "loadFailed": "読み込みに失敗しました: {message}"
+  },
+  "LoginPage": {
+    "documentTitle": "ログイン - codeg",
+    "brand": "Codeg",
+    "subtitle": "デスクトップアプリに接続するためのアクセストークンを入力してください",
+    "tokenPlaceholder": "アクセストークン",
+    "connect": "接続",
+    "connecting": "接続中...",
+    "helpText": "トークンはデスクトップアプリの 設定 → Web サービス で取得できます",
+    "invalidToken": "トークンが無効です。確認して再度お試しください",
+    "connectionFailed": "接続失敗 (HTTP {status})",
+    "networkError": "サーバーに接続できません"
+  },
   "CommitPage": {
     "title": "コミット",
     "invalidFolderId": "無効なフォルダID",
@@ -769,6 +814,12 @@
     "applyRightNonConflicting": "リモートを適用"
   },
   "Folder": {
+    "workspaceStatus": {
+      "degradedTitle": "リアルタイム更新は利用できません",
+      "degradedHint": "ウォッチャーの起動に失敗しました（アクセス権限エラーなど）。最新の変更を反映するには手動で更新してください。",
+      "retry": "再試行",
+      "retrying": "再試行中..."
+    },
     "common": {
       "all": "すべて",
       "cancel": "キャンセル",
@@ -788,12 +839,6 @@
       "viewDiff": "差分を見る",
       "push": "プッシュ..."
     },
-    "modes": {
-      "conversation": "会話モード",
-      "fusion": "フュージョンモード",
-      "files": "ファイルモード",
-      "workspaceModesAria": "ワークスペースモード"
-    },
     "statusLabels": {
       "in_progress": "進行中",
       "pending_review": "レビュー",
@@ -806,6 +851,7 @@
       "expandAllGroups": "すべてのグループを展開",
       "collapseAllGroups": "すべてのグループを折りたたむ",
       "newConversation": "新しい会話",
+      "newConversationShort": "新規",
       "noConversationsFound": "会話が見つかりません。",
       "importLocalSessions": "ローカルセッションをインポート",
       "importing": "インポート中...",
@@ -819,15 +865,74 @@
         "noNewSessionsFound": "新しいセッションは見つかりませんでした（{skipped} 件をスキップ）",
         "importFailed": "インポートに失敗しました: {message}",
         "reviewCompleted": "{count, plural, one {# 件のレビューセッション} other {# 件のレビューセッション}} を完了にしました",
-        "completeReviewFailed": "レビューセッションの完了処理に失敗しました: {message}"
+        "completeReviewFailed": "レビューセッションの完了処理に失敗しました: {message}",
+        "folderOpened": "フォルダ {name} を開きました",
+        "folderRemoved": "フォルダ {name} を削除しました",
+        "openFolderFailed": "フォルダを開けませんでした",
+        "removeFolderFailed": "フォルダの削除に失敗しました: {message}",
+        "reorderFoldersFailed": "フォルダの並べ替えに失敗しました: {message}",
+        "changeFolderColorFailed": "色の変更に失敗しました: {message}",
+        "changeFolderDefaultAgentFailed": "デフォルトエージェントの設定に失敗しました: {message}"
+      },
+      "statsLabel": "{folders} フォルダ · {convos} 会話",
+      "reorderHandle": "ドラッグして並べ替え",
+      "openFolder": "フォルダを開く",
+      "searchPlaceholder": "会話を検索...",
+      "showCompleted": "完了した会話を表示",
+      "moreOptions": "その他のオプション",
+      "sortBy": "並び替え",
+      "sortByCreatedAt": "作成時刻順",
+      "sortByUpdatedAt": "更新時刻順",
+      "statusRunningBadge": "実行中",
+      "statusCancelledBadge": "キャンセル済み",
+      "conversationCountUnit": "{count} 件",
+      "emptyFolderHint": "会話がありません",
+      "noMatchingConversations": "一致する会話がありません",
+      "noUnfinishedConversations": "未完了の会話はありません。右上のメニューから「完了した会話を表示」を有効にできます。",
+      "removeFolderConfirmTitle": "このフォルダをワークスペースから削除しますか？",
+      "removeFolderConfirmDescription": "\"{name}\" をワークスペースから削除しますか？関連するタブとターミナルが閉じられます。",
+      "folderHeaderMenu": {
+        "manageConversations": "会話の管理…",
+        "changeColor": "色を変更",
+        "useThemeColor": "アプリのテーマを使用",
+        "setDefaultAgent": "デフォルトエージェントを設定",
+        "defaultAgentNone": "設定なし（グローバルを使用）",
+        "agentUnavailableSuffix": "（利用不可）",
+        "loadingAgents": "エージェントを読み込み中…",
+        "removeFromWorkspace": "ワークスペースから削除"
+      },
+      "manageConversations": {
+        "title": "会話の管理 — {name}",
+        "searchPlaceholder": "タイトルで検索…",
+        "agentFilterAll": "すべてのエージェント",
+        "statusFilterAll": "すべてのステータス",
+        "selectAllVisible": "すべて選択",
+        "deselectAll": "選択を解除",
+        "selectedCount": "{count} 件選択中",
+        "matchedCount": "{count} 件該当",
+        "messagesShort": "{count} 件",
+        "untitledConversation": "無題の会話",
+        "setStatus": "ステータスを変更…",
+        "deleteSelected": "削除",
+        "noConversations": "このフォルダには会話がありません。",
+        "noMatchingConversations": "条件に一致する会話がありません。",
+        "confirmDeleteTitle": "{count} 件の会話を削除しますか？",
+        "confirmDeleteDescription": "この操作は元に戻せません。",
+        "toastDeleted": "{count} 件の会話を削除しました",
+        "toastStatusUpdated": "{count} 件の会話のステータスを更新しました",
+        "toastOpFailed": "操作に失敗しました: {message}"
       }
     },
     "conversation": {
       "reloadFailed": "会話の再読み込みに失敗しました: {message}",
       "reloaded": "会話を再読み込みしました",
       "reload": "再読み込み",
+      "activeConversationIndicator": "アクティブな会話",
       "newConversation": "新しい会話",
       "closeConversation": "会話を閉じる",
+      "copyText": "テキストをコピー",
+      "copyTextSuccess": "コピーしました",
+      "copyTextFailed": "コピーに失敗しました",
       "forkSession": "セッションをフォーク",
       "forkSessionSuccess": "セッションのフォークに成功しました",
       "forkSessionFailed": "セッションのフォークに失敗しました：{error}",
@@ -874,6 +979,7 @@
     },
     "search": {
       "dialogTitle": "検索",
+      "dialogTitleWithFolder": "検索 — {name}",
       "tabConversations": "会話",
       "tabFiles": "ファイル",
       "placeholder": "会話を検索...",
@@ -933,7 +1039,9 @@
         "files": "ファイル",
         "changes": "変更",
         "commits": "コミット"
-      }
+      },
+      "noFolderTitle": "開いているフォルダがありません",
+      "noFolderHint": "フォルダを開くとここに表示されます"
     },
     "windowControls": {
       "minimizeWindow": "ウィンドウを最小化",
@@ -960,14 +1068,17 @@
       "closeOthers": "他を閉じる",
       "closeAll": "すべて閉じる",
       "preview": "プレビュー",
-      "editSource": "ソースを編集"
+      "editSource": "ソースを編集",
+      "maximize": "最大化",
+      "restore": "元に戻す"
     },
     "terminal": {
       "rename": "名前を変更",
       "close": "閉じる",
       "closeOthers": "他を閉じる",
       "closeAll": "すべて閉じる",
-      "hideTerminal": "ターミナルを隠す ({shortcut})"
+      "hideTerminal": "ターミナルを隠す ({shortcut})",
+      "openFolderFirst": "先にフォルダを開いてください"
     },
     "sessionFiles": {
       "currentResponse": "現在の応答",
@@ -1032,33 +1143,32 @@
         "checkoutTo": "{branchName} にチェックアウト",
         "mergeBranch": "{branchName} をマージ",
         "rebaseTo": "{branchName} にリベース",
-        "deleteBranch": "ブランチ {branchName} を削除",
         "deleteRemoteBranch": "リモートブランチ {branchName} を削除",
         "initGitRepo": "Git リポジトリを初期化",
         "pullCode": "コードをプル",
         "fetchInfo": "情報をフェッチ",
         "pushCode": "コードをプッシュ",
         "stashChanges": "変更を stash",
-        "stashPop": "stash を pop"
+        "stashPop": "stash を pop",
+        "deleteBranch": "ブランチ {branchName} を削除"
       },
       "confirm": {
         "mergeTitle": "ブランチをマージ",
         "rebaseTitle": "ブランチをリベース",
-        "deleteTitle": "ブランチを削除",
         "mergeDescription": "{branchName} を現在のブランチ {currentBranch} にマージしますか？",
         "rebaseDescription": "現在のブランチ {currentBranch} を {branchName} にリベースしますか？",
+        "deleteRemoteTitle": "リモートブランチの削除",
+        "deleteRemoteDescription": "リモートブランチ {branchName} を削除しますか？この操作はリモートリポジトリからブランチを削除し、元に戻せません。",
+        "deleteTitle": "ブランチを削除",
         "deleteDescription": "ブランチ {branchName} を削除しますか？この操作は元に戻せません。",
         "forceDeleteTitle": "ブランチを強制削除",
-        "forceDeleteDescription": "ブランチ {branchName} はまだ完全にマージされていません。強制削除してもよろしいですか？この操作は元に戻せません。",
-        "deleteRemoteTitle": "リモートブランチの削除",
-        "deleteRemoteDescription": "リモートブランチ {branchName} を削除しますか？この操作はリモートリポジトリからブランチを削除し、元に戻せません。"
+        "forceDeleteDescription": "ブランチ {branchName} はまだ完全にマージされていません。強制削除してもよろしいですか？この操作は元に戻せません。"
       },
       "current": "現在",
       "switchToBranch": "このブランチに切り替え",
       "mergeBranchIntoCurrent": "{branchName} を {currentBranch} にマージ",
       "rebaseCurrentToBranch": "{currentBranch} を {branchName} にリベース",
-      "deleteBranch": "ブランチを削除",
-      "versionControl": "バージョン管理",
+      "noBranch": "ブランチなし",
       "initGitRepo": "Git リポジトリを初期化",
       "pullCode": "コードをプル",
       "fetchRemoteBranches": "リモートブランチをフェッチ",
@@ -1073,7 +1183,6 @@
       "noLocalBranches": "ローカルブランチはありません",
       "remoteBranches": "リモートブランチ ({count, plural, one {#} other {#}})",
       "noRemoteBranches": "リモートブランチはありません",
-      "parentBranchHint": "現在のブランチは {parentBranch} から作成されました。クリックして {parentBranch} を現在のブランチにマージします。",
       "dialogs": {
         "newBranchTitle": "新規ブランチ",
         "newBranchDescription": "現在のブランチ {branch} から新しいブランチを作成",
@@ -1123,7 +1232,8 @@
         "dropSuccess": "スタッシュを削除しました",
         "confirmApply": "スタッシュ {ref} を作業ディレクトリに適用しますか？",
         "cancel": "キャンセル"
-      }
+      },
+      "deleteBranch": "ブランチを削除"
     },
     "commitDialog": {
       "toasts": {
@@ -1202,6 +1312,8 @@
       "workspace": "ワークスペース",
       "retry": "再試行",
       "noCommitsFound": "コミットが見つかりません",
+      "notAGitRepoTitle": "Git リポジトリではありません",
+      "notAGitRepoHint": "上のブランチメニューから Git を初期化するか、既存のリポジトリを開いてください。",
       "hash": "ハッシュ",
       "copyHash": "ハッシュをコピー",
       "copyMessage": "メッセージをコピー",
@@ -1278,6 +1390,8 @@
     "gitChangesTab": {
       "workspace": "ワークスペース",
       "noChanges": "ローカルの変更はありません",
+      "notAGitRepoTitle": "Git リポジトリではありません",
+      "notAGitRepoHint": "上のブランチメニューから Git を初期化するか、既存のリポジトリを開いてください。",
       "trackedChanges": "追跡中の変更 ({count})",
       "untrackedFiles": "未追跡ファイル ({count})",
       "expandTracked": "追跡中の変更を展開",
@@ -1351,6 +1465,9 @@
       "newDirectory": "ディレクトリ",
       "openIn": "で開く",
       "openInTerminal": "ターミナルで開く",
+      "upload": "ファイル/フォルダをアップロード",
+      "download": "ファイルをダウンロード",
+      "downloadAsZip": "ZIP としてダウンロード",
       "actions": {
         "select": "選択",
         "unselect": "選択解除",
@@ -1379,7 +1496,9 @@
         "savedAsCopy": "コピーとして保存しました",
         "saveCopyFailed": "コピーとして保存できませんでした",
         "watchStartFailed": "ファイル監視の開始に失敗しました",
-        "createFailed": "作成に失敗しました"
+        "createFailed": "作成に失敗しました",
+        "downloadFailed": "{name} のダウンロードに失敗しました",
+        "downloadSaved": "{name} をダウンロードしました"
       },
       "createDialog": {
         "newFile": "新規ファイル",
@@ -1394,6 +1513,31 @@
         "description": "新しい名前を入力してください（名前のみ、パスは不要）。",
         "placeholderDirectory": "新しいフォルダ名",
         "placeholderFile": "新しいファイル名.ext"
+      },
+      "uploadDialog": {
+        "title": "ワークスペースへアップロード",
+        "description": "必要に応じて上書き先を変更し、ファイルやフォルダを追加してください。",
+        "workspaceRoot": "ワークスペースのルート",
+        "targetPathLabel": "アップロード先",
+        "targetPathHint": "実際の場所：{path}",
+        "dropHint": "ファイルやフォルダをここにドロップ、または下のボタンから選択",
+        "dropHintActive": "離してキューに追加",
+        "selectFiles": "ファイルを選択",
+        "selectFolder": "フォルダを選択",
+        "startUpload": "アップロード開始",
+        "clearQueue": "完了したものをクリア",
+        "removeItem": "キューから削除",
+        "retry": "再試行",
+        "dropZoneAria": "ファイルをここにドロップ、または Enter で参照",
+        "folderEmpty": "ドロップされたフォルダにファイルが見つかりません",
+        "summary": "合計：{total} · 成功：{succeeded} · 失敗：{failed}",
+        "status": {
+          "pending": "待機中",
+          "uploading": "アップロード中",
+          "success": "完了",
+          "error": "失敗",
+          "cancelled": "キャンセル済み"
+        }
       },
       "directoryDialog": {
         "descriptionAdd": "ディレクトリ {path} 配下で VCS に追加するファイルを選択してください。",
@@ -1503,7 +1647,13 @@
           "initializeTimeout": "{agent} の接続ハンドシェイクがタイムアウトしました（60 秒以内に応答なし）。設定を開いてエージェントとネットワーク設定を確認してください。",
           "processExited": "{agent} プロセスが予期せず終了しました。",
           "spawnFailed": "{agent} の起動に失敗しました: {message}",
-          "downloadFailed": "{agent} のダウンロードに失敗しました: {message}"
+          "downloadFailed": "{agent} のダウンロードに失敗しました: {message}",
+          "sessionLoadResourceNotFound": "{agent} セッションの読み込みに失敗しました。再読み込みして再試行するか、新しい会話を開始してください。",
+          "turnFailedRefusal": "{agent} がこのターンの続行を拒否しました。バックエンドまたはゲートウェイのエラーが原因の可能性があります。エージェントのログを確認してください。",
+          "turnFailedMaxTokens": "{agent} がこのターンの最大トークン数に達しました。",
+          "turnFailedMaxTurnRequests": "{agent} がこのターンで許可された最大リクエスト数に達しました。",
+          "turnFailedUnknown": "{agent} が不明な停止理由でターンを終了しました。",
+          "turnFailedEmpty": "{agent} は応答を生成せずにターンを終了しました。エージェントの設定を確認してください。"
         },
         "unableReadAgentConfig": "エージェント設定を読み取れません: {message}",
         "connectFailedTitle": "{agent} の接続に失敗しました",
@@ -1552,15 +1702,30 @@
         "askAnything": "何でも質問してください...",
         "removeAttachmentAria": "{name} を削除",
         "attachFiles": "ファイルを添付",
+        "addActions": "追加",
+        "quickMessages": "クイックメッセージ",
+        "quickMessagesEmpty": "クイックメッセージはありません",
+        "quickMessagesLoading": "読み込み中...",
+        "quickMessageUntitled": "無題",
         "dropFilesToAttach": "ファイルをドロップして添付",
         "loadingSettings": "設定を読み込み中...",
         "loadingMode": "モードを読み込み中...",
+        "modeLabel": "モード",
+        "agentSettings": "エージェント設定",
         "cancel": "キャンセル",
         "send": "送信",
         "forkAndSend": "フォークして送信",
         "slashCommands": "スラッシュコマンド",
         "expertSkills": "エキスパートスキル",
-        "expertsEmptyForAgent": "このエージェントで有効なエキスパートはありません。「設定 > エキスパート」から有効にしてください。"
+        "expertsEmptyForAgent": "このエージェントで有効なエキスパートはありません。「設定 > エキスパート」から有効にしてください。",
+        "slashSearchPlaceholder": "コマンドを検索...",
+        "slashSearchEmpty": "一致するコマンドがありません",
+        "attachLocalUpload": "ローカルファイルを添付",
+        "attachServerFile": "サーバーファイルを添付",
+        "attachUploadTooLarge": "{names} は {limit}MB のアップロード上限を超えたためスキップしました。",
+        "attachUploadFailed": "{names} のアップロードに失敗しました。",
+        "attachUploadNotAFile": "{names} は通常ファイルではなく（ディレクトリまたは特殊ファイル）、スキップされました。",
+        "attachUploadQuotaExceeded": "サーバーのアップロード容量が不足しているため、{names} をアップロードできませんでした。"
       },
       "messageQueue": {
         "addToQueue": "キューに追加",
@@ -1575,6 +1740,28 @@
         "autoConnectAppend": "{message}。{path} を開いてインストールを管理してください。",
         "enableAgentFirstPlaceholder": "セッション開始前に少なくとも1つのエージェントを有効化してください...",
         "askAnythingPlaceholder": "何でも質問してください..."
+      },
+      "welcomePanel": {
+        "greeting": "今日は<highlight>何を</highlight>しましょうか？",
+        "tips": {
+          "tileTabs": "会話タブを右クリックして「タイル表示」を選ぶと、複数のセッションを並べて比較できます",
+          "pinTab": "会話タブをダブルクリックすると固定でき、新しい会話に自動で置き換えられなくなります",
+          "shortcutsNewSearch": "<shortcut>{newConversation}</shortcut> で新規会話、<shortcut>{searchConversations}</shortcut> で履歴を検索できます",
+          "slashAtMention": "入力欄で / を入力するとスラッシュコマンド、@ を入力するとプロジェクト内のファイルを参照できます",
+          "pasteDropFiles": "スクリーンショットを貼り付けたり、ファイルを入力欄にドロップするだけで添付できます",
+          "queueMessage": "エージェントの応答中も入力を続けられ、次のメッセージはキューに入って完了後に自動送信されます",
+          "draftAutoSave": "未送信の下書きは会話ごとに自動保存され、戻ったときに復元されます",
+          "forkSend": "送信ボタンのドロップダウンで「分岐して送信」を選ぶと、現在の地点から新しいタブに分岐できます",
+          "exportConversation": "会話内容を右クリックすると Markdown / HTML / 画像としてエクスポートできます",
+          "chatChannels": "「設定 → チャットチャネル」で Telegram / Lark / WeChat を連携すれば、スマホから続けて操作できます",
+          "shortcutsAuxPanel": "<shortcut>{toggleAuxPanel}</shortcut> で右側パネルを開き、このセッションで変更したファイルや Git の差分を確認できます",
+          "shortcutsTerminalSidebar": "<shortcut>{toggleTerminal}</shortcut> で内蔵ターミナル、<shortcut>{toggleSidebar}</shortcut> でサイドバーを切り替えできます",
+          "customShortcuts": "すべてのショートカットは「設定 → ショートカット」で自由に変更できます",
+          "webService": "「設定 → Web サービス」を有効にすると、チームメンバーが同じ codeg にブラウザでアクセスできます",
+          "fusionMode": "ファイルや差分を開くと、会話の横に自動で表示されます。",
+          "quickMessages": "入力欄横の + ボタンから「クイックメッセージ」を選ぶと、保存済みのスニペットを一発で挿入できます（「設定 → クイックメッセージ」で管理）",
+          "experts": "+ ボタンの「エキスパートスキル」メニューから、デバッグや計画などのプリセットロールをワンクリックで読み込めます"
+        }
       },
       "agentSelector": {
         "noEnabledAgents": "有効なエージェントがありません",
@@ -1628,28 +1815,38 @@
         "thoughtForSeconds": "考えた"
       },
       "linkSafety": {
-        "localFileTitle": "ローカルファイルを開きますか？",
-        "externalLinkTitle": "外部リンクを開きますか？",
-        "localFileDescription": "ファイルパネルでローカルファイルを開こうとしています。",
-        "externalLinkDescription": "外部ウェブサイトにアクセスしようとしています。",
-        "cancel": "キャンセル",
-        "opening": "開いています…",
-        "openFile": "ファイルを開く",
-        "openLink": "リンクを開く",
         "errorCannotOpen": "ローカルファイルを開けません",
         "errorNoWorkspace": "現在アクティブなワークスペースフォルダがありません。",
         "errorOutsideWorkspace": "ファイルが現在のワークスペースフォルダの外にあります。",
         "errorFailedOpen": "ローカルファイルを開けませんでした",
-        "errorFailedLink": "リンクを開けませんでした"
+        "errorFailedLink": "リンクを開けませんでした",
+        "errorUnsupportedLinkProtocol": "このリンクプロトコルはサポートされていません。"
       },
       "messageList": {
         "attachedResources": "添付リソース",
         "loading": "読み込み中...",
         "error": "エラー: {message}",
+        "errorTitle": "セッションの読み込みに失敗しました",
+        "errorActionReload": "再読み込み",
+        "errorActionNewSession": "新規会話",
         "emptyConversation": "この会話にはメッセージがありません。",
         "systemMessage": "システムメッセージ",
         "copyMessage": "コピー",
-        "copied": "コピー済み"
+        "copied": "コピー済み",
+        "downloadImage": "画像をダウンロード",
+        "downloadFailed": "ダウンロードに失敗しました: {message}",
+        "imageGeneration": "画像生成",
+        "imageGenerationPending": "画像を生成中…",
+        "imageGenerationFailed": "画像生成に失敗しました",
+        "model": "モデル",
+        "tokenStats": "トークン使用量",
+        "tokenInput": "入力",
+        "tokenOutput": "出力",
+        "tokenCacheRead": "キャッシュ読取",
+        "tokenCacheWrite": "キャッシュ書込",
+        "duration": "所要時間",
+        "completedAt": "完了時刻",
+        "jumpToPreviousUserMessage": "前のユーザーメッセージへ"
       },
       "liveTurnStats": {
         "thinking": "考え中...",
@@ -1678,6 +1875,34 @@
         "error": "エラー",
         "result": "結果"
       },
+      "delegation": {
+        "subAgentRunning": "サブエージェント実行中…",
+        "noDetail": "No detail available yet.",
+        "unknownAgent": "サブエージェント",
+        "openDetail": "会話を表示",
+        "detailTitle": "サブエージェントの会話",
+        "detailDescription": "委任されたサブエージェントの会話を読み取り専用で表示します。",
+        "status": {
+          "starting": "起動中",
+          "running": "実行中",
+          "ok": "完了",
+          "err": {
+            "default": "失敗",
+            "delegation_disabled": "無効",
+            "depth_limit": "深さ上限",
+            "invalid_agent_type": "不正なエージェント",
+            "spawn_failed": "起動失敗",
+            "send_failed": "送信失敗",
+            "timeout": "タイムアウト",
+            "canceled": "キャンセル済み",
+            "child_refusal": "サブエージェント拒否",
+            "child_max_tokens": "サブエージェント: トークン上限",
+            "child_max_turn_requests": "サブエージェント: 要求上限",
+            "child_empty": "サブエージェント応答なし",
+            "child_unknown": "サブエージェント: エラー"
+          }
+        }
+      },
       "contentParts": {
         "showingTailOutput": "パフォーマンスのため、ストリーミング中は末尾出力を表示しています。",
         "result": "結果",
@@ -1704,6 +1929,14 @@
         "subjectLabel": "件名",
         "taskLabel": "タスク",
         "nameLabel": "名前:",
+        "agentPromptLabel": "プロンプト",
+        "agentModelLabel": "モデル",
+        "agentRunning": "実行中...",
+        "agentStatsBash": "コマンド",
+        "agentStatsRead": "ファイル読取",
+        "agentStatsSearch": "検索",
+        "agentStatsEdit": "編集",
+        "agentStatsOther": "その他",
         "field": {
           "file": "ファイル",
           "notebook": "ノートブック",
@@ -1758,6 +1991,20 @@
           "todosProgress": "タスク ({done}/{total})",
           "skillWithName": "Skill: {name}",
           "genericWithContext": "{tool}（{context}）"
+        },
+        "toolGroup": {
+          "search": "{count} 件を検索",
+          "command": "{count} 件のコマンドを実行",
+          "read": "ファイルを {count} 回読み取り",
+          "memory": "{count} 件の記憶を呼び出し",
+          "edit": "ファイルを {count} 回編集",
+          "fetch": "{count} 件のリソースを取得",
+          "think": "{count} 回思考",
+          "todo": "{count} 件の TODO を更新",
+          "task": "{count} 件のタスクを実行",
+          "other": "{count} 件のツールを使用",
+          "errorSuffix": "{count} 件失敗",
+          "joiner": " · "
         }
       }
     },
@@ -1771,6 +2018,38 @@
       "hunkLabel": "ハンク {index}",
       "loadingHunk": "Hunk を読み込み中...",
       "noDiffData": "Diff データがありません"
+    },
+    "conversationContextBar": {
+      "folderTitle": "作業フォルダ",
+      "branchTitle": "作業ブランチ",
+      "searchFolder": "Search folder...",
+      "searchBranch": "Search branch...",
+      "noFolders": "No folders",
+      "noBranches": "No branches",
+      "noBranch": "(no branch)",
+      "commit": "Commit",
+      "push": "Push",
+      "merge": "Merge",
+      "toasts": {
+        "folderChanged": "Switched to {name}",
+        "openFolderFailed": "Failed to open folder",
+        "openStashFailed": "Failed to open stash window",
+        "openMergeFailed": "Failed to open merge window"
+      }
+    },
+    "cloneDialog": {
+      "title": "リポジトリをクローン",
+      "repositoryUrl": "リポジトリ URL",
+      "repositoryUrlPlaceholder": "https://github.com/user/repo.git",
+      "directory": "ディレクトリ",
+      "directoryPlaceholder": "保存先ディレクトリを選択...",
+      "browseDirectory": "ディレクトリを参照",
+      "cancel": "キャンセル",
+      "clone": "クローン",
+      "clonePath": "クローンパス: {path}"
+    },
+    "toasts": {
+      "cloneFailed": "リポジトリのクローンに失敗しました"
     }
   },
   "ProjectBoot": {
@@ -1822,7 +2101,8 @@
     },
     "toasts": {
       "createFailed": "プロジェクトの作成に失敗しました",
-      "createSuccess": "プロジェクトが正常に作成されました"
+      "createSuccess": "プロジェクトが正常に作成されました",
+      "openWorkspaceFailed": "プロジェクトは作成されましたが、ワークスペースで開けませんでした"
     },
     "errors": {
       "directoryExists": "対象ディレクトリは既に存在します",
@@ -1834,6 +2114,8 @@
     "sectionDescription": "有効にするとブラウザからCodegにリモートアクセスできます",
     "port": "ポート",
     "status": "ステータス",
+    "autoStart": "自動起動",
+    "autoStartHint": "Codeg の起動時に Web サービスを開始",
     "running": "実行中",
     "stopped": "停止中",
     "processing": "処理中...",
@@ -1841,13 +2123,27 @@
     "stop": "停止",
     "startFailed": "開始に失敗しました",
     "stopFailed": "停止に失敗しました",
+    "saveConfigFailed": "Webサービス設定の保存に失敗しました",
     "open": "開く",
     "hide": "非表示",
     "show": "表示",
     "copy": "コピー",
     "addressLabel": "アクセスアドレス",
     "tokenLabel": "アクセストークン",
-    "tokenHint": "Webクライアントの初回アクセス時にこのトークンを入力してください"
+    "tokenHint": "Webクライアントの初回アクセス時にこのトークンを入力してください",
+    "tokenPlaceholder": "空欄の場合は自動生成",
+    "regenerate": "再生成",
+    "stalePortOccupiedTitle": "ポート {port} は他のプロセスに使用されています",
+    "stalePortUnknownTitle": "ポート {port} の状態を確認できません",
+    "stalePortHint": "ポートが解放されるまで Codeg はバインドできません。上のポートを変更するか、占有しているプロセスを終了してください。",
+    "errors": {
+      "alreadyRunning": "Web サービスはすでに起動しています",
+      "invalidAddress": "ホストまたはポートの形式が無効です",
+      "portInUse": "ポート {port} はすでに使用中です。そのポートを使用しているプロセスを終了するか、別のポートを指定してください",
+      "permissionDenied": "権限が不足しています。1024 以上のポートを使用するか、より高い権限で実行してください",
+      "addressUnavailable": "このアドレスはこの端末では利用できません",
+      "bindFailed": "アドレスのバインドに失敗しました"
+    }
   },
   "DirectoryBrowser": {
     "title": "ディレクトリを参照",
@@ -1904,6 +2200,7 @@
     "weixinRefreshQrcode": "更新",
     "weixinWaitingScan": "スキャン待ち...",
     "weixinPollError": "接続が不安定です。再試行中...",
+    "weixinReconnectNotice": "iLink プロトコルの制限により、再接続のたびにまずボットにメッセージを送信しないとイベントトリガーが有効になりません。",
     "connect": "接続",
     "disconnect": "切断",
     "test": "接続テスト",
@@ -1979,6 +2276,17 @@
     "apiKeyKeepCurrent": "空欄のまま現在の値を維持",
     "agentTypes": "エージェントタイプ",
     "agentTypesRequired": "少なくとも1つのエージェントタイプを選択してください。",
+    "agentType": "エージェントタイプ",
+    "agentTypeRequired": "エージェントタイプを選択してください。",
+    "agentTypeImmutableHint": "エージェントタイプは作成後に変更できません。",
+    "model": "モデル",
+    "modelPlaceholderCodex": "gpt-5 / gpt-5-mini",
+    "modelPlaceholderGemini": "gemini-3-pro-preview",
+    "claudeMainModel": "メインモデル",
+    "claudeReasoningModel": "推論モデル（思考）",
+    "claudeHaikuDefaultModel": "デフォルトの Haiku モデル",
+    "claudeSonnetDefaultModel": "デフォルトの Sonnet モデル",
+    "claudeOpusDefaultModel": "デフォルトの Opus モデル",
     "nameRequired": "プロバイダー名は必須です。",
     "apiUrlRequired": "API URLは必須です。",
     "apiKeyRequired": "APIキーは必須です。",
@@ -2039,5 +2347,196 @@
       "disableFailed": "エキスパートの無効化に失敗しました",
       "openFolderFailed": "フォルダを開けませんでした"
     }
+  },
+  "QuickMessagesSettings": {
+    "title": "クイックメッセージ",
+    "description": "再利用可能なメッセージスニペットを管理します。ドラッグして並べ替えできます。",
+    "loading": "クイックメッセージを読み込み中…",
+    "emptyList": "クイックメッセージはまだありません。「新規」をクリックして作成してください。",
+    "emptySelection": "編集するクイックメッセージを選択してください。",
+    "searchPlaceholder": "タイトルまたは内容で検索",
+    "untitled": "無題",
+    "actions": {
+      "new": "新規",
+      "save": "保存",
+      "delete": "削除",
+      "dragSort": "ドラッグして並べ替え",
+      "dragSortMessage": "クイックメッセージを並べ替え: {name}"
+    },
+    "fields": {
+      "title": "タイトル",
+      "titlePlaceholder": "このメッセージに短いタイトルを付けてください",
+      "content": "内容",
+      "contentPlaceholder": "ここにメッセージ内容を入力してください"
+    },
+    "confirmDelete": {
+      "title": "クイックメッセージを削除しますか？",
+      "message": "「{name}」を完全に削除します。よろしいですか？",
+      "cancel": "キャンセル",
+      "confirm": "削除"
+    },
+    "toasts": {
+      "loadFailed": "クイックメッセージの読み込みに失敗しました",
+      "createFailed": "クイックメッセージの作成に失敗しました",
+      "saveFailed": "クイックメッセージの保存に失敗しました",
+      "deleteFailed": "クイックメッセージの削除に失敗しました",
+      "saveOrderFailed": "順序の保存に失敗しました",
+      "created": "クイックメッセージを作成しました",
+      "saved": "クイックメッセージを保存しました",
+      "deleted": "クイックメッセージを削除しました"
+    }
+  },
+  "Pet": {
+    "menu": {
+      "scale": "拡大率",
+      "openManager": "ペット管理",
+      "close": "閉じる"
+    },
+    "loadError": "ペットの読み込みに失敗",
+    "missingPetIdParam": "ペットが選択されていません",
+    "summonButton": "ペット",
+    "manager": {
+      "title": "デスクトップペット",
+      "description": "Codex 互換のスプライトシートで動く、デスクトップ常駐のお供。",
+      "addPet": "ペットを追加",
+      "importFromCodex": "Codex から取り込む",
+      "noPets": "ペットがありません。追加するか、Codex から取り込んでください。",
+      "setActive": "アクティブにする",
+      "active": "アクティブ",
+      "edit": "編集",
+      "delete": "削除",
+      "deleteConfirm": "ペット「{name}」を削除しますか?ディスクからも削除されます。",
+      "summon": "ペットウィンドウを呼び出す",
+      "openCodexHelp": "Codex ペットは ~/.codex/pets/ 配下に配置する必要があります。見つかりません。",
+      "specRequirement": "スプライトシートは 1536x1872 ピクセル、透過 PNG / WebP 形式である必要があります。",
+      "form": {
+        "id": "ペット ID",
+        "idHelp": "英小文字、数字、'-'、'_' のみ。最大 64 文字。",
+        "displayName": "表示名",
+        "description": "説明 (任意)",
+        "spritesheet": "スプライトシート",
+        "chooseFile": "ファイルを選択",
+        "replaceFile": "スプライトを差し替え",
+        "saveCreate": "ペットを追加",
+        "saveUpdate": "変更を保存",
+        "cancel": "キャンセル"
+      },
+      "errors": {
+        "missingId": "ペット ID は必須です",
+        "missingName": "表示名は必須です",
+        "missingSpritesheet": "スプライトシートは必須です",
+        "addFailed": "ペットの追加に失敗しました",
+        "updateFailed": "ペットの更新に失敗しました",
+        "deleteFailed": "ペットの削除に失敗しました",
+        "loadFailed": "ペット一覧の取得に失敗しました",
+        "setActiveFailed": "アクティブなペットの設定に失敗しました",
+        "summonFailed": "ペットウィンドウの召喚に失敗しました"
+      }
+    },
+    "import": {
+      "title": "Codex から取り込む",
+      "subtitle": "~/.codex/pets/ 配下に見つかったペット一覧。",
+      "selectAll": "すべて選択",
+      "alreadyImported": "取り込み済み",
+      "renameOnConflict": "ID が重複した場合は -imported を付与",
+      "import": "選択したものを取り込む",
+      "noneFound": "取り込み可能な Codex ペットが見つかりません。",
+      "imported": "取り込みに成功",
+      "failed": "取り込みに失敗",
+      "close": "閉じる"
+    },
+    "marketplace": {
+      "openMarketplace": "ペットマーケット",
+      "title": "ペットマーケット",
+      "search": "ペットを検索",
+      "kindFilter": {
+        "all": "すべて",
+        "object": "オブジェクト",
+        "animal": "動物",
+        "person": "人物",
+        "creature": "生き物"
+      },
+      "sortFilter": {
+        "latest": "新着",
+        "popular": "人気",
+        "views": "閲覧数順"
+      },
+      "refresh": "更新",
+      "install": "インストール",
+      "installing": "インストール中",
+      "reinstall": "再インストール",
+      "reinstallConfirm": "ローカルのペット \"{name}\" を上書きしますか？既存のデータは置き換えられます。",
+      "cancel": "キャンセル",
+      "stats": {
+        "views": "閲覧",
+        "downloads": "ダウンロード",
+        "likes": "いいね"
+      },
+      "actions": {
+        "idle": "待機",
+        "running_right": "右走り",
+        "running_left": "左走り",
+        "waving": "手振り",
+        "jumping": "ジャンプ",
+        "failed": "失敗",
+        "waiting": "待ち",
+        "running": "実行",
+        "review": "レビュー"
+      },
+      "page": "{page} / {total} ページ",
+      "prev": "前へ",
+      "next": "次へ",
+      "empty": "条件に一致するペットがありません。",
+      "successInstalled": "\"{name}\" をインストールしました",
+      "errors": {
+        "loadFailed": "マーケットの読み込みに失敗しました",
+        "installFailed": "インストールに失敗しました",
+        "alreadyInstalled": "そのペットは既に存在します"
+      }
+    }
+  },
+  "RemoteWorkspace": {
+    "openRemoteWorkspace": "Open remote workspace",
+    "manage": "Manage remote workspace",
+    "manageTitle": "Remote Workspace connections",
+    "empty": "No remote connections",
+    "searchPlaceholder": "Search remote workspaces",
+    "orderFailed": "Failed to save remote workspace order",
+    "dragSort": "Drag to sort",
+    "dragSortConnection": "Drag to sort {name}",
+    "newConnection": "New connection",
+    "loading": "Loading",
+    "loadingConnection": "Loading remote connection",
+    "name": "Name",
+    "baseUrl": "Service URL",
+    "token": "Access token",
+    "save": "Save",
+    "delete": "Delete",
+    "confirmDelete": {
+      "title": "Delete remote connection?",
+      "message": "This will remove \"{name}\" from this device. This action cannot be undone.",
+      "cancel": "Cancel",
+      "confirm": "Delete"
+    },
+    "saved": "Remote connection saved.",
+    "deleted": "Remote connection deleted.",
+    "loadFailed": "Failed to load remote connections",
+    "saveFailed": "Failed to save remote connection",
+    "deleteFailed": "Failed to delete remote connection",
+    "openFailed": "Failed to open remote workspace",
+    "connectionLoadFailed": "Failed to load remote connection: {message}",
+    "connectionExpired": "Remote connection \"{name}\" is expired. Update its token and reload this window."
+  },
+  "ServerFileBrowser": {
+    "title": "サーバーファイルを選択",
+    "pathPlaceholder": "ディレクトリパスを入力...",
+    "goHome": "ホームディレクトリへ",
+    "navigateUp": "上の階層へ",
+    "select": "選択",
+    "cancel": "キャンセル",
+    "loading": "読み込み中...",
+    "emptyDirectory": "このディレクトリは空です",
+    "errorLoadingDir": "ディレクトリの読み込みに失敗しました",
+    "selectedCount": "{count} 件選択中"
   }
 }

@@ -1,9 +1,12 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Reorder } from "motion/react"
+import { useAppWorkspace } from "@/contexts/app-workspace-context"
 import { useTabContext } from "@/contexts/tab-context"
+import type { TabItem as TabItemData } from "@/contexts/tab-context"
 import { useWorkspaceContext } from "@/contexts/workspace-context"
+import { useIsCoarsePointer } from "@/hooks/use-is-coarse-pointer"
 import { useShortcutSettings } from "@/hooks/use-shortcut-settings"
 import { matchShortcutEvent } from "@/lib/keyboard-shortcuts"
 import { TabItem } from "./tab-item"
@@ -22,10 +25,22 @@ export function TabBar() {
     toggleTileMode,
     reorderTabs,
   } = useTabContext()
-  const { mode, activePane } = useWorkspaceContext()
+  const { allFolders, branches } = useAppWorkspace()
+  const { mode, activePane, filesMaximized } = useWorkspaceContext()
+
+  const folderIndex = useMemo(() => {
+    const map = new Map<number, { name: string }>()
+    for (const f of allFolders) map.set(f.id, { name: f.name })
+    return map
+  }, [allFolders])
+
   const { shortcuts } = useShortcutSettings()
   const scrollRef = useRef<HTMLDivElement>(null)
+  const isCoarsePointer = useIsCoarsePointer()
   const [isHovered, setIsHovered] = useState(false)
+  const [touchSortingTabId, setTouchSortingTabId] = useState<string | null>(
+    null
+  )
 
   const handleWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
     if (e.deltaY !== 0 && scrollRef.current) {
@@ -44,7 +59,7 @@ export function TabBar() {
     const onKeyDown = (event: KeyboardEvent) => {
       const shouldHandleShortcut =
         mode === "conversation" ||
-        (mode === "fusion" && activePane === "conversation")
+        (mode === "fusion" && activePane === "conversation" && !filesMaximized)
       if (!shouldHandleShortcut) return
       if (!matchShortcutEvent(event, shortcuts.close_current_tab)) return
       if (!activeTabId) return
@@ -57,7 +72,27 @@ export function TabBar() {
     return () => {
       window.removeEventListener("keydown", onKeyDown)
     }
-  }, [activePane, activeTabId, closeTab, mode, shortcuts.close_current_tab])
+  }, [
+    activePane,
+    activeTabId,
+    closeTab,
+    filesMaximized,
+    mode,
+    shortcuts.close_current_tab,
+  ])
+
+  const handleReorder = useCallback(
+    (nextTabs: TabItemData[]) => {
+      if (isCoarsePointer && !touchSortingTabId) return
+      reorderTabs(nextTabs)
+    },
+    [isCoarsePointer, reorderTabs, touchSortingTabId]
+  )
+
+  const handleTouchSortingEnd = useCallback(
+    () => setTouchSortingTabId(null),
+    []
+  )
 
   if (tabs.length === 0) return null
 
@@ -68,7 +103,7 @@ export function TabBar() {
       role="tablist"
       axis="x"
       values={tabs}
-      onReorder={reorderTabs}
+      onReorder={handleReorder}
       onWheel={handleWheel}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
@@ -86,20 +121,29 @@ export function TabBar() {
           : ["pb-1.5", "[&::-webkit-scrollbar]:h-0"]
       )}
     >
-      {tabs.map((tab) => (
-        <TabItem
-          key={tab.id}
-          tab={tab}
-          isActive={tab.id === activeTabId}
-          isTileMode={isTileMode}
-          onSwitch={switchTab}
-          onClose={closeTab}
-          onCloseOthers={closeOtherTabs}
-          onCloseAll={closeAllTabs}
-          onPin={pinTab}
-          onToggleTile={toggleTileMode}
-        />
-      ))}
+      {tabs.map((tab) => {
+        const folderInfo = folderIndex.get(tab.folderId)
+        return (
+          <TabItem
+            key={tab.id}
+            tab={tab}
+            isActive={tab.id === activeTabId}
+            isTileMode={isTileMode}
+            folderName={folderInfo?.name ?? null}
+            folderBranch={branches.get(tab.folderId) ?? null}
+            onSwitch={switchTab}
+            onClose={closeTab}
+            onCloseOthers={closeOtherTabs}
+            onCloseAll={closeAllTabs}
+            onPin={pinTab}
+            onToggleTile={toggleTileMode}
+            isCoarsePointer={isCoarsePointer}
+            isTouchSorting={touchSortingTabId === tab.id}
+            onTouchSortingStart={setTouchSortingTabId}
+            onTouchSortingEnd={handleTouchSortingEnd}
+          />
+        )
+      })}
     </Reorder.Group>
   )
 }

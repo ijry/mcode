@@ -12,54 +12,6 @@
     "portuguese": "Portuguese",
     "arabic": "Arabic"
   },
-  "WelcomePage": {
-    "title": "Welcome to Codeg",
-    "openSettings": "Open Settings",
-    "searchPlaceholder": "Search folders...",
-    "loading": "Loading...",
-    "emptyFolders": "No folders yet",
-    "removeFromHistory": "Remove from history",
-    "openFolder": "Open Folder",
-    "cloneRepository": "Clone Repository",
-    "projectBoot": "Project Boot",
-    "softwareVersion": "version {version}",
-    "toasts": {
-      "loadFolderHistoryFailed": "Failed to load folder history",
-      "openFolderFailed": "Failed to open folder",
-      "removeFromHistoryFailed": "Failed to remove folder",
-      "openSettingsFailed": "Failed to open settings",
-      "cloneFailed": "Failed to clone repository",
-      "openProjectBootFailed": "Failed to open Project Boot"
-    },
-    "errors": {
-      "unknown": "Unexpected error",
-      "invalidInput": "Invalid input.",
-      "notFound": "Resource not found.",
-      "alreadyExists": "Resource already exists.",
-      "dependencyMissing": "Required dependency is missing.",
-      "databaseError": "Database operation failed.",
-      "ioError": "File operation failed.",
-      "externalCommandFailed": "External command failed.",
-      "windowOperationFailed": "Window operation failed.",
-      "gitNotInstalled": "Git is not installed. Please install Git first.",
-      "targetDirectoryNotEmpty": "Target directory already exists and is not empty.",
-      "repositoryNotFound": "Repository not found. Check URL and access permissions.",
-      "networkUnavailable": "Network is unavailable. Check your connection and try again.",
-      "authenticationFailed": "Authentication failed. Check credentials or SSH key.",
-      "permissionDenied": "Permission denied. Check directory permissions."
-    },
-    "cloneDialog": {
-      "title": "Clone Repository",
-      "repositoryUrl": "Repository URL",
-      "repositoryUrlPlaceholder": "https://github.com/user/repo.git",
-      "directory": "Directory",
-      "directoryPlaceholder": "Select target directory...",
-      "browseDirectory": "Browse directory",
-      "cancel": "Cancel",
-      "clone": "Clone",
-      "clonePath": "Clone path: {path}"
-    }
-  },
   "GitCredentialDialog": {
     "title": "Authentication Required",
     "description": "The remote server requires credentials. Enter your username and password (or personal access token).",
@@ -85,6 +37,7 @@
     "title": "Settings",
     "preferences": "Preferences",
     "nav": {
+      "general": "General",
       "appearance": "Appearance",
       "agents": "Agents",
       "mcp": "MCP",
@@ -95,7 +48,8 @@
       "chat_channels": "Chat Channels",
       "web_service": "Web Service",
       "model_providers": "Model Providers",
-      "experts": "Experts"
+      "experts": "Experts",
+      "quick_messages": "Quick Messages"
     }
   },
   "AppearanceSettings": {
@@ -137,9 +91,7 @@
       "placeholder": "Select zoom level",
       "default": "Default",
       "current": "Current zoom: {zoom}%"
-    },
-    "resetToDefaults": "Reset to defaults",
-    "resetHint": "Reset theme color and window zoom to defaults."
+    }
   },
   "SystemSettings": {
     "loading": "Loading...",
@@ -174,6 +126,7 @@
     "updating": "Installing...",
     "downloading": "Downloading...",
     "upgradeTo": "Upgrade to v{version}",
+    "viewRelease": "View v{version} release",
     "foundUpdate": "New version v{version} found",
     "alreadyLatest": "You're on the latest version",
     "checkUpdateFailed": "Failed to check for updates: {message}",
@@ -310,7 +263,7 @@
       },
       "close_all_file_tabs": {
         "title": "Close All File Tabs",
-        "description": "Close all file tabs in file mode only"
+        "description": "Close all open file tabs when the file pane is active"
       },
       "send_message": {
         "title": "Send Message",
@@ -349,6 +302,8 @@
     "loadingSkill": "Loading skill...",
     "emptyNoAgents": "No available agent.",
     "noSelectionHint": "Select a skill on the left, or click \"New Skill\" to create one.",
+    "systemBadge": "System",
+    "systemHint": "Built-in CLI skill · read-only",
     "scope": {
       "global": "Global",
       "folder": "Folder",
@@ -390,7 +345,7 @@
       "gemini": "---\nname: example-skill\ndescription: Describe when this skill should be used.\n---\n\n# Skill Name\n\nInstructions for the agent when this skill is active.\n\n## Workflow\n\n1. Add actionable step one.\n2. Add actionable step two.\n",
       "openCode": "---\nname: example-skill\ndescription: Describe when this skill should be used.\n---\n\n# Purpose\n\nDescribe what this skill helps with.\n\n# Steps\n\n1. Add actionable step one.\n2. Add actionable step two.\n",
       "openClaw": "---\nname: example-skill\ndescription: Describe when this skill should be used.\nuser-invocable: true\ndisable-model-invocation: false\n---\n\n# Purpose\n\nDescribe what this skill helps with.\n\n# Instructions\n\n1. Add actionable instruction one.\n2. Add actionable instruction two.\n",
-      "default": "# Skill: example-skill\n\n## When to use\n\n- Describe trigger conditions.\n\n## Instructions\n\n1. Add actionable instruction one.\n2. Add actionable instruction two.\n"
+      "default": "---\nname: example-skill\ndescription: Describe when this skill should be used.\n---\n\n# Skill: example-skill\n\n## When to use\n\n- Describe trigger conditions.\n\n## Instructions\n\n1. Add actionable instruction one.\n2. Add actionable instruction two.\n"
     }
   },
   "McpSettings": {
@@ -412,7 +367,15 @@
       "fieldOutOfRange": "{field} value is out of allowed range",
       "jsonEmpty": "{name} cannot be empty",
       "jsonInvalid": "{name} is not valid JSON: {message}",
-      "jsonMustBeObject": "{name} must be a JSON object"
+      "jsonMustBeObject": "{name} must be a JSON object",
+      "specMustBeObject": "MCP config must be a JSON object.",
+      "missingType": "MCP config is missing the type field. Use one of stdio, http (aliases: streamable-http, streamableHttp), sse.",
+      "unsupportedType": "Unsupported MCP type {type}. Supported: stdio, http (aliases: streamable-http, streamableHttp), sse.",
+      "codexEntryUnsupportedType": "Codex MCP entry {id} has unsupported type {type}. Supported: stdio, http (aliases: streamable-http, streamableHttp), sse.",
+      "unsupportedTransportType": "Unsupported transport type {type}. Supported: http (aliases: streamable-http, streamableHttp), sse.",
+      "stdioCommandRequired": "stdio MCP requires a non-empty command field.",
+      "remoteUrlRequired": "Remote MCP requires a non-empty url field.",
+      "appsRequired": "Select at least one target app."
     },
     "jsonNames": {
       "localConfig": "MCP Config",
@@ -425,7 +388,10 @@
       "saveSuccess": "Saved",
       "saveFailed": "Save failed: {message}",
       "installed": "{name} installed",
-      "installFailed": "Install failed: {message}"
+      "installFailed": "Install failed: {message}",
+      "serverIdRequired": "Server ID is required",
+      "serverIdExists": "Server ID \"{id}\" already exists. Edit the existing entry or pick a different name.",
+      "created": "MCP created"
     },
     "installDialog": {
       "title": "Confirm MCP Installation",
@@ -447,7 +413,11 @@
       "viewDetails": "View Details",
       "save": "Save",
       "saving": "Saving",
-      "install": "Install"
+      "install": "Install",
+      "refresh": "Refresh",
+      "newMcp": "New MCP",
+      "create": "Create",
+      "creating": "Creating..."
     },
     "tabs": {
       "local": "Local MCP",
@@ -459,7 +429,13 @@
       "empty": "No local MCP detected.",
       "description": "Local MCP configuration can be edited and saved directly.",
       "enabledApps": "Enabled Apps",
-      "configJson": "MCP Config (JSON)"
+      "configJson": "MCP Config (JSON)",
+      "draftTitle": "New MCP",
+      "draftDescription": "Provide a Server ID and configuration to create a local MCP server.",
+      "serverIdLabel": "Server ID",
+      "serverIdPlaceholder": "Server ID (e.g. my-mcp)",
+      "typeHint": "Supported types: stdio, http (aliases: streamable-http, streamableHttp), sse. env is only used by stdio; for remote MCPs use headers to carry auth tokens.",
+      "envOnRemoteWarning": "env detected on a remote MCP. Only stdio uses env; remote MCPs carry auth tokens via headers, so env will be ignored on save."
     },
     "market": {
       "selectMarketplace": "Select marketplace",
@@ -498,6 +474,29 @@
     "modelHintDefault": "Leave empty to use system default model.",
     "generalConfigDescriptionClaude": "Supports quick configuration for API URL, API Key and Claude models, and syncs with native JSON config.",
     "generalConfigDescriptionDefault": "Supports important config input (API URL, API Key, Model) and native JSON config management.",
+    "multiAgent": {
+      "title": "Multi-Agent Collaboration",
+      "description": "Allow active agents to delegate sub-tasks to other agents.",
+      "enable": "Enable delegation",
+      "enableHint": "When off, the delegate_to_agent tool is hidden from the agent's MCP catalog.",
+      "depthLimit": "Maximum delegation depth",
+      "depthHint": "Allowed range: {min}–{max}. Caps how deep a chain (root → child → grandchild …) can recurse.",
+      "save": "Save",
+      "saving": "Saving…",
+      "saved": "Delegation settings saved",
+      "saveFailed": "Failed to save delegation settings",
+      "loadFailed": "Failed to load delegation settings: {detail}",
+      "tabGeneral": "General",
+      "tabAgentDefaults": "Agent defaults",
+      "agentDefaultsDescription": "Per-agent overrides applied when Multi-Agent Collaboration spawns a subagent for a delegation call. Options shown here come from a live probe — what you pick is exactly what the agent will accept.",
+      "probing": "Loading available options from the agent…",
+      "probeFailed": "Failed to load options: {detail}",
+      "retry": "Retry",
+      "noConfigAvailable": "This agent has no configurable options.",
+      "modeLabel": "Mode",
+      "agentDefaultHint": "Agent default: {value}",
+      "defaultOptionLabel": "Default ({value})"
+    },
     "actions": {
       "dragSort": "Drag to reorder",
       "dragSortAgent": "Drag to reorder {name}",
@@ -528,7 +527,8 @@
       "deleting": "Deleting...",
       "confirmDelete": "Confirm Delete",
       "confirmUninstall": "Confirm Uninstall",
-      "saveClineConfig": "Save Cline Config"
+      "saveClineConfig": "Save Cline Config",
+      "customInstall": "Custom install"
     },
     "status": {
       "enabled": "Enabled",
@@ -602,7 +602,6 @@
       "emptyProvider": "No provider yet. Enter an ID then click \"Add Provider\".",
       "providerEnabledState": "{providerId} enabled state",
       "selectProviderNpm": "Select provider.npm",
-      "notSet": "Not set",
       "modelManagement": "Model Management",
       "modelCount": "{count} models",
       "modelDescription": "Aligned with OpenCode `provider.models`. Fast management currently supports `name` / `id`; other advanced fields are preserved and can be edited in native JSON below.",
@@ -629,7 +628,7 @@
     "authModeCustomEndpointHint": "Manually configure API URL and API Key for a custom endpoint.",
     "authModeModelProvider": "Model Provider",
     "modelProvider": "Model Provider",
-    "modelProviderHint": "Use API URL and API Key from a configured model provider.",
+    "modelProviderHint": "Use API URL, API Key, and model from a configured model provider.",
     "selectModelProvider": "Select Model Provider",
     "noModelProviderAvailable": "No model provider configured for this agent. Go to Model Provider Settings to add one.",
     "claude": {
@@ -646,13 +645,18 @@
       "effortLevel_low": "Low",
       "effortLevel_medium": "Medium",
       "effortLevel_high": "High",
-      "effortLevelMax": "Max (Opus only)"
+      "effortLevel_xhigh": "Extra High"
     },
     "dialogs": {
       "confirmDeleteProvider": "Delete Provider {providerId}?",
       "confirmDeleteProviderDescription": "OpenCode config and auth JSON will be updated together. This action cannot be undone.",
       "confirmUninstall": "Uninstall {name}?",
-      "confirmUninstallDescription": "This removes local installed version. You can reinstall later."
+      "confirmUninstallDescription": "This removes local installed version. You can reinstall later.",
+      "customInstallTitle": "Custom install {name}",
+      "customInstallDescription": "Enter the version to install. This reinstalls and replaces the currently installed version.",
+      "customInstallVersionLabel": "Version number",
+      "customInstallInvalid": "Enter a valid version number, e.g. 1.2.3.",
+      "customInstallSubmit": "Install"
     },
     "errors": {
       "nativeJsonMustBeObject": "Native JSON config must be an object",
@@ -662,9 +666,9 @@
       "authMustBeObject": "auth.json must be a JSON object",
       "authInvalid": "auth.json format error: {message}",
       "providerIdPattern": "Provider ID only supports letters, numbers, underscore, dot and hyphen",
-      "providerExists": "Provider '{providerId}' already exists",
+      "providerExists": "Provider {providerId} already exists",
       "modelIdPattern": "Model ID only supports letters, numbers, underscore, dot, colon and hyphen",
-      "modelExists": "Model '{modelId}' already exists"
+      "modelExists": "Model {modelId} already exists"
     },
     "warnings": {
       "nativeJsonRecoveredStructured": "Native JSON config is invalid; reset to structured config",
@@ -737,6 +741,47 @@
   "SettingsPages": {
     "agentsLoading": "Loading agent settings..."
   },
+  "GeneralSettings": {
+    "loading": "Loading...",
+    "sectionTitle": "General",
+    "sectionDescription": "Centralized preferences for the default terminal, rendering acceleration, and multi-agent delegation.",
+    "terminalTitle": "Default Terminal",
+    "terminalDescription": "Choose the shell used when opening new terminal tabs from the terminal bar or file tree.",
+    "defaultTerminalShell": "Default shell",
+    "terminalSystemDefault": "System default",
+    "terminalPowerShell7": "PowerShell 7 (pwsh)",
+    "terminalWindowsPowerShell": "Windows PowerShell",
+    "terminalCmd": "Command Prompt (cmd)",
+    "terminalSaveFailed": "Failed to save terminal settings: {message}",
+    "terminalShellCustom": "Custom path",
+    "terminalShellCustomPath": "Shell path",
+    "terminalShellCustomPlaceholder": "/usr/local/bin/fish",
+    "terminalShellCustomSave": "Save",
+    "terminalShellCustomHint": "Provide an absolute path or a name resolvable on PATH.",
+    "terminalShellNotInstalled": "not installed",
+    "terminalShellNotFoundWarning": "This path doesn't exist on this host.",
+    "terminalCurrentShell": "Currently using: {path}",
+    "renderingTitle": "Rendering",
+    "renderingDescription": "Disable hardware acceleration if the app shows a black screen or rendering glitches (common on certain AMD GPUs or Intel integrated GPUs). Only takes effect on the Windows desktop build.",
+    "disableHardwareAcceleration": "Disable hardware acceleration",
+    "renderingSaveFailed": "Failed to save rendering settings: {message}",
+    "restartRequired": "Saved. Restart the app for the change to take effect.",
+    "restartNow": "Restart now",
+    "restartFailed": "Failed to restart: {message}",
+    "loadFailed": "Load failed: {message}"
+  },
+  "LoginPage": {
+    "documentTitle": "Login - codeg",
+    "brand": "Codeg",
+    "subtitle": "Enter your access token to connect to the desktop app",
+    "tokenPlaceholder": "Access Token",
+    "connect": "Connect",
+    "connecting": "Connecting...",
+    "helpText": "Find your token in the desktop app under Settings → Web Service",
+    "invalidToken": "Invalid token. Please check and try again.",
+    "connectionFailed": "Connection failed (HTTP {status})",
+    "networkError": "Unable to connect to the server"
+  },
   "CommitPage": {
     "title": "Commit",
     "invalidFolderId": "Invalid folder ID",
@@ -769,6 +814,12 @@
     "applyRightNonConflicting": "Apply Remote"
   },
   "Folder": {
+    "workspaceStatus": {
+      "degradedTitle": "Live updates unavailable",
+      "degradedHint": "Watcher failed to start (e.g. permission denied). Refresh manually to see changes.",
+      "retry": "Retry",
+      "retrying": "Retrying..."
+    },
     "common": {
       "all": "All",
       "cancel": "Cancel",
@@ -788,12 +839,6 @@
       "viewDiff": "View Diff",
       "push": "Push..."
     },
-    "modes": {
-      "conversation": "Conversation Mode",
-      "fusion": "Fusion Mode",
-      "files": "Files Mode",
-      "workspaceModesAria": "Workspace modes"
-    },
     "statusLabels": {
       "in_progress": "In Progress",
       "pending_review": "Review",
@@ -806,6 +851,7 @@
       "expandAllGroups": "Expand All Groups",
       "collapseAllGroups": "Collapse All Groups",
       "newConversation": "New Conversation",
+      "newConversationShort": "New",
       "noConversationsFound": "No conversations found.",
       "importLocalSessions": "Import local sessions",
       "importing": "Importing...",
@@ -819,15 +865,74 @@
         "noNewSessionsFound": "No new sessions found (skipped {skipped})",
         "importFailed": "Import failed: {message}",
         "reviewCompleted": "Marked {count, plural, one {# review session} other {# review sessions}} as completed",
-        "completeReviewFailed": "Failed to complete review sessions: {message}"
+        "completeReviewFailed": "Failed to complete review sessions: {message}",
+        "folderOpened": "Opened folder {name}",
+        "folderRemoved": "Removed folder {name}",
+        "openFolderFailed": "Failed to open folder",
+        "removeFolderFailed": "Failed to remove folder: {message}",
+        "reorderFoldersFailed": "Failed to reorder folders: {message}",
+        "changeFolderColorFailed": "Failed to change folder color: {message}",
+        "changeFolderDefaultAgentFailed": "Failed to set default agent: {message}"
+      },
+      "statsLabel": "{folders} folders · {convos} conversations",
+      "reorderHandle": "Drag to reorder",
+      "openFolder": "Open Folder",
+      "searchPlaceholder": "Search conversations...",
+      "showCompleted": "Show completed conversations",
+      "moreOptions": "More options",
+      "sortBy": "Sort by",
+      "sortByCreatedAt": "Created time",
+      "sortByUpdatedAt": "Updated time",
+      "statusRunningBadge": "Running",
+      "statusCancelledBadge": "Cancelled",
+      "conversationCountUnit": "{count, plural, one {# conversation} other {# conversations}}",
+      "emptyFolderHint": "No conversations",
+      "noMatchingConversations": "No matching conversations",
+      "noUnfinishedConversations": "No unfinished conversations. Enable \"Show completed\" from the top-right menu.",
+      "removeFolderConfirmTitle": "Remove folder from workspace?",
+      "removeFolderConfirmDescription": "Remove \"{name}\" from the workspace? Its tabs and terminals will close.",
+      "folderHeaderMenu": {
+        "manageConversations": "Manage conversations…",
+        "changeColor": "Change color",
+        "useThemeColor": "Use app theme",
+        "setDefaultAgent": "Set default agent",
+        "defaultAgentNone": "No default (use global)",
+        "agentUnavailableSuffix": "(unavailable)",
+        "loadingAgents": "Loading agents…",
+        "removeFromWorkspace": "Remove from workspace"
+      },
+      "manageConversations": {
+        "title": "Manage conversations — {name}",
+        "searchPlaceholder": "Search by title…",
+        "agentFilterAll": "All agents",
+        "statusFilterAll": "All statuses",
+        "selectAllVisible": "Select all",
+        "deselectAll": "Deselect all",
+        "selectedCount": "{count} selected",
+        "matchedCount": "{count} matched",
+        "messagesShort": "{count} msg",
+        "untitledConversation": "Untitled conversation",
+        "setStatus": "Set status…",
+        "deleteSelected": "Delete",
+        "noConversations": "No conversations in this folder.",
+        "noMatchingConversations": "No conversations match the filters.",
+        "confirmDeleteTitle": "Delete {count} conversation(s)?",
+        "confirmDeleteDescription": "This action cannot be undone.",
+        "toastDeleted": "Deleted {count} conversation(s)",
+        "toastStatusUpdated": "Updated status for {count} conversation(s)",
+        "toastOpFailed": "Operation failed: {message}"
       }
     },
     "conversation": {
       "reloadFailed": "Failed to reload conversation: {message}",
       "reloaded": "Conversation reloaded",
       "reload": "Reload",
+      "activeConversationIndicator": "Active conversation",
       "newConversation": "New Conversation",
       "closeConversation": "Close Conversation",
+      "copyText": "Copy Text",
+      "copyTextSuccess": "Copied",
+      "copyTextFailed": "Copy failed",
       "forkSession": "Fork Session",
       "forkSessionSuccess": "Session forked successfully",
       "forkSessionFailed": "Failed to fork session: {error}",
@@ -874,6 +979,7 @@
     },
     "search": {
       "dialogTitle": "Search",
+      "dialogTitleWithFolder": "Search — {name}",
       "tabConversations": "Conversations",
       "tabFiles": "Files",
       "placeholder": "Search conversations...",
@@ -933,7 +1039,9 @@
         "files": "Files",
         "changes": "Changes",
         "commits": "Commits"
-      }
+      },
+      "noFolderTitle": "No folder open",
+      "noFolderHint": "Open a folder to see its contents here"
     },
     "windowControls": {
       "minimizeWindow": "Minimize window",
@@ -960,14 +1068,17 @@
       "closeOthers": "Close Others",
       "closeAll": "Close All",
       "preview": "Preview",
-      "editSource": "Edit Source"
+      "editSource": "Edit Source",
+      "maximize": "Maximize",
+      "restore": "Restore"
     },
     "terminal": {
       "rename": "Rename",
       "close": "Close",
       "closeOthers": "Close Others",
       "closeAll": "Close All",
-      "hideTerminal": "Hide Terminal ({shortcut})"
+      "hideTerminal": "Hide Terminal ({shortcut})",
+      "openFolderFirst": "Open a folder first"
     },
     "sessionFiles": {
       "currentResponse": "Current response",
@@ -1032,33 +1143,32 @@
         "checkoutTo": "Checkout to {branchName}",
         "mergeBranch": "Merge {branchName}",
         "rebaseTo": "Rebase to {branchName}",
-        "deleteBranch": "Delete branch {branchName}",
         "deleteRemoteBranch": "Delete remote branch {branchName}",
         "initGitRepo": "Initialize Git repository",
         "pullCode": "Pull code",
         "fetchInfo": "Fetch info",
         "pushCode": "Push code",
         "stashChanges": "Stash changes",
-        "stashPop": "Pop stash"
+        "stashPop": "Pop stash",
+        "deleteBranch": "Delete branch {branchName}"
       },
       "confirm": {
         "mergeTitle": "Merge branch",
         "rebaseTitle": "Rebase branch",
-        "deleteTitle": "Delete branch",
         "mergeDescription": "Merge {branchName} into current branch {currentBranch}?",
         "rebaseDescription": "Rebase current branch {currentBranch} onto {branchName}?",
+        "deleteRemoteTitle": "Delete Remote Branch",
+        "deleteRemoteDescription": "Delete remote branch {branchName}? This will remove it from the remote repository and cannot be undone.",
+        "deleteTitle": "Delete branch",
         "deleteDescription": "Delete branch {branchName}? This action cannot be undone.",
         "forceDeleteTitle": "Force Delete Branch",
-        "forceDeleteDescription": "Branch {branchName} is not fully merged. Are you sure you want to force delete it? This action cannot be undone.",
-        "deleteRemoteTitle": "Delete Remote Branch",
-        "deleteRemoteDescription": "Delete remote branch {branchName}? This will remove it from the remote repository and cannot be undone."
+        "forceDeleteDescription": "Branch {branchName} is not fully merged. Are you sure you want to force delete it? This action cannot be undone."
       },
       "current": "Current",
       "switchToBranch": "Switch to this branch",
       "mergeBranchIntoCurrent": "Merge {branchName} into {currentBranch}",
       "rebaseCurrentToBranch": "Rebase {currentBranch} onto {branchName}",
-      "deleteBranch": "Delete branch",
-      "versionControl": "Version Control",
+      "noBranch": "No branch",
       "initGitRepo": "Initialize Git repository",
       "pullCode": "Pull code",
       "fetchRemoteBranches": "Fetch remote branches",
@@ -1073,7 +1183,6 @@
       "noLocalBranches": "No local branches",
       "remoteBranches": "Remote branches ({count, plural, one {#} other {#}})",
       "noRemoteBranches": "No remote branches",
-      "parentBranchHint": "Current branch was created from {parentBranch}. Click to merge {parentBranch} into current branch.",
       "dialogs": {
         "newBranchTitle": "New branch",
         "newBranchDescription": "Create a new branch from current branch {branch}",
@@ -1123,7 +1232,8 @@
         "dropSuccess": "Stash dropped",
         "confirmApply": "Apply stash {ref} to working directory?",
         "cancel": "Cancel"
-      }
+      },
+      "deleteBranch": "Delete branch"
     },
     "commitDialog": {
       "toasts": {
@@ -1202,6 +1312,8 @@
       "workspace": "workspace",
       "retry": "Retry",
       "noCommitsFound": "No commits found",
+      "notAGitRepoTitle": "Not a Git repository",
+      "notAGitRepoHint": "Initialize Git from the branch menu above, or open a folder that is already tracked.",
       "hash": "Hash",
       "copyHash": "Copy hash",
       "copyMessage": "Copy message",
@@ -1278,6 +1390,8 @@
     "gitChangesTab": {
       "workspace": "workspace",
       "noChanges": "No local changes",
+      "notAGitRepoTitle": "Not a Git repository",
+      "notAGitRepoHint": "Initialize Git from the branch menu above, or open a folder that is already tracked.",
       "trackedChanges": "Tracked changes ({count})",
       "untrackedFiles": "Untracked files ({count})",
       "expandTracked": "Expand tracked changes",
@@ -1351,6 +1465,9 @@
       "newDirectory": "Directory",
       "openIn": "Open in",
       "openInTerminal": "Open in terminal",
+      "upload": "Upload files/folder",
+      "download": "Download file",
+      "downloadAsZip": "Download as ZIP",
       "actions": {
         "select": "Select",
         "unselect": "Unselect",
@@ -1379,7 +1496,9 @@
         "savedAsCopy": "Saved as a copy",
         "saveCopyFailed": "Failed to save as copy",
         "watchStartFailed": "Failed to start file watch",
-        "createFailed": "Failed to create"
+        "createFailed": "Failed to create",
+        "downloadFailed": "Failed to download {name}",
+        "downloadSaved": "Downloaded {name}"
       },
       "createDialog": {
         "newFile": "New file",
@@ -1394,6 +1513,31 @@
         "description": "Enter a new name (name only, no path).",
         "placeholderDirectory": "new-folder-name",
         "placeholderFile": "new-file-name.ext"
+      },
+      "uploadDialog": {
+        "title": "Upload to workspace",
+        "description": "Adjust the destination if needed, then add files or folders.",
+        "workspaceRoot": "workspace root",
+        "targetPathLabel": "Upload to",
+        "targetPathHint": "Resolved path: {path}",
+        "dropHint": "Drag files or folders here, or use the buttons below",
+        "dropHintActive": "Release to add to the queue",
+        "selectFiles": "Select files",
+        "selectFolder": "Select folder",
+        "startUpload": "Start upload",
+        "clearQueue": "Clear finished",
+        "removeItem": "Remove from queue",
+        "retry": "Retry",
+        "dropZoneAria": "Drop files here or activate to browse",
+        "folderEmpty": "No files found in the dropped folder",
+        "summary": "Total: {total} · Succeeded: {succeeded} · Failed: {failed}",
+        "status": {
+          "pending": "Waiting",
+          "uploading": "Uploading",
+          "success": "Done",
+          "error": "Failed",
+          "cancelled": "Cancelled"
+        }
       },
       "directoryDialog": {
         "descriptionAdd": "Select files under directory {path} to add to VCS.",
@@ -1503,7 +1647,13 @@
           "initializeTimeout": "{agent} connection handshake timed out after 60 seconds. Please open Settings to check Agent configuration and network settings.",
           "processExited": "{agent} process exited unexpectedly.",
           "spawnFailed": "Failed to start {agent}: {message}",
-          "downloadFailed": "{agent} download failed: {message}"
+          "downloadFailed": "{agent} download failed: {message}",
+          "sessionLoadResourceNotFound": "{agent} session failed to load. Reload to retry, or start a new conversation.",
+          "turnFailedRefusal": "{agent} refused to continue this turn. This often indicates a backend or gateway error — check the agent's logs.",
+          "turnFailedMaxTokens": "{agent} reached the maximum token limit for this turn.",
+          "turnFailedMaxTurnRequests": "{agent} reached the maximum number of allowed requests for this turn.",
+          "turnFailedUnknown": "{agent} ended the turn with an unrecognized stop reason.",
+          "turnFailedEmpty": "{agent} ended the turn without producing any response. Please check the agent's configuration."
         },
         "unableReadAgentConfig": "Unable to read Agent config: {message}",
         "connectFailedTitle": "{agent} connection failed",
@@ -1552,15 +1702,30 @@
         "askAnything": "Ask anything...",
         "removeAttachmentAria": "Remove {name}",
         "attachFiles": "Attach files",
+        "attachLocalUpload": "Upload local file",
+        "attachServerFile": "Pick server file",
+        "addActions": "Add",
+        "quickMessages": "Quick messages",
+        "quickMessagesEmpty": "No quick messages yet",
+        "quickMessagesLoading": "Loading...",
+        "quickMessageUntitled": "Untitled",
         "dropFilesToAttach": "Drop files to attach",
         "loadingSettings": "Loading settings...",
         "loadingMode": "Loading mode...",
+        "modeLabel": "Mode",
+        "agentSettings": "Agent settings",
         "cancel": "Cancel",
         "send": "Send",
         "forkAndSend": "Fork & Send",
         "slashCommands": "Slash commands",
         "expertSkills": "Expert skills",
-        "expertsEmptyForAgent": "This agent has no enabled experts. Enable them in Settings > Experts."
+        "expertsEmptyForAgent": "This agent has no enabled experts. Enable them in Settings > Experts.",
+        "slashSearchPlaceholder": "Search commands...",
+        "slashSearchEmpty": "No matching commands",
+        "attachUploadTooLarge": "{names} exceeds the {limit}MB upload limit and was skipped.",
+        "attachUploadFailed": "Failed to upload {names}.",
+        "attachUploadNotAFile": "{names} isn't a regular file (directory or special file) and was skipped.",
+        "attachUploadQuotaExceeded": "The server is out of upload storage; {names} couldn't be uploaded."
       },
       "messageQueue": {
         "addToQueue": "Queue message",
@@ -1575,6 +1740,28 @@
         "autoConnectAppend": "{message}. Click to open {path} and manage installation.",
         "enableAgentFirstPlaceholder": "Enable at least one agent before starting a session...",
         "askAnythingPlaceholder": "Ask anything..."
+      },
+      "welcomePanel": {
+        "greeting": "What would you like to <highlight>do today</highlight>?",
+        "tips": {
+          "tileTabs": "Right-click any conversation tab and choose Tile Display to see multiple sessions side by side.",
+          "pinTab": "Double-click a conversation tab to pin it, so a newly opened session won't auto-replace it.",
+          "shortcutsNewSearch": "<shortcut>{newConversation}</shortcut> opens a new conversation, <shortcut>{searchConversations}</shortcut> searches your history.",
+          "slashAtMention": "Type / in the input to trigger slash commands, or @ to reference a file from the project.",
+          "pasteDropFiles": "Paste a screenshot or drop a file directly onto the input to attach it.",
+          "queueMessage": "While the agent is replying, keep typing — your next message gets queued and auto-sent when it finishes.",
+          "draftAutoSave": "Unsent drafts are auto-saved per conversation and restored when you come back.",
+          "forkSend": "The send button's dropdown has Fork and Send — branch from the current turn into a new tab.",
+          "exportConversation": "Right-click inside the conversation to export it as Markdown, HTML, or an image.",
+          "chatChannels": "Connect Telegram / Lark / WeChat under Settings → Chat Channels to continue from your phone.",
+          "shortcutsAuxPanel": "<shortcut>{toggleAuxPanel}</shortcut> toggles the right panel to view this session's touched files and Git changes.",
+          "shortcutsTerminalSidebar": "<shortcut>{toggleTerminal}</shortcut> opens the built-in terminal, <shortcut>{toggleSidebar}</shortcut> toggles the sidebar.",
+          "customShortcuts": "Every shortcut is fully remappable under Settings → Shortcuts.",
+          "webService": "Enable Settings → Web Service so teammates can reach the same codeg from a browser.",
+          "fusionMode": "Open a file or diff to automatically show it alongside the conversation.",
+          "quickMessages": "Open the + button next to the input and pick Quick Messages to insert a saved snippet (manage them under Settings → Quick Messages).",
+          "experts": "The + button has an Expert Skills menu — preload roles like Debug or Planning with one click."
+        }
       },
       "agentSelector": {
         "noEnabledAgents": "No enabled agents",
@@ -1628,28 +1815,38 @@
         "thoughtForSeconds": "Thought"
       },
       "linkSafety": {
-        "localFileTitle": "Open local file?",
-        "externalLinkTitle": "Open external link?",
-        "localFileDescription": "You're about to open a local file in the Files panel.",
-        "externalLinkDescription": "You're about to visit an external website.",
-        "cancel": "Cancel",
-        "opening": "Opening...",
-        "openFile": "Open file",
-        "openLink": "Open link",
         "errorCannotOpen": "Cannot open local file",
         "errorNoWorkspace": "No workspace folder is currently active.",
         "errorOutsideWorkspace": "The file is outside the current workspace folder.",
         "errorFailedOpen": "Failed to open local file",
-        "errorFailedLink": "Failed to open link"
+        "errorFailedLink": "Failed to open link",
+        "errorUnsupportedLinkProtocol": "This link protocol is not supported."
       },
       "messageList": {
         "attachedResources": "Attached resources",
         "loading": "Loading...",
         "error": "Error: {message}",
+        "errorTitle": "Session load failed",
+        "errorActionReload": "Reload",
+        "errorActionNewSession": "New conversation",
         "emptyConversation": "No messages in this conversation.",
         "systemMessage": "System message",
         "copyMessage": "Copy",
-        "copied": "Copied"
+        "copied": "Copied",
+        "downloadImage": "Download image",
+        "downloadFailed": "Download failed: {message}",
+        "imageGeneration": "Image generation",
+        "imageGenerationPending": "Generating image…",
+        "imageGenerationFailed": "Image generation failed",
+        "model": "Model",
+        "tokenStats": "Token usage",
+        "tokenInput": "Input",
+        "tokenOutput": "Output",
+        "tokenCacheRead": "Cache read",
+        "tokenCacheWrite": "Cache write",
+        "duration": "Duration",
+        "completedAt": "Completed at",
+        "jumpToPreviousUserMessage": "Jump to user message"
       },
       "liveTurnStats": {
         "thinking": "Thinking...",
@@ -1678,6 +1875,34 @@
         "error": "Error",
         "result": "Result"
       },
+      "delegation": {
+        "subAgentRunning": "Sub-agent running…",
+        "noDetail": "No detail available yet.",
+        "unknownAgent": "Sub-agent",
+        "openDetail": "Open conversation",
+        "detailTitle": "Sub-agent conversation",
+        "detailDescription": "Read-only view of the delegated sub-agent's conversation.",
+        "status": {
+          "starting": "starting",
+          "running": "running",
+          "ok": "done",
+          "err": {
+            "default": "failed",
+            "delegation_disabled": "disabled",
+            "depth_limit": "depth limit",
+            "invalid_agent_type": "bad agent",
+            "spawn_failed": "spawn failed",
+            "send_failed": "send failed",
+            "timeout": "timeout",
+            "canceled": "canceled",
+            "child_refusal": "subagent refused",
+            "child_max_tokens": "subagent token limit",
+            "child_max_turn_requests": "subagent request limit",
+            "child_empty": "subagent no output",
+            "child_unknown": "subagent unknown error"
+          }
+        }
+      },
       "contentParts": {
         "showingTailOutput": "Showing tail output while streaming for performance.",
         "result": "Result",
@@ -1704,6 +1929,14 @@
         "subjectLabel": "Subject",
         "taskLabel": "Task",
         "nameLabel": "Name:",
+        "agentPromptLabel": "Prompt",
+        "agentModelLabel": "Model",
+        "agentRunning": "Running...",
+        "agentStatsBash": "Commands",
+        "agentStatsRead": "Files read",
+        "agentStatsSearch": "Searches",
+        "agentStatsEdit": "Edits",
+        "agentStatsOther": "Other",
         "field": {
           "file": "File",
           "notebook": "Notebook",
@@ -1758,6 +1991,20 @@
           "todosProgress": "Todos ({done}/{total})",
           "skillWithName": "Skill: {name}",
           "genericWithContext": "{tool}: {context}"
+        },
+        "toolGroup": {
+          "search": "{count, plural, one {Explored # search} other {Explored # searches}}",
+          "command": "{count, plural, one {Ran # command} other {Ran # commands}}",
+          "read": "{count, plural, one {Read files # time} other {Read files # times}}",
+          "memory": "{count, plural, one {Recalled # memory} other {Recalled # memories}}",
+          "edit": "{count, plural, one {Edited files # time} other {Edited files # times}}",
+          "fetch": "{count, plural, one {Fetched # resource} other {Fetched # resources}}",
+          "think": "{count, plural, one {Thought # time} other {Thought # times}}",
+          "todo": "{count, plural, one {Updated # todo} other {Updated # todos}}",
+          "task": "{count, plural, one {Ran # task} other {Ran # tasks}}",
+          "other": "{count, plural, one {Used # tool} other {Used # tools}}",
+          "errorSuffix": "{count, plural, one {# failed} other {# failed}}",
+          "joiner": " · "
         }
       }
     },
@@ -1771,6 +2018,38 @@
       "hunkLabel": "Hunk {index}",
       "loadingHunk": "Loading hunk...",
       "noDiffData": "No diff data"
+    },
+    "conversationContextBar": {
+      "folderTitle": "Working folder",
+      "branchTitle": "Working branch",
+      "searchFolder": "Search folder...",
+      "searchBranch": "Search branch...",
+      "noFolders": "No folders",
+      "noBranches": "No branches",
+      "noBranch": "(no branch)",
+      "commit": "Commit",
+      "push": "Push",
+      "merge": "Merge",
+      "toasts": {
+        "folderChanged": "Switched to {name}",
+        "openFolderFailed": "Failed to open folder",
+        "openStashFailed": "Failed to open stash window",
+        "openMergeFailed": "Failed to open merge window"
+      }
+    },
+    "cloneDialog": {
+      "title": "Clone Repository",
+      "repositoryUrl": "Repository URL",
+      "repositoryUrlPlaceholder": "https://github.com/user/repo.git",
+      "directory": "Directory",
+      "directoryPlaceholder": "Select target directory...",
+      "browseDirectory": "Browse directory",
+      "cancel": "Cancel",
+      "clone": "Clone",
+      "clonePath": "Clone path: {path}"
+    },
+    "toasts": {
+      "cloneFailed": "Failed to clone repository"
     }
   },
   "ProjectBoot": {
@@ -1822,7 +2101,8 @@
     },
     "toasts": {
       "createFailed": "Failed to create project",
-      "createSuccess": "Project created successfully"
+      "createSuccess": "Project created successfully",
+      "openWorkspaceFailed": "Project created, but couldn't open it in the workspace"
     },
     "errors": {
       "directoryExists": "Target directory already exists",
@@ -1834,6 +2114,8 @@
     "sectionDescription": "Enable to access Codeg remotely via browser",
     "port": "Port",
     "status": "Status",
+    "autoStart": "Auto-start",
+    "autoStartHint": "Start the Web service when Codeg launches",
     "running": "Running",
     "stopped": "Stopped",
     "processing": "Processing...",
@@ -1841,13 +2123,27 @@
     "stop": "Stop",
     "startFailed": "Failed to start",
     "stopFailed": "Failed to stop",
+    "saveConfigFailed": "Failed to save Web service settings",
     "open": "Open",
     "hide": "Hide",
     "show": "Show",
     "copy": "Copy",
     "addressLabel": "Access Address",
     "tokenLabel": "Access Token",
-    "tokenHint": "Enter this token when accessing the Web client for the first time"
+    "tokenHint": "Enter this token when accessing the Web client for the first time",
+    "tokenPlaceholder": "Leave empty to auto-generate",
+    "regenerate": "Regenerate",
+    "stalePortOccupiedTitle": "Port {port} is held by another process",
+    "stalePortUnknownTitle": "Port {port} status is unclear",
+    "stalePortHint": "Codeg can't bind here until the port is released. Change the port above, or close the process holding it.",
+    "errors": {
+      "alreadyRunning": "Web service is already running",
+      "invalidAddress": "Invalid host or port format",
+      "portInUse": "Port {port} is already in use. Close the process using it or choose another port.",
+      "permissionDenied": "Permission denied. Try a port above 1024 or run with higher privileges.",
+      "addressUnavailable": "The address is not available on this machine",
+      "bindFailed": "Failed to bind address"
+    }
   },
   "DirectoryBrowser": {
     "title": "Browse Directory",
@@ -1861,6 +2157,18 @@
     "errorLoadingDir": "Failed to load directory",
     "permissionDenied": "Permission denied"
   },
+  "ServerFileBrowser": {
+    "title": "Pick server file",
+    "pathPlaceholder": "Enter directory path...",
+    "goHome": "Go to home directory",
+    "navigateUp": "Go to parent directory",
+    "select": "Select",
+    "cancel": "Cancel",
+    "loading": "Loading...",
+    "emptyDirectory": "This directory is empty",
+    "errorLoadingDir": "Failed to load directory",
+    "selectedCount": "{count} selected"
+  },
   "ChatChannelSettings": {
     "loading": "Loading...",
     "sectionTitle": "Chat Channels",
@@ -1871,7 +2179,6 @@
     "channelNamePlaceholder": "My Telegram Bot",
     "channelType": "Channel Type",
     "lark": "Lark (Feishu)",
-    "mcode": "MCode",
     "weixin": "WeChat",
     "dailyReport": "Daily Report",
     "dailyReportTime": "Report Time",
@@ -1905,6 +2212,7 @@
     "weixinRefreshQrcode": "Refresh",
     "weixinWaitingScan": "Waiting for scan...",
     "weixinPollError": "Connection unstable, retrying...",
+    "weixinReconnectNotice": "Due to iLink protocol limitations, after each reconnection you must send a message to the bot before event triggers take effect.",
     "connect": "Connect",
     "disconnect": "Disconnect",
     "test": "Test Connection",
@@ -1980,6 +2288,17 @@
     "apiKeyKeepCurrent": "Leave blank to keep current",
     "agentTypes": "Agent Types",
     "agentTypesRequired": "At least one agent type is required.",
+    "agentType": "Agent Type",
+    "agentTypeRequired": "Agent type is required.",
+    "agentTypeImmutableHint": "Agent type cannot be changed after creation.",
+    "model": "Model",
+    "modelPlaceholderCodex": "gpt-5 / gpt-5-mini",
+    "modelPlaceholderGemini": "gemini-3-pro-preview",
+    "claudeMainModel": "Main Model",
+    "claudeReasoningModel": "Reasoning Model (thinking)",
+    "claudeHaikuDefaultModel": "Default Haiku Model",
+    "claudeSonnetDefaultModel": "Default Sonnet Model",
+    "claudeOpusDefaultModel": "Default Opus Model",
     "nameRequired": "Provider name is required.",
     "apiUrlRequired": "API URL is required.",
     "apiKeyRequired": "API Key is required.",
@@ -2040,5 +2359,184 @@
       "disableFailed": "Failed to disable expert",
       "openFolderFailed": "Failed to open folder"
     }
+  },
+  "QuickMessagesSettings": {
+    "title": "Quick Messages",
+    "description": "Manage reusable message snippets. Drag to reorder.",
+    "loading": "Loading quick messages…",
+    "emptyList": "No quick messages yet. Click \"New\" to create one.",
+    "emptySelection": "Select a quick message to edit.",
+    "searchPlaceholder": "Search by title or content",
+    "untitled": "Untitled",
+    "actions": {
+      "new": "New",
+      "save": "Save",
+      "delete": "Delete",
+      "dragSort": "Drag to reorder",
+      "dragSortMessage": "Drag to reorder quick message: {name}"
+    },
+    "fields": {
+      "title": "Title",
+      "titlePlaceholder": "Give this message a short title",
+      "content": "Content",
+      "contentPlaceholder": "Write the message content here"
+    },
+    "confirmDelete": {
+      "title": "Delete quick message?",
+      "message": "This will permanently delete \"{name}\". Are you sure?",
+      "cancel": "Cancel",
+      "confirm": "Delete"
+    },
+    "toasts": {
+      "loadFailed": "Failed to load quick messages",
+      "createFailed": "Failed to create quick message",
+      "saveFailed": "Failed to save quick message",
+      "deleteFailed": "Failed to delete quick message",
+      "saveOrderFailed": "Failed to save order",
+      "created": "Quick message created",
+      "saved": "Quick message saved",
+      "deleted": "Quick message deleted"
+    }
+  },
+  "Pet": {
+    "menu": {
+      "scale": "Scale",
+      "openManager": "Manage pets",
+      "close": "Close"
+    },
+    "loadError": "Failed to load pet",
+    "missingPetIdParam": "No pet selected",
+    "summonButton": "Pet",
+    "manager": {
+      "title": "Pets",
+      "description": "Floating desktop companions powered by Codex-compatible sprite sheets.",
+      "addPet": "Add pet",
+      "importFromCodex": "Import from Codex",
+      "noPets": "No pets yet. Add one or import from Codex.",
+      "setActive": "Set active",
+      "active": "Active",
+      "edit": "Edit",
+      "delete": "Delete",
+      "deleteConfirm": "Delete pet \"{name}\"? It will be removed from disk.",
+      "summon": "Summon pet window",
+      "openCodexHelp": "Codex pets must be installed under ~/.codex/pets/. None found.",
+      "specRequirement": "Spritesheet must be 1536x1872 PNG or WebP with transparency.",
+      "form": {
+        "id": "Pet ID",
+        "idHelp": "Lowercase letters, digits, '-' and '_'. Max 64 chars.",
+        "displayName": "Display name",
+        "description": "Description (optional)",
+        "spritesheet": "Spritesheet",
+        "chooseFile": "Choose file",
+        "replaceFile": "Replace spritesheet",
+        "saveCreate": "Add pet",
+        "saveUpdate": "Save changes",
+        "cancel": "Cancel"
+      },
+      "errors": {
+        "missingId": "Pet id is required",
+        "missingName": "Display name is required",
+        "missingSpritesheet": "Spritesheet is required",
+        "addFailed": "Failed to add pet",
+        "updateFailed": "Failed to update pet",
+        "deleteFailed": "Failed to delete pet",
+        "loadFailed": "Failed to load pets",
+        "setActiveFailed": "Failed to set active pet",
+        "summonFailed": "Failed to summon pet window"
+      }
+    },
+    "import": {
+      "title": "Import from Codex",
+      "subtitle": "These pets are available under ~/.codex/pets/.",
+      "selectAll": "Select all",
+      "alreadyImported": "Already imported",
+      "renameOnConflict": "Rename conflicts with -imported suffix",
+      "import": "Import selected",
+      "noneFound": "No importable Codex pets found.",
+      "imported": "Imported successfully",
+      "failed": "Import failed",
+      "close": "Close"
+    },
+    "marketplace": {
+      "openMarketplace": "Pet marketplace",
+      "title": "Pet marketplace",
+      "search": "Search pets",
+      "kindFilter": {
+        "all": "All",
+        "object": "Object",
+        "animal": "Animal",
+        "person": "Person",
+        "creature": "Creature"
+      },
+      "sortFilter": {
+        "latest": "Latest",
+        "popular": "Popular",
+        "views": "Most viewed"
+      },
+      "refresh": "Refresh",
+      "install": "Install",
+      "installing": "Installing",
+      "reinstall": "Reinstall",
+      "reinstallConfirm": "Replace local pet \"{name}\"? Existing data will be overwritten.",
+      "cancel": "Cancel",
+      "stats": {
+        "views": "Views",
+        "downloads": "Downloads",
+        "likes": "Likes"
+      },
+      "actions": {
+        "idle": "Idle",
+        "running_right": "Run right",
+        "running_left": "Run left",
+        "waving": "Wave",
+        "jumping": "Jump",
+        "failed": "Fail",
+        "waiting": "Wait",
+        "running": "Run",
+        "review": "Review"
+      },
+      "page": "Page {page} of {total}",
+      "prev": "Previous",
+      "next": "Next",
+      "empty": "No pets match this filter.",
+      "successInstalled": "Installed \"{name}\"",
+      "errors": {
+        "loadFailed": "Failed to load marketplace",
+        "installFailed": "Failed to install pet",
+        "alreadyInstalled": "Pet already exists locally"
+      }
+    }
+  },
+  "RemoteWorkspace": {
+    "openRemoteWorkspace": "Open remote workspace",
+    "manage": "Manage remote workspace",
+    "manageTitle": "Remote Workspace connections",
+    "empty": "No remote connections",
+    "searchPlaceholder": "Search remote workspaces",
+    "orderFailed": "Failed to save remote workspace order",
+    "dragSort": "Drag to sort",
+    "dragSortConnection": "Drag to sort {name}",
+    "newConnection": "New connection",
+    "loading": "Loading",
+    "loadingConnection": "Loading remote connection",
+    "name": "Name",
+    "baseUrl": "Service URL",
+    "token": "Access token",
+    "save": "Save",
+    "delete": "Delete",
+    "confirmDelete": {
+      "title": "Delete remote connection?",
+      "message": "This will remove \"{name}\" from this device. This action cannot be undone.",
+      "cancel": "Cancel",
+      "confirm": "Delete"
+    },
+    "saved": "Remote connection saved.",
+    "deleted": "Remote connection deleted.",
+    "loadFailed": "Failed to load remote connections",
+    "saveFailed": "Failed to save remote connection",
+    "deleteFailed": "Failed to delete remote connection",
+    "openFailed": "Failed to open remote workspace",
+    "connectionLoadFailed": "Failed to load remote connection: {message}",
+    "connectionExpired": "Remote connection \"{name}\" is expired. Update its token and reload this window."
   }
 }

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Globe,
   Loader2,
+  Plus,
   RefreshCw,
   Search,
   ShieldCheck,
@@ -46,6 +47,8 @@ import {
   mcpSearchMarketplace,
   mcpUpsertLocalServer,
 } from "@/lib/api"
+import { toLocalizedErrorMessage } from "@/lib/app-error"
+import { normalizeMcpType } from "@/lib/mcp-types"
 import { cn } from "@/lib/utils"
 import type {
   LocalMcpServer,
@@ -61,7 +64,18 @@ type LeftTab = "local" | "market"
 type Selection =
   | { kind: "local"; id: string }
   | { kind: "market"; id: string }
+  | { kind: "draft" }
   | null
+
+const DEFAULT_DRAFT_SPEC = JSON.stringify(
+  {
+    type: "stdio",
+    command: "",
+    args: [],
+  },
+  null,
+  2
+)
 
 type McpTranslator = (
   key: string,
@@ -107,9 +121,10 @@ function specSummary(spec: Record<string, unknown>, t: McpTranslator): string {
 }
 
 function protocolBadgeLabel(protocol: string, t: McpTranslator): string {
-  if (protocol === "stdio") return t("protocol.stdio")
-  if (protocol === "sse") return "SSE"
-  if (protocol === "http") return "HTTP"
+  const canonical = normalizeMcpType(protocol)
+  if (canonical === "stdio") return t("protocol.stdio")
+  if (canonical === "sse") return "SSE"
+  if (canonical === "http") return "HTTP"
   return protocol
 }
 
@@ -197,7 +212,7 @@ function parseParameterValues(
       try {
         values[field.key] = JSON.parse(raw)
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = toLocalizedErrorMessage(err, t)
         return {
           values: {},
           error: t("errors.fieldInvalidJson", {
@@ -246,6 +261,26 @@ function selectedAppsFromDraft(
   )
 }
 
+function detectEnvOnRemote(text: string): boolean {
+  const trimmed = text.trim()
+  if (!trimmed) return false
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(trimmed)
+  } catch {
+    return false
+  }
+  if (!isObject(parsed)) return false
+
+  const rawType = typeof parsed.type === "string" ? parsed.type : ""
+  const canonical = normalizeMcpType(rawType)
+  if (canonical !== "http" && canonical !== "sse") return false
+
+  const env = parsed.env
+  if (!isObject(env)) return false
+  return Object.keys(env).length > 0
+}
+
 function parseJsonObject(
   text: string,
   name: string,
@@ -260,7 +295,7 @@ function parseJsonObject(
   try {
     parsed = JSON.parse(trimmed)
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
+    const message = toLocalizedErrorMessage(err, t)
     throw new Error(t("errors.jsonInvalid", { name, message }))
   }
 
@@ -273,7 +308,7 @@ function parseJsonObject(
 
 export function McpSettings() {
   const t = useTranslations("McpSettings")
-  const mcpT = t as unknown as McpTranslator
+  const mcpT = useMemo(() => t as unknown as McpTranslator, [t])
   const [loading, setLoading] = useState(true)
   const [loadingError, setLoadingError] = useState<string | null>(null)
 
@@ -314,6 +349,12 @@ export function McpSettings() {
     Record<McpAppType, boolean>
   >(appsToDraft(APP_OPTIONS.map((x) => x.value)))
 
+  const [draftServerId, setDraftServerId] = useState("")
+  const [draftSpecText, setDraftSpecText] = useState(DEFAULT_DRAFT_SPEC)
+  const [draftAppsDraft, setDraftAppsDraft] = useState<
+    Record<McpAppType, boolean>
+  >(appsToDraft(APP_OPTIONS.map((x) => x.value)))
+
   const [runningAction, setRunningAction] = useState<string | null>(null)
 
   const selectedLocal = useMemo(() => {
@@ -336,6 +377,15 @@ export function McpSettings() {
       null
     )
   }, [marketDetail, selectedInstallOptionId])
+
+  const draftEnvOnRemote = useMemo(
+    () => detectEnvOnRemote(draftSpecText),
+    [draftSpecText]
+  )
+  const localEnvOnRemote = useMemo(
+    () => detectEnvOnRemote(localSpecText),
+    [localSpecText]
+  )
 
   const filteredLocalServers = useMemo(() => {
     const q = localFilter.trim().toLowerCase()
@@ -372,12 +422,12 @@ export function McpSettings() {
         setSelection({ kind: "local", id: servers[0].id })
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = toLocalizedErrorMessage(err, mcpT)
       setLoadingError(message)
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [mcpT])
 
   useEffect(() => {
     loadInitial().catch((err) => {
@@ -426,7 +476,7 @@ export function McpSettings() {
         setMarketSpecDirty(false)
       })
       .catch((err) => {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = toLocalizedErrorMessage(err, mcpT)
         setMarketDetailError(message)
         setMarketDetail(null)
         setMarketSpecText("")
@@ -437,7 +487,7 @@ export function McpSettings() {
       .finally(() => {
         setMarketDetailLoading(false)
       })
-  }, [selection, selectedMarketItem])
+  }, [selection, selectedMarketItem, mcpT])
 
   const executeSearch = useCallback(
     async ({
@@ -470,13 +520,13 @@ export function McpSettings() {
           })
         }
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = toLocalizedErrorMessage(err, mcpT)
         setSearchError(message)
       } finally {
         setSearching(false)
       }
     },
-    []
+    [mcpT]
   )
 
   useEffect(() => {
@@ -510,13 +560,13 @@ export function McpSettings() {
           return null
         })
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = toLocalizedErrorMessage(err, mcpT)
         toast.error(t("toasts.uninstallFailed", { message }))
       } finally {
         setRunningAction(null)
       }
     },
-    [refreshLocalServers, t]
+    [refreshLocalServers, t, mcpT]
   )
 
   const saveLocalServer = useCallback(async () => {
@@ -530,7 +580,7 @@ export function McpSettings() {
         mcpT
       )
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = toLocalizedErrorMessage(err, mcpT)
       toast.error(message)
       return
     }
@@ -560,7 +610,7 @@ export function McpSettings() {
         setLocalAppsDraft(appsToDraft(updated.apps))
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = toLocalizedErrorMessage(err, mcpT)
       toast.error(t("toasts.saveFailed", { message }))
     } finally {
       setRunningAction(null)
@@ -571,6 +621,79 @@ export function McpSettings() {
     mcpT,
     refreshLocalServers,
     selectedLocal,
+    t,
+  ])
+
+  const handleCreateDraft = useCallback(() => {
+    setLeftTab("local")
+    setSelection({ kind: "draft" })
+    setDraftServerId("")
+    setDraftSpecText(DEFAULT_DRAFT_SPEC)
+    setDraftAppsDraft(appsToDraft(APP_OPTIONS.map((item) => item.value)))
+  }, [])
+
+  const saveDraft = useCallback(async () => {
+    const trimmedId = draftServerId.trim()
+    if (!trimmedId) {
+      toast.error(t("toasts.serverIdRequired"))
+      return
+    }
+
+    if (installedServers.some((server) => server.id === trimmedId)) {
+      toast.error(t("toasts.serverIdExists", { id: trimmedId }))
+      return
+    }
+
+    let parsedSpec: Record<string, unknown>
+    try {
+      parsedSpec = parseJsonObject(
+        draftSpecText,
+        t("jsonNames.localConfig"),
+        mcpT
+      )
+    } catch (err) {
+      const message = toLocalizedErrorMessage(err, mcpT)
+      toast.error(message)
+      return
+    }
+
+    const apps = normalizeApps(selectedAppsFromDraft(draftAppsDraft))
+    if (apps.length === 0) {
+      toast.error(t("toasts.selectAtLeastOneApp"))
+      return
+    }
+
+    const action = `create:${trimmedId}`
+    setRunningAction(action)
+
+    try {
+      await mcpUpsertLocalServer({
+        serverId: trimmedId,
+        spec: parsedSpec,
+        apps,
+      })
+      const next = await refreshLocalServers()
+      toast.success(t("toasts.created"))
+
+      const created = next.find((item) => item.id === trimmedId)
+      if (created) {
+        setSelection({ kind: "local", id: created.id })
+      } else {
+        setSelection(null)
+      }
+    } catch (err) {
+      const message = toLocalizedErrorMessage(err, mcpT)
+      toast.error(t("toasts.saveFailed", { message }))
+    } finally {
+      setRunningAction(null)
+    }
+  }, [
+    draftAppsDraft,
+    draftServerId,
+    draftSpecText,
+    installedServers,
+    mcpT,
+    refreshLocalServers,
     t,
   ])
 
@@ -633,7 +756,7 @@ export function McpSettings() {
           mcpT
         )
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = toLocalizedErrorMessage(err, mcpT)
         toast.error(message)
         return
       }
@@ -670,7 +793,7 @@ export function McpSettings() {
         setSelection({ kind: "local", id: installed.id })
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = toLocalizedErrorMessage(err, mcpT)
       toast.error(t("toasts.installFailed", { message }))
     } finally {
       setRunningAction(null)
@@ -893,7 +1016,7 @@ export function McpSettings() {
         </DialogContent>
       </Dialog>
 
-      <div className="h-full min-h-0 grid grid-cols-1 gap-4 lg:grid-cols-[360px_1fr]">
+      <div className="h-full min-h-0 grid grid-cols-1 gap-4 p-3 md:p-4 lg:grid-cols-[360px_1fr]">
         <section className="min-h-0 rounded-xl border bg-card p-3">
           <Tabs
             value={leftTab}
@@ -909,24 +1032,16 @@ export function McpSettings() {
               </TabsTrigger>
             </TabsList>
 
-            <TabsContent value="local" className="h-full min-h-0 pt-2">
-              <div className="flex items-center gap-2 pb-2">
+            <TabsContent
+              value="local"
+              className="h-full min-h-0 pt-2 flex flex-col"
+            >
+              <div className="pb-2">
                 <Input
                   value={localFilter}
                   onChange={(event) => setLocalFilter(event.target.value)}
                   placeholder={t("local.filterPlaceholder")}
                 />
-                <Button
-                  size="icon"
-                  variant="outline"
-                  onClick={() => {
-                    refreshLocalServers().catch((err) => {
-                      console.error("[Settings] refresh local MCP failed:", err)
-                    })
-                  }}
-                >
-                  <RefreshCw className="h-3.5 w-3.5" />
-                </Button>
               </div>
 
               {loadingError ? (
@@ -935,7 +1050,7 @@ export function McpSettings() {
                 </div>
               ) : null}
 
-              <div className="h-[calc(100%-48px)] overflow-auto space-y-1">
+              <div className="flex-1 min-h-0 overflow-auto space-y-1">
                 {filteredLocalServers.length === 0 ? (
                   <div className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
                     {t("local.empty")}
@@ -986,6 +1101,30 @@ export function McpSettings() {
                     )
                   })
                 )}
+              </div>
+
+              <div className="border-t pt-2 mt-2 flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="flex-1"
+                  onClick={() => {
+                    refreshLocalServers().catch((err) => {
+                      console.error("[Settings] refresh local MCP failed:", err)
+                    })
+                  }}
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  {t("actions.refresh")}
+                </Button>
+                <Button
+                  size="sm"
+                  className="flex-1"
+                  onClick={handleCreateDraft}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  {t("actions.newMcp")}
+                </Button>
               </div>
             </TabsContent>
 
@@ -1169,6 +1308,103 @@ export function McpSettings() {
         </section>
 
         <section className="min-h-0 rounded-xl border bg-card p-4 overflow-auto">
+          {selection?.kind === "draft" ? (
+            <div className="space-y-4">
+              <div>
+                <h2 className="text-base font-semibold">
+                  {t("local.draftTitle")}
+                </h2>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {t("local.draftDescription")}
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <div className="text-xs text-muted-foreground">
+                  {t("local.serverIdLabel")}
+                </div>
+                <Input
+                  value={draftServerId}
+                  onChange={(event) => setDraftServerId(event.target.value)}
+                  placeholder={t("local.serverIdPlaceholder")}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <div className="text-xs text-muted-foreground">
+                  {t("local.enabledApps")}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {APP_OPTIONS.map((app) => (
+                    <label
+                      key={app.value}
+                      className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={draftAppsDraft[app.value]}
+                        onChange={(event) => {
+                          setDraftAppsDraft((prev) => ({
+                            ...prev,
+                            [app.value]: event.target.checked,
+                          }))
+                        }}
+                      />
+                      {app.label}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="text-xs text-muted-foreground">
+                  {t("local.configJson")}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {t("local.typeHint")}
+                </p>
+                <Textarea
+                  value={draftSpecText}
+                  onChange={(event) => setDraftSpecText(event.target.value)}
+                  className="min-h-[360px] font-mono text-xs"
+                />
+              </div>
+
+              {draftEnvOnRemote ? (
+                <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-600 dark:text-amber-400">
+                  {t("local.envOnRemoteWarning")}
+                </div>
+              ) : null}
+
+              <div className="flex justify-end gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => setSelection(null)}
+                  disabled={Boolean(runningAction?.startsWith("create:"))}
+                >
+                  {t("actions.cancel")}
+                </Button>
+                <Button
+                  onClick={() => {
+                    saveDraft().catch((err) => {
+                      console.error("[Settings] create local MCP failed:", err)
+                    })
+                  }}
+                  disabled={Boolean(runningAction?.startsWith("create:"))}
+                >
+                  {runningAction?.startsWith("create:") ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      {t("actions.creating")}
+                    </>
+                  ) : (
+                    t("actions.create")
+                  )}
+                </Button>
+              </div>
+            </div>
+          ) : null}
+
           {selection?.kind === "local" && selectedLocal ? (
             <div className="space-y-4">
               <div className="flex items-start justify-between gap-3">
@@ -1230,12 +1466,21 @@ export function McpSettings() {
                 <div className="text-xs text-muted-foreground">
                   {t("local.configJson")}
                 </div>
+                <p className="text-xs text-muted-foreground">
+                  {t("local.typeHint")}
+                </p>
                 <Textarea
                   value={localSpecText}
                   onChange={(event) => setLocalSpecText(event.target.value)}
                   className="min-h-[360px] font-mono text-xs"
                 />
               </div>
+
+              {localEnvOnRemote ? (
+                <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-600 dark:text-amber-400">
+                  {t("local.envOnRemoteWarning")}
+                </div>
+              ) : null}
 
               <div className="flex justify-end">
                 <Button

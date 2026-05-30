@@ -34,10 +34,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { isDesktop, openFileDialog } from "@/lib/platform"
+import { isDesktop, openFileDialog, closeCurrentWindow } from "@/lib/platform"
+import { getActiveRemoteConnectionId } from "@/lib/transport"
 import {
   createShadcnProject,
-  openFolderWindow,
+  openFolderInWorkspace,
   detectPackageManager,
 } from "@/lib/api"
 import { extractAppCommandError, toErrorMessage } from "@/lib/app-error"
@@ -98,7 +99,11 @@ export function CreateProjectDialog({
   }, [open, packageManager, checkPackageManager])
 
   const handleBrowse = async () => {
-    if (isDesktop()) {
+    // Project scaffolding runs on whichever host hosts the workspace —
+    // remote when bound to a remote workspace, local otherwise. The
+    // picker must match that host, so we only use the native Tauri
+    // dialog when we are truly on a local desktop workspace.
+    if (isDesktop() && getActiveRemoteConnectionId() === null) {
       const result = await openFileDialog({ directory: true, multiple: false })
       if (!result) return
       const selected = Array.isArray(result) ? result[0] : result
@@ -122,7 +127,26 @@ export function CreateProjectDialog({
       toast.success(t("toasts.createSuccess"))
       onOpenChange(false)
       resetForm()
-      await openFolderWindow(projectPath)
+      // The project is created; handing it off to the workspace (the backend
+      // upserts the folder and broadcasts it so the workspace window opens a
+      // draft tab) and closing this launcher is best-effort. A failure here
+      // must not be reported as a creation failure.
+      try {
+        await openFolderInWorkspace(projectPath)
+        await closeCurrentWindow()
+      } catch (handoffErr) {
+        // The project exists and was persisted as open, so it will surface in
+        // the workspace on its next load — only the live auto-open failed.
+        // Tell the user (with the path) instead of failing silently, but never
+        // report this as a creation failure.
+        console.error(
+          "[CreateProjectDialog] failed to hand project off to workspace:",
+          handoffErr
+        )
+        toast.warning(t("toasts.openWorkspaceFailed"), {
+          description: projectPath,
+        })
+      }
     } catch (err) {
       const appErr = extractAppCommandError(err)
       const message =

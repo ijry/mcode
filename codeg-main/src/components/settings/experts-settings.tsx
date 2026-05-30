@@ -44,7 +44,7 @@ import {
   expertsOpenCentralDir,
   expertsReadContent,
   expertsUnlinkFromAgent,
-  openFolderWindow,
+  openFolder,
 } from "@/lib/api"
 import { invalidateAgentExpertsCache } from "@/hooks/use-agent-experts"
 import type {
@@ -54,6 +54,7 @@ import type {
   ExpertLinkState,
   ExpertListItem,
 } from "@/lib/types"
+import { toErrorMessage } from "@/lib/app-error"
 
 const ICON_MAP: Record<string, LucideIcon> = {
   Lightbulb,
@@ -203,7 +204,7 @@ export function ExpertsSettings() {
       setExperts(expertList)
       setAgents(agentList)
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = toErrorMessage(err)
       setLoadError(message)
       setExperts([])
       setAgents([])
@@ -315,7 +316,7 @@ export function ExpertsSettings() {
       })
       .catch((err) => {
         if (cancelled) return
-        const message = err instanceof Error ? err.message : String(err)
+        const message = toErrorMessage(err)
         toast.error(t("toasts.loadFailed"), { description: message })
       })
       .finally(() => {
@@ -352,7 +353,7 @@ export function ExpertsSettings() {
           toast.success(t("toasts.disabled"))
         }
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = toErrorMessage(err)
         toast.error(
           enable ? t("toasts.enableFailed") : t("toasts.disableFailed"),
           {
@@ -369,9 +370,9 @@ export function ExpertsSettings() {
   const handleOpenCentralDir = useCallback(async () => {
     try {
       const path = await expertsOpenCentralDir()
-      await openFolderWindow(path)
+      await openFolder(path)
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = toErrorMessage(err)
       toast.error(t("toasts.openFolderFailed"), { description: message })
     }
   }, [t])
@@ -410,7 +411,7 @@ export function ExpertsSettings() {
   const SelectedIcon = selectedIcon
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="h-full flex flex-col p-3 md:p-4">
       <div className="flex items-center justify-between gap-3 pb-4">
         <div>
           <h2 className="text-base font-semibold">{t("title")}</h2>

@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core"
+import { getCurrentEffectiveAppLocale } from "./i18n"
 import type {
   AgentType,
   ConversationSummary,
@@ -19,7 +20,7 @@ import type {
   FolderDetail,
   DbConversationSummary,
   ImportResult,
-  OpenedConversation,
+  OpenedTab,
   GitStatusEntry,
   GitBranchList,
   GitPullResult,
@@ -43,8 +44,12 @@ import type {
   FileSaveResult,
   WorkspaceSnapshotResponse,
   GitLogResult,
+  AvailableTerminalShells,
+  AppLocale,
   SystemLanguageSettings,
   SystemProxySettings,
+  SystemRenderingSettings,
+  SystemTerminalSettings,
   GitCredentials,
   GitDetectResult,
   GitSettings,
@@ -133,6 +138,7 @@ export async function acpCancel(connectionId: string): Promise<void> {
 export interface ForkResult {
   forkedSessionId: string
   originalSessionId: string
+  siblingConversationId: number
 }
 
 export async function acpFork(connectionId: string): Promise<ForkResult> {
@@ -175,9 +181,14 @@ export async function acpClearBinaryCache(agentType: AgentType): Promise<void> {
 
 export async function acpDownloadAgentBinary(
   agentType: AgentType,
-  taskId: string
+  taskId: string,
+  version?: string | null
 ): Promise<void> {
-  return invoke("acp_download_agent_binary", { agentType, taskId })
+  return invoke("acp_download_agent_binary", {
+    agentType,
+    version: version ?? null,
+    taskId,
+  })
 }
 
 export async function acpDetectAgentLocalVersion(
@@ -189,11 +200,15 @@ export async function acpDetectAgentLocalVersion(
 export async function acpPrepareNpxAgent(
   agentType: AgentType,
   registryVersion: string | null | undefined,
-  taskId: string
+  taskId: string,
+  cleanFirst: boolean = false,
+  version?: string | null
 ): Promise<string> {
   return invoke("acp_prepare_npx_agent", {
     agentType,
     registryVersion: registryVersion ?? null,
+    version: version ?? null,
+    cleanFirst,
     taskId,
   })
 }
@@ -315,6 +330,38 @@ export async function updateSystemLanguageSettings(
   settings: SystemLanguageSettings
 ): Promise<SystemLanguageSettings> {
   return invoke("update_system_language_settings", { settings })
+}
+
+export async function setTrayLocale(locale: AppLocale): Promise<void> {
+  return invoke("set_tray_locale", { locale })
+}
+
+export async function getSystemTerminalSettings(): Promise<SystemTerminalSettings> {
+  return invoke("get_system_terminal_settings")
+}
+
+export async function updateSystemTerminalSettings(
+  settings: SystemTerminalSettings
+): Promise<SystemTerminalSettings> {
+  return invoke("update_system_terminal_settings", { settings })
+}
+
+export async function getAvailableTerminalShells(): Promise<AvailableTerminalShells> {
+  return invoke("get_available_terminal_shells")
+}
+
+export async function probeTerminalShellPath(path: string): Promise<boolean> {
+  return invoke("probe_terminal_shell_path", { path })
+}
+
+export async function getSystemRenderingSettings(): Promise<SystemRenderingSettings> {
+  return invoke("get_system_rendering_settings")
+}
+
+export async function updateSystemRenderingSettings(
+  settings: SystemRenderingSettings
+): Promise<SystemRenderingSettings> {
+  return invoke("update_system_rendering_settings", { settings })
 }
 
 // --- Version Control ---
@@ -470,20 +517,56 @@ export async function getFolder(folderId: number): Promise<FolderDetail> {
   return invoke("get_folder", { folderId })
 }
 
-export async function listFolderConversations(params: {
-  folder_id: number
+export async function listAllConversations(params?: {
+  folder_ids?: number[] | null
   agent_type?: AgentType | null
   search?: string | null
   sort_by?: string | null
   status?: string | null
+  include_children?: boolean | null
 }): Promise<DbConversationSummary[]> {
-  return invoke("list_folder_conversations", {
-    folderId: params.folder_id,
-    agentType: params.agent_type ?? null,
-    search: params.search ?? null,
-    sortBy: params.sort_by ?? null,
-    status: params.status ?? null,
+  return invoke("list_all_conversations", {
+    folderIds: params?.folder_ids ?? null,
+    agentType: params?.agent_type ?? null,
+    search: params?.search ?? null,
+    sortBy: params?.sort_by ?? null,
+    status: params?.status ?? null,
+    includeChildren: params?.include_children ?? null,
   })
+}
+
+export async function listChildConversations(
+  parentConversationId: number
+): Promise<DbConversationSummary[]> {
+  return invoke("list_child_conversations", {
+    parentConversationId,
+  })
+}
+
+export async function listOpenedTabs(): Promise<OpenedTab[]> {
+  return invoke("list_opened_tabs")
+}
+
+export async function saveOpenedTabs(items: OpenedTab[]): Promise<void> {
+  return invoke("save_opened_tabs", { items })
+}
+
+export async function listOpenFolderDetails(): Promise<FolderDetail[]> {
+  return invoke("list_open_folder_details")
+}
+
+export async function openFolderById(folderId: number): Promise<FolderDetail> {
+  return invoke("open_folder_by_id", { folderId })
+}
+
+export async function removeFolderFromWorkspace(
+  folderId: number
+): Promise<void> {
+  return invoke("remove_folder_from_workspace", { folderId })
+}
+
+export async function reorderFolders(ids: number[]): Promise<void> {
+  return invoke("reorder_folders", { ids })
 }
 
 export async function importLocalConversations(
@@ -496,23 +579,6 @@ export async function getFolderConversation(
   conversationId: number
 ): Promise<DbConversationDetail> {
   return invoke("get_folder_conversation", { conversationId })
-}
-
-export async function saveFolderOpenedConversations(
-  folderId: number,
-  items: OpenedConversation[]
-): Promise<void> {
-  return invoke("save_folder_opened_conversations", { folderId, items })
-}
-
-export async function setFolderParentBranch(
-  path: string,
-  parentBranch: string | null
-): Promise<void> {
-  return invoke("set_folder_parent_branch", {
-    path,
-    parentBranch,
-  })
 }
 
 export async function removeFolderFromHistory(path: string): Promise<void> {
@@ -633,14 +699,6 @@ export async function gitRebase(
   return invoke("git_rebase", { path, branchName })
 }
 
-export async function gitDeleteBranch(
-  path: string,
-  branchName: string,
-  force = false
-): Promise<string> {
-  return invoke("git_delete_branch", { path, branchName, force })
-}
-
 export async function gitListConflicts(path: string): Promise<string[]> {
   return invoke("git_list_conflicts", { path })
 }
@@ -683,15 +741,22 @@ export async function openMergeWindow(
     folderId,
     operation,
     upstreamCommit: upstreamCommit ?? null,
+    locale: getCurrentEffectiveAppLocale(),
   })
 }
 
 export async function openStashWindow(folderId: number): Promise<void> {
-  return invoke("open_stash_window", { folderId })
+  return invoke("open_stash_window", {
+    folderId,
+    locale: getCurrentEffectiveAppLocale(),
+  })
 }
 
 export async function openPushWindow(folderId: number): Promise<void> {
-  return invoke("open_push_window", { folderId })
+  return invoke("open_push_window", {
+    folderId,
+    locale: getCurrentEffectiveAppLocale(),
+  })
 }
 
 export async function gitStashPush(
@@ -858,12 +923,15 @@ export async function gitAddFiles(
 
 // Window management commands
 
-export async function openFolderWindow(path: string): Promise<void> {
-  return invoke("open_folder_window", { path })
+export async function openFolder(path: string): Promise<FolderDetail> {
+  return invoke("open_folder", { path })
 }
 
 export async function openCommitWindow(folderId: number): Promise<void> {
-  return invoke("open_commit_window", { folderId })
+  return invoke("open_commit_window", {
+    folderId,
+    locale: getCurrentEffectiveAppLocale(),
+  })
 }
 
 export type SettingsSection =
@@ -885,15 +953,8 @@ export async function openSettingsWindow(
   return invoke("open_settings_window", {
     section: section ?? null,
     agentType: options?.agentType ?? null,
+    locale: getCurrentEffectiveAppLocale(),
   })
-}
-
-export async function listOpenFolders(): Promise<FolderHistoryEntry[]> {
-  return invoke("list_open_folders")
-}
-
-export async function focusFolderWindow(folderId: number): Promise<void> {
-  return invoke("focus_folder_window", { folderId })
 }
 
 // Conversation CRUD commands
@@ -922,16 +983,6 @@ export async function updateConversationTitle(
   title: string
 ): Promise<void> {
   return invoke("update_conversation_title", { conversationId, title })
-}
-
-export async function updateConversationExternalId(
-  conversationId: number,
-  externalId: string
-): Promise<void> {
-  return invoke("update_conversation_external_id", {
-    conversationId,
-    externalId,
-  })
 }
 
 export async function deleteConversation(
@@ -1138,11 +1189,13 @@ export async function gitReset(
 
 export async function terminalSpawn(
   workingDir: string,
+  shell?: string,
   initialCommand?: string,
   terminalId?: string
 ): Promise<string> {
   return invoke("terminal_spawn", {
     workingDir,
+    shell: shell ?? null,
     initialCommand: initialCommand ?? null,
     terminalId: terminalId ?? null,
   })

@@ -6,14 +6,21 @@
     "linux"
   ],
   "windows": [
-    "welcome",
-    "folder-*",
+    "main",
     "commit-*",
     "merge-*",
     "stash-*",
     "push-*",
     "settings",
-    "project-boot"
+    "project-boot",
+    "remote-project-boot-*",
+    "pet",
+    "remote-workspace-*",
+    "remote-settings-*",
+    "remote-commit-*",
+    "remote-merge-*",
+    "remote-stash-*",
+    "remote-push-*"
   ],
   "permissions": [
     "window-state:default"

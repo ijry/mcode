@@ -1,6 +1,18 @@
-import { getTransport } from "./transport"
+import {
+  getActiveRemoteConnectionId,
+  getShellTransport,
+  getTransport,
+  isDesktop,
+  isRemoteDesktopMode,
+  notifyRemoteDesktopUnauthorized,
+} from "./transport"
+import { getCodegToken, redirectToCodegLogin } from "./transport/web-auth"
+import { getCurrentEffectiveAppLocale } from "./i18n"
+import type { FolderThemeColor } from "./theme-presets"
 import type {
   AgentType,
+  AgentDelegationDefaults,
+  AgentOptionsSnapshot,
   ConversationSummary,
   ConversationDetail,
   DbConversationDetail,
@@ -8,6 +20,7 @@ import type {
   AgentStats,
   SidebarData,
   ConnectionInfo,
+  LiveSessionSnapshot,
   AcpAgentInfo,
   AcpAgentStatus,
   AgentSkillScope,
@@ -21,7 +34,7 @@ import type {
   FolderDetail,
   DbConversationSummary,
   ImportResult,
-  OpenedConversation,
+  OpenedTab,
   GitStatusEntry,
   GitBranchList,
   GitPullResult,
@@ -40,13 +53,18 @@ import type {
   PromptInputBlock,
   FileTreeNode,
   DirectoryEntry,
+  DirectoryItem,
+  UploadAttachmentResult,
   FilePreviewContent,
   FileEditContent,
   FileSaveResult,
   WorkspaceSnapshotResponse,
   GitLogResult,
+  AvailableTerminalShells,
   SystemLanguageSettings,
   SystemProxySettings,
+  SystemRenderingSettings,
+  SystemTerminalSettings,
   GitCredentials,
   GitDetectResult,
   PackageManagerInfo,
@@ -63,6 +81,7 @@ import type {
   ChatChannelMessageLog,
   ModelProviderInfo,
   PluginCheckSummary,
+  QuickMessage,
 } from "./types"
 
 export async function listConversations(params?: {
@@ -103,20 +122,31 @@ export async function getSidebarData(): Promise<SidebarData> {
 export async function acpConnect(
   agentType: AgentType,
   workingDir?: string,
-  sessionId?: string
+  sessionId?: string,
+  preferredModeId?: string | null,
+  preferredConfigValues?: Record<string, string> | null
 ): Promise<string> {
   return getTransport().call("acp_connect", {
     agentType,
     workingDir: workingDir ?? null,
     sessionId: sessionId ?? null,
+    preferredModeId: preferredModeId ?? null,
+    preferredConfigValues: preferredConfigValues ?? null,
   })
 }
 
 export async function acpPrompt(
   connectionId: string,
-  blocks: PromptInputBlock[]
+  blocks: PromptInputBlock[],
+  folderId: number | null = null,
+  conversationId: number | null = null
 ): Promise<void> {
-  return getTransport().call("acp_prompt", { connectionId, blocks })
+  return getTransport().call("acp_prompt", {
+    connectionId,
+    blocks,
+    folderId,
+    conversationId,
+  })
 }
 
 export async function acpSetMode(
@@ -145,6 +175,7 @@ export async function acpCancel(connectionId: string): Promise<void> {
 export interface ForkResult {
   forkedSessionId: string
   originalSessionId: string
+  siblingConversationId: number
 }
 
 export async function acpFork(connectionId: string): Promise<ForkResult> {
@@ -167,8 +198,28 @@ export async function acpDisconnect(connectionId: string): Promise<void> {
   return getTransport().call("acp_disconnect", { connectionId })
 }
 
+export async function acpTouchConnection(
+  connectionId: string
+): Promise<boolean> {
+  return getTransport().call("acp_touch_connection", { connectionId })
+}
+
 export async function acpListConnections(): Promise<ConnectionInfo[]> {
   return getTransport().call("acp_list_connections")
+}
+
+export async function acpGetSessionSnapshot(
+  connectionId: string
+): Promise<LiveSessionSnapshot | null> {
+  return getTransport().call("acp_get_session_snapshot", { connectionId })
+}
+
+export async function acpGetSessionSnapshotByConversation(
+  conversationId: number
+): Promise<LiveSessionSnapshot | null> {
+  return getTransport().call("acp_get_session_snapshot_by_conversation", {
+    conversationId,
+  })
 }
 
 export async function acpListAgents(): Promise<AcpAgentInfo[]> {
@@ -187,9 +238,14 @@ export async function acpClearBinaryCache(agentType: AgentType): Promise<void> {
 
 export async function acpDownloadAgentBinary(
   agentType: AgentType,
-  taskId: string
+  taskId: string,
+  version?: string | null
 ): Promise<void> {
-  return getTransport().call("acp_download_agent_binary", { agentType, taskId })
+  return getTransport().call("acp_download_agent_binary", {
+    agentType,
+    version: version ?? null,
+    taskId,
+  })
 }
 
 export async function acpDetectAgentLocalVersion(
@@ -201,11 +257,15 @@ export async function acpDetectAgentLocalVersion(
 export async function acpPrepareNpxAgent(
   agentType: AgentType,
   registryVersion: string | null | undefined,
-  taskId: string
+  taskId: string,
+  cleanFirst: boolean = false,
+  version?: string | null
 ): Promise<string> {
   return getTransport().call("acp_prepare_npx_agent", {
     agentType,
     registryVersion: registryVersion ?? null,
+    version: version ?? null,
+    cleanFirst,
     taskId,
   })
 }
@@ -455,6 +515,34 @@ export async function updateSystemLanguageSettings(
   return getTransport().call("update_system_language_settings", { settings })
 }
 
+export async function getSystemTerminalSettings(): Promise<SystemTerminalSettings> {
+  return getTransport().call("get_system_terminal_settings")
+}
+
+export async function updateSystemTerminalSettings(
+  settings: SystemTerminalSettings
+): Promise<SystemTerminalSettings> {
+  return getTransport().call("update_system_terminal_settings", { settings })
+}
+
+export async function getAvailableTerminalShells(): Promise<AvailableTerminalShells> {
+  return getTransport().call("get_available_terminal_shells")
+}
+
+export async function probeTerminalShellPath(path: string): Promise<boolean> {
+  return getTransport().call("probe_terminal_shell_path", { path })
+}
+
+export async function getSystemRenderingSettings(): Promise<SystemRenderingSettings> {
+  return getTransport().call("get_system_rendering_settings")
+}
+
+export async function updateSystemRenderingSettings(
+  settings: SystemRenderingSettings
+): Promise<SystemRenderingSettings> {
+  return getTransport().call("update_system_rendering_settings", { settings })
+}
+
 // --- Version Control ---
 
 export async function detectGit(): Promise<GitDetectResult> {
@@ -598,19 +686,76 @@ export async function getFolder(folderId: number): Promise<FolderDetail> {
   return getTransport().call("get_folder", { folderId })
 }
 
-export async function listFolderConversations(params: {
-  folder_id: number
+export async function listAllConversations(params?: {
+  folder_ids?: number[] | null
   agent_type?: AgentType | null
   search?: string | null
   sort_by?: string | null
   status?: string | null
+  include_children?: boolean | null
 }): Promise<DbConversationSummary[]> {
-  return getTransport().call("list_folder_conversations", {
-    folderId: params.folder_id,
-    agentType: params.agent_type ?? null,
-    search: params.search ?? null,
-    sortBy: params.sort_by ?? null,
-    status: params.status ?? null,
+  return getTransport().call("list_all_conversations", {
+    folderIds: params?.folder_ids ?? null,
+    agentType: params?.agent_type ?? null,
+    search: params?.search ?? null,
+    sortBy: params?.sort_by ?? null,
+    status: params?.status ?? null,
+    includeChildren: params?.include_children ?? null,
+  })
+}
+
+export async function listChildConversations(
+  parentConversationId: number
+): Promise<DbConversationSummary[]> {
+  return getTransport().call("list_child_conversations", {
+    parentConversationId,
+  })
+}
+
+export async function listOpenedTabs(): Promise<OpenedTab[]> {
+  return getTransport().call("list_opened_tabs")
+}
+
+export async function saveOpenedTabs(items: OpenedTab[]): Promise<void> {
+  return getTransport().call("save_opened_tabs", { items })
+}
+
+export async function listOpenFolderDetails(): Promise<FolderDetail[]> {
+  return getTransport().call("list_open_folder_details")
+}
+
+export async function listAllFolderDetails(): Promise<FolderDetail[]> {
+  return getTransport().call("list_all_folder_details")
+}
+
+export async function openFolderById(folderId: number): Promise<FolderDetail> {
+  return getTransport().call("open_folder_by_id", { folderId })
+}
+
+export async function removeFolderFromWorkspace(
+  folderId: number
+): Promise<void> {
+  return getTransport().call("remove_folder_from_workspace", { folderId })
+}
+
+export async function reorderFolders(ids: number[]): Promise<void> {
+  return getTransport().call("reorder_folders", { ids })
+}
+
+export async function updateFolderColor(
+  folderId: number,
+  color: FolderThemeColor
+): Promise<FolderDetail> {
+  return getTransport().call("update_folder_color", { folderId, color })
+}
+
+export async function updateFolderDefaultAgent(
+  folderId: number,
+  defaultAgentType: AgentType | null
+): Promise<FolderDetail> {
+  return getTransport().call("update_folder_default_agent", {
+    folderId,
+    defaultAgentType,
   })
 }
 
@@ -624,26 +769,6 @@ export async function getFolderConversation(
   conversationId: number
 ): Promise<DbConversationDetail> {
   return getTransport().call("get_folder_conversation", { conversationId })
-}
-
-export async function saveFolderOpenedConversations(
-  folderId: number,
-  items: OpenedConversation[]
-): Promise<void> {
-  return getTransport().call("save_folder_opened_conversations", {
-    folderId,
-    items,
-  })
-}
-
-export async function setFolderParentBranch(
-  path: string,
-  parentBranch: string | null
-): Promise<void> {
-  return getTransport().call("set_folder_parent_branch", {
-    path,
-    parentBranch,
-  })
 }
 
 export async function removeFolderFromHistory(path: string): Promise<void> {
@@ -779,9 +904,13 @@ export async function gitRebase(
 export async function gitDeleteBranch(
   path: string,
   branchName: string,
-  force = false
+  force: boolean = false
 ): Promise<string> {
-  return getTransport().call("git_delete_branch", { path, branchName, force })
+  return getTransport().call("git_delete_branch", {
+    path,
+    branchName,
+    force,
+  })
 }
 
 export async function gitDeleteRemoteBranch(
@@ -836,11 +965,14 @@ export async function openMergeWindow(
   operation: string,
   upstreamCommit?: string | null
 ): Promise<void> {
-  if (getTransport().isDesktop()) {
-    return getTransport().call("open_merge_window", {
+  const locale = getCurrentEffectiveAppLocale()
+  if (isDesktop()) {
+    return getShellTransport().call("open_merge_window", {
       folderId,
       operation,
       upstreamCommit: upstreamCommit ?? null,
+      locale,
+      remoteConnectionId: getActiveRemoteConnectionId(),
     })
   }
   const result = await getTransport().call<{ path: string }>(
@@ -849,29 +981,40 @@ export async function openMergeWindow(
       folderId,
       operation,
       upstreamCommit: upstreamCommit ?? null,
+      locale,
     }
   )
   window.open(result.path, `merge-${folderId}`)
 }
 
 export async function openStashWindow(folderId: number): Promise<void> {
-  if (getTransport().isDesktop()) {
-    return getTransport().call("open_stash_window", { folderId })
+  const locale = getCurrentEffectiveAppLocale()
+  if (isDesktop()) {
+    return getShellTransport().call("open_stash_window", {
+      folderId,
+      locale,
+      remoteConnectionId: getActiveRemoteConnectionId(),
+    })
   }
   const result = await getTransport().call<{ path: string }>(
     "open_stash_window",
-    { folderId }
+    { folderId, locale }
   )
   window.open(result.path, `stash-${folderId}`)
 }
 
 export async function openPushWindow(folderId: number): Promise<void> {
-  if (getTransport().isDesktop()) {
-    return getTransport().call("open_push_window", { folderId })
+  const locale = getCurrentEffectiveAppLocale()
+  if (isDesktop()) {
+    return getShellTransport().call("open_push_window", {
+      folderId,
+      locale,
+      remoteConnectionId: getActiveRemoteConnectionId(),
+    })
   }
   const result = await getTransport().call<{ path: string }>(
     "open_push_window",
-    { folderId }
+    { folderId, locale }
   )
   window.open(result.path, `push-${folderId}`)
 }
@@ -1053,32 +1196,22 @@ export async function gitAddFiles(
 
 // Window management commands
 
-export async function openFolderWindow(
-  path: string,
-  options?: { newWindow?: boolean }
-): Promise<void> {
-  if (getTransport().isDesktop()) {
-    return getTransport().call("open_folder_window", { path })
-  }
-  const entry = await getTransport().call<{ id: number }>(
-    "open_folder_window",
-    { path }
-  )
-  const url = `/folder?id=${entry.id}`
-  if (options?.newWindow) {
-    window.open(url, `folder-${entry.id}`)
-  } else {
-    window.location.href = url
-  }
+export async function openFolder(path: string): Promise<FolderDetail> {
+  return getTransport().call("open_folder", { path })
 }
 
 export async function openCommitWindow(folderId: number): Promise<void> {
-  if (getTransport().isDesktop()) {
-    return getTransport().call("open_commit_window", { folderId })
+  const locale = getCurrentEffectiveAppLocale()
+  if (isDesktop()) {
+    return getShellTransport().call("open_commit_window", {
+      folderId,
+      locale,
+      remoteConnectionId: getActiveRemoteConnectionId(),
+    })
   }
   const result = await getTransport().call<{ path: string }>(
     "open_commit_window",
-    { folderId }
+    { folderId, locale }
   )
   window.open(result.path, `commit-${folderId}`)
 }
@@ -1099,10 +1232,13 @@ export async function openSettingsWindow(
   section?: SettingsSection,
   options?: OpenSettingsWindowOptions
 ): Promise<void> {
-  if (getTransport().isDesktop()) {
-    return getTransport().call("open_settings_window", {
+  const locale = getCurrentEffectiveAppLocale()
+  if (isDesktop()) {
+    return getShellTransport().call("open_settings_window", {
       section: section ?? null,
       agentType: options?.agentType ?? null,
+      locale,
+      remoteConnectionId: getActiveRemoteConnectionId(),
     })
   }
   // Web mode: open in new window
@@ -1111,16 +1247,39 @@ export async function openSettingsWindow(
     {
       section: section ?? null,
       agentType: options?.agentType ?? null,
+      locale,
     }
   )
   window.open(result.path, `settings-${section ?? "general"}`)
 }
 
 export async function openProjectBootWindow(source?: string): Promise<void> {
-  if (getTransport().isDesktop()) {
-    return getTransport().call("open_project_boot_window", { source })
+  if (isDesktop()) {
+    return getShellTransport().call("open_project_boot_window", {
+      source,
+      locale: getCurrentEffectiveAppLocale(),
+      remoteConnectionId: getActiveRemoteConnectionId(),
+    })
   }
-  window.open("/project-boot", "project-boot")
+  if (typeof window !== "undefined") {
+    window.open("/project-boot", "project-boot")
+  }
+}
+
+// Cross-window handoff for the project launcher, which lives in its own
+// window/tab and can't reach the workspace's React state directly. The
+// backend upserts the folder and emits `folder://open-in-workspace` carrying
+// the FolderDetail through the shared EventEmitter; the transport layer routes
+// that to the right workspace window in every runtime (local Tauri bus, the
+// server's WebSocket broadcaster for web, and the remote server's broadcaster
+// for remote desktop), so only windows talking to this backend react. The
+// workspace subscribes via WorkspaceOpenFolderListener.
+export const FOLDER_OPEN_IN_WORKSPACE_EVENT = "folder://open-in-workspace"
+
+export async function openFolderInWorkspace(
+  path: string
+): Promise<FolderDetail> {
+  return getTransport().call("open_folder_in_workspace", { path })
 }
 
 export async function detectPackageManager(
@@ -1143,27 +1302,6 @@ export async function createShadcnProject(params: {
     packageManager: params.packageManager,
     targetDir: params.targetDir,
   })
-}
-
-export async function listOpenFolders(): Promise<FolderHistoryEntry[]> {
-  return getTransport().call("list_open_folders")
-}
-
-export async function focusFolderWindow(folderId: number): Promise<void> {
-  if (getTransport().isDesktop()) {
-    return getTransport().call("focus_folder_window", { folderId })
-  }
-  // Web mode: open empty string to focus existing named window without reload.
-  // If the window doesn't exist (was closed), open the folder page.
-  const win = window.open("", `folder-${folderId}`)
-  if (
-    !win ||
-    win.closed ||
-    !win.location.href ||
-    win.location.href === "about:blank"
-  ) {
-    window.open(`/folder?id=${folderId}`, `folder-${folderId}`)
-  }
 }
 
 // Conversation CRUD commands
@@ -1197,16 +1335,6 @@ export async function updateConversationTitle(
   return getTransport().call("update_conversation_title", {
     conversationId,
     title,
-  })
-}
-
-export async function updateConversationExternalId(
-  conversationId: number,
-  externalId: string
-): Promise<void> {
-  return getTransport().call("update_conversation_external_id", {
-    conversationId,
-    externalId,
   })
 }
 
@@ -1271,6 +1399,42 @@ export async function bootstrapFolderCommandsFromPackageJson(
   })
 }
 
+// Quick message management
+
+export async function quickMessagesList(): Promise<QuickMessage[]> {
+  return getTransport().call("quick_messages_list")
+}
+
+export async function quickMessagesCreate(params: {
+  title: string
+  content: string
+}): Promise<QuickMessage> {
+  return getTransport().call("quick_messages_create", {
+    title: params.title,
+    content: params.content,
+  })
+}
+
+export async function quickMessagesUpdate(params: {
+  id: number
+  title?: string
+  content?: string
+}): Promise<QuickMessage> {
+  return getTransport().call("quick_messages_update", {
+    id: params.id,
+    title: params.title ?? null,
+    content: params.content ?? null,
+  })
+}
+
+export async function quickMessagesDelete(id: number): Promise<void> {
+  return getTransport().call("quick_messages_delete", { id })
+}
+
+export async function quickMessagesReorder(ids: number[]): Promise<void> {
+  return getTransport().call("quick_messages_reorder", { ids })
+}
+
 // Directory browser (for web/server mode)
 
 export async function getHomeDirectory(): Promise<string> {
@@ -1281,6 +1445,577 @@ export async function listDirectoryEntries(
   path: string
 ): Promise<DirectoryEntry[]> {
   return getTransport().call("list_directory_entries", { path })
+}
+
+export async function listDirectoryWithFiles(
+  path: string
+): Promise<DirectoryItem[]> {
+  return getTransport().call("list_directory_with_files", { path })
+}
+
+// Hard ceiling for a single attachment, kept in lockstep with the server's
+// `UPLOAD_MAX_BYTES`. Aligned with axum's default multipart body limit (and
+// with the fact that anything larger won't fit a model context anyway).
+export const UPLOAD_MAX_BYTES = 2 * 1024 * 1024
+
+// `btoa` only accepts a binary string, and `String.fromCharCode(...bytes)`
+// hits the call-stack limit somewhere around a few hundred KB. Chunk the
+// buffer so a 2 MB upload encodes without blowing the stack.
+function arrayBufferToBase64(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf)
+  let binary = ""
+  const chunkSize = 0x8000
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const slice = bytes.subarray(i, i + chunkSize) as unknown as number[]
+    binary += String.fromCharCode.apply(null, slice)
+  }
+  return btoa(binary)
+}
+
+// i18n_key values the Rust upload layer stamps via `with_i18n` and that
+// the frontend branches on. MUST stay in lockstep with the Rust
+// constants `UPLOAD_I18N_KEY_TOO_LARGE` / `UPLOAD_I18N_KEY_NOT_A_FILE`
+// in `src-tauri/src/app_error.rs`. If either side renames the literal,
+// the Rust unit test
+// `commands::remote_proxy::tests::upload_i18n_keys_have_expected_values`
+// fails — that's the CI tripwire keeping the two languages aligned.
+export const UPLOAD_I18N_KEY_TOO_LARGE = "errors.upload.tooLarge"
+export const UPLOAD_I18N_KEY_NOT_A_FILE = "errors.upload.notAFile"
+export const UPLOAD_I18N_KEY_QUOTA_EXCEEDED = "errors.upload.quotaExceeded"
+
+// Structured error thrown by the upload functions when an attachment
+// would be empty (0 bytes). Callers should recognize it and silently
+// skip — attaching a zero-byte ResourceLink would be a no-op for the
+// agent and a confusing chip in the UI. Modeled as a real `Error`
+// subclass so it carries a proper stack trace through async pipelines
+// (a bare object literal would lose that), and so existing `instanceof
+// Error` catch-rendering in the UI doesn't see an undefined `message`.
+//
+// The `code` field is preserved for the legacy duck-type check path —
+// any callers still inspecting `.code === UPLOAD_ERROR_EMPTY` continue
+// to work, but new code should rely on `isEmptyAttachmentError` or
+// `instanceof EmptyAttachmentError`.
+export const UPLOAD_ERROR_EMPTY = "attachment_empty"
+
+export class EmptyAttachmentError extends Error {
+  readonly code = UPLOAD_ERROR_EMPTY
+  readonly fileName: string
+
+  constructor(fileName: string) {
+    super(`Empty file skipped: ${fileName}`)
+    this.name = "EmptyAttachmentError"
+    this.fileName = fileName
+  }
+}
+
+export function isEmptyAttachmentError(err: unknown): boolean {
+  if (err instanceof EmptyAttachmentError) return true
+  // Tolerate the older bare-object shape so anything thrown through an
+  // IPC boundary (which strips the class identity) still gets caught.
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    "code" in err &&
+    (err as { code?: string }).code === UPLOAD_ERROR_EMPTY
+  )
+}
+
+// Upload a single attachment to the server.
+//
+// Web mode: streams the file via multipart/form-data to the same origin the
+// page was served from. Desktop + remote workspace: routes through the Rust
+// `remote_upload_attachment` command, because the webview's `fetch` can't
+// hit a plain `http://` remote (mixed-content rules block secure-context
+// requests). Returns the server-side absolute path so the caller can attach
+// it as a `file://` ResourceLink — identical shape on both transports.
+export async function uploadAttachment(
+  file: File,
+  sessionId?: string | null
+): Promise<UploadAttachmentResult> {
+  if (file.size === 0) {
+    // Skip empty files at the entry — both the web and remote-desktop
+    // transports would otherwise dutifully POST a zero-byte multipart part
+    // (the server records it under `~/.codeg/uploads/<bucket>/...`), and
+    // we'd attach a ResourceLink to an empty file. Throw the sentinel and
+    // let the pool's catch block log + continue.
+    throw new EmptyAttachmentError(file.name)
+  }
+  const remoteId = getActiveRemoteConnectionId()
+  if (isDesktop() && remoteId !== null) {
+    const buf = await file.arrayBuffer()
+    // `getShellTransport()` resolves to the local Tauri transport even when
+    // a `RemoteDesktopTransport` is configured — we deliberately want the
+    // local IPC here, not the proxy, because `remote_upload_attachment`
+    // lives on this desktop binary.
+    return getShellTransport().call<UploadAttachmentResult>(
+      "remote_upload_attachment",
+      {
+        connectionId: remoteId,
+        fileName: file.name,
+        mimeType: file.type || null,
+        sessionId: sessionId ?? null,
+        dataBase64: arrayBufferToBase64(buf),
+      }
+    )
+  }
+
+  const token = getCodegToken()
+  const form = new FormData()
+  form.append("file", file, file.name)
+  if (sessionId) form.append("session_id", sessionId)
+
+  const res = await fetch(`${window.location.origin}/api/upload_attachment`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  })
+  if (res.status === 401) {
+    redirectToCodegLogin()
+    throw new Error("Unauthorized")
+  }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({
+      code: "network_error",
+      message: `HTTP ${res.status}`,
+    }))
+    throw err
+  }
+  return res.json()
+}
+
+// Upload a file picked from the desktop machine's filesystem to the remote
+// codeg-server bound to the current window. The Tauri-native drag-drop event
+// hands us OS paths (not `File` objects), so we read the bytes via Rust,
+// then reuse the same `remote_upload_attachment` channel. Only callable from
+// a window that has a remote workspace attached; non-remote callers should
+// continue to use `appendResourceAttachments` with the local path directly.
+export async function uploadLocalPathToRemote(
+  path: string,
+  sessionId?: string | null
+): Promise<UploadAttachmentResult> {
+  const remoteId = getActiveRemoteConnectionId()
+  if (remoteId === null) {
+    throw new Error(
+      "uploadLocalPathToRemote requires an active remote workspace"
+    )
+  }
+  const shell = getShellTransport()
+  const file = await shell.call<{
+    fileName: string
+    mimeType: string | null
+    size: number
+    dataBase64: string
+  }>("read_local_file_for_upload", { path })
+  if (file.size === 0) {
+    // Mirror the `uploadAttachment` empty-file guard. The Rust side
+    // already read the bytes, so we've paid the cost — drop on the
+    // floor here rather than send a zero-byte multipart upstream.
+    throw new EmptyAttachmentError(file.fileName)
+  }
+  return shell.call<UploadAttachmentResult>("remote_upload_attachment", {
+    connectionId: remoteId,
+    fileName: file.fileName,
+    mimeType: file.mimeType,
+    sessionId: sessionId ?? null,
+    dataBase64: file.dataBase64,
+  })
+}
+
+// ─── Workspace file upload / download ───
+//
+// Issue #179: in server mode the user has no native file dialog, so the
+// file-tree context menu offers explicit upload + download actions
+// against these endpoints. The local desktop build (no remote) uses OS
+// dialogs instead, so these helpers throw there. A remote-desktop
+// window is a Tauri runtime but its file ops must target the remote
+// host — it goes through the `remote_*_workspace_*` proxy commands.
+
+export interface UploadWorkspaceFileResult {
+  path: string
+  name: string
+  size: number
+}
+
+/**
+ * Returns true when the current window can drive these helpers. Both
+ * pure-web mode and remote-desktop mode qualify; only a local-desktop
+ * Tauri window (no remote binding) is rejected, because it has its own
+ * native file dialogs and these helpers would just be the wrong tool.
+ */
+function isWorkspaceFileApiAvailable(): boolean {
+  return !isDesktop() || isRemoteDesktopMode()
+}
+
+function assertWorkspaceFileApiAvailable(action: string): void {
+  if (!isWorkspaceFileApiAvailable()) {
+    throw new Error(
+      `${action} is not available in local desktop mode; use the OS file dialogs instead.`
+    )
+  }
+}
+
+async function workspaceFileFetch(
+  endpoint: string,
+  body: BodyInit,
+  isMultipart: boolean
+): Promise<Response> {
+  const token = getCodegToken()
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${token}`,
+  }
+  if (!isMultipart) {
+    headers["Content-Type"] = "application/json"
+  }
+  const res = await fetch(`${window.location.origin}/api/${endpoint}`, {
+    method: "POST",
+    headers,
+    body,
+  })
+  if (res.status === 401) {
+    redirectToCodegLogin()
+    throw new Error("Unauthorized")
+  }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({
+      code: "network_error",
+      message: `HTTP ${res.status}`,
+    }))
+    throw err
+  }
+  return res
+}
+
+export interface UploadWorkspaceFileArgs {
+  rootPath: string
+  targetPath: string
+  file: File
+  relativePath?: string | null
+  signal?: AbortSignal
+  /**
+   * Byte-level progress callback fired on the request body as the
+   * browser uploads it. `total` may equal 0 on streams where the size
+   * is not pre-computable (rare for `File` objects but possible for
+   * `Blob` slices) — callers should treat 0 as "unknown" rather than
+   * "complete".
+   */
+  onProgress?: (loaded: number, total: number) => void
+}
+
+/**
+ * Upload one workspace file. Two transports:
+ *
+ *   - **Web** — `XMLHttpRequest` direct to `/api/upload_workspace_file`,
+ *     so we get byte-level upload progress and `AbortSignal` honoring.
+ *   - **Remote desktop** — uses `uploadWorkspaceLocalPathsToRemote` with
+ *     native file paths. Browser `File` objects are intentionally rejected
+ *     there because Tauri IPC is not a streaming binary transport.
+ *
+ * Empty files are allowed: a workspace legitimately contains zero-byte
+ * placeholders (`.gitkeep`, `__init__.py`). The chat-attachment uploader
+ * still rejects them because feeding nothing to an LLM is meaningless,
+ * but here we forward whatever the user picked.
+ */
+export async function uploadWorkspaceFile(
+  args: UploadWorkspaceFileArgs
+): Promise<UploadWorkspaceFileResult> {
+  assertWorkspaceFileApiAvailable("uploadWorkspaceFile")
+
+  if (isRemoteDesktopMode()) {
+    throw new Error(
+      "uploadWorkspaceFile requires browser File input; use uploadWorkspaceLocalPathsToRemote in remote desktop mode"
+    )
+  }
+
+  return new Promise<UploadWorkspaceFileResult>((resolve, reject) => {
+    const token = getCodegToken()
+    const xhr = new XMLHttpRequest()
+    xhr.open("POST", `${window.location.origin}/api/upload_workspace_file`)
+    xhr.setRequestHeader("Authorization", `Bearer ${token}`)
+
+    if (args.onProgress) {
+      const onProgress = args.onProgress
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) {
+          onProgress(event.loaded, event.total)
+        }
+      }
+    }
+
+    xhr.onload = () => {
+      if (xhr.status === 401) {
+        redirectToCodegLogin()
+        reject(new Error("Unauthorized"))
+        return
+      }
+      if (xhr.status < 200 || xhr.status >= 300) {
+        let err: unknown
+        try {
+          err = JSON.parse(xhr.responseText) as unknown
+        } catch {
+          err = {
+            code: "network_error",
+            message: `HTTP ${xhr.status}`,
+          }
+        }
+        reject(err)
+        return
+      }
+      try {
+        resolve(JSON.parse(xhr.responseText) as UploadWorkspaceFileResult)
+      } catch (e) {
+        reject(e instanceof Error ? e : new Error(String(e)))
+      }
+    }
+    xhr.onerror = () => reject(new Error("Network error during upload"))
+    xhr.onabort = () => reject(new DOMException("Upload aborted", "AbortError"))
+
+    // Wire the AbortSignal. The listener is removed on `loadend` so a
+    // long-lived controller shared across many sequential uploads
+    // doesn't leak listeners (the parent XHR will have been GC'd
+    // anyway, but the listener kept a strong reference until then).
+    if (args.signal) {
+      if (args.signal.aborted) {
+        xhr.abort()
+        return
+      }
+      const signal = args.signal
+      const onAbort = () => xhr.abort()
+      signal.addEventListener("abort", onAbort, { once: true })
+      xhr.addEventListener("loadend", () => {
+        signal.removeEventListener("abort", onAbort)
+      })
+    }
+
+    // Order matters: the backend reads text fields before the `file`
+    // stream so it can resolve the destination before any bytes land.
+    const form = new FormData()
+    form.append("root_path", args.rootPath)
+    form.append("target_path", args.targetPath)
+    if (args.relativePath) {
+      form.append("relative_path", args.relativePath)
+    }
+    form.append("file", args.file, args.file.name)
+    xhr.send(form)
+  })
+}
+
+export interface RemoteWorkspaceUploadPathEntry {
+  localPath: string
+  relativePath?: string | null
+}
+
+export interface RemoteWorkspaceUploadPathsResult {
+  transferId: string
+  files: UploadWorkspaceFileResult[]
+  bytes: number
+}
+
+export async function uploadWorkspaceLocalPathsToRemote(args: {
+  rootPath: string
+  targetPath: string
+  entries: RemoteWorkspaceUploadPathEntry[]
+}): Promise<RemoteWorkspaceUploadPathsResult> {
+  const connectionId = getActiveRemoteConnectionId()
+  if (connectionId === null) {
+    throw new Error(
+      "uploadWorkspaceLocalPathsToRemote: no active remote connection"
+    )
+  }
+  try {
+    return await getShellTransport().call<RemoteWorkspaceUploadPathsResult>(
+      "remote_upload_workspace_paths",
+      {
+        connectionId,
+        rootPath: args.rootPath,
+        targetPath: args.targetPath,
+        entries: args.entries,
+      }
+    )
+  } catch (err) {
+    if (isRemoteAuthenticationFailed(err)) {
+      notifyRemoteDesktopUnauthorized()
+    }
+    throw err
+  }
+}
+
+export interface WorkspaceTransferProgress {
+  transferId: string
+  direction: "upload" | "download"
+  loaded: number
+  total: number | null
+  state: "running" | "done" | "cancelled" | "error"
+  path?: string | null
+  error?: string | null
+}
+
+export async function listenWorkspaceTransferProgress(
+  handler: (event: WorkspaceTransferProgress) => void
+): Promise<() => void> {
+  if (!isDesktop()) return () => {}
+  const { listen } = await import("@tauri-apps/api/event")
+  return listen<WorkspaceTransferProgress>(
+    "workspace://transfer-progress",
+    (event) => handler(event.payload)
+  )
+}
+
+export async function cancelWorkspaceTransfer(
+  transferId: string
+): Promise<boolean> {
+  return getShellTransport().call<boolean>("remote_cancel_workspace_transfer", {
+    transferId,
+  })
+}
+
+function isRemoteAuthenticationFailed(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    "code" in err &&
+    (err as { code?: unknown }).code === "authentication_failed"
+  )
+}
+
+export function isUploadAbortError(err: unknown): boolean {
+  return err instanceof DOMException && err.name === "AbortError"
+}
+
+interface WorkspaceDownloadTicket {
+  ticket: string
+  url: string
+  filename: string
+  expiresAt: number
+}
+
+type WorkspaceDownloadKind = "file" | "dir"
+
+function openBrowserDownloadUrl(url: string, filename: string): void {
+  const anchor = document.createElement("a")
+  anchor.href = url
+  anchor.download = filename
+  anchor.rel = "noopener"
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+}
+
+async function createWorkspaceDownloadTicket(args: {
+  rootPath: string
+  path: string
+  kind: WorkspaceDownloadKind
+}): Promise<WorkspaceDownloadTicket> {
+  const res = await workspaceFileFetch(
+    "workspace_download_ticket",
+    JSON.stringify(args),
+    false
+  )
+  return res.json()
+}
+
+/**
+ * Sentinel return from a remote-desktop download path when the user
+ * cancels the Tauri save dialog. Web mode never returns this — the
+ * browser owns the download manager and there's no per-call cancel.
+ */
+export const WORKSPACE_DOWNLOAD_CANCELLED = "cancelled" as const
+
+export type WorkspaceDownloadResult =
+  | { status: "started" }
+  | { status: "done"; savedPath?: string; bytes?: number; transferId?: string }
+  | { status: typeof WORKSPACE_DOWNLOAD_CANCELLED }
+
+export async function downloadWorkspaceFile(
+  rootPath: string,
+  path: string,
+  fileName: string
+): Promise<WorkspaceDownloadResult> {
+  assertWorkspaceFileApiAvailable("downloadWorkspaceFile")
+
+  if (isRemoteDesktopMode()) {
+    return downloadWorkspaceViaRemoteProxy({
+      endpoint: "remote_download_workspace_file",
+      rootPath,
+      path,
+      suggestedName: fileName,
+    })
+  }
+
+  const ticket = await createWorkspaceDownloadTicket({
+    rootPath,
+    path,
+    kind: "file",
+  })
+  openBrowserDownloadUrl(ticket.url, ticket.filename || fileName)
+  return { status: "started" }
+}
+
+export async function downloadWorkspaceDir(
+  rootPath: string,
+  path: string,
+  dirName: string
+): Promise<WorkspaceDownloadResult> {
+  assertWorkspaceFileApiAvailable("downloadWorkspaceDir")
+
+  if (isRemoteDesktopMode()) {
+    return downloadWorkspaceViaRemoteProxy({
+      endpoint: "remote_download_workspace_dir",
+      rootPath,
+      path,
+      suggestedName: `${dirName}.zip`,
+    })
+  }
+
+  const ticket = await createWorkspaceDownloadTicket({
+    rootPath,
+    path,
+    kind: "dir",
+  })
+  openBrowserDownloadUrl(ticket.url, ticket.filename || `${dirName}.zip`)
+  return { status: "started" }
+}
+
+async function downloadWorkspaceViaRemoteProxy(opts: {
+  endpoint: "remote_download_workspace_file" | "remote_download_workspace_dir"
+  rootPath: string
+  path: string
+  suggestedName: string
+}): Promise<WorkspaceDownloadResult> {
+  const connectionId = getActiveRemoteConnectionId()
+  if (connectionId === null) {
+    throw new Error(
+      "downloadWorkspaceFile (remote): no active remote connection"
+    )
+  }
+  const { save } = await import("@tauri-apps/plugin-dialog")
+  const savePath = await save({ defaultPath: opts.suggestedName })
+  if (!savePath) {
+    return { status: WORKSPACE_DOWNLOAD_CANCELLED }
+  }
+  const { invoke } = await import("@tauri-apps/api/core")
+  let result: { transferId: string; bytes: number }
+  try {
+    result = await invoke<{ transferId: string; bytes: number }>(
+      opts.endpoint,
+      {
+        connectionId,
+        rootPath: opts.rootPath,
+        path: opts.path,
+        savePath,
+      }
+    )
+  } catch (err) {
+    if (isRemoteAuthenticationFailed(err)) {
+      notifyRemoteDesktopUnauthorized()
+    }
+    throw err
+  }
+  return {
+    status: "done",
+    savedPath: savePath,
+    bytes: result.bytes,
+    transferId: result.transferId,
+  }
 }
 
 // File tree and git log commands
@@ -1433,11 +2168,13 @@ export async function gitReset(
 
 export async function terminalSpawn(
   workingDir: string,
+  shell?: string,
   initialCommand?: string,
   terminalId?: string
 ): Promise<string> {
   return getTransport().call("terminal_spawn", {
     workingDir,
+    shell: shell ?? null,
     initialCommand: initialCommand ?? null,
     terminalId: terminalId ?? null,
   })
@@ -1477,10 +2214,12 @@ export interface WebServerInfo {
 export async function startWebServer(params?: {
   port?: number
   host?: string
+  token?: string | null
 }): Promise<WebServerInfo> {
   return getTransport().call("start_web_server", {
     port: params?.port ?? null,
     host: params?.host ?? null,
+    token: params?.token ?? null,
   })
 }
 
@@ -1490,6 +2229,37 @@ export async function stopWebServer(): Promise<void> {
 
 export async function getWebServerStatus(): Promise<WebServerInfo | null> {
   return getTransport().call("get_web_server_status")
+}
+
+export interface WebServiceConfig {
+  token: string | null
+  port: number | null
+  autoStart: boolean
+}
+
+export async function getWebServiceConfig(): Promise<WebServiceConfig> {
+  return getTransport().call("get_web_service_config")
+}
+
+export async function updateWebServiceConfig(
+  config: WebServiceConfig
+): Promise<WebServiceConfig> {
+  return getTransport().call("update_web_service_config", { config })
+}
+
+export type WebServicePortState = "free" | "occupied" | "unknown"
+
+export interface WebServicePortProbe {
+  port: number
+  state: WebServicePortState
+}
+
+export async function probeWebServicePort(
+  port?: number
+): Promise<WebServicePortProbe> {
+  return getTransport().call("probe_web_service_port", {
+    port: port ?? null,
+  })
 }
 
 // ─── Chat Channels ───
@@ -1641,9 +2411,16 @@ export async function createModelProvider(params: {
   name: string
   apiUrl: string
   apiKey: string
-  agentTypes: string[]
+  agentType: string
+  model?: string | null
 }): Promise<ModelProviderInfo> {
-  return getTransport().call("create_model_provider", params)
+  return getTransport().call("create_model_provider", {
+    name: params.name,
+    apiUrl: params.apiUrl,
+    apiKey: params.apiKey,
+    agentType: params.agentType,
+    model: params.model ?? null,
+  })
 }
 
 export async function updateModelProvider(params: {
@@ -1651,17 +2428,65 @@ export async function updateModelProvider(params: {
   name?: string | null
   apiUrl?: string | null
   apiKey?: string | null
-  agentTypes?: string[] | null
+  agentType?: string | null
+  model?: string | null
 }): Promise<ModelProviderInfo> {
   return getTransport().call("update_model_provider", {
     id: params.id,
     name: params.name ?? null,
     apiUrl: params.apiUrl ?? null,
     apiKey: params.apiKey ?? null,
-    agentTypes: params.agentTypes ?? null,
+    agentType: params.agentType ?? null,
+    model: params.model ?? null,
   })
 }
 
 export async function deleteModelProvider(id: number): Promise<void> {
   return getTransport().call("delete_model_provider", { id })
+}
+
+// ─── Delegation settings ───────────────────────────────────────────────
+
+export interface DelegationSettings {
+  enabled: boolean
+  depth_limit: number
+  /** Optional per-agent overrides applied when codeg-mcp spawns a subagent.
+   * Keyed by `agent_type`. Missing entries mean "use agent defaults." */
+  agent_defaults?: Partial<Record<AgentType, AgentDelegationDefaults>>
+}
+
+export async function getDelegationSettings(): Promise<DelegationSettings> {
+  return getTransport().call("get_delegation_settings")
+}
+
+export async function setDelegationSettings(
+  settings: DelegationSettings
+): Promise<DelegationSettings> {
+  return getTransport().call("set_delegation_settings", { settings })
+}
+
+/** Live probe — opens a transient ACP connection to `agent_type`, reads what
+ * it advertises (modes / config_options), and tears down. Used by the
+ * delegation-settings UI so the option set on screen matches exactly what
+ * codeg-mcp will receive when a subagent is spawned for delegation.
+ *
+ * Does NOT touch chat-side `selectorsCache` or `localStorage` preferences. */
+export async function describeAgentOptions(
+  agentType: AgentType,
+  workingDir?: string | null
+): Promise<AgentOptionsSnapshot> {
+  // The backend probe has its own 60s timeout (`ConnectionManager::
+  // probe_agent_options`) plus 500ms grace + poll/serialization
+  // overhead. The default transport timeout of 60s would race with
+  // that and surface "Request timed out" before the backend can
+  // return `ProbeTimedOut`. 70s gives the backend a clean margin to
+  // produce its structured error.
+  return getTransport().call(
+    "acp_describe_agent_options",
+    {
+      agentType,
+      workingDir: workingDir ?? null,
+    },
+    { timeoutMs: 70_000 }
+  )
 }

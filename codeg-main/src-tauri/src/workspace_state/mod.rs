@@ -13,13 +13,14 @@ use tokio::sync::mpsc::error::TrySendError;
 
 use crate::app_error::AppCommandError;
 use crate::commands::folders::{self, FileTreeNode};
+use crate::git_repo::is_git_repo;
 use crate::web::event_bridge::{emit_event, EventEmitter};
 
 pub const WORKSPACE_STATE_PROTOCOL_VERSION: u16 = 1;
 
 const WATCH_IGNORED_DIRS: &[&str] = &["__pycache__"];
-const WATCH_DEBOUNCE_MS: u64 = 2_000;
-const WATCH_MAX_BATCH_WINDOW_MS: u64 = 5_000;
+const WATCH_DEBOUNCE_MS: u64 = 300;
+const WATCH_MAX_BATCH_WINDOW_MS: u64 = 1_500;
 const WATCH_MAX_CHANGED_PATHS: usize = 2_000;
 const WATCH_EVENT_CHANNEL_CAPACITY: usize = 2_048;
 const RECENT_EVENT_CAPACITY: usize = 24;
@@ -47,6 +48,8 @@ pub struct WorkspaceDeltaEnvelope {
     pub kind: String,
     pub payload: Vec<WorkspaceDelta>,
     pub requires_resync: bool,
+    #[serde(default)]
+    pub changed_paths: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -57,6 +60,8 @@ pub struct WorkspaceStateEvent {
     pub kind: String,
     pub payload: Vec<WorkspaceDelta>,
     pub requires_resync: bool,
+    #[serde(default)]
+    pub changed_paths: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -68,6 +73,8 @@ pub struct WorkspaceSnapshotResponse {
     pub tree_snapshot: Option<Vec<FileTreeNode>>,
     pub git_snapshot: Option<Vec<WorkspaceGitEntry>>,
     pub deltas: Vec<WorkspaceDeltaEnvelope>,
+    pub degraded: bool,
+    pub is_git_repo: bool,
 }
 
 struct WorkspaceStateCore {
@@ -75,8 +82,10 @@ struct WorkspaceStateCore {
     seq: u64,
     tree_snapshot: Vec<FileTreeNode>,
     git_snapshot: Vec<WorkspaceGitEntry>,
-    recent_events: VecDeque<WorkspaceDeltaEnvelope>,
+    recent_events: VecDeque<Arc<WorkspaceDeltaEnvelope>>,
     recent_capacity: usize,
+    degraded: bool,
+    is_git_repo: bool,
 }
 
 impl WorkspaceStateCore {
@@ -84,6 +93,7 @@ impl WorkspaceStateCore {
         root_path: String,
         tree_snapshot: Vec<FileTreeNode>,
         git_snapshot: Vec<WorkspaceGitEntry>,
+        is_git_repo: bool,
     ) -> Self {
         Self {
             root_path,
@@ -92,6 +102,8 @@ impl WorkspaceStateCore {
             git_snapshot,
             recent_events: VecDeque::new(),
             recent_capacity: RECENT_EVENT_CAPACITY,
+            degraded: false,
+            is_git_repo,
         }
     }
 
@@ -100,6 +112,7 @@ impl WorkspaceStateCore {
         kind: String,
         payload: Vec<WorkspaceDelta>,
         requires_resync: bool,
+        changed_paths: Vec<String>,
     ) -> WorkspaceStateEvent {
         self.seq += 1;
 
@@ -107,12 +120,13 @@ impl WorkspaceStateCore {
             self.apply_payload(&payload);
         }
 
-        let envelope = WorkspaceDeltaEnvelope {
+        let envelope = Arc::new(WorkspaceDeltaEnvelope {
             seq: self.seq,
             kind: kind.clone(),
             payload: payload.clone(),
             requires_resync,
-        };
+            changed_paths: changed_paths.clone(),
+        });
         self.push_recent_event(envelope);
 
         WorkspaceStateEvent {
@@ -122,6 +136,7 @@ impl WorkspaceStateCore {
             kind,
             payload,
             requires_resync,
+            changed_paths,
         }
     }
 
@@ -132,7 +147,7 @@ impl WorkspaceStateCore {
                     .recent_events
                     .iter()
                     .filter(|event| event.seq > since)
-                    .cloned()
+                    .map(|event| (**event).clone())
                     .collect::<Vec<_>>();
 
                 return WorkspaceSnapshotResponse {
@@ -143,6 +158,8 @@ impl WorkspaceStateCore {
                     tree_snapshot: None,
                     git_snapshot: None,
                     deltas,
+                    degraded: self.degraded,
+                    is_git_repo: self.is_git_repo,
                 };
             }
         }
@@ -155,6 +172,8 @@ impl WorkspaceStateCore {
             tree_snapshot: Some(self.tree_snapshot.clone()),
             git_snapshot: Some(self.git_snapshot.clone()),
             deltas: Vec::new(),
+            degraded: self.degraded,
+            is_git_repo: self.is_git_repo,
         }
     }
 
@@ -172,17 +191,49 @@ impl WorkspaceStateCore {
         }
     }
 
-    fn push_recent_event(&mut self, event: WorkspaceDeltaEnvelope) {
-        // Tree replace events carry large payloads. Keeping a long history of
-        // them can cause unnecessary memory growth on large workspaces.
+    fn push_recent_event(&mut self, event: Arc<WorkspaceDeltaEnvelope>) {
+        // Tree/Git replace deltas are idempotent full snapshots — keeping older
+        // copies wastes memory and doesn't change replay outcomes. Strip the
+        // same-kind deltas from earlier envelopes but preserve their seq slot
+        // and `changed_paths` so strict seq continuity and lazy-load
+        // invalidation still work.
         let has_tree_replace = event
             .payload
             .iter()
             .any(|delta| matches!(delta, WorkspaceDelta::TreeReplace { .. }));
-        if has_tree_replace {
-            self.recent_events.clear();
-            self.recent_events.push_back(event);
-            return;
+        let has_git_replace = event
+            .payload
+            .iter()
+            .any(|delta| matches!(delta, WorkspaceDelta::GitReplace { .. }));
+
+        if has_tree_replace || has_git_replace {
+            for slot in self.recent_events.iter_mut() {
+                let needs_rewrite = slot.payload.iter().any(|delta| match delta {
+                    WorkspaceDelta::TreeReplace { .. } => has_tree_replace,
+                    WorkspaceDelta::GitReplace { .. } => has_git_replace,
+                    WorkspaceDelta::Meta { .. } => false,
+                });
+                if !needs_rewrite {
+                    continue;
+                }
+                let remaining: Vec<WorkspaceDelta> = slot
+                    .payload
+                    .iter()
+                    .filter(|delta| match delta {
+                        WorkspaceDelta::TreeReplace { .. } => !has_tree_replace,
+                        WorkspaceDelta::GitReplace { .. } => !has_git_replace,
+                        WorkspaceDelta::Meta { .. } => true,
+                    })
+                    .cloned()
+                    .collect();
+                *slot = Arc::new(WorkspaceDeltaEnvelope {
+                    seq: slot.seq,
+                    kind: slot.kind.clone(),
+                    payload: remaining,
+                    requires_resync: slot.requires_resync,
+                    changed_paths: slot.changed_paths.clone(),
+                });
+            }
         }
 
         self.recent_events.push_back(event);
@@ -212,8 +263,8 @@ impl WorkspaceStateCore {
 struct WorkspaceStreamEntry {
     root_canonical: PathBuf,
     root_display: String,
-    watcher: RecommendedWatcher,
-    task: tokio::task::JoinHandle<()>,
+    watcher: Option<RecommendedWatcher>,
+    task: Option<tokio::task::JoinHandle<()>>,
     ref_count: usize,
     state: Arc<Mutex<WorkspaceStateCore>>,
 }
@@ -345,6 +396,7 @@ fn git_check_ignored_paths(
     }
 
     let mut child = crate::process::std_command("git")
+        .arg("--no-optional-locks")
         .args(["check-ignore", "--stdin", "-z"])
         .current_dir(repo_path)
         .stdin(Stdio::piped())
@@ -382,6 +434,65 @@ fn git_check_ignored_paths(
     Ok(ignored)
 }
 
+#[derive(Clone, Copy)]
+struct GitignoreCacheEntry {
+    ignored: bool,
+    expires_at: Instant,
+}
+
+const GITIGNORE_CACHE_TTL: Duration = Duration::from_secs(30);
+const GITIGNORE_CACHE_MAX_ENTRIES: usize = 4_096;
+
+static GITIGNORE_CACHE: LazyLock<Mutex<HashMap<(String, String), GitignoreCacheEntry>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn gitignore_cache_lookup(root: &str, path: &str) -> Option<bool> {
+    let mut cache = GITIGNORE_CACHE.lock().ok()?;
+    let key = (root.to_string(), path.to_string());
+    let entry = *cache.get(&key)?;
+    if entry.expires_at <= Instant::now() {
+        cache.remove(&key);
+        return None;
+    }
+    Some(entry.ignored)
+}
+
+fn gitignore_cache_put_batch(root: &str, results: impl IntoIterator<Item = (String, bool)>) {
+    let Ok(mut cache) = GITIGNORE_CACHE.lock() else {
+        return;
+    };
+
+    if cache.len() >= GITIGNORE_CACHE_MAX_ENTRIES {
+        let mut sorted: Vec<_> = cache
+            .iter()
+            .map(|(k, v)| (k.clone(), v.expires_at))
+            .collect();
+        sorted.sort_by_key(|(_, exp)| *exp);
+        let drop_count = cache.len() / 4;
+        for (k, _) in sorted.into_iter().take(drop_count) {
+            cache.remove(&k);
+        }
+    }
+
+    let expires_at = Instant::now() + GITIGNORE_CACHE_TTL;
+    for (path, ignored) in results {
+        cache.insert(
+            (root.to_string(), path),
+            GitignoreCacheEntry {
+                ignored,
+                expires_at,
+            },
+        );
+    }
+}
+
+fn gitignore_cache_invalidate_root(root: &str) {
+    let Ok(mut cache) = GITIGNORE_CACHE.lock() else {
+        return;
+    };
+    cache.retain(|(r, _), _| r != root);
+}
+
 async fn should_refresh_git_status_for_paths(root_display: &str, changed_paths: &[String]) -> bool {
     if changed_paths.is_empty() {
         return true;
@@ -390,6 +501,9 @@ async fn should_refresh_git_status_for_paths(root_display: &str, changed_paths: 
     let mut candidates: Vec<String> = Vec::new();
     for path in changed_paths {
         if is_git_metadata_rel_path(path) || is_gitignore_rel_path(path) {
+            // `.gitignore` or `.git/*` changed — our ignore cache is likely
+            // stale; drop it before returning.
+            gitignore_cache_invalidate_root(root_display);
             return true;
         }
         candidates.push(path.clone());
@@ -399,10 +513,24 @@ async fn should_refresh_git_status_for_paths(root_display: &str, changed_paths: 
         return false;
     }
 
+    let mut missing: Vec<String> = Vec::new();
+    for path in &candidates {
+        match gitignore_cache_lookup(root_display, path) {
+            Some(false) => return true, // cached non-ignored → must refresh
+            Some(true) => {}
+            None => missing.push(path.clone()),
+        }
+    }
+
+    if missing.is_empty() {
+        // All candidates were cached as ignored — nothing to refresh.
+        return false;
+    }
+
     let repo_path = root_display.to_string();
-    let candidates_for_check = candidates.clone();
+    let missing_for_check = missing.clone();
     let ignored = match tokio::task::spawn_blocking(move || {
-        git_check_ignored_paths(&repo_path, &candidates_for_check)
+        git_check_ignored_paths(&repo_path, &missing_for_check)
     })
     .await
     {
@@ -411,9 +539,14 @@ async fn should_refresh_git_status_for_paths(root_display: &str, changed_paths: 
         _ => return true,
     };
 
-    candidates
+    let results: Vec<(String, bool)> = missing
         .iter()
-        .any(|path| !ignored.contains(path.as_str()))
+        .map(|path| (path.clone(), ignored.contains(path.as_str())))
+        .collect();
+    let should_refresh = results.iter().any(|(_, is_ignored)| !is_ignored);
+    gitignore_cache_put_batch(root_display, results);
+
+    should_refresh
 }
 
 fn is_allowed_git_watch_path(relative: &Path) -> bool {
@@ -522,6 +655,7 @@ fn parse_numstat_value(raw: &str) -> i32 {
 async fn git_numstat_map(path: &str) -> HashMap<String, (i32, i32)> {
     async fn run_numstat(path: &str, args: &[&str]) -> Option<HashMap<String, (i32, i32)>> {
         let output = crate::process::tokio_command("git")
+            .arg("--no-optional-locks")
             .args(args)
             .current_dir(path)
             .output()
@@ -571,9 +705,13 @@ async fn git_numstat_map(path: &str) -> HashMap<String, (i32, i32)> {
 }
 
 async fn collect_git_snapshot(path: &str) -> Result<Vec<WorkspaceGitEntry>, AppCommandError> {
-    let status_entries = folders::git_status(path.to_string(), Some(true)).await?;
-
-    let stats = git_numstat_map(path).await;
+    // status + numstat don't depend on each other; run concurrently to cut
+    // per-flush latency roughly in half on large repos.
+    let (status_entries, stats) = tokio::join!(
+        folders::git_status(path.to_string(), Some(true)),
+        git_numstat_map(path),
+    );
+    let status_entries = status_entries?;
 
     let mut result = status_entries
         .into_iter()
@@ -623,36 +761,39 @@ async fn flush_watch_batch(
     };
 
     let should_refresh_tree = batch.overflowed || event_kind_hint != "modify";
-    let should_refresh_git = if batch.overflowed {
-        true
-    } else {
-        should_refresh_git_status_for_paths(root_display, &changed_paths).await
-    };
+    let is_git = is_git_repo(root_canonical);
+    let should_refresh_git = is_git
+        && (batch.overflowed
+            || should_refresh_git_status_for_paths(root_display, &changed_paths).await);
 
     let mut payload = Vec::new();
-    let mut requires_resync = false;
     let mut refreshed_tree: Option<Vec<FileTreeNode>> = None;
     let mut refreshed_git: Option<Vec<WorkspaceGitEntry>> = None;
 
+    // Refresh failures are logged and silently skipped. Emitting a
+    // `resync_hint` on every failure creates a feedback loop when the
+    // failure is persistent (e.g. tree enum hits a permission-denied
+    // subdir, git is unreachable), because the frontend would re-fetch
+    // the same stored resync_hint event on every watch tick.
     if should_refresh_tree {
         match folders::get_file_tree(root_display.to_string(), Some(WORKSPACE_TREE_MAX_DEPTH)).await
         {
             Ok(tree) => refreshed_tree = Some(tree),
-            Err(_) => requires_resync = true,
+            Err(err) => eprintln!(
+                "[workspace-state-watch] tree refresh failed for {}: {}",
+                root_display, err
+            ),
         }
     }
 
     if should_refresh_git {
         match collect_git_snapshot(root_display).await {
             Ok(git_snapshot) => refreshed_git = Some(git_snapshot),
-            Err(_) => requires_resync = true,
+            Err(err) => eprintln!(
+                "[workspace-state-watch] git refresh failed for {}: {}",
+                root_display, err
+            ),
         }
-    }
-
-    if requires_resync {
-        payload = vec![WorkspaceDelta::Meta {
-            reason: format!("watch_refresh_failed:{event_kind_hint}"),
-        }];
     }
 
     let event = {
@@ -661,28 +802,60 @@ async fn flush_watch_batch(
             Err(_) => return,
         };
 
-        if !requires_resync {
-            if let Some(tree) = refreshed_tree {
-                if tree != guard.tree_snapshot {
-                    payload.push(WorkspaceDelta::TreeReplace { nodes: tree });
-                }
-            }
-            if let Some(git_snapshot) = refreshed_git {
-                if git_snapshot != guard.git_snapshot {
-                    payload.push(WorkspaceDelta::GitReplace {
-                        entries: git_snapshot,
-                    });
-                }
-            }
-
-            if payload.is_empty() {
-                return;
-            }
+        // Keep the cached git-presence flag in sync with the filesystem.
+        // When it flips, the snapshot response carries the new value, and the
+        // emitted event carries `requires_resync=true` so the frontend re-fetches
+        // to align its isGitRepo view.
+        let git_presence_changed = guard.is_git_repo != is_git;
+        if git_presence_changed {
+            guard.is_git_repo = is_git;
         }
 
-        let kind = if requires_resync {
-            "resync_hint".to_string()
-        } else if payload
+        if let Some(tree) = refreshed_tree {
+            if tree != guard.tree_snapshot {
+                payload.push(WorkspaceDelta::TreeReplace { nodes: tree });
+            }
+        }
+        if let Some(git_snapshot) = refreshed_git {
+            if git_snapshot != guard.git_snapshot {
+                payload.push(WorkspaceDelta::GitReplace {
+                    entries: git_snapshot,
+                });
+            }
+        } else if !is_git && !guard.git_snapshot.is_empty() {
+            // .git vanished (or was never there) and we still hold stale git
+            // data — emit an empty GitReplace so the UI stops showing tracked
+            // files that no longer exist from git's perspective.
+            payload.push(WorkspaceDelta::GitReplace {
+                entries: Vec::new(),
+            });
+        }
+
+        // Presence flip with no data delta (e.g. `git init` in a clean folder)
+        // still needs to wake the frontend, otherwise the snapshot flag never
+        // propagates until an unrelated change happens.
+        if git_presence_changed && payload.is_empty() {
+            payload.push(WorkspaceDelta::Meta {
+                reason: format!("is_git_repo_changed:{is_git}"),
+            });
+        }
+
+        // Surface FS activity that doesn't otherwise change tree/git snapshots
+        // (e.g. files added/removed in a directory beyond WORKSPACE_TREE_MAX_DEPTH,
+        // or gitignored / non-git-repo changes). The envelope's `changed_paths`
+        // lets the frontend invalidate its lazy-loaded overrides for deep
+        // directories without waiting for a manual reload.
+        if payload.is_empty() && !changed_paths.is_empty() {
+            payload.push(WorkspaceDelta::Meta {
+                reason: "fs_events".to_string(),
+            });
+        }
+
+        if payload.is_empty() {
+            return;
+        }
+
+        let kind = if payload
             .iter()
             .any(|delta| matches!(delta, WorkspaceDelta::TreeReplace { .. }))
         {
@@ -696,7 +869,7 @@ async fn flush_watch_batch(
             "meta".to_string()
         };
 
-        guard.append_event(kind, payload, requires_resync)
+        guard.append_event(kind, payload, git_presence_changed, changed_paths)
     };
 
     emit_event(emitter, "folder://workspace-state-event", event);
@@ -807,12 +980,18 @@ pub async fn start_workspace_state_stream_core(
     let initial_tree = folders::get_file_tree(root_path.clone(), Some(WORKSPACE_TREE_MAX_DEPTH))
         .await
         .unwrap_or_default();
-    let initial_git = collect_git_snapshot(&root_path).await.unwrap_or_default();
+    let initial_is_git_repo = is_git_repo(&root_canonical);
+    let initial_git = if initial_is_git_repo {
+        collect_git_snapshot(&root_path).await.unwrap_or_default()
+    } else {
+        Vec::new()
+    };
 
     let state = Arc::new(Mutex::new(WorkspaceStateCore::new(
         root_path.clone(),
         initial_tree,
         initial_git,
+        initial_is_git_repo,
     )));
 
     let (event_tx, event_rx) = mpsc::channel::<notify::Event>(WATCH_EVENT_CHANNEL_CAPACITY);
@@ -861,14 +1040,26 @@ pub async fn start_workspace_state_stream_core(
         })?,
     );
 
-    watcher
+    let watch_result = watcher
         .as_mut()
         .ok_or_else(|| AppCommandError::task_execution_failed("Failed to create watcher"))?
-        .watch(&root_canonical, RecursiveMode::Recursive)
-        .map_err(|e| {
-            AppCommandError::io_error("Failed to start workspace state watcher")
-                .with_detail(e.to_string())
-        })?;
+        .watch(&root_canonical, RecursiveMode::Recursive);
+
+    if let Err(err) = watch_result {
+        eprintln!(
+            "[workspace-state-watch] degraded (no realtime updates) for {}: {}",
+            root_path, err
+        );
+        if let Some(mut created_watcher) = watcher.take() {
+            let _ = created_watcher.unwatch(&root_canonical);
+        }
+        if let Some(created_task) = task.take() {
+            created_task.abort();
+        }
+        if let Ok(mut guard) = state.lock() {
+            guard.degraded = true;
+        }
+    }
 
     let (should_cleanup_new_stream, start_snapshot) = {
         let mut streams = WORKSPACE_STREAMS.lock().map_err(|_| {
@@ -895,16 +1086,8 @@ pub async fn start_workspace_state_stream_core(
                 WorkspaceStreamEntry {
                     root_canonical: root_canonical.clone(),
                     root_display: root_path,
-                    watcher: watcher.take().ok_or_else(|| {
-                        AppCommandError::task_execution_failed(
-                            "Failed to initialize workspace state watcher",
-                        )
-                    })?,
-                    task: task.take().ok_or_else(|| {
-                        AppCommandError::task_execution_failed(
-                            "Failed to initialize workspace state task",
-                        )
-                    })?,
+                    watcher: watcher.take(),
+                    task: task.take(),
                     ref_count: 1,
                     state: Arc::clone(&state),
                 },
@@ -962,9 +1145,13 @@ pub async fn stop_workspace_state_stream_core(root_path: String) -> Result<(), A
     drop(streams);
 
     if let Some(mut entry) = removed_entry.take() {
-        let _ = entry.watcher.unwatch(&entry.root_canonical);
-        drop(entry.watcher);
-        entry.task.abort();
+        if let Some(mut watcher) = entry.watcher.take() {
+            let _ = watcher.unwatch(&entry.root_canonical);
+            drop(watcher);
+        }
+        if let Some(task) = entry.task.take() {
+            task.abort();
+        }
     }
 
     Ok(())
@@ -979,18 +1166,30 @@ pub async fn get_workspace_snapshot_core(
         .map(|(_, key)| key)
         .unwrap_or_else(|_| normalize_slash_path(&root));
 
-    let state = {
+    let (state, root_display, root_canonical) = {
         let streams = WORKSPACE_STREAMS.lock().map_err(|_| {
             AppCommandError::task_execution_failed("Failed to lock workspace stream registry")
         })?;
 
-        let by_key = streams.get(&key).map(|entry| Arc::clone(&entry.state));
+        let by_key = streams.get(&key).map(|entry| {
+            (
+                Arc::clone(&entry.state),
+                entry.root_display.clone(),
+                entry.root_canonical.clone(),
+            )
+        });
         if let Some(found) = by_key {
             found
         } else if let Some(found) = streams
             .values()
             .find(|entry| entry.root_display == root_path)
-            .map(|entry| Arc::clone(&entry.state))
+            .map(|entry| {
+                (
+                    Arc::clone(&entry.state),
+                    entry.root_display.clone(),
+                    entry.root_canonical.clone(),
+                )
+            })
         {
             found
         } else {
@@ -1000,11 +1199,81 @@ pub async fn get_workspace_snapshot_core(
         }
     };
 
-    let guard = state.lock().map_err(|_| {
-        AppCommandError::task_execution_failed("Failed to lock workspace state snapshot")
-    })?;
+    // The frontend calls this endpoint after every write (delete / upload /
+    // create / rename) via `fetchTree`. The FS watcher debounces 300ms after
+    // each event, so the cached snapshots are reliably stale the moment we're
+    // polled — and if a notify event is ever missed (macOS FSEvents drops
+    // under load, SSE reconnects, host suspends/resumes), the cache stays stale
+    // until the next unrelated FS change comes in. Re-scan disk here and
+    // append deltas if either tree or git diverges, so the client request
+    // itself catches up the state instead of waiting on the watcher.
+    let is_git = is_git_repo(&root_canonical);
+    let tree_fut = folders::get_file_tree(root_display.clone(), Some(WORKSPACE_TREE_MAX_DEPTH));
+    let git_fut = async {
+        if is_git {
+            collect_git_snapshot(&root_display).await.ok()
+        } else {
+            None
+        }
+    };
+    let (tree_result, refreshed_git) = tokio::join!(tree_fut, git_fut);
+    let refreshed_tree = tree_result.ok();
 
-    Ok(guard.snapshot(since_seq))
+    let guard_snapshot = {
+        let mut guard = state.lock().map_err(|_| {
+            AppCommandError::task_execution_failed("Failed to lock workspace state snapshot")
+        })?;
+
+        let mut payload: Vec<WorkspaceDelta> = Vec::new();
+        if let Some(tree) = refreshed_tree {
+            if tree != guard.tree_snapshot {
+                payload.push(WorkspaceDelta::TreeReplace { nodes: tree });
+            }
+        }
+        if let Some(git) = refreshed_git {
+            if git != guard.git_snapshot {
+                payload.push(WorkspaceDelta::GitReplace { entries: git });
+            }
+        } else if !is_git && !guard.git_snapshot.is_empty() {
+            // .git vanished while we weren't watching — clear the stale entries
+            // so the UI stops showing tracked files that no longer exist from
+            // git's perspective.
+            payload.push(WorkspaceDelta::GitReplace {
+                entries: Vec::new(),
+            });
+        }
+
+        let git_presence_changed = guard.is_git_repo != is_git;
+        if git_presence_changed {
+            guard.is_git_repo = is_git;
+            if payload.is_empty() {
+                payload.push(WorkspaceDelta::Meta {
+                    reason: format!("is_git_repo_changed:{is_git}"),
+                });
+            }
+        }
+
+        if !payload.is_empty() {
+            let kind = if payload
+                .iter()
+                .any(|delta| matches!(delta, WorkspaceDelta::TreeReplace { .. }))
+            {
+                "fs_delta".to_string()
+            } else if payload
+                .iter()
+                .any(|delta| matches!(delta, WorkspaceDelta::GitReplace { .. }))
+            {
+                "git_delta".to_string()
+            } else {
+                "meta".to_string()
+            };
+            guard.append_event(kind, payload, false, Vec::new());
+        }
+
+        guard.snapshot(since_seq)
+    };
+
+    Ok(guard_snapshot)
 }
 
 #[cfg(test)]
@@ -1013,7 +1282,8 @@ mod tests {
 
     #[test]
     fn workspace_state_core_seq_is_monotonic() {
-        let mut core = WorkspaceStateCore::new("/tmp/repo".to_string(), Vec::new(), Vec::new());
+        let mut core =
+            WorkspaceStateCore::new("/tmp/repo".to_string(), Vec::new(), Vec::new(), false);
 
         let e1 = core.append_event(
             "meta".to_string(),
@@ -1021,6 +1291,7 @@ mod tests {
                 reason: "boot".to_string(),
             }],
             false,
+            Vec::new(),
         );
 
         let e2 = core.append_event(
@@ -1029,6 +1300,7 @@ mod tests {
                 reason: "tick".to_string(),
             }],
             false,
+            Vec::new(),
         );
 
         assert!(e2.seq > e1.seq);
@@ -1036,7 +1308,8 @@ mod tests {
 
     #[test]
     fn workspace_state_core_snapshot_incremental_when_since_available() {
-        let mut core = WorkspaceStateCore::new("/tmp/repo".to_string(), Vec::new(), Vec::new());
+        let mut core =
+            WorkspaceStateCore::new("/tmp/repo".to_string(), Vec::new(), Vec::new(), false);
 
         let e1 = core.append_event(
             "meta".to_string(),
@@ -1044,6 +1317,7 @@ mod tests {
                 reason: "a".to_string(),
             }],
             false,
+            Vec::new(),
         );
 
         core.append_event(
@@ -1052,6 +1326,7 @@ mod tests {
                 reason: "b".to_string(),
             }],
             false,
+            Vec::new(),
         );
 
         let snapshot = core.snapshot(Some(e1.seq));
@@ -1063,7 +1338,8 @@ mod tests {
 
     #[test]
     fn workspace_state_core_snapshot_full_when_since_too_old() {
-        let mut core = WorkspaceStateCore::new("/tmp/repo".to_string(), Vec::new(), Vec::new());
+        let mut core =
+            WorkspaceStateCore::new("/tmp/repo".to_string(), Vec::new(), Vec::new(), false);
         core.recent_capacity = 1;
 
         core.append_event(
@@ -1072,6 +1348,7 @@ mod tests {
                 reason: "a".to_string(),
             }],
             false,
+            Vec::new(),
         );
         core.append_event(
             "meta".to_string(),
@@ -1079,11 +1356,116 @@ mod tests {
                 reason: "b".to_string(),
             }],
             false,
+            Vec::new(),
         );
 
         let snapshot = core.snapshot(Some(0));
         assert!(snapshot.full);
         assert!(snapshot.tree_snapshot.is_some());
         assert!(snapshot.git_snapshot.is_some());
+    }
+
+    #[test]
+    fn workspace_state_core_same_kind_replace_is_compressed() {
+        let mut core =
+            WorkspaceStateCore::new("/tmp/repo".to_string(), Vec::new(), Vec::new(), false);
+
+        let e1 = core.append_event(
+            "git_delta".to_string(),
+            vec![WorkspaceDelta::GitReplace {
+                entries: vec![WorkspaceGitEntry {
+                    path: "a.txt".to_string(),
+                    status: "M".to_string(),
+                    additions: 1,
+                    deletions: 0,
+                }],
+            }],
+            false,
+            vec!["a.txt".to_string()],
+        );
+
+        let e2 = core.append_event(
+            "meta".to_string(),
+            vec![WorkspaceDelta::Meta {
+                reason: "tick".to_string(),
+            }],
+            false,
+            Vec::new(),
+        );
+
+        core.append_event(
+            "git_delta".to_string(),
+            vec![WorkspaceDelta::GitReplace { entries: vec![] }],
+            false,
+            vec!["a.txt".to_string()],
+        );
+
+        let snapshot = core.snapshot(Some(0));
+        assert!(!snapshot.full);
+        assert_eq!(snapshot.deltas.len(), 3);
+
+        let first = snapshot
+            .deltas
+            .iter()
+            .find(|d| d.seq == e1.seq)
+            .expect("e1 still present");
+        assert!(
+            first.payload.is_empty(),
+            "older GitReplace payload should be dropped after compression"
+        );
+        assert_eq!(first.changed_paths, vec!["a.txt".to_string()]);
+
+        let meta = snapshot
+            .deltas
+            .iter()
+            .find(|d| d.seq == e2.seq)
+            .expect("meta still present");
+        assert_eq!(meta.payload.len(), 1);
+    }
+
+    #[test]
+    fn workspace_state_core_tree_replace_compresses_older_tree_but_keeps_git() {
+        let mut core =
+            WorkspaceStateCore::new("/tmp/repo".to_string(), Vec::new(), Vec::new(), false);
+
+        core.append_event(
+            "fs_delta".to_string(),
+            vec![WorkspaceDelta::TreeReplace { nodes: Vec::new() }],
+            false,
+            Vec::new(),
+        );
+        let git_event = core.append_event(
+            "git_delta".to_string(),
+            vec![WorkspaceDelta::GitReplace {
+                entries: vec![WorkspaceGitEntry {
+                    path: "b.txt".to_string(),
+                    status: "??".to_string(),
+                    additions: 0,
+                    deletions: 0,
+                }],
+            }],
+            false,
+            Vec::new(),
+        );
+        core.append_event(
+            "fs_delta".to_string(),
+            vec![WorkspaceDelta::TreeReplace { nodes: Vec::new() }],
+            false,
+            Vec::new(),
+        );
+
+        let snapshot = core.snapshot(Some(0));
+        assert!(!snapshot.full);
+        assert_eq!(snapshot.deltas.len(), 3);
+
+        let git_slot = snapshot
+            .deltas
+            .iter()
+            .find(|d| d.seq == git_event.seq)
+            .expect("git delta still present");
+        assert!(matches!(
+            git_slot.payload.as_slice(),
+            [WorkspaceDelta::GitReplace { .. }]
+        ));
     }
 }
