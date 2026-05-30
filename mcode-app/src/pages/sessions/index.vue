@@ -24,8 +24,8 @@ const folderId = ref("")
 
 async function loadSessions() {
   const gateway = auth.gateway()
-  const result = await gateway.call<unknown[]>("list_folder_conversations", {
-    folderId: Number(folderId.value || session.projects[0]?.id || 1),
+  const result = await gateway.call<unknown[]>("list_all_conversations", {
+    folderIds: [Number(folderId.value || session.projects[0]?.id || 1)],
   })
   session.setSessions(result as Record<string, unknown>[])
 }

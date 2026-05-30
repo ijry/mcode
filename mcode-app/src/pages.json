@@ -7,52 +7,59 @@
   },
   "pages": [
     {
-      "path": "pages/pair/index",
+      "path": "pages/connections/index",
       "style": {
-        "navigationBarTitleText": "Pair"
+        "navigationBarTitleText": "连接",
+        "enablePullDownRefresh": false
       }
     },
     {
-      "path": "pages/targets/index",
+      "path": "pages/conversations/index",
       "style": {
-        "navigationBarTitleText": "Targets"
+        "navigationBarTitleText": "会话",
+        "enablePullDownRefresh": true
       }
     },
     {
-      "path": "pages/projects/index",
+      "path": "pages/conversation-detail/index",
       "style": {
-        "navigationBarTitleText": "Projects"
+        "navigationBarTitleText": "会话详情",
+        "enablePullDownRefresh": false
       }
     },
     {
-      "path": "pages/sessions/index",
+      "path": "pages/profile/index",
       "style": {
-        "navigationBarTitleText": "Sessions"
-      }
-    },
-    {
-      "path": "pages/session-detail/index",
-      "style": {
-        "navigationBarTitleText": "Session"
-      }
-    },
-    {
-      "path": "pages/settings/index",
-      "style": {
-        "navigationBarTitleText": "Settings"
+        "navigationBarTitleText": "我的",
+        "enablePullDownRefresh": false
       }
     }
   ],
   "tabBar": {
-    "color": "#666666",
-    "selectedColor": "#111111",
+    "color": "#8f8f94",
+    "selectedColor": "#2979ff",
+    "backgroundColor": "#ffffff",
     "borderStyle": "black",
     "list": [
-      { "pagePath": "pages/targets/index", "text": "Targets" },
-      { "pagePath": "pages/projects/index", "text": "Projects" },
-      { "pagePath": "pages/sessions/index", "text": "Sessions" },
-      { "pagePath": "pages/settings/index", "text": "Settings" }
+      {
+        "pagePath": "pages/connections/index",
+        "text": "连接"
+      },
+      {
+        "pagePath": "pages/conversations/index",
+        "text": "会话"
+      },
+      {
+        "pagePath": "pages/profile/index",
+        "text": "我的"
+      }
     ]
+  },
+  "globalStyle": {
+    "navigationBarTextStyle": "black",
+    "navigationBarTitleText": "MCode",
+    "navigationBarBackgroundColor": "#ffffff",
+    "backgroundColor": "#f8f8f8"
   }
 }
 
