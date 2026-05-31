@@ -22,6 +22,7 @@
         :key="index"
         class="connection-item"
         @click="activateConnection(conn)"
+        @longpress="showConnectionMenu(conn, index)"
       >
         <view class="connection-info">
           <view class="connection-name">
@@ -34,10 +35,26 @@
             <u-tag v-if="conn.active" text="当前" type="primary" size="mini"></u-tag>
           </view>
           <view class="connection-url">{{ conn.url }}</view>
+          <view class="connection-mode">
+            <u-tag
+              :text="conn.mode === 'direct' ? '直连模式' : '中继模式'"
+              type="info"
+              size="mini"
+              plain
+            ></u-tag>
+          </view>
         </view>
-        <u-icon name="arrow-right" color="#c0c4cc" size="18"></u-icon>
+        <u-icon name="more-dot-fill" color="#c0c4cc" size="18"></u-icon>
       </view>
     </view>
+
+    <!-- 连接操作菜单 -->
+    <u-action-sheet
+      :show="showActionSheet"
+      :actions="connectionActions"
+      @select="handleActionSelect"
+      @close="showActionSheet = false"
+    ></u-action-sheet>
 
     <u-popup v-model:show="showAddPopup" mode="bottom" :round="10">
       <view class="popup-content">
@@ -130,12 +147,17 @@ const auth = useAuthStore()
 const showAddPopup = ref(false)
 const subsectionIndex = ref(0)
 const loading = ref(false)
+const showActionSheet = ref(false)
+const currentConnectionIndex = ref(-1)
 
 interface ConnectionItem {
   name: string
   mode: "direct" | "relay"
   url: string
   active: boolean
+  directToken?: string
+  pairCode?: string
+  pairSecret?: string
 }
 
 const form = ref({
@@ -149,6 +171,22 @@ const form = ref({
 })
 
 const connections = ref<ConnectionItem[]>([])
+
+const connectionActions = computed(() => {
+  const current = connections.value[currentConnectionIndex.value]
+  const actions = []
+
+  if (!current?.active) {
+    actions.push({ name: "切换", color: "#2979ff" })
+  }
+
+  actions.push(
+    { name: "编辑", color: "#19be6b" },
+    { name: "删除", color: "#fa3534" }
+  )
+
+  return actions
+})
 
 onMounted(() => {
   loadConnections()
@@ -201,6 +239,7 @@ async function submitConnection() {
         mode: "direct",
         url: form.value.directBaseUrl,
         active: true,
+        directToken: form.value.directToken,
       }
 
       saveConnection(newConnection)
@@ -231,6 +270,8 @@ async function submitConnection() {
           mode: "relay",
           url: form.value.relayUrl,
           active: true,
+          pairCode: form.value.pairCode,
+          pairSecret: form.value.pairSecret,
         }
 
         saveConnection(newConnection)
@@ -251,6 +292,12 @@ async function submitConnection() {
 
 function saveConnection(conn: ConnectionItem) {
   const savedConnections = uni.getStorageSync("mcode_connections") || []
+
+  // 将所有连接设为非激活
+  savedConnections.forEach((c: ConnectionItem) => {
+    c.active = false
+  })
+
   const existingIndex = savedConnections.findIndex(
     (c: ConnectionItem) => c.mode === conn.mode && c.url === conn.url
   )
@@ -264,14 +311,133 @@ function saveConnection(conn: ConnectionItem) {
   uni.setStorageSync("mcode_connections", savedConnections)
 }
 
-function activateConnection(conn: ConnectionItem) {
+function showConnectionMenu(conn: ConnectionItem, index: number) {
+  currentConnectionIndex.value = index
+  showActionSheet.value = true
+}
+
+function handleActionSelect(e: any) {
+  const action = e.name
+  const conn = connections.value[currentConnectionIndex.value]
+
+  if (!conn) return
+
+  if (action === "切换") {
+    switchConnection(conn)
+  } else if (action === "编辑") {
+    editConnection(conn, currentConnectionIndex.value)
+  } else if (action === "删除") {
+    deleteConnection(currentConnectionIndex.value)
+  }
+
+  showActionSheet.value = false
+}
+
+async function activateConnection(conn: ConnectionItem) {
+  if (conn.active) return
+
   uni.showModal({
     title: "切换连接",
     content: `确定切换到 ${conn.name} 吗？`,
     success: (res) => {
       if (res.confirm) {
-        // TODO: 实现连接切换逻辑
-        uni.showToast({ title: "切换成功", icon: "success" })
+        switchConnection(conn)
+      }
+    },
+  })
+}
+
+async function switchConnection(conn: ConnectionItem) {
+  try {
+    if (conn.mode === "direct") {
+      if (!conn.directToken) {
+        uni.showToast({ title: "连接信息不完整", icon: "none" })
+        return
+      }
+
+      const gateway = createGateway({
+        mode: "direct",
+        directBaseUrl: conn.url,
+      })
+
+      await gateway.pair({
+        directBaseUrl: conn.url,
+        token: conn.directToken,
+      })
+
+      auth.setDirectMode(conn.url, conn.directToken)
+    } else {
+      if (!conn.pairCode || !conn.pairSecret) {
+        uni.showToast({ title: "连接信息不完整", icon: "none" })
+        return
+      }
+
+      const gateway = createGateway({
+        mode: "relay",
+        relayUrl: conn.url,
+        session: { accessToken: "" },
+      })
+
+      const session = await gateway.pair({
+        relayUrl: conn.url,
+        code: conn.pairCode,
+        secret: conn.pairSecret,
+      })
+
+      if (session) {
+        auth.setRelayMode(conn.url, session)
+      }
+    }
+
+    // 更新激活状态
+    const savedConnections = uni.getStorageSync("mcode_connections") || []
+    savedConnections.forEach((c: ConnectionItem) => {
+      c.active = c.mode === conn.mode && c.url === conn.url
+    })
+    uni.setStorageSync("mcode_connections", savedConnections)
+
+    uni.showToast({ title: "切换成功", icon: "success" })
+    loadConnections()
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    uni.showToast({ title: `切换失败: ${message}`, icon: "none", duration: 3000 })
+  }
+}
+
+function editConnection(conn: ConnectionItem, index: number) {
+  form.value.name = conn.name
+  form.value.mode = conn.mode
+
+  if (conn.mode === "direct") {
+    form.value.directBaseUrl = conn.url
+    form.value.directToken = conn.directToken || ""
+  } else {
+    form.value.relayUrl = conn.url
+    form.value.pairCode = conn.pairCode || ""
+    form.value.pairSecret = conn.pairSecret || ""
+  }
+
+  showAddPopup.value = true
+}
+
+function deleteConnection(index: number) {
+  const conn = connections.value[index]
+
+  uni.showModal({
+    title: "确认删除",
+    content: `确定要删除连接 ${conn.name} 吗？`,
+    success: (res) => {
+      if (res.confirm) {
+        const savedConnections = uni.getStorageSync("mcode_connections") || []
+        savedConnections.splice(index, 1)
+        uni.setStorageSync("mcode_connections", savedConnections)
+
+        // 如果删除的是当前激活的连接，清除认证信息
+        if (conn.active) {
+          auth.clearAuth()
+        }
+
+        uni.showToast({ title: "删除成功", icon: "success" })
         loadConnections()
       }
     },
@@ -342,6 +508,11 @@ function resetForm() {
 .connection-url {
   font-size: 26rpx;
   color: #909399;
+  margin-left: 32rpx;
+  margin-bottom: 8rpx;
+}
+
+.connection-mode {
   margin-left: 32rpx;
 }
 

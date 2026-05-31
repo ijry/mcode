@@ -14,14 +14,8 @@
     <view v-else class="detail-container">
       <!-- 工具栏 -->
       <view class="toolbar">
-        <u-button size="small" type="primary" plain @click="showModelPicker = true">
-          <u-icon name="setting" size="16"></u-icon>
-          <text class="btn-text">模型</text>
-        </u-button>
-        <u-button size="small" type="success" plain @click="showPermissionPicker = true">
-          <u-icon name="lock" size="16"></u-icon>
-          <text class="btn-text">权限</text>
-        </u-button>
+        <AgentSelector v-model="selectedAgent" @change="handleAgentChange" />
+        <ExpertMenu @select="handleCommandSelect" />
         <u-button size="small" type="warning" plain @click="chooseImage">
           <u-icon name="photo" size="16"></u-icon>
           <text class="btn-text">图片</text>
@@ -132,6 +126,8 @@ import { useConversationRuntimeStore } from "@/stores/conversationRuntime"
 import { acpApi } from "@/api/acp"
 import type { PromptInputBlock } from "@/types/acp"
 import MessageBubble from "@/components/MessageBubble.vue"
+import AgentSelector from "@/components/AgentSelector.vue"
+import ExpertMenu from "@/components/ExpertMenu.vue"
 
 const auth = useAuthStore()
 const runtime = useConversationRuntimeStore()
@@ -142,27 +138,8 @@ const conversationId = ref<number>(0)
 const folderId = ref<number>(0)
 const inputText = ref("")
 const scrollIntoView = ref("")
-const showModelPicker = ref(false)
-const showPermissionPicker = ref(false)
 const attachments = ref<any[]>([])
-
-const modelColumns = ref([
-  [
-    { text: "Claude Sonnet 4", value: "claude-sonnet-4" },
-    { text: "Claude Opus 4", value: "claude-opus-4" },
-    { text: "Claude Haiku 4", value: "claude-haiku-4" },
-    { text: "GPT-4", value: "gpt-4" },
-    { text: "GPT-3.5", value: "gpt-3.5-turbo" },
-  ],
-])
-
-const permissionColumns = ref([
-  [
-    { text: "自动批准", value: "auto" },
-    { text: "手动批准", value: "manual" },
-    { text: "拒绝所有", value: "deny" },
-  ],
-])
+const selectedAgent = ref("general")
 
 // 计算属性
 const messages = computed(() => {
@@ -227,7 +204,7 @@ async function loadConversation() {
     // 连接到 ACP
     await runtime.connect(
       conversationId.value,
-      result.agentType || "general",
+      result.agentType || selectedAgent.value,
       undefined,
       result.sessionId
     )
@@ -244,6 +221,25 @@ async function loadConversation() {
   } finally {
     loading.value = false
   }
+}
+
+// 智能体切换
+async function handleAgentChange(agent: any) {
+  try {
+    const conn = session.value?.connectionId
+    if (conn) {
+      await acpApi.acpSetMode(conn, agent.type)
+      uni.showToast({ title: `已切换到: ${agent.name}`, icon: "success" })
+    }
+  } catch (error) {
+    uni.showToast({ title: "切换失败", icon: "none" })
+  }
+}
+
+// 专家命令选择
+function handleCommandSelect(command: any) {
+  inputText.value = command.prompt + "\n\n"
+  uni.showToast({ title: `已插入: ${command.name}`, icon: "success" })
 }
 
 // 发送消息
@@ -361,28 +357,6 @@ async function regenerateLastMessage() {
     inputText.value = textContent.text
     await sendMessage()
   }
-}
-
-// 模型确认
-async function onModelConfirm(e: any) {
-  const selected = e.value[0]
-  try {
-    const conn = session.value?.connectionId
-    if (conn) {
-      await acpApi.acpSetMode(conn, selected.value)
-      uni.showToast({ title: `已切换到: ${selected.text}`, icon: "success" })
-    }
-  } catch (error) {
-    uni.showToast({ title: "切换失败", icon: "none" })
-  }
-  showModelPicker.value = false
-}
-
-// 权限确认
-function onPermissionConfirm(e: any) {
-  const selected = e.value[0]
-  uni.showToast({ title: `权限设置: ${selected.text}`, icon: "none" })
-  showPermissionPicker.value = false
 }
 
 // 辅助函数：将路径转换为 File 对象
