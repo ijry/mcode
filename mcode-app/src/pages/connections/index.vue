@@ -1,9 +1,18 @@
 <template>
   <view class="page">
+    <view v-if="false" class="hero-banner">
+      <image
+        class="hero-banner__img"
+        src="/static/illustrations/connection-ai-coding-hero.svg"
+        mode="widthFix"
+      />
+    </view>
+
     <view class="header">
-      <u-button type="primary" @click="showAddPopup = true" icon="plus" size="large">
-        新增连接
-      </u-button>
+      <view class="add-conn-btn" @click="showAddPopup = true">
+        <u-icon name="plus" size="18" color="#2979ff"></u-icon>
+        <text class="add-conn-btn__text">新增连接</text>
+      </view>
     </view>
 
     <view v-if="connections.length === 0" class="empty-container">
@@ -24,27 +33,32 @@
         @click="activateConnection(conn)"
         @longpress="showConnectionMenu(conn, index)"
       >
-        <view class="connection-info">
-          <view class="connection-name">
-            <u-icon
-              :name="conn.mode === 'direct' ? 'wifi' : 'cloud'"
-              size="20"
-              :color="conn.active ? '#2979ff' : '#909399'"
-            ></u-icon>
-            <text class="name-text">{{ conn.name }}</text>
-            <u-tag v-if="conn.active" text="当前" type="primary" size="mini"></u-tag>
-          </view>
-          <view class="connection-url">{{ conn.url }}</view>
-          <view class="connection-mode">
-            <u-tag
-              :text="conn.mode === 'direct' ? '直连模式' : '中继模式'"
-              type="info"
-              size="mini"
-              plain
-            ></u-tag>
-          </view>
+        <view
+          class="connection-icon"
+          :style="{ backgroundColor: (isConnectionConnected(conn) ? '#19be6b' : '#909399') + '18' }"
+        >
+          <u-icon
+            :name="conn.mode === 'direct' ? 'wifi' : 'cloud'"
+            size="24"
+            :color="isConnectionConnected(conn) ? '#19be6b' : '#909399'"
+          ></u-icon>
         </view>
-        <u-icon name="more-dot-fill" color="#c0c4cc" size="18"></u-icon>
+
+        <view class="connection-info">
+          <view class="connection-info__title">
+            <text class="connection-info__name">{{ conn.name }}</text>
+            <view
+              :class="['status-dot', isConnectionConnected(conn) && 'status-dot--online']"
+            ></view>
+          </view>
+          <text class="connection-info__desc">
+            {{ conn.mode === 'direct' ? '直连模式' : '中继模式' }} · {{ conn.url }}
+          </text>
+        </view>
+
+        <view class="row-menu-btn" @click.stop="showConnectionMenu(conn, index)">
+          <u-icon name="more-dot-fill" color="#c0c4cc" size="18"></u-icon>
+        </view>
       </view>
     </view>
 
@@ -142,6 +156,7 @@
 import { ref, computed, onMounted } from "vue"
 import { useAuthStore } from "@/stores/auth"
 import { createGateway } from "@/services/gateway"
+import type { RelaySessionInfo } from "@/services/gateway"
 
 const auth = useAuthStore()
 const showAddPopup = ref(false)
@@ -149,15 +164,18 @@ const subsectionIndex = ref(0)
 const loading = ref(false)
 const showActionSheet = ref(false)
 const currentConnectionIndex = ref(-1)
+const connectedMap = ref<Record<string, boolean>>({})
+const onlineMap = ref<Record<string, boolean>>({})
 
 interface ConnectionItem {
   name: string
   mode: "direct" | "relay"
   url: string
-  active: boolean
+  active?: boolean
   directToken?: string
   pairCode?: string
   pairSecret?: string
+  relaySession?: RelaySessionInfo
 }
 
 const form = ref({
@@ -174,33 +192,29 @@ const connections = ref<ConnectionItem[]>([])
 
 const connectionActions = computed(() => {
   const current = connections.value[currentConnectionIndex.value]
-  const actions = []
-
-  if (!current?.active) {
-    actions.push({ name: "切换", color: "#2979ff" })
-  }
-
-  actions.push(
+  const isConnected = current ? isConnectionConnected(current) : false
+  const isLinked = current ? isConnectionLinked(current) : false
+  return [
+    { name: "连接", color: "#2979ff", disabled: isConnected },
+    { name: "断开连接", color: "#fa8c16", disabled: !isLinked },
     { name: "编辑", color: "#19be6b" },
-    { name: "删除", color: "#fa3534" }
-  )
-
-  return actions
+    { name: "删除", color: "#fa3534" },
+  ]
 })
 
 onMounted(() => {
+  connectedMap.value = uni.getStorageSync("mcode_connected_map") || {}
   loadConnections()
 })
 
 function loadConnections() {
   const savedConnections = uni.getStorageSync("mcode_connections") || []
-  const currentMode = auth.mode
-  const currentUrl = currentMode === "direct" ? auth.directBaseUrl : auth.relayUrl
 
   connections.value = savedConnections.map((conn: ConnectionItem) => ({
     ...conn,
-    active: conn.mode === currentMode && conn.url === currentUrl,
   }))
+  pruneConnectedMapByConnections()
+  void refreshOnlineStatus()
 }
 
 function subsectionChange(index: number) {
@@ -243,6 +257,8 @@ async function submitConnection() {
       }
 
       saveConnection(newConnection)
+      setConnectionConnected(newConnection, true)
+      persistConnectedMap()
       uni.showToast({ title: "连接成功", icon: "success" })
     } else {
       if (!form.value.relayUrl || !form.value.pairCode || !form.value.pairSecret) {
@@ -272,9 +288,12 @@ async function submitConnection() {
           active: true,
           pairCode: form.value.pairCode,
           pairSecret: form.value.pairSecret,
+          relaySession: session,
         }
 
         saveConnection(newConnection)
+        setConnectionConnected(newConnection, true)
+        persistConnectedMap()
         uni.showToast({ title: "配对成功", icon: "success" })
       }
     }
@@ -292,11 +311,6 @@ async function submitConnection() {
 
 function saveConnection(conn: ConnectionItem) {
   const savedConnections = uni.getStorageSync("mcode_connections") || []
-
-  // 将所有连接设为非激活
-  savedConnections.forEach((c: ConnectionItem) => {
-    c.active = false
-  })
 
   const existingIndex = savedConnections.findIndex(
     (c: ConnectionItem) => c.mode === conn.mode && c.url === conn.url
@@ -317,13 +331,20 @@ function showConnectionMenu(conn: ConnectionItem, index: number) {
 }
 
 function handleActionSelect(e: any) {
-  const action = e.name
+  const action = resolveActionName(e)
   const conn = connections.value[currentConnectionIndex.value]
 
-  if (!conn) return
+  if (!conn || !action) return
 
-  if (action === "切换") {
+  if (action === "连接") {
+    if (isCurrentConnection(conn) && isConnectionConnected(conn)) {
+      uni.showToast({ title: "当前已连接", icon: "none" })
+      showActionSheet.value = false
+      return
+    }
     switchConnection(conn)
+  } else if (action === "断开连接") {
+    disconnectConnection(conn)
   } else if (action === "编辑") {
     editConnection(conn, currentConnectionIndex.value)
   } else if (action === "删除") {
@@ -334,7 +355,7 @@ function handleActionSelect(e: any) {
 }
 
 async function activateConnection(conn: ConnectionItem) {
-  if (conn.active) return
+  if (isCurrentConnection(conn)) return
 
   uni.showModal({
     title: "切换连接",
@@ -385,23 +406,34 @@ async function switchConnection(conn: ConnectionItem) {
       })
 
       if (session) {
+        conn.relaySession = session
+        saveConnection(conn)
         auth.setRelayMode(conn.url, session)
       }
     }
 
-    // 更新激活状态
-    const savedConnections = uni.getStorageSync("mcode_connections") || []
-    savedConnections.forEach((c: ConnectionItem) => {
-      c.active = c.mode === conn.mode && c.url === conn.url
-    })
-    uni.setStorageSync("mcode_connections", savedConnections)
-
-    uni.showToast({ title: "切换成功", icon: "success" })
+    setConnectionConnected(conn, true)
+    persistConnectedMap()
+    void refreshOnlineStatus()
+    uni.showToast({ title: "连接成功", icon: "success" })
     loadConnections()
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    uni.showToast({ title: `切换失败: ${message}`, icon: "none", duration: 3000 })
+    uni.showToast({ title: `连接失败: ${message}`, icon: "none", duration: 3000 })
   }
+}
+
+function disconnectConnection(conn: ConnectionItem) {
+  setConnectionConnected(conn, false)
+  persistConnectedMap()
+  const nextOnline = { ...onlineMap.value }
+  delete nextOnline[connectionKey(conn)]
+  onlineMap.value = nextOnline
+  if (isCurrentConnection(conn)) {
+    auth.clearAuth()
+  }
+  uni.showToast({ title: "已断开连接", icon: "success" })
+  loadConnections()
 }
 
 function editConnection(conn: ConnectionItem, index: number) {
@@ -431,11 +463,13 @@ function deleteConnection(index: number) {
         const savedConnections = uni.getStorageSync("mcode_connections") || []
         savedConnections.splice(index, 1)
         uni.setStorageSync("mcode_connections", savedConnections)
+        setConnectionConnected(conn, false)
+        persistConnectedMap()
+        const nextOnline = { ...onlineMap.value }
+        delete nextOnline[connectionKey(conn)]
+        onlineMap.value = nextOnline
 
-        // 如果删除的是当前激活的连接，清除认证信息
-        if (conn.active) {
-          auth.clearAuth()
-        }
+        // 删除当前连接时仅移除记录，不在此处强制改写当前认证状态
 
         uni.showToast({ title: "删除成功", icon: "success" })
         loadConnections()
@@ -455,18 +489,218 @@ function resetForm() {
     pairSecret: "",
   }
 }
+
+function normalizeBaseUrl(url: string): string {
+  return String(url || "").trim().replace(/\/+$/, "")
+}
+
+function connectionKey(conn: Pick<ConnectionItem, "mode" | "url">): string {
+  return `${conn.mode}::${normalizeBaseUrl(conn.url)}`
+}
+
+function isConnectionConnected(conn: ConnectionItem): boolean {
+  const key = connectionKey(conn)
+  return Boolean(connectedMap.value[key] && onlineMap.value[key])
+}
+
+function isConnectionLinked(conn: ConnectionItem): boolean {
+  return Boolean(connectedMap.value[connectionKey(conn)])
+}
+
+function setConnectionConnected(conn: ConnectionItem, connected: boolean) {
+  const key = connectionKey(conn)
+  const next = { ...connectedMap.value }
+  if (connected) {
+    next[key] = true
+  } else {
+    delete next[key]
+  }
+  connectedMap.value = next
+}
+
+function resolveActionName(e: any): string {
+  if (typeof e === "string") return e
+  if (e && typeof e.name === "string") return e.name
+  if (e && typeof e.index === "number") {
+    return connectionActions.value[e.index]?.name || ""
+  }
+  return ""
+}
+
+function pruneConnectedMapByConnections() {
+  const validKeys = new Set(connections.value.map((conn) => connectionKey(conn)))
+  const next: Record<string, boolean> = {}
+  Object.entries(connectedMap.value || {}).forEach(([key, value]) => {
+    if (validKeys.has(key) && Boolean(value)) {
+      next[key] = true
+    }
+  })
+  connectedMap.value = next
+  persistConnectedMap()
+}
+
+async function refreshOnlineStatus() {
+  if (!connections.value.length) {
+    onlineMap.value = {}
+    return
+  }
+
+  const connectedConnections = connections.value.filter((conn) =>
+    Boolean(connectedMap.value[connectionKey(conn)])
+  )
+  if (!connectedConnections.length) {
+    onlineMap.value = {}
+    return
+  }
+
+  const results = await Promise.all(
+    connectedConnections.map(async (conn) => ({
+      key: connectionKey(conn),
+      online: await probeConnectionOnline(conn),
+    }))
+  )
+
+  const next: Record<string, boolean> = {}
+  results.forEach((item) => {
+    if (item.online) {
+      next[item.key] = true
+    }
+  })
+  onlineMap.value = next
+}
+
+async function probeConnectionOnline(conn: ConnectionItem): Promise<boolean> {
+  if (conn.mode === "direct") {
+    return probeDirectOnline(conn)
+  }
+  return probeRelayOnline(conn)
+}
+
+async function probeDirectOnline(conn: ConnectionItem): Promise<boolean> {
+  try {
+    const token = conn.directToken || ""
+    const res = await uni.request({
+      url: `${normalizeBaseUrl(conn.url)}/api/health`,
+      method: "POST",
+      data: {},
+      header: {
+        "content-type": "application/json",
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+      },
+      timeout: 3000,
+    })
+    return Number(res.statusCode) >= 200 && Number(res.statusCode) < 400
+  } catch {
+    return false
+  }
+}
+
+async function probeRelayOnline(conn: ConnectionItem): Promise<boolean> {
+  try {
+    const session = await ensureRelaySession(conn)
+    if (!session?.accessToken) return false
+
+    const response = await uni.request({
+      url: `${normalizeBaseUrl(conn.url)}/v1/targets`,
+      method: "GET",
+      header: {
+        authorization: `Bearer ${session.accessToken}`,
+      },
+      timeout: 3000,
+    })
+
+    if (Number(response.statusCode) !== 200) return false
+
+    const data = response.data as
+      | {
+          currentTargetId?: string
+          targets?: Array<{ targetId?: string; online?: boolean }>
+        }
+      | undefined
+    const currentTargetId = data?.currentTargetId
+    const target = (data?.targets || []).find((item) => item.targetId === currentTargetId)
+    return Boolean(target?.online)
+  } catch {
+    return false
+  }
+}
+
+async function ensureRelaySession(conn: ConnectionItem): Promise<RelaySessionInfo | null> {
+  if (conn.mode !== "relay") return null
+  if (conn.relaySession?.accessToken) return conn.relaySession
+  if (!conn.pairCode || !conn.pairSecret) return null
+
+  const gateway = createGateway({
+    mode: "relay",
+    relayUrl: conn.url,
+    session: { accessToken: "" },
+  })
+  const session = await gateway.pair({
+    relayUrl: conn.url,
+    code: conn.pairCode,
+    secret: conn.pairSecret,
+  })
+  if (!session) return null
+
+  conn.relaySession = session
+  saveConnection(conn)
+  return session
+}
+
+function isCurrentConnection(conn: ConnectionItem): boolean {
+  const currentMode = auth.mode
+  const currentUrl = currentMode === "direct" ? auth.directBaseUrl : auth.relayUrl
+  return conn.mode === currentMode && normalizeBaseUrl(conn.url) === normalizeBaseUrl(currentUrl)
+}
+
+function persistConnectedMap() {
+  uni.setStorageSync("mcode_connected_map", connectedMap.value)
+}
 </script>
 
 <style scoped lang="scss">
 .page {
   min-height: 100vh;
-  background-color: #f8f8f8;
+  background-color: #ffffff;
+}
+
+.hero-banner {
+  padding: 20rpx 24rpx 10rpx;
+  background-color: #ffffff;
+}
+
+.hero-banner__img {
+  width: 100%;
+  display: block;
+  border-radius: 18rpx;
 }
 
 .header {
-  padding: 20rpx 30rpx;
+  padding: 10rpx 24rpx 20rpx;
   background-color: #ffffff;
   border-bottom: 1rpx solid #e4e7ed;
+}
+
+.add-conn-btn {
+  height: 76rpx;
+  border: 2rpx dashed #8fb8ff;
+  border-radius: 14rpx;
+  background-color: #f8fbff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10rpx;
+
+  &:active {
+    background-color: #edf4ff;
+    border-color: #7aa9ff;
+  }
+}
+
+.add-conn-btn__text {
+  font-size: 28rpx;
+  color: #2979ff;
+  font-weight: 500;
 }
 
 .empty-container {
@@ -474,46 +708,83 @@ function resetForm() {
 }
 
 .connection-list {
-  padding: 20rpx 0;
+  padding: 20rpx 24rpx;
 }
 
 .connection-item {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 30rpx;
-  margin: 20rpx 30rpx;
-  background-color: #ffffff;
+  gap: 20rpx;
+  padding: 20rpx 16rpx;
+  background-color: #f8f9fa;
   border-radius: 16rpx;
-  box-shadow: 0 2rpx 12rpx rgba(0, 0, 0, 0.05);
+  margin-bottom: 10rpx;
+  transition: background-color 0.15s;
+
+  &:active { background-color: #f0f0f0; }
+}
+
+.connection-icon {
+  width: 76rpx;
+  height: 76rpx;
+  border-radius: 18rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 }
 
 .connection-info {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
 }
 
-.connection-name {
+.connection-info__name {
+  font-size: 30rpx;
+  font-weight: 500;
+  color: #1d1d1f;
+}
+
+.connection-info__title {
   display: flex;
   align-items: center;
-  gap: 12rpx;
-  margin-bottom: 12rpx;
+  gap: 10rpx;
 }
 
-.name-text {
-  font-size: 32rpx;
-  font-weight: 500;
-  color: #303133;
+.connection-info__desc {
+  font-size: 24rpx;
+  color: #86909c;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.connection-url {
-  font-size: 26rpx;
-  color: #909399;
-  margin-left: 32rpx;
+.status-dot {
+  width: 14rpx;
+  height: 14rpx;
+  border-radius: 50%;
+  background-color: #c0c4cc;
+  flex-shrink: 0;
+}
+
+.status-dot--online {
+  background-color: #19be6b;
+}
+
+.connection-item:last-child {
   margin-bottom: 8rpx;
 }
 
-.connection-mode {
-  margin-left: 32rpx;
+.row-menu-btn {
+  width: 44rpx;
+  height: 44rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12rpx;
 }
 
 .popup-content {
