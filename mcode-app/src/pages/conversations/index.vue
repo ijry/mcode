@@ -44,7 +44,7 @@
         <!-- 左侧 tab 项 -->
         <template #tabItem="slotProps">
           <view v-if="slotProps?.item" class="tab-item">
-            <text class="tab-item__name up-line-2">{{ slotProps.item.label }}</text>
+            <text class="tab-item__name">{{ slotProps.item.label }}</text>
             <view v-if="slotProps.item.count > 0" class="tab-item__badge">{{ slotProps.item.count }}</view>
           </view>
         </template>
@@ -508,15 +508,25 @@ function formatTime(time?: string): string {
   position: relative;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: stretch;
   gap: 6rpx;
-  padding: 4rpx 0;
+  width: 100%;
+  padding: 8rpx 12rpx;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
 .tab-item__name {
-  font-size: 26rpx;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: normal;
+  word-break: break-all;
+  line-height: 1.35;
+  font-size: 24rpx;
   color: inherit;
-  line-height: 1.4;
 }
 
 .tab-item__badge {
@@ -686,5 +696,15 @@ function formatTime(time?: string): string {
 
 .safe-bottom {
   height: calc(32rpx + env(safe-area-inset-bottom));
+}
+
+:deep(.u-cate-tab__view) {
+  width: 220rpx !important;
+}
+
+:deep(.u-cate-tab__item) {
+  height: 120rpx;
+  align-items: flex-start;
+  justify-content: center;
 }
 </style>
