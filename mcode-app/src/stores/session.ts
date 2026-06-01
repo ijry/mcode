@@ -28,4 +28,10 @@ export const useSessionStore = defineStore("session", {
       this.events = this.events.slice(0, 50)
     },
   },
+  persist: {
+    storage: {
+      getItem: (key: string) => uni.getStorageSync(key),
+      setItem: (key: string, value: string) => uni.setStorageSync(key, value),
+    },
+  },
 })

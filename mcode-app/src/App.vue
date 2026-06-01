@@ -29,6 +29,7 @@ function initDarkMode() {
 </script>
 
 <style lang="scss">
+@import 'uview-plus/index.scss';
 /* 全局样式 */
 page {
   background-color: #f8f8f8;

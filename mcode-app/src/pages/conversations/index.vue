@@ -1,166 +1,186 @@
 <template>
   <view class="page">
-    <!-- 搜索栏 -->
-    <view v-if="hasActiveConnection" class="search-bar">
-      <u-search
-        v-model="searchKeyword"
-        placeholder="搜索会话..."
-        :show-action="false"
-        @search="handleSearch"
-        @clear="handleSearch"
-      ></u-search>
-    </view>
 
-    <view v-if="!hasActiveConnection" class="empty-container">
-      <u-empty mode="data" text="请先添加连接">
+    <!-- 无连接 -->
+    <view v-if="!hasActiveConnection" class="empty-fullpage">
+      <up-empty mode="data" text="请先添加连接">
         <template #bottom>
-          <u-button type="primary" @click="goToConnections" size="normal">
+          <up-button type="primary" @click="goToConnections" size="normal" customStyle="margin-top:32rpx">
             前往添加
-          </u-button>
+          </up-button>
         </template>
-      </u-empty>
+      </up-empty>
     </view>
 
-    <view v-else-if="filteredProjects.length === 0" class="empty-container">
-      <u-empty
-        mode="list"
-        :text="searchKeyword ? '未找到匹配的会话' : '暂无项目'"
-        :show="!loading"
-      ></u-empty>
-    </view>
+    <view v-else class="main-wrap">
 
-    <view v-else class="conversation-list">
-      <u-collapse v-model="activeNames" accordion>
-        <u-collapse-item
-          v-for="project in filteredProjects"
-          :key="project.id"
-          :name="String(project.id)"
-          :title="project.name || project.path || '未命名项目'"
-        >
-          <template #right>
-            <u-button
-              size="mini"
+      <!-- 顶部搜索 -->
+      <view class="search-bar">
+        <up-search
+          v-model="searchKeyword"
+          placeholder="搜索会话..."
+          :show-action="false"
+          shape="round"
+          @search="() => {}"
+          @clear="() => {}"
+        ></up-search>
+      </view>
+
+      <!-- 空状态 -->
+      <view v-if="!loading && projects.length === 0" class="empty-fullpage">
+        <up-empty mode="list" text="暂无项目"></up-empty>
+      </view>
+
+      <!-- 分类面板 -->
+      <up-cate-tab
+        v-else
+        :tabList="tabList"
+        tabKeyName="label"
+        mode="tab"
+        height="calc(100vh - 120rpx)"
+        :current="currentTab"
+        @update:current="onTabChange"
+      >
+        <!-- 左侧 tab 项 -->
+        <template #tabItem="{ item }">
+          <view class="tab-item">
+            <text class="tab-item__name u-line-2">{{ item.label }}</text>
+            <view v-if="item.count > 0" class="tab-item__badge">{{ item.count }}</view>
+          </view>
+        </template>
+
+        <!-- 右侧顶部：新建按钮 -->
+        <template #rightTop="{ tabList }">
+          <view class="right-top-bar">
+            <view class="right-top-bar__title">
+              {{ tabList[currentTab]?.label || '' }}
+            </view>
+            <view class="add-btn" @click="createConversation(tabList[currentTab]?.projectId)">
+              <up-icon name="plus" size="18" color="#2979ff"></up-icon>
+              <text class="add-btn__label">新建</text>
+            </view>
+          </view>
+        </template>
+
+        <!-- 右侧每个分类的内容 -->
+        <template #itemList="{ item }">
+          <!-- 无会话 -->
+          <view v-if="item.conversations.length === 0" class="empty-section">
+            <up-empty mode="message" text="暂无会话" iconSize="60"></up-empty>
+            <up-button
               type="primary"
               plain
-              @click.stop="createConversation(project.id)"
-            >
-              <u-icon name="plus" size="14"></u-icon>
-            </u-button>
-          </template>
+              size="small"
+              @click="createConversation(item.projectId)"
+              customStyle="margin-top:24rpx"
+            >创建第一个会话</up-button>
+          </view>
 
-          <view v-if="project.conversations && project.conversations.length > 0">
+          <!-- 会话列表 -->
+          <view v-else class="conv-list">
             <view
-              v-for="conv in project.conversations"
+              v-for="conv in item.conversations"
               :key="conv.id"
-              class="conversation-item"
+              class="conv-card"
               @click="openConversation(conv)"
               @longpress="showConversationMenu(conv)"
             >
-              <view class="conversation-header">
-                <view class="conversation-title">
-                  <u-icon name="chat" size="18" color="#2979ff"></u-icon>
-                  <text class="title-text">{{ conv.title || "未命名会话" }}</text>
+              <view class="conv-card__icon">
+                <up-icon name="chat-fill" size="20" color="#2979ff"></up-icon>
+              </view>
+              <view class="conv-card__body">
+                <text class="conv-card__title u-line-1">{{ conv.title || '未命名会话' }}</text>
+                <view class="conv-card__meta">
+                  <up-tag
+                    :text="formatAgentType(conv.agent_type)"
+                    type="info"
+                    size="mini"
+                    plain
+                  ></up-tag>
+                  <text class="conv-card__time">{{ formatTime(conv.updated_at) }}</text>
                 </view>
-                <u-icon name="arrow-right" color="#c0c4cc" size="16"></u-icon>
               </view>
-              <view class="conversation-meta">
-                <u-tag
-                  :text="conv.agent_type || 'unknown'"
-                  type="info"
-                  size="mini"
-                  plain
-                ></u-tag>
-                <text class="time-text">{{ formatTime(conv.updated_at) }}</text>
-              </view>
+              <up-icon name="arrow-right" size="14" color="#c0c4cc"></up-icon>
             </view>
           </view>
-          <view v-else class="empty-conversations">
-            <text class="empty-text">暂无会话</text>
-            <u-button
-              size="small"
-              type="primary"
-              plain
-              @click="createConversation(project.id)"
-            >
-              创建会话
-            </u-button>
+        </template>
+      </up-cate-tab>
+    </view>
+
+    <!-- 创建会话底部弹层 -->
+    <up-popup v-model:show="showCreateDialog" mode="bottom" :round="20">
+      <view class="create-sheet">
+        <view class="create-sheet__hd">
+          <text class="create-sheet__title">新建会话</text>
+          <view class="create-sheet__close" @click="showCreateDialog = false">
+            <up-icon name="close" size="20" color="#909399"></up-icon>
           </view>
-        </u-collapse-item>
-      </u-collapse>
-    </view>
-
-    <!-- 浮动创建按钮 -->
-    <view v-if="hasActiveConnection && projects.length > 0" class="fab-button">
-      <u-button
-        type="primary"
-        shape="circle"
-        size="large"
-        @click="showCreateDialog = true"
-      >
-        <u-icon name="plus" size="24" color="#ffffff"></u-icon>
-      </u-button>
-    </view>
-
-    <!-- 创建会话对话框 -->
-    <u-popup v-model:show="showCreateDialog" mode="center" :round="10">
-      <view class="create-dialog">
-        <view class="dialog-title">创建新会话</view>
-
-        <view class="form-item">
-          <text class="form-label">选择项目</text>
-          <u-picker
-            :show="showProjectPicker"
-            :columns="projectColumns"
-            @confirm="onProjectConfirm"
-            @cancel="showProjectPicker = false"
-          ></u-picker>
-          <u-input
-            v-model="selectedProjectName"
-            placeholder="请选择项目"
-            readonly
-            @click="showProjectPicker = true"
-          ></u-input>
         </view>
 
-        <view class="form-item">
-          <text class="form-label">选择智能体</text>
-          <u-picker
-            :show="showAgentPicker"
-            :columns="agentColumns"
-            @confirm="onAgentConfirm"
-            @cancel="showAgentPicker = false"
-          ></u-picker>
-          <u-input
-            v-model="selectedAgentName"
-            placeholder="请选择智能体"
-            readonly
-            @click="showAgentPicker = true"
-          ></u-input>
+        <view class="form-group">
+          <text class="form-label">项目</text>
+          <view class="form-readonly" @click="showProjectPicker = true">
+            <text class="form-readonly__text">{{ selectedProjectName || '请选择' }}</text>
+            <up-icon name="arrow-down" size="14" color="#c0c4cc"></up-icon>
+          </view>
         </view>
 
-        <view class="form-item">
-          <text class="form-label">会话标题（可选）</text>
-          <u-input v-model="newConversationTitle" placeholder="输入会话标题"></u-input>
+        <view class="form-group">
+          <text class="form-label">智能体</text>
+          <view class="form-readonly" @click="showAgentPicker = true">
+            <text class="form-readonly__text">{{ selectedAgentName }}</text>
+            <up-icon name="arrow-down" size="14" color="#c0c4cc"></up-icon>
+          </view>
         </view>
 
-        <view class="dialog-actions">
-          <u-button @click="showCreateDialog = false">取消</u-button>
-          <u-button type="primary" @click="confirmCreate" :loading="creating">
-            创建
-          </u-button>
+        <view class="form-group">
+          <text class="form-label">标题（可选）</text>
+          <up-input
+            v-model="newConversationTitle"
+            placeholder="输入会话标题"
+            border="surround"
+            shape="circle"
+          ></up-input>
         </view>
+
+        <up-button
+          type="primary"
+          :loading="creating"
+          :disabled="!selectedProjectId"
+          shape="circle"
+          @click="confirmCreate"
+          customStyle="margin-top:16rpx"
+        >创建会话</up-button>
+
+        <view class="safe-bottom"></view>
       </view>
-    </u-popup>
+    </up-popup>
+
+    <!-- 项目 Picker -->
+    <up-picker
+      :show="showProjectPicker"
+      :columns="projectColumns"
+      @confirm="onProjectConfirm"
+      @cancel="showProjectPicker = false"
+    ></up-picker>
+
+    <!-- 智能体 Picker -->
+    <up-picker
+      :show="showAgentPicker"
+      :columns="agentColumns"
+      @confirm="onAgentConfirm"
+      @cancel="showAgentPicker = false"
+    ></up-picker>
 
     <!-- 会话操作菜单 -->
-    <u-action-sheet
+    <up-action-sheet
       :show="showActionSheet"
       :actions="conversationActions"
       @select="handleActionSelect"
       @close="showActionSheet = false"
-    ></u-action-sheet>
+    ></up-action-sheet>
 
-    <u-loading-page :loading="loading" loading-text="加载中..."></u-loading-page>
+    <up-loading-page :loading="loading" loading-text="加载中..."></up-loading-page>
   </view>
 </template>
 
@@ -168,14 +188,12 @@
 import { ref, computed, onMounted } from "vue"
 import { onPullDownRefresh } from "@dcloudio/uni-app"
 import { useAuthStore } from "@/stores/auth"
-import { useSessionStore } from "@/stores/session"
 import { acpApi } from "@/api/acp"
 
 const auth = useAuthStore()
-const session = useSessionStore()
 const loading = ref(false)
 const creating = ref(false)
-const activeNames = ref<string[]>([])
+const currentTab = ref(0)
 const searchKeyword = ref("")
 const showCreateDialog = ref(false)
 const showProjectPicker = ref(false)
@@ -183,15 +201,15 @@ const showAgentPicker = ref(false)
 const showActionSheet = ref(false)
 const selectedProjectId = ref<number>(0)
 const selectedProjectName = ref("")
-const selectedAgentType = ref("general")
-const selectedAgentName = ref("通用助手")
+const selectedAgentType = ref("claude_code")
+const selectedAgentName = ref("Claude Code")
 const newConversationTitle = ref("")
 const currentConversation = ref<Conversation | null>(null)
 
 interface Project {
   id: number
-  name?: string
-  path?: string
+  name: string
+  path: string
   conversations?: Conversation[]
 }
 
@@ -205,6 +223,22 @@ interface Conversation {
 
 const projects = ref<Project[]>([])
 
+// up-cate-tab 所需数据结构
+const tabList = computed(() => {
+  const kw = searchKeyword.value.toLowerCase()
+  return projects.value.map((p) => {
+    const convs = (p.conversations || []).filter(
+      (c) => !kw || (c.title || "").toLowerCase().includes(kw)
+    )
+    return {
+      label: p.name || p.path || "未命名项目",
+      projectId: p.id,
+      count: convs.length,
+      conversations: convs,
+    }
+  })
+})
+
 const projectColumns = computed(() => [
   projects.value.map((p) => ({
     text: p.name || p.path || "未命名项目",
@@ -214,104 +248,87 @@ const projectColumns = computed(() => [
 
 const agentColumns = ref([
   [
-    { text: "通用助手", value: "general" },
-    { text: "代码助手", value: "code" },
-    { text: "写作助手", value: "writing" },
-    { text: "分析助手", value: "analysis" },
+    { text: "Claude Code", value: "claude_code" },
+    { text: "Codex CLI",   value: "codex"       },
+    { text: "OpenCode",    value: "open_code"   },
+    { text: "Gemini CLI",  value: "gemini"      },
+    { text: "OpenClaw",    value: "open_claw"   },
+    { text: "Cline",       value: "cline"       },
   ],
 ])
 
-const conversationActions = ref([
+const AGENT_LABELS: Record<string, string> = {
+  claude_code: "Claude Code",
+  codex:       "Codex CLI",
+  open_code:   "OpenCode",
+  gemini:      "Gemini CLI",
+  open_claw:   "OpenClaw",
+  cline:       "Cline",
+}
+
+function formatAgentType(t?: string) {
+  return t ? (AGENT_LABELS[t] ?? t) : "未知"
+}
+
+const conversationActions = [
   { name: "重命名", color: "#2979ff" },
-  { name: "删除", color: "#fa3534" },
-])
+  { name: "删除",   color: "#fa3534" },
+]
 
-const hasActiveConnection = computed(() => {
-  return !!(auth.directBaseUrl || auth.relayUrl)
-})
+const hasActiveConnection = computed(() => !!(auth.directBaseUrl || auth.relayUrl))
 
-const filteredProjects = computed(() => {
-  if (!searchKeyword.value) return projects.value
-
-  return projects.value
-    .map((project) => ({
-      ...project,
-      conversations: project.conversations?.filter((conv) =>
-        conv.title?.toLowerCase().includes(searchKeyword.value.toLowerCase())
-      ),
-    }))
-    .filter((project) => project.conversations && project.conversations.length > 0)
-})
+function onTabChange(idx: number) {
+  currentTab.value = idx
+}
 
 onMounted(() => {
-  if (hasActiveConnection.value) {
-    loadData()
-  }
+  if (hasActiveConnection.value) loadData()
 })
 
 onPullDownRefresh(() => {
-  loadData().finally(() => {
-    uni.stopPullDownRefresh()
-  })
+  loadData().finally(() => uni.stopPullDownRefresh())
 })
 
 async function loadData() {
   loading.value = true
   try {
     const gateway = auth.gateway()
+    const raw = await gateway.call<unknown>("list_all_folder_details")
+    const list = normalizeList(raw)
 
-    // 加载项目列表
-    const projectsResult = await gateway.call<unknown>("list_folders")
-    const projectsList = normalizeProjectResponse(projectsResult)
-
-    // 为每个项目加载会话
-    const projectsWithConversations = await Promise.all(
-      projectsList.map(async (project: any) => {
+    const withConvs = await Promise.all(
+      list.map(async (p: any) => {
         try {
-          const conversations = await gateway.call<unknown[]>("list_all_conversations", {
-            folderIds: [project.id],
+          const convs = await gateway.call<unknown[]>("list_all_conversations", {
+            folderIds: [p.id],
           })
-          return {
-            ...project,
-            conversations: conversations || [],
-          }
-        } catch (error) {
-          console.error(`Failed to load conversations for project ${project.id}:`, error)
-          return {
-            ...project,
-            conversations: [],
-          }
+          return { ...p, conversations: convs || [] }
+        } catch {
+          return { ...p, conversations: [] }
         }
       })
     )
 
-    projects.value = projectsWithConversations
+    projects.value = withConvs
+    // 默认展开第一个
+    if (withConvs.length > 0) currentTab.value = 0
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    uni.showToast({ title: `加载失败: ${message}`, icon: "none", duration: 3000 })
+    const msg = error instanceof Error ? error.message : String(error)
+    uni.showToast({ title: `加载失败: ${msg}`, icon: "none", duration: 3000 })
   } finally {
     loading.value = false
   }
 }
 
-function normalizeProjectResponse(input: unknown): any[] {
-  if (Array.isArray(input)) {
-    return input
-  }
-  if (input && typeof input === "object" && "data" in input && Array.isArray((input as any).data)) {
+function normalizeList(input: unknown): any[] {
+  if (Array.isArray(input)) return input
+  if (input && typeof input === "object" && Array.isArray((input as any).data))
     return (input as any).data
-  }
   return []
 }
 
-function handleSearch() {
-  // 搜索逻辑已在 computed 中实现
-}
-
 function goToConnections() {
-  uni.switchTab({
-    url: "/pages/connections/index",
-  })
+  uni.switchTab({ url: "/pages/connections/index" })
 }
 
 function openConversation(conv: Conversation) {
@@ -320,24 +337,26 @@ function openConversation(conv: Conversation) {
   })
 }
 
-function createConversation(projectId: number) {
-  selectedProjectId.value = projectId
-  const project = projects.value.find((p) => p.id === projectId)
-  selectedProjectName.value = project?.name || project?.path || "未命名项目"
+function createConversation(projectId?: number) {
+  if (projectId) {
+    selectedProjectId.value = projectId
+    const p = projects.value.find((x) => x.id === projectId)
+    selectedProjectName.value = p?.name || p?.path || "未命名项目"
+  }
   showCreateDialog.value = true
 }
 
 function onProjectConfirm(e: any) {
-  const selected = e.value[0]
-  selectedProjectId.value = selected.value
-  selectedProjectName.value = selected.text
+  const sel = e.value[0]
+  selectedProjectId.value = sel.value
+  selectedProjectName.value = sel.text
   showProjectPicker.value = false
 }
 
 function onAgentConfirm(e: any) {
-  const selected = e.value[0]
-  selectedAgentType.value = selected.value
-  selectedAgentName.value = selected.text
+  const sel = e.value[0]
+  selectedAgentType.value = sel.value
+  selectedAgentName.value = sel.text
   showAgentPicker.value = false
 }
 
@@ -346,7 +365,6 @@ async function confirmCreate() {
     uni.showToast({ title: "请选择项目", icon: "none" })
     return
   }
-
   creating.value = true
   try {
     const result = await acpApi.createConversation(
@@ -354,28 +372,16 @@ async function confirmCreate() {
       selectedAgentType.value,
       newConversationTitle.value || undefined
     )
-
     uni.showToast({ title: "创建成功", icon: "success" })
     showCreateDialog.value = false
-
-    // 重置表单
     newConversationTitle.value = ""
-    selectedAgentType.value = "general"
-    selectedAgentName.value = "通用助手"
-
-    // 刷新列表
+    selectedAgentType.value = "claude_code"
+    selectedAgentName.value = "Claude Code"
     await loadData()
-
-    // 打开新创建的会话
-    openConversation({
-      id: result.id,
-      folder_id: selectedProjectId.value,
-      title: result.title,
-      agent_type: result.agentType,
-    })
+    openConversation({ id: result.id, folder_id: selectedProjectId.value })
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    uni.showToast({ title: `创建失败: ${message}`, icon: "none", duration: 3000 })
+    const msg = error instanceof Error ? error.message : String(error)
+    uni.showToast({ title: `创建失败: ${msg}`, icon: "none", duration: 3000 })
   } finally {
     creating.value = false
   }
@@ -387,83 +393,62 @@ function showConversationMenu(conv: Conversation) {
 }
 
 async function handleActionSelect(e: any) {
-  const action = e.name
   if (!currentConversation.value) return
-
-  if (action === "删除") {
+  if (e.name === "删除") {
     uni.showModal({
       title: "确认删除",
       content: "确定要删除这个会话吗？此操作不可恢复。",
       success: async (res) => {
         if (res.confirm) {
-          await deleteConversation(currentConversation.value!.id)
+          try {
+            await acpApi.deleteConversation(currentConversation.value!.id)
+            uni.showToast({ title: "删除成功", icon: "success" })
+            await loadData()
+          } catch (err) {
+            uni.showToast({ title: "删除失败", icon: "none" })
+          }
         }
       },
     })
-  } else if (action === "重命名") {
+  } else if (e.name === "重命名") {
     uni.showModal({
       title: "重命名会话",
       editable: true,
       placeholderText: currentConversation.value.title || "未命名会话",
       success: async (res) => {
         if (res.confirm && res.content) {
-          await renameConversation(currentConversation.value!.id, res.content)
+          try {
+            const gateway = auth.gateway()
+            await gateway.call("update_conversation", {
+              conversationId: currentConversation.value!.id,
+              title: res.content,
+            })
+            uni.showToast({ title: "重命名成功", icon: "success" })
+            await loadData()
+          } catch {
+            uni.showToast({ title: "重命名失败", icon: "none" })
+          }
         }
       },
     })
   }
-
   showActionSheet.value = false
-}
-
-async function deleteConversation(conversationId: number) {
-  try {
-    await acpApi.deleteConversation(conversationId)
-    uni.showToast({ title: "删除成功", icon: "success" })
-    await loadData()
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    uni.showToast({ title: `删除失败: ${message}`, icon: "none", duration: 3000 })
-  }
-}
-
-async function renameConversation(conversationId: number, newTitle: string) {
-  try {
-    const gateway = auth.gateway()
-    await gateway.call("update_conversation", {
-      conversationId,
-      title: newTitle,
-    })
-    uni.showToast({ title: "重命名成功", icon: "success" })
-    await loadData()
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    uni.showToast({ title: `重命名失败: ${message}`, icon: "none", duration: 3000 })
-  }
 }
 
 function formatTime(time?: string): string {
   if (!time) return ""
   try {
     const date = new Date(time)
-    const now = new Date()
-    const diff = now.getTime() - date.getTime()
-    const days = Math.floor(diff / (1000 * 60 * 60 * 24))
-
-    if (days === 0) {
-      const hours = Math.floor(diff / (1000 * 60 * 60))
-      if (hours === 0) {
-        const minutes = Math.floor(diff / (1000 * 60))
-        return minutes === 0 ? "刚刚" : `${minutes}分钟前`
-      }
-      return `${hours}小时前`
-    } else if (days === 1) {
-      return "昨天"
-    } else if (days < 7) {
-      return `${days}天前`
-    } else {
-      return date.toLocaleDateString("zh-CN")
-    }
+    const diff = Date.now() - date.getTime()
+    const min = Math.floor(diff / 60000)
+    if (min < 1)  return "刚刚"
+    if (min < 60) return `${min}分钟前`
+    const h = Math.floor(min / 60)
+    if (h < 24)   return `${h}小时前`
+    const d = Math.floor(h / 24)
+    if (d === 1)  return "昨天"
+    if (d < 7)    return `${d}天前`
+    return date.toLocaleDateString("zh-CN")
   } catch {
     return ""
   }
@@ -472,127 +457,219 @@ function formatTime(time?: string): string {
 
 <style scoped lang="scss">
 .page {
-  min-height: 100vh;
-  background-color: #f8f8f8;
+  height: 100vh;
+  background-color: #f2f3f5;
+  display: flex;
+  flex-direction: column;
 }
 
+.main-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ===== 搜索栏 ===== */
 .search-bar {
-  padding: 20rpx 30rpx;
+  padding: 16rpx 24rpx;
   background-color: #ffffff;
-  border-bottom: 1rpx solid #e4e7ed;
+  border-bottom: 1rpx solid #f0f0f0;
+  flex-shrink: 0;
 }
 
-.empty-container {
-  padding-top: 200rpx;
+/* ===== 空状态 ===== */
+.empty-fullpage {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding-bottom: 100rpx;
 }
 
-.conversation-list {
-  padding: 20rpx 0 120rpx;
+/* ===== 左侧 Tab 项 ===== */
+.tab-item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6rpx;
+  padding: 4rpx 0;
 }
 
-.conversation-item {
-  padding: 30rpx;
-  margin: 0 30rpx 20rpx;
-  background-color: #ffffff;
-  border-radius: 16rpx;
-  box-shadow: 0 2rpx 12rpx rgba(0, 0, 0, 0.05);
-  transition: transform 0.2s;
-
-  &:active {
-    transform: scale(0.98);
-  }
+.tab-item__name {
+  font-size: 26rpx;
+  color: inherit;
+  line-height: 1.4;
 }
 
-.conversation-header {
+.tab-item__badge {
+  font-size: 20rpx;
+  color: #2979ff;
+  background-color: #e8f0fe;
+  border-radius: 20rpx;
+  padding: 2rpx 12rpx;
+  line-height: 1.4;
+}
+
+/* ===== 右侧顶部栏 ===== */
+.right-top-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 16rpx;
+  padding: 20rpx 24rpx 16rpx;
+  border-bottom: 1rpx solid #f0f0f0;
 }
 
-.conversation-title {
-  display: flex;
-  align-items: center;
-  gap: 12rpx;
-  flex: 1;
-}
-
-.title-text {
+.right-top-bar__title {
   font-size: 30rpx;
-  font-weight: 500;
-  color: #303133;
+  font-weight: 600;
+  color: #1d1d1f;
+  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.conversation-meta {
+.add-btn {
   display: flex;
   align-items: center;
-  gap: 20rpx;
+  gap: 6rpx;
+  padding: 10rpx 20rpx;
+  background-color: #e8f0fe;
+  border-radius: 20rpx;
+  flex-shrink: 0;
+
+  &:active { background-color: #d0e2fd; }
 }
 
-.time-text {
-  font-size: 24rpx;
-  color: #909399;
+.add-btn__label {
+  font-size: 26rpx;
+  color: #2979ff;
+  font-weight: 500;
 }
 
-.empty-conversations {
-  padding: 40rpx;
-  text-align: center;
+/* ===== 会话列表 ===== */
+.conv-list {
+  padding: 16rpx 20rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+}
+
+.conv-card {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  padding: 20rpx 16rpx;
+  background-color: #ffffff;
+  border-radius: 16rpx;
+  box-shadow: 0 1rpx 8rpx rgba(0, 0, 0, 0.04);
+  transition: transform 0.15s;
+
+  &:active { transform: scale(0.985); }
+}
+
+.conv-card__icon {
+  width: 64rpx;
+  height: 64rpx;
+  background-color: #e8f0fe;
+  border-radius: 16rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.conv-card__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+
+.conv-card__title {
+  font-size: 28rpx;
+  font-weight: 500;
+  color: #1d1d1f;
+}
+
+.conv-card__meta {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+}
+
+.conv-card__time {
+  font-size: 22rpx;
+  color: #c0c4cc;
+}
+
+/* ===== 空会话 ===== */
+.empty-section {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 20rpx;
+  padding: 60rpx 0;
 }
 
-.empty-text {
-  font-size: 28rpx;
-  color: #909399;
+/* ===== 创建弹层 ===== */
+.create-sheet {
+  padding: 36rpx 32rpx 0;
+  background-color: #ffffff;
 }
 
-.fab-button {
-  position: fixed;
-  right: 60rpx;
-  bottom: 120rpx;
-  z-index: 999;
-  box-shadow: 0 4rpx 20rpx rgba(41, 121, 255, 0.4);
+.create-sheet__hd {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 32rpx;
+}
+
+.create-sheet__title {
+  font-size: 34rpx;
+  font-weight: 600;
+  color: #1d1d1f;
+}
+
+.create-sheet__close {
+  width: 56rpx;
+  height: 56rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #f5f5f5;
   border-radius: 50%;
 }
 
-.create-dialog {
-  width: 600rpx;
-  padding: 40rpx;
-  background-color: #ffffff;
-  border-radius: 20rpx;
-}
-
-.dialog-title {
-  font-size: 36rpx;
-  font-weight: 600;
-  color: #303133;
-  margin-bottom: 40rpx;
-  text-align: center;
-}
-
-.form-item {
-  margin-bottom: 30rpx;
+.form-group {
+  margin-bottom: 28rpx;
 }
 
 .form-label {
   display: block;
-  font-size: 28rpx;
-  color: #606266;
-  margin-bottom: 16rpx;
+  font-size: 26rpx;
+  color: #86909c;
+  margin-bottom: 12rpx;
 }
 
-.dialog-actions {
+.form-readonly {
   display: flex;
-  gap: 20rpx;
-  margin-top: 40rpx;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20rpx 24rpx;
+  background-color: #f5f6f8;
+  border-radius: 50rpx;
+}
 
-  button {
-    flex: 1;
-  }
+.form-readonly__text {
+  font-size: 28rpx;
+  color: #303133;
+}
+
+.safe-bottom {
+  height: calc(32rpx + env(safe-area-inset-bottom));
 }
 </style>

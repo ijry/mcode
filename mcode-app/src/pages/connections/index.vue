@@ -78,8 +78,8 @@
 
             <u-form-item label="连接模式" prop="mode" required>
               <u-radio-group v-model="form.mode" placement="row">
-                <u-radio label="direct" name="直连模式"></u-radio>
-                <u-radio label="relay" name="中继模式"></u-radio>
+                <u-radio name="direct" label="直连模式"></u-radio>
+                <u-radio name="relay" label="中继模式"></u-radio>
               </u-radio-group>
             </u-form-item>
 

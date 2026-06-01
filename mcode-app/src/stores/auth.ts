@@ -30,4 +30,10 @@ export const useAuthStore = defineStore("auth", {
       })
     },
   },
+  persist: {
+    storage: {
+      getItem: (key: string) => uni.getStorageSync(key),
+      setItem: (key: string, value: string) => uni.setStorageSync(key, value),
+    },
+  },
 })
