@@ -42,20 +42,20 @@
         @update:current="onTabChange"
       >
         <!-- 左侧 tab 项 -->
-        <template #tabItem="{ item }">
-          <view class="tab-item">
-            <text class="tab-item__name u-line-2">{{ item.label }}</text>
-            <view v-if="item.count > 0" class="tab-item__badge">{{ item.count }}</view>
+        <template #tabItem="slotProps">
+          <view v-if="slotProps?.item" class="tab-item">
+            <text class="tab-item__name up-line-2">{{ slotProps.item.label }}</text>
+            <view v-if="slotProps.item.count > 0" class="tab-item__badge">{{ slotProps.item.count }}</view>
           </view>
         </template>
 
         <!-- 右侧顶部：新建按钮 -->
-        <template #rightTop="{ tabList }">
+        <template #rightTop="slotProps">
           <view class="right-top-bar">
             <view class="right-top-bar__title">
-              {{ tabList[currentTab]?.label || '' }}
+              {{ getCurrentTabLabel(slotProps?.tabList) }}
             </view>
-            <view class="add-btn" @click="createConversation(tabList[currentTab]?.projectId)">
+            <view class="add-btn" @click="createConversation(getCurrentTabProjectId(slotProps?.tabList))">
               <up-icon name="plus" size="18" color="#2979ff"></up-icon>
               <text class="add-btn__label">新建</text>
             </view>
@@ -63,15 +63,15 @@
         </template>
 
         <!-- 右侧每个分类的内容 -->
-        <template #itemList="{ item }">
+        <template #itemList="slotProps">
           <!-- 无会话 -->
-          <view v-if="item.conversations.length === 0" class="empty-section">
+          <view v-if="getConversationList(slotProps?.item).length === 0" class="empty-section">
             <up-empty mode="message" text="暂无会话" iconSize="60"></up-empty>
             <up-button
               type="primary"
               plain
               size="small"
-              @click="createConversation(item.projectId)"
+              @click="createConversation(slotProps?.item?.projectId)"
               customStyle="margin-top:24rpx"
             >创建第一个会话</up-button>
           </view>
@@ -79,7 +79,7 @@
           <!-- 会话列表 -->
           <view v-else class="conv-list">
             <view
-              v-for="conv in item.conversations"
+              v-for="conv in getConversationList(slotProps?.item)"
               :key="conv.id"
               class="conv-card"
               @click="openConversation(conv)"
@@ -227,7 +227,7 @@ const projects = ref<Project[]>([])
 const tabList = computed(() => {
   const kw = searchKeyword.value.toLowerCase()
   return projects.value.map((p) => {
-    const convs = (p.conversations || []).filter(
+    const convs = normalizeList((p as any).conversations).filter(
       (c) => !kw || (c.title || "").toLowerCase().includes(kw)
     )
     return {
@@ -299,10 +299,10 @@ async function loadData() {
     const withConvs = await Promise.all(
       list.map(async (p: any) => {
         try {
-          const convs = await gateway.call<unknown[]>("list_all_conversations", {
+          const rawConvs = await gateway.call<unknown>("list_all_conversations", {
             folderIds: [p.id],
           })
-          return { ...p, conversations: convs || [] }
+          return { ...p, conversations: normalizeList(rawConvs) }
         } catch {
           return { ...p, conversations: [] }
         }
@@ -325,6 +325,21 @@ function normalizeList(input: unknown): any[] {
   if (input && typeof input === "object" && Array.isArray((input as any).data))
     return (input as any).data
   return []
+}
+
+function getConversationList(item: any): Conversation[] {
+  return normalizeList(item?.conversations) as Conversation[]
+}
+
+function getCurrentTabLabel(slotTabList: any): string {
+  const list = normalizeList(slotTabList)
+  return list[currentTab.value]?.label || ""
+}
+
+function getCurrentTabProjectId(slotTabList: any): number | undefined {
+  const list = normalizeList(slotTabList)
+  const projectId = list[currentTab.value]?.projectId
+  return typeof projectId === "number" ? projectId : undefined
 }
 
 function goToConnections() {
