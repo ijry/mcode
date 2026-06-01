@@ -211,10 +211,10 @@ function logout() {
   align-items: center;
   justify-content: space-between;
   padding: 40rpx 30rpx;
-  margin: 20rpx 30rpx;
+  margin: 20rpx 8rpx;
   background-color: #ffffff;
-  border-radius: 20rpx;
-  box-shadow: 0 2rpx 12rpx rgba(0, 0, 0, 0.05);
+  border-radius: 30rpx;
+  box-shadow: none;
 }
 
 .user-info {
@@ -241,7 +241,8 @@ function logout() {
 }
 
 .section {
-  margin: 20rpx 30rpx;
+  margin: 20rpx 8rpx;
+  padding: 0;
 }
 
 .section-title {
@@ -252,7 +253,7 @@ function logout() {
 
 .menu-list {
   background-color: #ffffff;
-  border-radius: 16rpx;
+  border-radius: 26rpx;
   overflow: hidden;
 }
 

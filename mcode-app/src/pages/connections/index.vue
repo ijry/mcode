@@ -62,6 +62,12 @@
       </view>
     </view>
 
+    <view v-if="false" class="app-intro-box">
+      <text class="app-intro-text">
+        本APP是一个远程遥控APP，可以遥控电脑上的CodeX/Claude Code等进行随时随地任务处理，电脑/服务器端需要安装codeg
+      </text>
+    </view>
+
     <!-- 连接操作菜单 -->
     <u-action-sheet
       :show="showActionSheet"
@@ -153,7 +159,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from "vue"
+import { ref, computed, onMounted, onUnmounted } from "vue"
 import { useAuthStore } from "@/stores/auth"
 import { createGateway } from "@/services/gateway"
 import type { RelaySessionInfo } from "@/services/gateway"
@@ -166,6 +172,8 @@ const showActionSheet = ref(false)
 const currentConnectionIndex = ref(-1)
 const connectedMap = ref<Record<string, boolean>>({})
 const onlineMap = ref<Record<string, boolean>>({})
+const statusSocketMap = new Map<string, UniApp.SocketTask>()
+const reconnectTimerMap = new Map<string, ReturnType<typeof setTimeout>>()
 
 interface ConnectionItem {
   name: string
@@ -207,6 +215,10 @@ onMounted(() => {
   loadConnections()
 })
 
+onUnmounted(() => {
+  cleanupOnlineWatchers()
+})
+
 function loadConnections() {
   const savedConnections = uni.getStorageSync("mcode_connections") || []
 
@@ -214,6 +226,7 @@ function loadConnections() {
     ...conn,
   }))
   pruneConnectedMapByConnections()
+  syncOnlineWatchers()
   void refreshOnlineStatus()
 }
 
@@ -414,6 +427,7 @@ async function switchConnection(conn: ConnectionItem) {
 
     setConnectionConnected(conn, true)
     persistConnectedMap()
+    syncOnlineWatchers()
     void refreshOnlineStatus()
     uni.showToast({ title: "连接成功", icon: "success" })
     loadConnections()
@@ -424,10 +438,12 @@ async function switchConnection(conn: ConnectionItem) {
 }
 
 function disconnectConnection(conn: ConnectionItem) {
+  const key = connectionKey(conn)
   setConnectionConnected(conn, false)
   persistConnectedMap()
+  stopOnlineWatcher(key)
   const nextOnline = { ...onlineMap.value }
-  delete nextOnline[connectionKey(conn)]
+  delete nextOnline[key]
   onlineMap.value = nextOnline
   if (isCurrentConnection(conn)) {
     auth.clearAuth()
@@ -465,6 +481,7 @@ function deleteConnection(index: number) {
         uni.setStorageSync("mcode_connections", savedConnections)
         setConnectionConnected(conn, false)
         persistConnectedMap()
+        stopOnlineWatcher(connectionKey(conn))
         const nextOnline = { ...onlineMap.value }
         delete nextOnline[connectionKey(conn)]
         onlineMap.value = nextOnline
@@ -567,6 +584,126 @@ async function refreshOnlineStatus() {
     }
   })
   onlineMap.value = next
+}
+
+function syncOnlineWatchers() {
+  const linkedConnections = connections.value.filter((conn) =>
+    Boolean(connectedMap.value[connectionKey(conn)])
+  )
+  const linkedKeys = new Set(linkedConnections.map((conn) => connectionKey(conn)))
+
+  Array.from(statusSocketMap.keys()).forEach((key) => {
+    if (!linkedKeys.has(key)) {
+      stopOnlineWatcher(key)
+    }
+  })
+  Array.from(reconnectTimerMap.keys()).forEach((key) => {
+    if (!linkedKeys.has(key)) {
+      clearReconnectTimer(key)
+    }
+  })
+
+  linkedConnections.forEach((conn) => {
+    const key = connectionKey(conn)
+    if (!statusSocketMap.has(key) && !reconnectTimerMap.has(key)) {
+      void startOnlineWatcher(conn)
+    }
+  })
+}
+
+function cleanupOnlineWatchers() {
+  Array.from(statusSocketMap.keys()).forEach((key) => stopOnlineWatcher(key))
+  Array.from(reconnectTimerMap.keys()).forEach((key) => clearReconnectTimer(key))
+}
+
+async function startOnlineWatcher(conn: ConnectionItem) {
+  const key = connectionKey(conn)
+  if (!connectedMap.value[key]) return
+
+  try {
+    const socketTask = await createStatusSocket(conn)
+    statusSocketMap.set(key, socketTask)
+    socketTask.onOpen(() => {
+      setOnlineStatus(key, true)
+      clearReconnectTimer(key)
+    })
+    socketTask.onClose(() => {
+      statusSocketMap.delete(key)
+      setOnlineStatus(key, false)
+      scheduleReconnect(key)
+    })
+    socketTask.onError(() => {
+      setOnlineStatus(key, false)
+    })
+  } catch {
+    setOnlineStatus(key, false)
+    scheduleReconnect(key)
+  }
+}
+
+function stopOnlineWatcher(key: string) {
+  clearReconnectTimer(key)
+  const socketTask = statusSocketMap.get(key)
+  if (socketTask) {
+    try {
+      socketTask.close({ code: 1000, reason: "manual_disconnect" })
+    } catch {}
+    statusSocketMap.delete(key)
+  }
+}
+
+function scheduleReconnect(key: string) {
+  if (!connectedMap.value[key]) return
+  if (reconnectTimerMap.has(key)) return
+
+  const timer = setTimeout(() => {
+    reconnectTimerMap.delete(key)
+    if (!connectedMap.value[key]) return
+    const conn = connections.value.find((item) => connectionKey(item) === key)
+    if (!conn) return
+    void startOnlineWatcher(conn)
+  }, 3000)
+  reconnectTimerMap.set(key, timer)
+}
+
+function clearReconnectTimer(key: string) {
+  const timer = reconnectTimerMap.get(key)
+  if (timer) {
+    clearTimeout(timer)
+    reconnectTimerMap.delete(key)
+  }
+}
+
+function setOnlineStatus(key: string, online: boolean) {
+  const next = { ...onlineMap.value }
+  if (online) {
+    next[key] = true
+  } else {
+    delete next[key]
+  }
+  onlineMap.value = next
+}
+
+async function createStatusSocket(conn: ConnectionItem): Promise<UniApp.SocketTask> {
+  if (conn.mode === "direct") {
+    const token = conn.directToken || ""
+    return uni.connectSocket({
+      url: `${normalizeBaseUrl(conn.url).replace(/^http/, "ws")}/ws/events?token=${encodeURIComponent(token)}`,
+      complete: () => {},
+    }) as UniApp.SocketTask
+  }
+
+  const session = await ensureRelaySession(conn)
+  if (!session?.accessToken) {
+    throw new Error("missing relay session")
+  }
+  return uni.connectSocket({
+    url: `${normalizeBaseUrl(conn.url).replace(/^http/, "ws")}/v1/events`,
+    header: {
+      authorization: `Bearer ${session.accessToken}`,
+    },
+    complete: () => {},
+  }) as UniApp.SocketTask
 }
 
 async function probeConnectionOnline(conn: ConnectionItem): Promise<boolean> {
@@ -709,6 +846,20 @@ function persistConnectedMap() {
 
 .connection-list {
   padding: 20rpx 24rpx;
+}
+
+.app-intro-box {
+  margin: 420rpx 108rpx 44rpx;
+  padding: 18rpx 20rpx;
+  border: 2rpx dashed #f3f5f8;
+  border-radius: 14rpx;
+  background-color: #fefefe;
+}
+
+.app-intro-text {
+  font-size: 24rpx;
+  line-height: 1.7;
+  color: #b0b7c3;
 }
 
 .connection-item {

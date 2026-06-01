@@ -14,7 +14,14 @@ module.exports = defineConfig(async () => {
           additionalData: '@import "uview-plus/theme.scss";'
         }
       }
-    }
+    },
+    server: {
+      port: 18888,
+      fs: {
+          // Allow serving files from one level up to the project root
+          allow: ['..']
+      }
+    },
   }
 })
 

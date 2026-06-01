@@ -10,7 +10,7 @@
     {
       "path": "pages/connections/index",
       "style": {
-        "navigationBarTitleText": "连接",
+        "navigationBarTitleText": "MCode",
         "enablePullDownRefresh": false
       }
     },

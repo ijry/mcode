@@ -21,6 +21,13 @@ export const useAuthStore = defineStore("auth", {
       this.directBaseUrl = directBaseUrl
       uni.setStorageSync("mcode_direct_token", token)
     },
+    clearAuth() {
+      this.mode = "relay"
+      this.relayUrl = ""
+      this.directBaseUrl = ""
+      this.relaySession = null
+      uni.removeStorageSync("mcode_direct_token")
+    },
     gateway() {
       return createGateway({
         mode: this.mode,

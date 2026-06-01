@@ -15,7 +15,6 @@
 
       <!-- 顶部工具栏 -->
       <view class="toolbar">
-        <AgentSelector v-model="selectedAgent" @change="handleAgentChange" />
         <view class="toolbar-right">
           <ExpertMenu @select="handleCommandSelect" />
           <view class="icon-btn" @click="chooseImage">
@@ -197,9 +196,8 @@ import { onLoad, onUnload } from "@dcloudio/uni-app"
 import { useAuthStore } from "@/stores/auth"
 import { useConversationRuntimeStore } from "@/stores/conversationRuntime"
 import { acpApi } from "@/api/acp"
-import type { PromptInputBlock, ToolCall } from "@/types/acp"
+import type { PromptInputBlock, ToolCall, ContentPart, MessageTurn } from "@/types/acp"
 import MessageBubble from "@/components/MessageBubble.vue"
-import AgentSelector from "@/components/AgentSelector.vue"
 import ExpertMenu from "@/components/ExpertMenu.vue"
 
 const auth = useAuthStore()
@@ -212,7 +210,6 @@ const folderId = ref<number>(0)
 const inputText = ref("")
 const scrollIntoView = ref("")
 const attachments = ref<any[]>([])
-const selectedAgent = ref("general")
 const showModelPicker = ref(false)
 const showPermissionPicker = ref(false)
 const showPlanDrawer = ref(false)
@@ -259,7 +256,7 @@ const planTasks = computed<PlanTask[]>(() => {
   }
 
   for (const msg of messages.value) {
-    for (const part of msg.content) {
+    for (const part of getTurnContentParts(msg)) {
       if (part.type !== "tool_call" || !part.tool_call) continue
       mergeTaskFromToolCall(taskMap, part.tool_call, nextOrder)
     }
@@ -326,12 +323,12 @@ async function loadConversation() {
 
     // 加载历史消息到运行时
     const session = runtime.getOrCreateSession(conversationId.value)
-    session.localTurns = result.turns || []
+    session.localTurns = normalizeTurns(result.turns)
 
     // 连接到 ACP
     await runtime.connect(
       conversationId.value,
-      result.agentType || selectedAgent.value,
+      result.agentType || "claude_code",
       undefined,
       result.sessionId
     )
@@ -347,19 +344,6 @@ async function loadConversation() {
     uni.showToast({ title: `加载失败: ${message}`, icon: "none", duration: 3000 })
   } finally {
     loading.value = false
-  }
-}
-
-// 智能体切换
-async function handleAgentChange(agent: any) {
-  try {
-    const conn = session.value?.connectionId
-    if (conn) {
-      await acpApi.acpSetMode(conn, agent.type)
-      uni.showToast({ title: `已切换到: ${agent.name}`, icon: "success" })
-    }
-  } catch (error) {
-    uni.showToast({ title: "切换失败", icon: "none" })
   }
 }
 
@@ -462,7 +446,7 @@ async function regenerateLastMessage() {
 
   await cancelGeneration()
 
-  const textContent = lastUserMessage.content.find((p) => p.type === "text")
+  const textContent = getTurnContentParts(lastUserMessage).find((p) => p.type === "text")
   if (textContent?.text) {
     inputText.value = textContent.text
     await sendMessage()
@@ -641,6 +625,103 @@ function taskStatusLabel(status: PlanTaskStatus): string {
 function countByStatus(status: PlanTaskStatus): number {
   return planTasks.value.filter((task) => task.status === status).length
 }
+
+function normalizeTurns(rawTurns: unknown): MessageTurn[] {
+  if (!Array.isArray(rawTurns)) return []
+  return rawTurns.map((raw, index) => normalizeTurn(raw, index)).filter(Boolean) as MessageTurn[]
+}
+
+function normalizeTurn(raw: any, index: number): MessageTurn | null {
+  if (!raw || typeof raw !== "object") return null
+  const role = raw.role === "user" ? "user" : "assistant"
+  const content = normalizeContentParts(raw.content)
+  const id = firstString(raw.id) || `turn-${index}-${Date.now()}`
+  const timestamp =
+    typeof raw.timestamp === "number"
+      ? raw.timestamp
+      : typeof raw.created_at === "number"
+        ? raw.created_at
+        : Date.now()
+
+  return {
+    id,
+    role,
+    content,
+    timestamp,
+    status: raw.status,
+    error: firstString(raw.error),
+  }
+}
+
+function normalizeContentParts(rawContent: unknown): ContentPart[] {
+  if (Array.isArray(rawContent)) {
+    return rawContent
+      .map((part) => normalizeContentPart(part))
+      .filter(Boolean) as ContentPart[]
+  }
+
+  const text = firstString(rawContent)
+  if (text) return [{ type: "text", text }]
+  return []
+}
+
+function normalizeContentPart(raw: any): ContentPart | null {
+  if (!raw || typeof raw !== "object") {
+    const text = firstString(raw)
+    return text ? { type: "text", text } : null
+  }
+
+  const type = firstString(raw.type)
+  if (type === "text") return { type: "text", text: firstString(raw.text) || "" }
+  if (type === "thinking") return { type: "thinking", thinking: firstString(raw.thinking) || "" }
+  if (type === "tool_call" && raw.tool_call && typeof raw.tool_call === "object") {
+    return {
+      type: "tool_call",
+      tool_call: {
+        id: firstString(raw.tool_call.id) || `tool-${Date.now()}`,
+        name: firstString(raw.tool_call.name) || "unknown",
+        input: (raw.tool_call.input && typeof raw.tool_call.input === "object")
+          ? raw.tool_call.input
+          : {},
+        status: raw.tool_call.status,
+        output: firstString(raw.tool_call.output),
+        error: firstString(raw.tool_call.error),
+      },
+    }
+  }
+  if (type === "image" && raw.image && typeof raw.image === "object") {
+    return {
+      type: "image",
+      image: {
+        url: firstString(raw.image.url) || "",
+        alt: firstString(raw.image.alt),
+      },
+    }
+  }
+  if (type === "plan" && raw.plan && typeof raw.plan === "object") {
+    const steps = Array.isArray(raw.plan.steps) ? raw.plan.steps : []
+    return {
+      type: "plan",
+      plan: {
+        steps: steps
+          .map((step: any) => ({
+            description: firstString(step?.description, step?.title, step?.content) || "",
+            completed: Boolean(step?.completed),
+          }))
+          .filter((step: any) => step.description),
+        status: raw.plan.status,
+      },
+    }
+  }
+
+  const text = firstString(raw.text, raw.content, raw.description)
+  return text ? { type: "text", text } : null
+}
+
+function getTurnContentParts(turn: any): ContentPart[] {
+  if (turn?.content && Array.isArray(turn.content)) return turn.content as ContentPart[]
+  return normalizeContentParts(turn?.content)
+}
 </script>
 
 <style scoped lang="scss">
@@ -672,7 +753,7 @@ function countByStatus(status: PlanTaskStatus): number {
 .toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   padding: 16rpx 30rpx;
   background-color: #ffffff;
   border-bottom: 1rpx solid #f0f0f0;

@@ -2,7 +2,7 @@
   <view class="expert-menu">
     <!-- 触发按钮 -->
     <view class="menu-trigger" @click="showMenu = true">
-      <up-icon name="lightning-fill" size="18" color="#ff9900"></up-icon>
+      <up-icon name="list-dot" size="18" color="#ff9900"></up-icon>
       <text class="trigger-label">命令</text>
     </view>
 
@@ -244,14 +244,17 @@ function selectCommand(cmd: Command) {
 
   &:active {
     background-color: #ededf0;
-    transform: scale(0.985);
+  }
+
+  &--active {
+    background-color: #e8f0fe;
   }
 }
 
 .cmd-icon {
-  width: 72rpx;
-  height: 72rpx;
-  border-radius: 16rpx;
+  width: 76rpx;
+  height: 76rpx;
+  border-radius: 18rpx;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -267,13 +270,13 @@ function selectCommand(cmd: Command) {
 }
 
 .cmd-info__name {
-  font-size: 28rpx;
+  font-size: 30rpx;
   font-weight: 500;
   color: #1d1d1f;
 }
 
 .cmd-info__desc {
-  font-size: 23rpx;
+  font-size: 24rpx;
   color: #86909c;
   overflow: hidden;
   text-overflow: ellipsis;

@@ -1,5 +1,5 @@
 <template>
-  <view class="page">
+  <view class="page conversations-page">
 
     <!-- 无连接 -->
     <view v-if="!hasActiveConnection" class="empty-fullpage">
@@ -16,31 +16,124 @@
 
       <!-- 顶部搜索 -->
       <view class="search-bar">
-        <up-search
-          v-model="searchKeyword"
-          placeholder="搜索会话..."
-          :show-action="false"
-          shape="round"
-          @search="() => {}"
-          @clear="() => {}"
-        ></up-search>
+        <view class="search-bar__inner">
+          <up-search
+            v-model="searchKeyword"
+            placeholder="搜索会话..."
+            :show-action="false"
+            shape="round"
+            @search="() => {}"
+            @clear="() => {}"
+          ></up-search>
+          <view class="quick-add-btn" @click="createConversation()">
+            <up-icon name="plus" size="16" color="#2979ff"></up-icon>
+          </view>
+        </view>
       </view>
 
-      <!-- 空状态 -->
-      <view v-if="!loading && projects.length === 0" class="empty-fullpage">
-        <up-empty mode="list" text="暂无项目"></up-empty>
-      </view>
-
-      <!-- 分类面板 -->
-      <up-cate-tab
-        v-else
-        :tabList="tabList"
-        tabKeyName="label"
-        mode="tab"
-        height="calc(100vh - 120rpx)"
-        :current="currentTab"
-        @update:current="onTabChange"
+      <!-- 默认：连接分组会话总览 -->
+      <scroll-view
+        v-if="!showHistoryPanel"
+        class="group-scroll"
+        scroll-y
+        enhanced
+        show-scrollbar="false"
       >
+        <view v-if="!loading && filteredConnectionGroups.length === 0" class="empty-fullpage">
+          <up-empty mode="list" text="暂无分组会话"></up-empty>
+        </view>
+
+        <view v-else class="group-list">
+          <view
+            v-for="group in filteredConnectionGroups"
+            :key="group.key"
+            class="group-section"
+          >
+            <text class="group-section__title">{{ group.name }}</text>
+
+            <view v-if="group.cards.length === 0" class="group-empty">
+              <text class="group-empty__text">暂无打开中的标签会话</text>
+            </view>
+
+            <view
+              v-for="card in group.cards"
+              :key="`${group.key}-${card.tabId}`"
+              class="live-card"
+              @click="openLiveSession(card)"
+            >
+              <view
+                :class="[
+                  'agent-logo',
+                  agentLogoClass(card.agentType),
+                  agentLogoPath(card.agentType) && 'agent-logo--real',
+                ]"
+              >
+                <image
+                  v-if="agentLogoPath(card.agentType)"
+                  class="agent-logo__img"
+                  :src="agentLogoPath(card.agentType)"
+                  mode="aspectFit"
+                />
+                <text v-else class="agent-logo__text">{{ agentLogoText(card.agentType) }}</text>
+              </view>
+
+              <view class="live-card__body">
+                <text class="live-card__project-title u-line-1">{{ card.projectName }}</text>
+                <view class="live-card__meta">
+                  <text class="live-card__session-name u-line-1">{{ card.title }}</text>
+                  <text class="live-card__time">{{ formatTime(card.updatedAt) }}</text>
+                </view>
+              </view>
+
+              <view class="card-status-corner">
+                <view :class="['status-chip', `status-chip--${statusClass(card.status)}`]">
+                  <text class="status-chip__text">{{ statusLabel(card.status) }}</text>
+                </view>
+                <view
+                  v-if="statusClass(card.status) === 'running'"
+                  class="status-wave"
+                ></view>
+              </view>
+            </view>
+
+            <view class="live-card history-card" @click="openHistoryPanel(group)">
+              <view class="conv-card__icon history-card__icon">
+                <up-icon name="clock" size="18" color="#2979ff"></up-icon>
+              </view>
+              <view class="history-entry__left">
+                <text class="history-entry__text u-line-1">历史会话</text>
+                <text class="history-entry__desc u-line-1">可查看已结束或已完成会话并重新激活</text>
+              </view>
+              <up-icon name="arrow-right" size="14" color="#c0c4cc"></up-icon>
+            </view>
+          </view>
+        </view>
+      </scroll-view>
+
+      <!-- 历史模式：展示原 up-cate-tab -->
+      <view v-else class="cate-wrap">
+        <view class="history-mode-bar">
+          <view class="history-mode-back" @click="closeHistoryPanel">
+            <up-icon name="arrow-left" size="14" color="#2979ff"></up-icon>
+            <text class="history-mode-back__text">返回分组</text>
+          </view>
+          <text class="history-mode-title u-line-1">{{ historyGroupTitle }}</text>
+        </view>
+
+        <view v-if="!loading && projects.length === 0" class="empty-fullpage">
+          <up-empty mode="list" text="暂无历史会话"></up-empty>
+        </view>
+
+        <view v-else class="cate-wrap__inner">
+        <up-cate-tab
+          class="cate-tab"
+          :tabList="tabList"
+          tabKeyName="label"
+          mode="tab"
+          :height="cateTabHeight"
+          :current="currentTab"
+          @update:current="onTabChange"
+        >
         <!-- 左侧 tab 项 -->
         <template #tabItem="slotProps">
           <view v-if="slotProps?.item" class="tab-item">
@@ -55,10 +148,15 @@
             <view class="right-top-bar__title">
               {{ getCurrentTabLabel(slotProps?.tabList) }}
             </view>
-            <view class="add-btn" @click="createConversation(getCurrentTabProjectId(slotProps?.tabList))">
+            <view
+              v-if="canCreateInHistory"
+              class="add-btn"
+              @click="createConversation(getCurrentTabProjectId(slotProps?.tabList))"
+            >
               <up-icon name="plus" size="18" color="#2979ff"></up-icon>
               <text class="add-btn__label">新建</text>
             </view>
+            <view v-else class="history-mode-tip">历史模式</view>
           </view>
         </template>
 
@@ -104,16 +202,26 @@
             </view>
           </view>
         </template>
-      </up-cate-tab>
+        </up-cate-tab>
+        </view>
+      </view>
     </view>
 
     <!-- 创建会话底部弹层 -->
-    <up-popup v-model:show="showCreateDialog" mode="bottom" :round="20">
+    <up-popup v-model:show="showCreateDialog" mode="bottom" :round="28">
       <view class="create-sheet">
         <view class="create-sheet__hd">
           <text class="create-sheet__title">新建会话</text>
           <view class="create-sheet__close" @click="showCreateDialog = false">
             <up-icon name="close" size="20" color="#909399"></up-icon>
+          </view>
+        </view>
+
+        <view class="form-group">
+          <text class="form-label">连接</text>
+          <view class="form-readonly" @click="showConnectionPicker = true">
+            <text class="form-readonly__text">{{ selectedConnectionName || '请选择连接' }}</text>
+            <up-icon name="arrow-down" size="14" color="#c0c4cc"></up-icon>
           </view>
         </view>
 
@@ -126,7 +234,7 @@
         </view>
 
         <view class="form-group">
-          <text class="form-label">智能体</text>
+          <text class="form-label">模型</text>
           <view class="form-readonly" @click="showAgentPicker = true">
             <text class="form-readonly__text">{{ selectedAgentName }}</text>
             <up-icon name="arrow-down" size="14" color="#c0c4cc"></up-icon>
@@ -143,10 +251,21 @@
           ></up-input>
         </view>
 
+        <view class="form-group">
+          <text class="form-label">本次任务内容</text>
+          <up-textarea
+            v-model="newTaskContent"
+            placeholder="请输入本次任务内容"
+            autoHeight
+            count
+            :maxlength="1200"
+          ></up-textarea>
+        </view>
+
         <up-button
           type="primary"
           :loading="creating"
-          :disabled="!selectedProjectId"
+          :disabled="!selectedProjectId || !selectedConnectionKey"
           shape="circle"
           @click="confirmCreate"
           customStyle="margin-top:16rpx"
@@ -155,6 +274,14 @@
         <view class="safe-bottom"></view>
       </view>
     </up-popup>
+
+    <!-- 项目 Picker -->
+    <up-picker
+      :show="showConnectionPicker"
+      :columns="connectionColumns"
+      @confirm="onConnectionConfirm"
+      @cancel="showConnectionPicker = false"
+    ></up-picker>
 
     <!-- 项目 Picker -->
     <up-picker
@@ -185,10 +312,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from "vue"
-import { onPullDownRefresh } from "@dcloudio/uni-app"
+import { ref, computed, onMounted, nextTick, getCurrentInstance } from "vue"
+import { onPullDownRefresh, onReady, onShow } from "@dcloudio/uni-app"
 import { useAuthStore } from "@/stores/auth"
 import { acpApi } from "@/api/acp"
+import { createGateway } from "@/services/gateway"
+import type { RelaySessionInfo } from "@/services/gateway"
 
 const auth = useAuthStore()
 const loading = ref(false)
@@ -196,15 +325,23 @@ const creating = ref(false)
 const currentTab = ref(0)
 const searchKeyword = ref("")
 const showCreateDialog = ref(false)
+const showConnectionPicker = ref(false)
 const showProjectPicker = ref(false)
 const showAgentPicker = ref(false)
 const showActionSheet = ref(false)
+const selectedConnectionKey = ref("")
+const selectedConnectionName = ref("")
 const selectedProjectId = ref<number>(0)
 const selectedProjectName = ref("")
 const selectedAgentType = ref("claude_code")
 const selectedAgentName = ref("Claude Code")
 const newConversationTitle = ref("")
+const newTaskContent = ref("")
 const currentConversation = ref<Conversation | null>(null)
+const cateTabHeight = ref("calc(100vh - 160rpx)")
+const showHistoryPanel = ref(false)
+const historyGroupKey = ref("")
+const historyGroupTitle = ref("")
 
 interface Project {
   id: number
@@ -219,9 +356,52 @@ interface Conversation {
   agent_type?: string
   updated_at?: string
   folder_id?: number
+  status?: string
+}
+
+interface ConnectionItem {
+  name: string
+  mode: "direct" | "relay"
+  url: string
+  directToken?: string
+  pairCode?: string
+  pairSecret?: string
+  relaySession?: RelaySessionInfo
+}
+
+interface OpenedTabItem {
+  id: number
+  folder_id: number
+  conversation_id?: number | null
+  agent_type?: string
+  position?: number
+  is_active?: boolean
+  is_pinned?: boolean
+}
+
+interface LiveSessionCard {
+  tabId: number
+  conversationId?: number
+  folderId: number
+  projectName: string
+  agentType: string
+  title: string
+  updatedAt?: string
+  status: string
+  isActive: boolean
+}
+
+interface ConnectionGroup {
+  key: string
+  name: string
+  mode: "direct" | "relay"
+  url: string
+  projects: Project[]
+  cards: LiveSessionCard[]
 }
 
 const projects = ref<Project[]>([])
+const connectionGroups = ref<ConnectionGroup[]>([])
 
 // up-cate-tab 所需数据结构
 const tabList = computed(() => {
@@ -239,8 +419,49 @@ const tabList = computed(() => {
   })
 })
 
+const filteredConnectionGroups = computed(() => {
+  const kw = searchKeyword.value.trim().toLowerCase()
+  if (!kw) return connectionGroups.value
+  return connectionGroups.value
+    .map((group) => ({
+      ...group,
+      cards: group.cards.filter((card) =>
+        [
+          card.title || "",
+          card.projectName || "",
+          formatAgentType(card.agentType),
+        ]
+          .join(" ")
+          .toLowerCase()
+          .includes(kw)
+      ),
+    }))
+    .filter(
+      (group) =>
+        group.cards.length > 0 ||
+        group.name.toLowerCase().includes(kw) ||
+        group.url.toLowerCase().includes(kw)
+    )
+})
+
+const selectedConnectionGroup = computed(() =>
+  connectionGroups.value.find((group) => group.key === selectedConnectionKey.value)
+)
+
+const canCreateInHistory = computed(() => {
+  if (!showHistoryPanel.value || !historyGroupKey.value) return false
+  return historyGroupKey.value === currentAuthConnectionKey()
+})
+
+const connectionColumns = computed(() => [
+  connectionGroups.value.map((group) => ({
+    text: group.name,
+    value: group.key,
+  })),
+])
+
 const projectColumns = computed(() => [
-  projects.value.map((p) => ({
+  (selectedConnectionGroup.value?.projects || []).map((p) => ({
     text: p.name || p.path || "未命名项目",
     value: p.id,
   })),
@@ -275,43 +496,63 @@ const conversationActions = [
   { name: "删除",   color: "#fa3534" },
 ]
 
-const hasActiveConnection = computed(() => !!(auth.directBaseUrl || auth.relayUrl))
+const hasActiveConnection = computed(() => {
+  if (connectionGroups.value.length > 0) return true
+  if (loading.value) return true
+  return getConnectedConnections().length > 0
+})
 
 function onTabChange(idx: number) {
   currentTab.value = idx
 }
 
 onMounted(() => {
-  if (hasActiveConnection.value) loadData()
+  void loadOverviewData()
+  syncCateTabHeight()
 })
 
 onPullDownRefresh(() => {
-  loadData().finally(() => uni.stopPullDownRefresh())
+  loadOverviewData().finally(() => {
+    uni.stopPullDownRefresh()
+    syncCateTabHeight()
+  })
 })
 
-async function loadData() {
+onReady(() => {
+  syncCateTabHeight()
+})
+
+onShow(() => {
+  void loadOverviewData()
+  syncCateTabHeight()
+})
+
+async function loadOverviewData() {
   loading.value = true
   try {
-    const gateway = auth.gateway()
-    const raw = await gateway.call<unknown>("list_all_folder_details")
-    const list = normalizeList(raw)
+    const connected = getConnectedConnections()
+    const groups = await Promise.all(connected.map((conn) => loadConnectionGroup(conn)))
+    connectionGroups.value = groups.filter((group) => !!group)
+    if (connectionGroups.value.length === 0) {
+      showHistoryPanel.value = false
+      projects.value = []
+      return
+    }
 
-    const withConvs = await Promise.all(
-      list.map(async (p: any) => {
-        try {
-          const rawConvs = await gateway.call<unknown>("list_all_conversations", {
-            folderIds: [p.id],
-          })
-          return { ...p, conversations: normalizeList(rawConvs) }
-        } catch {
-          return { ...p, conversations: [] }
-        }
-      })
-    )
-
-    projects.value = withConvs
-    // 默认展开第一个
-    if (withConvs.length > 0) currentTab.value = 0
+    if (showHistoryPanel.value && historyGroupKey.value) {
+      const current = connectionGroups.value.find((group) => group.key === historyGroupKey.value)
+      if (current) {
+        projects.value = current.projects
+        if (current.projects.length > 0) currentTab.value = 0
+      } else {
+        showHistoryPanel.value = false
+        historyGroupKey.value = ""
+        historyGroupTitle.value = ""
+        projects.value = []
+      }
+    } else {
+      projects.value = []
+    }
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
     uni.showToast({ title: `加载失败: ${msg}`, icon: "none", duration: 3000 })
@@ -320,11 +561,260 @@ async function loadData() {
   }
 }
 
+function getConnectedConnections(): ConnectionItem[] {
+  const savedConnections = normalizeList(uni.getStorageSync("mcode_connections")) as ConnectionItem[]
+  const connectedMap = (uni.getStorageSync("mcode_connected_map") || {}) as Record<string, boolean>
+  return savedConnections.filter((conn) => Boolean(connectedMap[connectionKey(conn)]))
+}
+
+function currentAuthConnectionKey(): string {
+  const mode = auth.mode
+  const url = mode === "direct" ? auth.directBaseUrl : auth.relayUrl
+  if (!url) return ""
+  return connectionKey({ mode, url })
+}
+
+async function loadConnectionGroup(conn: ConnectionItem): Promise<ConnectionGroup> {
+  const gateway = await createConnectionGateway(conn)
+  const foldersRaw = await gateway.call<unknown>("list_all_folder_details")
+  const folders = normalizeList(foldersRaw) as Project[]
+  const folderMap = new Map<number, Project>()
+  folders.forEach((folder) => {
+    folderMap.set(folder.id, folder)
+  })
+
+  let conversationsRaw: unknown = []
+  if (folders.length > 0) {
+    conversationsRaw = await gateway.call<unknown>("list_all_conversations", {
+      folderIds: folders.map((folder) => folder.id),
+    })
+  }
+  const conversations = normalizeList(conversationsRaw) as Conversation[]
+  const convMap = new Map<number, Conversation>()
+  conversations.forEach((conv) => {
+    convMap.set(conv.id, conv)
+  })
+
+  const tabsRaw = await gateway.call<unknown>("list_opened_tabs")
+  const tabs = normalizeList(tabsRaw) as OpenedTabItem[]
+  const cards = tabs
+    .map((tab) => {
+      const conversation = tab.conversation_id ? convMap.get(tab.conversation_id) : undefined
+      const project = folderMap.get(tab.folder_id)
+      return {
+        tabId: tab.id,
+        conversationId: tab.conversation_id || undefined,
+        folderId: tab.folder_id,
+        projectName: project?.name || project?.path || "未命名项目",
+        agentType: normalizeAgentType(tab.agent_type || conversation?.agent_type),
+        title: conversation?.title || `标签会话 #${tab.id}`,
+        updatedAt: conversation?.updated_at,
+        status: normalizeConversationStatus(conversation?.status),
+        isActive: Boolean(tab.is_active),
+      } satisfies LiveSessionCard
+    })
+    .sort((a, b) => {
+      const aActive = a.isActive ? 1 : 0
+      const bActive = b.isActive ? 1 : 0
+      if (aActive !== bActive) return bActive - aActive
+      return Number(a.tabId) - Number(b.tabId)
+    })
+
+  const projectsWithConversations = folders.map((folder) => ({
+    ...folder,
+    conversations: conversations.filter((conv) => conv.folder_id === folder.id),
+  }))
+
+  return {
+    key: connectionKey(conn),
+    name: conn.name,
+    mode: conn.mode,
+    url: conn.url,
+    projects: projectsWithConversations,
+    cards,
+  }
+}
+
 function normalizeList(input: unknown): any[] {
   if (Array.isArray(input)) return input
   if (input && typeof input === "object" && Array.isArray((input as any).data))
     return (input as any).data
   return []
+}
+
+function normalizeBaseUrl(url: string): string {
+  return String(url || "").trim().replace(/\/+$/, "")
+}
+
+function connectionKey(conn: Pick<ConnectionItem, "mode" | "url">): string {
+  return `${conn.mode}::${normalizeBaseUrl(conn.url)}`
+}
+
+function normalizeAgentType(value?: string): string {
+  const raw = String(value || "")
+  if (!raw) return "claude_code"
+  if (raw === "claudecode") return "claude_code"
+  if (raw === "opencode") return "open_code"
+  if (raw === "openclaw") return "open_claw"
+  return raw
+}
+
+function normalizeConversationStatus(value?: string): string {
+  const raw = String(value || "").trim().toLowerCase()
+  if (!raw) return "unknown"
+  if (raw === "inprogress") return "in_progress"
+  if (raw === "pendingreview") return "pending_review"
+  return raw
+}
+
+function statusLabel(status: string): string {
+  if (status === "in_progress") return "远程运行中"
+  if (status === "completed") return "已完成"
+  if (status === "cancelled" || status === "canceled") return "已停止"
+  if (status === "pending_review") return "待处理"
+  if (status === "error" || status === "failed") return "异常"
+  return "空闲"
+}
+
+function statusClass(status: string): string {
+  if (status === "in_progress") return "running"
+  if (status === "completed") return "completed"
+  if (status === "cancelled" || status === "canceled") return "stopped"
+  if (status === "error" || status === "failed") return "error"
+  return "idle"
+}
+
+function agentLogoText(agentType: string): string {
+  const key = normalizeAgentType(agentType)
+  if (key === "claude_code") return "CC"
+  if (key === "codex") return "CX"
+  if (key === "open_code") return "OC"
+  if (key === "gemini") return "GM"
+  if (key === "open_claw") return "CL"
+  if (key === "cline") return "CN"
+  return "AI"
+}
+
+function agentLogoClass(agentType: string): string {
+  return `agent-logo--${normalizeAgentType(agentType).replace(/[^a-z0-9_]/g, "")}`
+}
+
+function agentLogoPath(agentType: string): string {
+  const key = normalizeAgentType(agentType)
+  if (key === "claude_code") return "/static/agent-logos/claude-code.svg"
+  if (key === "codex") return "/static/agent-logos/codex.svg"
+  return ""
+}
+
+async function createConnectionGateway(conn: ConnectionItem) {
+  if (conn.mode === "direct") {
+    if (!conn.directToken) {
+      throw new Error(`${conn.name} 缺少直连令牌`)
+    }
+    const gateway = createGateway({
+      mode: "direct",
+      directBaseUrl: conn.url,
+    })
+    await gateway.pair({
+      directBaseUrl: conn.url,
+      token: conn.directToken,
+    })
+    return gateway
+  }
+
+  if (!conn.relaySession?.accessToken) {
+    if (!conn.pairCode || !conn.pairSecret) {
+      throw new Error(`${conn.name} 缺少中继配对信息`)
+    }
+    const pairGateway = createGateway({
+      mode: "relay",
+      relayUrl: conn.url,
+      session: { accessToken: "" },
+    })
+    const session = await pairGateway.pair({
+      relayUrl: conn.url,
+      code: conn.pairCode,
+      secret: conn.pairSecret,
+    })
+    if (!session) {
+      throw new Error(`${conn.name} 中继会话无效`)
+    }
+    conn.relaySession = session
+    persistConnectionSession(conn)
+  }
+
+  return createGateway({
+    mode: "relay",
+    relayUrl: conn.url,
+    session: conn.relaySession,
+  })
+}
+
+function persistConnectionSession(conn: ConnectionItem) {
+  const savedConnections = normalizeList(uni.getStorageSync("mcode_connections")) as ConnectionItem[]
+  const idx = savedConnections.findIndex(
+    (item) => item.mode === conn.mode && normalizeBaseUrl(item.url) === normalizeBaseUrl(conn.url)
+  )
+  if (idx >= 0) {
+    savedConnections[idx] = { ...savedConnections[idx], relaySession: conn.relaySession }
+    uni.setStorageSync("mcode_connections", savedConnections)
+  }
+}
+
+function applySelectedConnection(connectionKeyValue: string) {
+  if (!connectionKeyValue) {
+    selectedConnectionKey.value = ""
+    selectedConnectionName.value = ""
+    selectedProjectId.value = 0
+    selectedProjectName.value = ""
+    return
+  }
+  const group = connectionGroups.value.find((item) => item.key === connectionKeyValue)
+  if (!group) return
+  selectedConnectionKey.value = group.key
+  selectedConnectionName.value = group.name
+  selectedProjectId.value = 0
+  selectedProjectName.value = ""
+}
+
+function syncAuthToConnection(conn: ConnectionItem) {
+  if (conn.mode === "direct") {
+    if (!conn.directToken) return
+    auth.setDirectMode(conn.url, conn.directToken)
+    return
+  }
+  if (conn.relaySession?.accessToken) {
+    auth.setRelayMode(conn.url, conn.relaySession)
+  }
+}
+
+function parseConversationId(input: unknown): number {
+  if (typeof input === "number" && Number.isFinite(input)) return input
+  if (input && typeof input === "object") {
+    const maybeId = (input as any).id ?? (input as any).conversationId
+    if (typeof maybeId === "number" && Number.isFinite(maybeId)) return maybeId
+  }
+  return 0
+}
+
+function loadData() {
+  return loadOverviewData()
+}
+
+function syncCateTabHeight() {
+  nextTick(() => {
+    const instance = getCurrentInstance()
+    const proxy = instance?.proxy
+    if (!proxy) return
+    const query = uni.createSelectorQuery().in(proxy)
+    query.select(".search-bar").boundingClientRect((rect: any) => {
+      const windowHeight = Number(uni.getSystemInfoSync().windowHeight || 0)
+      const searchHeight = Number(rect?.height || 0)
+      const nextHeight = Math.max(windowHeight - searchHeight, 260)
+      cateTabHeight.value = `${nextHeight}px`
+    })
+    query.exec()
+  })
 }
 
 function getConversationList(item: any): Conversation[] {
@@ -346,6 +836,37 @@ function goToConnections() {
   uni.switchTab({ url: "/pages/connections/index" })
 }
 
+function openHistoryPanel(group: ConnectionGroup) {
+  historyGroupKey.value = group.key
+  historyGroupTitle.value = group.name
+  projects.value = group.projects
+  currentTab.value = 0
+  showHistoryPanel.value = true
+  syncCateTabHeight()
+}
+
+function closeHistoryPanel() {
+  showHistoryPanel.value = false
+  historyGroupKey.value = ""
+  historyGroupTitle.value = ""
+  projects.value = []
+}
+
+function openLiveSession(card: LiveSessionCard) {
+  if (!card.conversationId) {
+    uni.showToast({ title: "该标签暂无会话记录", icon: "none" })
+    return
+  }
+  openConversation({
+    id: card.conversationId,
+    folder_id: card.folderId,
+    agent_type: card.agentType,
+    title: card.title,
+    status: card.status,
+    updated_at: card.updatedAt,
+  })
+}
+
 function openConversation(conv: Conversation) {
   uni.navigateTo({
     url: `/pages/conversation-detail/index?id=${conv.id}&folderId=${conv.folder_id}`,
@@ -353,12 +874,34 @@ function openConversation(conv: Conversation) {
 }
 
 function createConversation(projectId?: number) {
+  const defaultConnectionKey = showHistoryPanel.value
+    ? historyGroupKey.value
+    : currentAuthConnectionKey() || connectionGroups.value[0]?.key || ""
+  applySelectedConnection(defaultConnectionKey)
+
   if (projectId) {
-    selectedProjectId.value = projectId
-    const p = projects.value.find((x) => x.id === projectId)
-    selectedProjectName.value = p?.name || p?.path || "未命名项目"
+    const list = selectedConnectionGroup.value?.projects || []
+    const p = list.find((x) => x.id === projectId)
+    if (p) {
+      selectedProjectId.value = p.id
+      selectedProjectName.value = p.name || p.path || "未命名项目"
+    }
+  } else {
+    selectedProjectId.value = 0
+    selectedProjectName.value = ""
   }
+
+  newConversationTitle.value = ""
+  newTaskContent.value = ""
+  selectedAgentType.value = "claude_code"
+  selectedAgentName.value = "Claude Code"
   showCreateDialog.value = true
+}
+
+function onConnectionConfirm(e: any) {
+  const sel = e.value[0]
+  applySelectedConnection(String(sel.value || ""))
+  showConnectionPicker.value = false
 }
 
 function onProjectConfirm(e: any) {
@@ -376,24 +919,58 @@ function onAgentConfirm(e: any) {
 }
 
 async function confirmCreate() {
+  if (!selectedConnectionKey.value) {
+    uni.showToast({ title: "请选择连接", icon: "none" })
+    return
+  }
+
   if (!selectedProjectId.value) {
     uni.showToast({ title: "请选择项目", icon: "none" })
     return
   }
+
   creating.value = true
   try {
-    const result = await acpApi.createConversation(
-      selectedProjectId.value,
-      selectedAgentType.value,
-      newConversationTitle.value || undefined
+    const targetConn = getConnectedConnections().find(
+      (item) => connectionKey(item) === selectedConnectionKey.value
     )
+    if (!targetConn) {
+      throw new Error("连接不存在或已断开")
+    }
+    const gateway = await createConnectionGateway(targetConn)
+    syncAuthToConnection(targetConn)
+
+    const createResult = await gateway.call<any>("create_conversation", {
+      folderId: selectedProjectId.value,
+      agentType: selectedAgentType.value,
+      title: newConversationTitle.value || undefined,
+    })
+    const newConversationId = parseConversationId(createResult)
+    if (!newConversationId) {
+      throw new Error("创建会话失败：返回数据异常")
+    }
+
+    const taskContent = newTaskContent.value.trim()
+    if (taskContent) {
+      const connectionId = await gateway.call<string>("acp_connect", {
+        agentType: selectedAgentType.value,
+      })
+      await gateway.call("acp_prompt", {
+        connectionId,
+        blocks: [{ type: "text", text: taskContent }],
+        folderId: selectedProjectId.value,
+        conversationId: newConversationId,
+      })
+    }
+
     uni.showToast({ title: "创建成功", icon: "success" })
     showCreateDialog.value = false
     newConversationTitle.value = ""
+    newTaskContent.value = ""
     selectedAgentType.value = "claude_code"
     selectedAgentName.value = "Claude Code"
-    await loadData()
-    openConversation({ id: result.id, folder_id: selectedProjectId.value })
+    await loadOverviewData()
+    openConversation({ id: newConversationId, folder_id: selectedProjectId.value })
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
     uni.showToast({ title: `创建失败: ${msg}`, icon: "none", duration: 3000 })
@@ -472,7 +1049,8 @@ function formatTime(time?: string): string {
 
 <style scoped lang="scss">
 .page {
-  height: 100vh;
+  min-height: 100vh;
+  padding: 0 !important;
   background-color: #f2f3f5;
   display: flex;
   flex-direction: column;
@@ -480,16 +1058,296 @@ function formatTime(time?: string): string {
 
 .main-wrap {
   flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
 
+.cate-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.cate-wrap__inner {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.cate-tab {
+  height: 100%;
+}
+
+.group-scroll {
+  flex: 1;
+  min-height: 0;
+}
+
+.group-list {
+  padding: 16rpx 12rpx calc(40rpx + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 20rpx;
+}
+
+.group-section__title {
+  display: block;
+  margin-bottom: 10rpx;
+  padding-left: 4rpx;
+  font-size: 28rpx;
+  font-weight: 600;
+  color: #1d1d1f;
+}
+
+.group-empty {
+  padding: 18rpx 4rpx 10rpx;
+}
+
+.group-empty__text {
+  font-size: 24rpx;
+  color: #a0a3ad;
+}
+
+.live-card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 14rpx;
+  padding: 16rpx;
+  border-radius: 22rpx;
+  background-color: #ffffff;
+  border: 1rpx solid #ebeef5;
+  box-shadow: 0 2rpx 10rpx rgba(15, 23, 42, 0.04);
+  margin-bottom: 10rpx;
+}
+
+.agent-logo {
+  width: 58rpx;
+  height: 58rpx;
+  border-radius: 18rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background-color: #eef1f5;
+  border: 1rpx solid #e3e8ef;
+}
+
+.agent-logo__text {
+  font-size: 18rpx;
+  font-weight: 700;
+  color: #5f6470;
+}
+
+.agent-logo__img {
+  width: 58rpx;
+  height: 58rpx;
+  display: block;
+}
+
+.agent-logo--real {
+  background-color: #eef1f5 !important;
+  border: 1rpx solid #e3e8ef;
+}
+
+.agent-logo--claude_code,
+.agent-logo--codex,
+.agent-logo--open_code,
+.agent-logo--gemini,
+.agent-logo--open_claw,
+.agent-logo--cline {
+  background-color: #eef1f5;
+  border: 1rpx solid #e3e8ef;
+}
+
+.live-card__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.live-card__project-title {
+  font-size: 27rpx;
+  font-weight: 600;
+  color: #1d1d1f;
+}
+
+.live-card__meta {
+  margin-top: 8rpx;
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.live-card__session-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 22rpx;
+  color: #5f6470;
+}
+
+.live-card__time {
+  font-size: 21rpx;
+  color: #a7adb8;
+  flex-shrink: 0;
+}
+
+.card-status-corner {
+  position: absolute;
+  right: 12rpx;
+  top: 10rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.status-chip {
+  position: relative;
+  z-index: 2;
+  padding: 2rpx 10rpx;
+  border-radius: 999rpx;
+  background-color: #eceff4;
+}
+
+.status-chip__text {
+  font-size: 18rpx;
+  color: #7b7f88;
+}
+
+.status-chip--running {
+  background-color: #e8fff1;
+}
+.status-chip--running .status-chip__text {
+  color: #19be6b;
+}
+.status-chip--completed {
+  background-color: #eef5ff;
+}
+.status-chip--completed .status-chip__text {
+  color: #2979ff;
+}
+.status-chip--stopped .status-chip__text {
+  color: #909399;
+}
+.status-chip--error {
+  background-color: #fff1f0;
+}
+.status-chip--error .status-chip__text {
+  color: #f56c6c;
+}
+
+.status-wave {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  border-radius: 999rpx;
+  background-color: rgba(25, 190, 107, 0.24);
+  z-index: 1;
+  animation: statusPulse 1.4s ease-out infinite;
+}
+
+@keyframes statusPulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.7;
+  }
+  70% {
+    transform: scale(1.55);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1.55);
+    opacity: 0;
+  }
+}
+
+.history-card {
+  margin-top: 4rpx;
+}
+
+.history-entry__left {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 4rpx;
+}
+
+.history-entry__text {
+  font-size: 26rpx;
+  color: #1d1d1f;
+}
+
+.history-entry__desc {
+  font-size: 22rpx;
+  color: #909399;
+  line-height: 1.4;
+}
+
+.history-card__icon {
+  width: 58rpx;
+  height: 58rpx;
+  border-radius: 18rpx;
+}
+
+.history-mode-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12rpx;
+  padding: 12rpx 12rpx;
+  border-bottom: 1rpx solid #ebeef5;
+  background-color: #ffffff;
+}
+
+.history-mode-back {
+  display: flex;
+  align-items: center;
+  gap: 6rpx;
+  flex-shrink: 0;
+}
+
+.history-mode-back__text {
+  font-size: 24rpx;
+  color: #2979ff;
+}
+
+.history-mode-title {
+  flex: 1;
+  min-width: 0;
+  text-align: right;
+  font-size: 24rpx;
+  color: #606266;
+}
+
 /* ===== 搜索栏 ===== */
 .search-bar {
-  padding: 16rpx 24rpx;
+  padding: 16rpx 12rpx;
   background-color: #ffffff;
   border-bottom: 1rpx solid #f0f0f0;
+  flex-shrink: 0;
+}
+
+.search-bar__inner {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.quick-add-btn {
+  width: 56rpx;
+  height: 56rpx;
+  border-radius: 50%;
+  border: 1rpx solid #dbe7ff;
+  background-color: #eef4ff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
 }
 
@@ -507,35 +1365,35 @@ function formatTime(time?: string): string {
 .tab-item {
   position: relative;
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 6rpx;
+  flex-direction: row;
+  align-items: center;
+  gap: 8rpx;
   width: 100%;
-  padding: 8rpx 12rpx;
+  padding: 0 12rpx;
   box-sizing: border-box;
   overflow: hidden;
 }
 
 .tab-item__name {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  flex: 1;
+  min-width: 0;
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: normal;
-  word-break: break-all;
-  line-height: 1.35;
+  white-space: nowrap;
+  line-height: 1.3;
   font-size: 24rpx;
   color: inherit;
 }
 
 .tab-item__badge {
+  flex-shrink: 0;
   font-size: 20rpx;
   color: #2979ff;
   background-color: #e8f0fe;
   border-radius: 20rpx;
-  padding: 2rpx 12rpx;
-  line-height: 1.4;
+  padding: 2rpx 10rpx;
+  line-height: 1.2;
 }
 
 /* ===== 右侧顶部栏 ===== */
@@ -543,7 +1401,7 @@ function formatTime(time?: string): string {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 20rpx 24rpx 16rpx;
+  padding: 20rpx 12rpx 16rpx;
   border-bottom: 1rpx solid #f0f0f0;
 }
 
@@ -560,24 +1418,35 @@ function formatTime(time?: string): string {
 .add-btn {
   display: flex;
   align-items: center;
-  gap: 6rpx;
-  padding: 10rpx 20rpx;
+  gap: 4rpx;
+  padding: 6rpx 12rpx;
   background-color: #e8f0fe;
-  border-radius: 20rpx;
+  border-radius: 24rpx;
   flex-shrink: 0;
+  max-width: 112rpx;
+  min-width: 0;
+  overflow: hidden;
 
   &:active { background-color: #d0e2fd; }
 }
 
 .add-btn__label {
-  font-size: 26rpx;
+  font-size: 20rpx;
   color: #2979ff;
   font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history-mode-tip {
+  font-size: 22rpx;
+  color: #a0a3ad;
 }
 
 /* ===== 会话列表 ===== */
 .conv-list {
-  padding: 16rpx 20rpx;
+  padding: 16rpx 12rpx;
   display: flex;
   flex-direction: column;
   gap: 12rpx;
@@ -589,7 +1458,7 @@ function formatTime(time?: string): string {
   gap: 16rpx;
   padding: 20rpx 16rpx;
   background-color: #ffffff;
-  border-radius: 16rpx;
+  border-radius: 22rpx;
   box-shadow: 0 1rpx 8rpx rgba(0, 0, 0, 0.04);
   transition: transform 0.15s;
 
@@ -600,7 +1469,7 @@ function formatTime(time?: string): string {
   width: 64rpx;
   height: 64rpx;
   background-color: #e8f0fe;
-  border-radius: 16rpx;
+  border-radius: 18rpx;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -642,8 +1511,9 @@ function formatTime(time?: string): string {
 
 /* ===== 创建弹层 ===== */
 .create-sheet {
-  padding: 36rpx 32rpx 0;
+  padding: 36rpx 20rpx 0;
   background-color: #ffffff;
+  border-radius: 28rpx 28rpx 0 0;
 }
 
 .create-sheet__hd {
@@ -686,12 +1556,17 @@ function formatTime(time?: string): string {
   justify-content: space-between;
   padding: 20rpx 24rpx;
   background-color: #f5f6f8;
-  border-radius: 50rpx;
+  border-radius: 56rpx;
 }
 
 .form-readonly__text {
   font-size: 28rpx;
   color: #303133;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .safe-bottom {
@@ -699,12 +1574,31 @@ function formatTime(time?: string): string {
 }
 
 :deep(.u-cate-tab__view) {
-  width: 220rpx !important;
+  width: 180rpx !important;
+  min-width: 180rpx;
+  max-width: 180rpx;
 }
 
 :deep(.u-cate-tab__item) {
-  height: 120rpx;
+  min-height: 120rpx;
+  height: auto;
   align-items: flex-start;
   justify-content: center;
+}
+
+:deep(.u-cate-tab__right-box) {
+  min-width: 0;
+}
+
+:deep(.u-cate-tab__page-item) {
+  margin-bottom: 0;
+  border: none;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+:deep(.u-cate-tab__page-item:last-child) {
+  min-height: 0;
 }
 </style>
