@@ -1,47 +1,46 @@
 <template>
-  <view class="agent-selector">
-    <view class="selector-trigger" @click="showPicker = true">
-      <view class="agent-info">
-        <u-icon :name="currentAgent.icon" size="20" :color="currentAgent.color"></u-icon>
-        <text class="agent-name">{{ currentAgent.name }}</text>
-      </view>
-      <u-icon name="arrow-down" size="14" color="#909399"></u-icon>
+  <view class="agent-sel">
+    <view class="sel-trigger" @click="showPicker = true">
+      <view class="sel-dot" :style="{ backgroundColor: currentAgent.color }"></view>
+      <text class="sel-name">{{ currentAgent.name }}</text>
+      <up-icon name="arrow-down-fill" size="11" color="#c0c4cc"></up-icon>
     </view>
 
-    <u-popup v-model:show="showPicker" mode="bottom" :round="10">
-      <view class="agent-picker">
-        <view class="picker-header">
-          <text class="picker-title">选择智能体</text>
-          <u-icon name="close" size="24" @click="showPicker = false"></u-icon>
+    <up-popup v-model:show="showPicker" mode="bottom" :round="20">
+      <view class="picker-wrap">
+        <!-- 头部 -->
+        <view class="picker-hd">
+          <text class="picker-hd__title">选择智能体</text>
+          <view class="picker-close" @click="showPicker = false">
+            <up-icon name="close" size="20" color="#909399"></up-icon>
+          </view>
         </view>
 
-        <view class="agent-list">
+        <!-- 列表 -->
+        <scroll-view scroll-y class="picker-list">
           <view
             v-for="agent in agents"
             :key="agent.type"
-            class="agent-item"
-            :class="{ active: agent.type === modelValue }"
+            :class="['agent-row', agent.type === modelValue && 'agent-row--active']"
             @click="selectAgent(agent)"
           >
-            <view class="agent-left">
-              <view class="agent-icon" :style="{ backgroundColor: agent.color + '20' }">
-                <u-icon :name="agent.icon" size="24" :color="agent.color"></u-icon>
-              </view>
-              <view class="agent-content">
-                <text class="agent-title">{{ agent.name }}</text>
-                <text class="agent-desc">{{ agent.description }}</text>
-              </view>
+            <view class="agent-icon" :style="{ backgroundColor: agent.color + '18' }">
+              <up-icon :name="agent.icon" size="24" :color="agent.color"></up-icon>
             </view>
-            <u-icon
-              v-if="agent.type === modelValue"
-              name="checkbox-mark"
-              size="20"
-              color="#2979ff"
-            ></u-icon>
+            <view class="agent-info">
+              <text class="agent-info__name">{{ agent.name }}</text>
+              <text class="agent-info__desc">{{ agent.description }}</text>
+            </view>
+            <view v-if="agent.type === modelValue" class="check-mark">
+              <up-icon name="checkmark" size="16" color="#2979ff"></up-icon>
+            </view>
           </view>
-        </view>
+        </scroll-view>
+
+        <!-- 底部安全区 -->
+        <view class="safe-bottom"></view>
       </view>
-    </u-popup>
+    </up-popup>
   </view>
 </template>
 
@@ -68,53 +67,15 @@ const emit = defineEmits<{
 const showPicker = ref(false)
 
 const agents: Agent[] = [
-  {
-    type: "general",
-    name: "通用助手",
-    description: "适用于各种日常任务和问题",
-    icon: "star",
-    color: "#2979ff",
-  },
-  {
-    type: "code",
-    name: "代码助手",
-    description: "专注于编程、调试和代码审查",
-    icon: "code",
-    color: "#19be6b",
-  },
-  {
-    type: "writing",
-    name: "写作助手",
-    description: "帮助撰写文章、文档和创意内容",
-    icon: "edit",
-    color: "#ff9900",
-  },
-  {
-    type: "analysis",
-    name: "分析助手",
-    description: "数据分析、研究和洞察",
-    icon: "chart",
-    color: "#9c27b0",
-  },
-  {
-    type: "translation",
-    name: "翻译助手",
-    description: "多语言翻译和本地化",
-    icon: "globe",
-    color: "#00bcd4",
-  },
-  {
-    type: "creative",
-    name: "创意助手",
-    description: "头脑风暴、创意生成和设计",
-    icon: "bulb",
-    color: "#ff5722",
-  },
+  { type: "general",     name: "通用助手", description: "适用于各种日常任务和问题",     icon: "star",     color: "#2979ff" },
+  { type: "code",        name: "代码助手", description: "专注于编程、调试和代码审查",     icon: "code",     color: "#19be6b" },
+  { type: "writing",     name: "写作助手", description: "帮助撰写文章、文档和创意内容", icon: "edit",     color: "#ff9900" },
+  { type: "analysis",    name: "分析助手", description: "数据分析、研究和洞察",         icon: "chart",    color: "#9c27b0" },
+  { type: "translation", name: "翻译助手", description: "多语言翻译和本地化",           icon: "globe",    color: "#00bcd4" },
+  { type: "creative",    name: "创意助手", description: "头脑风暴、创意生成和设计",     icon: "bulb",     color: "#ff5722" },
 ]
 
-const currentAgent = computed(() => {
-  return agents.find((a) => a.type === props.modelValue) || agents[0]
-})
+const currentAgent = computed(() => agents.find((a) => a.type === props.modelValue) || agents[0])
 
 function selectAgent(agent: Agent) {
   emit("update:modelValue", agent.type)
@@ -124,114 +85,129 @@ function selectAgent(agent: Agent) {
 </script>
 
 <style scoped lang="scss">
-.agent-selector {
-  display: inline-block;
+/* ===== 触发器 ===== */
+.agent-sel {
+  display: inline-flex;
 }
 
-.selector-trigger {
+.sel-trigger {
   display: flex;
   align-items: center;
-  gap: 12rpx;
-  padding: 12rpx 24rpx;
-  background-color: #f5f7fa;
-  border-radius: 12rpx;
-  cursor: pointer;
-  transition: background-color 0.2s;
+  gap: 10rpx;
+  padding: 14rpx 20rpx;
+  background-color: #f5f6f8;
+  border-radius: 20rpx;
+  transition: background-color 0.15s;
 
-  &:active {
-    background-color: #e4e7ed;
-  }
+  &:active { background-color: #ebebeb; }
 }
 
-.agent-info {
-  display: flex;
-  align-items: center;
-  gap: 12rpx;
+.sel-dot {
+  width: 12rpx;
+  height: 12rpx;
+  border-radius: 50%;
+  flex-shrink: 0;
 }
 
-.agent-name {
-  font-size: 28rpx;
+.sel-name {
+  font-size: 26rpx;
   font-weight: 500;
   color: #303133;
 }
 
-.agent-picker {
-  padding: 40rpx 30rpx;
+/* ===== 弹层 ===== */
+.picker-wrap {
   background-color: #ffffff;
-  border-radius: 20rpx 20rpx 0 0;
-  max-height: 80vh;
+  padding: 0 0 0;
 }
 
-.picker-header {
+.picker-hd {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 30rpx;
+  padding: 36rpx 32rpx 24rpx;
 }
 
-.picker-title {
-  font-size: 36rpx;
+.picker-hd__title {
+  font-size: 34rpx;
   font-weight: 600;
-  color: #303133;
+  color: #1d1d1f;
 }
 
-.agent-list {
-  max-height: 60vh;
-  overflow-y: auto;
-}
-
-.agent-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 24rpx;
-  margin-bottom: 16rpx;
-  background-color: #f8f8f8;
-  border-radius: 16rpx;
-  transition: all 0.2s;
-
-  &:active {
-    transform: scale(0.98);
-  }
-
-  &.active {
-    background-color: #e3f2fd;
-    border: 2rpx solid #2979ff;
-  }
-}
-
-.agent-left {
-  display: flex;
-  align-items: center;
-  gap: 20rpx;
-  flex: 1;
-}
-
-.agent-icon {
-  width: 80rpx;
-  height: 80rpx;
+.picker-close {
+  width: 56rpx;
+  height: 56rpx;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 16rpx;
+  background-color: #f5f5f5;
+  border-radius: 50%;
 }
 
-.agent-content {
+.picker-list {
+  max-height: 65vh;
+  padding: 0 24rpx;
+}
+
+/* ===== 智能体行 ===== */
+.agent-row {
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+  padding: 20rpx 16rpx;
+  border-radius: 16rpx;
+  margin-bottom: 10rpx;
+  transition: background-color 0.15s;
+
+  &:active { background-color: #f0f0f0; }
+
+  &--active {
+    background-color: #e8f0fe;
+  }
+}
+
+.agent-icon {
+  width: 76rpx;
+  height: 76rpx;
+  border-radius: 18rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.agent-info {
   flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 8rpx;
+  gap: 6rpx;
 }
 
-.agent-title {
+.agent-info__name {
   font-size: 30rpx;
   font-weight: 500;
-  color: #303133;
+  color: #1d1d1f;
 }
 
-.agent-desc {
+.agent-info__desc {
   font-size: 24rpx;
-  color: #909399;
-  line-height: 1.4;
+  color: #86909c;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.check-mark {
+  width: 40rpx;
+  height: 40rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.safe-bottom {
+  height: calc(24rpx + env(safe-area-inset-bottom));
 }
 </style>

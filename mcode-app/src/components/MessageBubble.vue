@@ -1,96 +1,102 @@
 <template>
-  <view :class="['message-bubble', `message-${message.role}`]">
+  <view :class="['bubble-wrap', `bubble-wrap--${message.role}`]">
     <!-- 头像 -->
-    <view class="message-avatar">
-      <u-avatar :size="40" :text="message.role === 'user' ? '我' : 'AI'"></u-avatar>
+    <view class="bubble-avatar">
+      <up-avatar
+        :size="36"
+        :text="message.role === 'user' ? '我' : 'AI'"
+        :bgColor="message.role === 'user' ? '#2979ff' : '#f0f0f0'"
+        :color="message.role === 'user' ? '#fff' : '#606266'"
+        fontSize="24"
+      ></up-avatar>
     </view>
 
-    <!-- 内容 -->
-    <view class="message-content">
-      <!-- 渲染每个内容部分 -->
-      <view v-for="(part, index) in message.content" :key="index" class="content-part">
-        <!-- 文本内容 -->
-        <view v-if="part.type === 'text'" class="text-content">
-          <MarkdownRenderer :content="part.text || ''" />
-        </view>
-
-        <!-- 思考内容 -->
-        <view v-else-if="part.type === 'thinking'" class="thinking-content">
-          <view class="thinking-header">
-            <u-icon name="bulb" size="16" color="#ff9900"></u-icon>
-            <text class="thinking-label">思考中...</text>
+    <!-- 气泡内容 -->
+    <view class="bubble-body">
+      <view :class="['bubble', `bubble--${message.role}`]">
+        <!-- 内容渲染 -->
+        <view v-for="(part, index) in message.content" :key="index" class="part-wrap">
+          <!-- 文本 -->
+          <view v-if="part.type === 'text'" class="part-text">
+            <up-markdown :content="part.text || ''"></up-markdown>
           </view>
-          <view class="thinking-text">{{ part.thinking }}</view>
-        </view>
 
-        <!-- 工具调用 -->
-        <view v-else-if="part.type === 'tool_call'" class="tool-call-content">
-          <ToolCallBlock :toolCall="part.tool_call!" />
-        </view>
-
-        <!-- 图片 -->
-        <view v-else-if="part.type === 'image'" class="image-content">
-          <image
-            :src="part.image?.url"
-            mode="widthFix"
-            class="message-image"
-            @click="previewImage(part.image?.url)"
-          />
-        </view>
-
-        <!-- 计划 -->
-        <view v-else-if="part.type === 'plan'" class="plan-content">
-          <view class="plan-header">
-            <u-icon name="list" size="16" color="#2979ff"></u-icon>
-            <text class="plan-label">执行计划</text>
+          <!-- 思考 -->
+          <view v-else-if="part.type === 'thinking'" class="part-thinking">
+            <view class="thinking-hd">
+              <up-icon name="bulb" size="15" color="#f0a020"></up-icon>
+              <text class="thinking-hd__label">深度思考</text>
+            </view>
+            <text class="thinking-hd__text">{{ part.thinking }}</text>
           </view>
-          <view v-for="(step, idx) in part.plan?.steps" :key="idx" class="plan-step">
-            <u-icon
-              :name="step.completed ? 'checkbox-mark' : 'checkbox'"
-              size="14"
-              :color="step.completed ? '#19be6b' : '#909399'"
-            ></u-icon>
-            <text class="step-text">{{ step.description }}</text>
+
+          <!-- 工具调用 -->
+          <view v-else-if="part.type === 'tool_call'" class="part-tool">
+            <ToolCallBlock :toolCall="part.tool_call!" />
           </view>
+
+          <!-- 图片 -->
+          <view v-else-if="part.type === 'image'" class="part-image">
+            <image
+              :src="part.image?.url"
+              mode="widthFix"
+              class="msg-image"
+              @click="previewImage(part.image?.url)"
+            />
+          </view>
+
+          <!-- 计划 -->
+          <view v-else-if="part.type === 'plan'" class="part-plan">
+            <view class="plan-hd">
+              <up-icon name="list" size="15" color="#2979ff"></up-icon>
+              <text class="plan-hd__label">执行计划</text>
+            </view>
+            <view v-for="(step, idx) in part.plan?.steps" :key="idx" class="plan-step">
+              <up-icon
+                :name="step.completed ? 'checkmark-circle-fill' : 'circle'"
+                size="15"
+                :color="step.completed ? '#19be6b' : '#c0c4cc'"
+              ></up-icon>
+              <text :class="['plan-step__text', step.completed && 'plan-step__text--done']">
+                {{ step.description }}
+              </text>
+            </view>
+          </view>
+        </view>
+
+        <!-- 流式指示器 -->
+        <view v-if="message.status === 'streaming'" class="typing-dots">
+          <view class="dot"></view>
+          <view class="dot"></view>
+          <view class="dot"></view>
+        </view>
+
+        <!-- 错误 -->
+        <view v-if="message.error" class="bubble-error">
+          <up-icon name="close-circle" size="15" color="#fa3534"></up-icon>
+          <text class="bubble-error__text">{{ message.error }}</text>
         </view>
       </view>
 
-      <!-- 状态指示器 -->
-      <view v-if="message.status === 'streaming'" class="streaming-indicator">
-        <view class="dot"></view>
-        <view class="dot"></view>
-        <view class="dot"></view>
-      </view>
-
-      <!-- 错误信息 -->
-      <view v-if="message.error" class="error-message">
-        <u-icon name="error-circle" size="16" color="#fa3534"></u-icon>
-        <text class="error-text">{{ message.error }}</text>
-      </view>
-
-      <!-- 操作按钮 -->
-      <view class="message-actions">
-        <u-button size="mini" type="default" plain @click="copyMessage">
-          <u-icon name="copy" size="12"></u-icon>
-        </u-button>
-        <u-button
+      <!-- 操作栏 -->
+      <view :class="['bubble-actions', `bubble-actions--${message.role}`]">
+        <view class="action-btn" @click="copyMessage">
+          <up-icon name="copy" size="14" color="#c0c4cc"></up-icon>
+        </view>
+        <view
           v-if="message.role === 'assistant' && showRegenerate"
-          size="mini"
-          type="default"
-          plain
+          class="action-btn"
           @click="$emit('regenerate')"
         >
-          <u-icon name="reload" size="12"></u-icon>
-        </u-button>
+          <up-icon name="reload" size="14" color="#c0c4cc"></up-icon>
+        </view>
       </view>
     </view>
   </view>
 </template>
 
 <script setup lang="ts">
-import { computed } from "vue"
 import type { MessageTurn } from "@/types/acp"
-import MarkdownRenderer from "./MarkdownRenderer.vue"
 import ToolCallBlock from "./ToolCallBlock.vue"
 
 const props = defineProps<{
@@ -103,143 +109,138 @@ const emit = defineEmits<{
 }>()
 
 function copyMessage() {
-  const textContent = props.message.content
+  const text = props.message.content
     .filter((p) => p.type === "text")
     .map((p) => p.text)
     .join("\n")
 
   uni.setClipboardData({
-    data: textContent,
-    success: () => {
-      uni.showToast({ title: "已复制", icon: "success" })
-    },
+    data: text,
+    success: () => uni.showToast({ title: "已复制", icon: "success" }),
   })
 }
 
 function previewImage(url?: string) {
   if (!url) return
-  uni.previewImage({
-    urls: [url],
-    current: url,
-  })
+  uni.previewImage({ urls: [url], current: url })
 }
 </script>
 
 <style scoped lang="scss">
-.message-bubble {
+/* ===== 行容器 ===== */
+.bubble-wrap {
   display: flex;
-  gap: 20rpx;
-  margin-bottom: 30rpx;
-  animation: fadeIn 0.3s ease-in;
-}
+  align-items: flex-start;
+  gap: 16rpx;
+  animation: fadeUp 0.25s ease;
 
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(20rpx);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
+  &--user {
+    flex-direction: row-reverse;
   }
 }
 
-.message-user {
-  flex-direction: row-reverse;
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(16rpx); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
-.message-avatar {
+/* ===== 头像 ===== */
+.bubble-avatar {
   flex-shrink: 0;
+  margin-top: 4rpx;
 }
 
-.message-content {
+/* ===== 主体 ===== */
+.bubble-body {
   flex: 1;
-  max-width: 70%;
-  padding: 20rpx 24rpx;
-  border-radius: 16rpx;
-  word-wrap: break-word;
-  position: relative;
-}
+  max-width: 76%;
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
 
-.message-user .message-content {
-  background-color: #2979ff;
-  color: #ffffff;
-}
-
-.message-assistant .message-content {
-  background-color: #ffffff;
-  color: #303133;
-  box-shadow: 0 2rpx 12rpx rgba(0, 0, 0, 0.05);
-}
-
-.content-part {
-  margin-bottom: 20rpx;
-
-  &:last-child {
-    margin-bottom: 0;
+  .bubble-wrap--user & {
+    align-items: flex-end;
   }
 }
 
-.text-content {
+/* ===== 气泡 ===== */
+.bubble {
+  padding: 20rpx 24rpx;
+  border-radius: 20rpx;
+  word-break: break-word;
+
+  &--user {
+    background-color: #2979ff;
+    border-top-right-radius: 6rpx;
+    color: #ffffff;
+  }
+
+  &--assistant {
+    background-color: #ffffff;
+    border-top-left-radius: 6rpx;
+    box-shadow: 0 2rpx 16rpx rgba(0, 0, 0, 0.06);
+  }
+}
+
+/* ===== 内容区块 ===== */
+.part-wrap {
+  &:not(:last-child) { margin-bottom: 16rpx; }
+}
+
+.part-text {
   font-size: 28rpx;
+  line-height: 1.65;
+  // 用户消息文本颜色（up-markdown 在 user 气泡内需白色）
+  .bubble--user & {
+    color: #ffffff;
+    :deep(*) { color: #ffffff !important; }
+  }
+}
+
+/* ===== 思考块 ===== */
+.part-thinking {
+  padding: 16rpx 20rpx;
+  background-color: #fffbf0;
+  border-radius: 12rpx;
+  border-left: 4rpx solid #f0a020;
+}
+
+.thinking-hd {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  margin-bottom: 12rpx;
+}
+
+.thinking-hd__label {
+  font-size: 24rpx;
+  font-weight: 600;
+  color: #f0a020;
+}
+
+.thinking-hd__text {
+  font-size: 24rpx;
+  color: #86909c;
   line-height: 1.6;
 }
 
-.thinking-content {
-  padding: 20rpx;
-  background-color: #fff7e6;
+/* ===== 计划块 ===== */
+.part-plan {
+  padding: 16rpx 20rpx;
+  background-color: #f0f7ff;
   border-radius: 12rpx;
-  border-left: 6rpx solid #ff9900;
+  border-left: 4rpx solid #2979ff;
 }
 
-.thinking-header {
+.plan-hd {
   display: flex;
   align-items: center;
-  gap: 12rpx;
+  gap: 10rpx;
   margin-bottom: 16rpx;
 }
 
-.thinking-label {
-  font-size: 26rpx;
-  font-weight: 600;
-  color: #ff9900;
-}
-
-.thinking-text {
+.plan-hd__label {
   font-size: 24rpx;
-  color: #606266;
-  line-height: 1.5;
-}
-
-.tool-call-content {
-  margin: 16rpx 0;
-}
-
-.image-content {
-  margin: 16rpx 0;
-}
-
-.message-image {
-  width: 100%;
-  border-radius: 12rpx;
-}
-
-.plan-content {
-  padding: 20rpx;
-  background-color: #f0f9ff;
-  border-radius: 12rpx;
-  border-left: 6rpx solid #2979ff;
-}
-
-.plan-header {
-  display: flex;
-  align-items: center;
-  gap: 12rpx;
-  margin-bottom: 16rpx;
-}
-
-.plan-label {
-  font-size: 26rpx;
   font-weight: 600;
   color: #2979ff;
 }
@@ -247,80 +248,94 @@ function previewImage(url?: string) {
 .plan-step {
   display: flex;
   align-items: flex-start;
-  gap: 12rpx;
-  margin-bottom: 12rpx;
+  gap: 10rpx;
+  margin-bottom: 10rpx;
+
+  &:last-child { margin-bottom: 0; }
+}
+
+.plan-step__text {
+  flex: 1;
   font-size: 24rpx;
   color: #606266;
+  line-height: 1.5;
 
-  &:last-child {
-    margin-bottom: 0;
+  &--done {
+    color: #c0c4cc;
+    text-decoration: line-through;
   }
 }
 
-.step-text {
-  flex: 1;
-  line-height: 1.5;
+/* ===== 图片 ===== */
+.part-image { margin: 8rpx 0; }
+
+.msg-image {
+  width: 100%;
+  border-radius: 12rpx;
 }
 
-.streaming-indicator {
+/* ===== 流式动画 ===== */
+.typing-dots {
   display: flex;
   gap: 8rpx;
-  margin-top: 16rpx;
+  padding-top: 8rpx;
 }
 
 .dot {
-  width: 12rpx;
-  height: 12rpx;
-  background-color: #909399;
+  width: 10rpx;
+  height: 10rpx;
+  background-color: #c0c4cc;
   border-radius: 50%;
-  animation: pulse 1.4s infinite ease-in-out;
+  animation: blink 1.2s infinite ease-in-out;
 
-  &:nth-child(1) {
-    animation-delay: -0.32s;
-  }
-
-  &:nth-child(2) {
-    animation-delay: -0.16s;
-  }
+  &:nth-child(1) { animation-delay: 0s; }
+  &:nth-child(2) { animation-delay: 0.2s; }
+  &:nth-child(3) { animation-delay: 0.4s; }
 }
 
-@keyframes pulse {
-  0%,
-  80%,
-  100% {
-    opacity: 0.3;
-    transform: scale(0.8);
-  }
-  40% {
-    opacity: 1;
-    transform: scale(1);
-  }
+@keyframes blink {
+  0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
+  40%            { opacity: 1;   transform: scale(1); }
 }
 
-.error-message {
+/* ===== 错误 ===== */
+.bubble-error {
   display: flex;
   align-items: center;
-  gap: 12rpx;
-  margin-top: 16rpx;
-  padding: 16rpx;
-  background-color: #fef0f0;
+  gap: 8rpx;
+  margin-top: 12rpx;
+  padding: 12rpx 16rpx;
+  background-color: #fff1f0;
   border-radius: 8rpx;
 }
 
-.error-text {
+.bubble-error__text {
   font-size: 24rpx;
   color: #fa3534;
 }
 
-.message-actions {
+/* ===== 操作栏 ===== */
+.bubble-actions {
   display: flex;
-  gap: 16rpx;
-  margin-top: 16rpx;
+  gap: 12rpx;
   opacity: 0;
   transition: opacity 0.2s;
+
+  .bubble-wrap:hover & { opacity: 1; }
+
+  &--user { justify-content: flex-end; }
 }
 
-.message-bubble:hover .message-actions {
-  opacity: 1;
+.action-btn {
+  width: 48rpx;
+  height: 48rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10rpx;
+  background-color: #f5f6f8;
+  transition: background-color 0.15s;
+
+  &:active { background-color: #e8e8e8; }
 }
 </style>

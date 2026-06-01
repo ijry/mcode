@@ -2,34 +2,33 @@
   <view class="page">
     <!-- 加载状态 -->
     <view v-if="loading" class="loading-container">
-      <u-loading-page :loading="loading" loading-text="加载中..."></u-loading-page>
+      <up-loading-page :loading="loading" loading-text="加载中..."></up-loading-page>
     </view>
 
     <!-- 会话不存在 -->
     <view v-else-if="!conversationId" class="empty-container">
-      <u-empty mode="data" text="会话不存在"></u-empty>
+      <up-empty mode="data" text="会话不存在"></up-empty>
     </view>
 
     <!-- 主内容 -->
     <view v-else class="detail-container">
-      <!-- 工具栏 -->
+
+      <!-- 顶部工具栏 -->
       <view class="toolbar">
         <AgentSelector v-model="selectedAgent" @change="handleAgentChange" />
-        <ExpertMenu @select="handleCommandSelect" />
-        <u-button size="small" type="warning" plain @click="chooseImage">
-          <u-icon name="photo" size="16"></u-icon>
-          <text class="btn-text">图片</text>
-        </u-button>
-        <u-button
-          v-if="runtimeStatus === 'thinking'"
-          size="small"
-          type="error"
-          plain
-          @click="cancelGeneration"
-        >
-          <u-icon name="close" size="16"></u-icon>
-          <text class="btn-text">取消</text>
-        </u-button>
+        <view class="toolbar-right">
+          <ExpertMenu @select="handleCommandSelect" />
+          <view class="icon-btn" @click="chooseImage">
+            <up-icon name="photo" size="20" color="#606266"></up-icon>
+          </view>
+          <view
+            v-if="runtimeStatus === 'thinking'"
+            class="icon-btn icon-btn--danger"
+            @click="cancelGeneration"
+          >
+            <up-icon name="close-circle" size="20" color="#fa3534"></up-icon>
+          </view>
+        </view>
       </view>
 
       <!-- 消息列表 -->
@@ -40,7 +39,7 @@
         :scroll-with-animation="true"
       >
         <view v-if="messages.length === 0" class="empty-messages">
-          <u-empty mode="message" text="开始新的对话吧"></u-empty>
+          <up-empty mode="message" text="开始新的对话吧"></up-empty>
         </view>
 
         <view
@@ -57,64 +56,68 @@
         </view>
 
         <!-- 令牌统计 -->
-        <view v-if="stats.totalTokens > 0" class="stats-container">
-          <text class="stats-text">
-            输入: {{ stats.inputTokens }} | 输出: {{ stats.outputTokens }} | 总计:
-            {{ stats.totalTokens }}
-          </text>
+        <view v-if="stats.totalTokens > 0" class="stats-bar">
+          <up-icon name="file-text" size="14" color="#c0c4cc"></up-icon>
+          <text class="stats-text">{{ stats.inputTokens }} / {{ stats.outputTokens }} / {{ stats.totalTokens }} tokens</text>
         </view>
+
+        <!-- 底部留白 -->
+        <view class="list-bottom"></view>
       </scroll-view>
 
-      <!-- 输入框 -->
-      <view class="input-container">
+      <!-- 输入区 -->
+      <view class="input-wrap">
         <!-- 附件预览 -->
         <view v-if="attachments.length > 0" class="attachments-preview">
           <view v-for="(att, index) in attachments" :key="index" class="attachment-item">
             <image :src="att.url" mode="aspectFill" class="attachment-image" />
             <view class="attachment-remove" @click="removeAttachment(index)">
-              <u-icon name="close" size="12" color="#ffffff"></u-icon>
+              <up-icon name="close" size="10" color="#ffffff"></up-icon>
             </view>
           </view>
         </view>
 
         <view class="input-row">
-          <u-input
-            v-model="inputText"
-            type="textarea"
-            placeholder="输入消息..."
-            :autoHeight="true"
-            :maxlength="10000"
-            class="message-input"
-            @confirm="sendMessage"
-          ></u-input>
-          <u-button
-            type="primary"
-            size="normal"
-            :disabled="!canSend"
+          <view class="input-box">
+            <up-input
+              v-model="inputText"
+              type="textarea"
+              placeholder="发送消息..."
+              :autoHeight="true"
+              :maxlength="10000"
+              inputAlign="left"
+              border="none"
+              :customStyle="{ padding: '20rpx 0', fontSize: '28rpx', minHeight: '72rpx' }"
+              @confirm="sendMessage"
+            ></up-input>
+          </view>
+          <view
+            class="send-btn"
+            :class="{ 'send-btn--active': canSend, 'send-btn--loading': sending }"
             @click="sendMessage"
-            :loading="sending"
           >
-            发送
-          </u-button>
+            <up-loading-icon v-if="sending" color="#ffffff" size="20"></up-loading-icon>
+            <up-icon v-else name="arrow-up" size="22" color="#ffffff"></up-icon>
+          </view>
         </view>
       </view>
     </view>
 
     <!-- 模型选择器 -->
-    <u-picker
+    <up-picker
       :show="showModelPicker"
       :columns="modelColumns"
       @confirm="onModelConfirm"
       @cancel="showModelPicker = false"
-    ></u-picker>
+    ></up-picker>
 
     <!-- 权限选择器 -->
-    <u-picker
+    <up-picker
       :show="showPermissionPicker"
       :columns="permissionColumns"
       @confirm="onPermissionConfirm"
       @cancel="showPermissionPicker = false"
-    ></u-picker>
+    ></up-picker>
   </view>
 </template>
 
@@ -140,6 +143,10 @@ const inputText = ref("")
 const scrollIntoView = ref("")
 const attachments = ref<any[]>([])
 const selectedAgent = ref("general")
+const showModelPicker = ref(false)
+const showPermissionPicker = ref(false)
+const modelColumns = ref<any[]>([])
+const permissionColumns = ref<any[]>([])
 
 // 计算属性
 const messages = computed(() => {
@@ -259,34 +266,21 @@ async function sendMessage() {
   sending.value = true
 
   try {
-    // 构建消息块
     const blocks: PromptInputBlock[] = []
 
-    // 添加文本块
     if (content) {
-      blocks.push({
-        type: "text",
-        text: content,
-      })
+      blocks.push({ type: "text", text: content })
     }
 
-    // 添加图片块
     atts.forEach((att) => {
       blocks.push({
         type: "image",
-        source: {
-          type: "url",
-          url: att.url,
-          media_type: att.type,
-        },
+        source: { type: "url", url: att.url, media_type: att.type },
       })
     })
 
-    // 发送到 ACP
     const conn = session.value?.connectionId
-    if (!conn) {
-      throw new Error("未连接到代理")
-    }
+    if (!conn) throw new Error("未连接到代理")
 
     await acpApi.acpPrompt(conn, blocks, folderId.value, conversationId.value)
   } catch (error) {
@@ -306,10 +300,8 @@ function chooseImage() {
     success: async (res) => {
       for (const path of res.tempFilePaths) {
         try {
-          // 上传图片
           const file = await pathToFile(path)
           const result = await acpApi.uploadAttachment(file, session.value?.connectionId)
-
           attachments.value.push({
             url: result.url || result.path,
             name: result.name,
@@ -344,14 +336,11 @@ async function cancelGeneration() {
 
 // 重新生成
 async function regenerateLastMessage() {
-  // 找到最后一条用户消息
   const lastUserMessage = [...messages.value].reverse().find((m) => m.role === "user")
   if (!lastUserMessage) return
 
-  // 取消当前生成
   await cancelGeneration()
 
-  // 重新发送
   const textContent = lastUserMessage.content.find((p) => p.type === "text")
   if (textContent?.text) {
     inputText.value = textContent.text
@@ -359,20 +348,22 @@ async function regenerateLastMessage() {
   }
 }
 
-// 辅助函数：将路径转换为 File 对象
+// 辅助函数
+function onModelConfirm() {}
+function onPermissionConfirm() {}
+
 async function pathToFile(path: string): Promise<File> {
-  // 在 uni-app 中需要特殊处理
-  // 这里简化处理，实际需要根据平台调整
   return new File([], path)
 }
 </script>
 
 <style scoped lang="scss">
+/* ===== 页面容器 ===== */
 .page {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background-color: #f8f8f8;
+  background-color: #f2f3f5;
 }
 
 .loading-container,
@@ -388,53 +379,91 @@ async function pathToFile(path: string): Promise<File> {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  overflow: hidden;
 }
 
+/* ===== 工具栏 ===== */
 .toolbar {
   display: flex;
-  gap: 20rpx;
-  padding: 20rpx 30rpx;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16rpx 30rpx;
   background-color: #ffffff;
-  border-bottom: 1rpx solid #e4e7ed;
+  border-bottom: 1rpx solid #f0f0f0;
+  gap: 20rpx;
 }
 
-.btn-text {
-  margin-left: 8rpx;
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
 }
 
+.icon-btn {
+  width: 64rpx;
+  height: 64rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 16rpx;
+  background-color: #f5f6f8;
+  transition: background-color 0.15s;
+
+  &:active {
+    background-color: #e8e8e8;
+  }
+
+  &--danger {
+    background-color: #fff1f0;
+    &:active {
+      background-color: #ffe0de;
+    }
+  }
+}
+
+/* ===== 消息列表 ===== */
 .message-list {
   flex: 1;
-  padding: 20rpx 30rpx;
-  overflow-y: auto;
-}
-
-.empty-messages {
-  padding-top: 200rpx;
+  padding: 24rpx 24rpx 0;
 }
 
 .message-item {
-  margin-bottom: 30rpx;
+  margin-bottom: 32rpx;
 }
 
-.stats-container {
-  padding: 20rpx;
-  text-align: center;
+.empty-messages {
+  padding-top: 160rpx;
+}
+
+.stats-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8rpx;
+  padding: 16rpx;
 }
 
 .stats-text {
   font-size: 22rpx;
-  color: #909399;
+  color: #c0c4cc;
 }
 
-.input-container {
+.list-bottom {
+  height: 24rpx;
+}
+
+/* ===== 输入区 ===== */
+.input-wrap {
   background-color: #ffffff;
-  border-top: 1rpx solid #e4e7ed;
+  border-top: 1rpx solid #f0f0f0;
+  padding: 16rpx 24rpx;
+  padding-bottom: calc(16rpx + env(safe-area-inset-bottom));
 }
 
 .attachments-preview {
   display: flex;
   gap: 16rpx;
-  padding: 20rpx 30rpx 0;
+  padding-bottom: 16rpx;
   overflow-x: auto;
 }
 
@@ -447,15 +476,16 @@ async function pathToFile(path: string): Promise<File> {
   width: 120rpx;
   height: 120rpx;
   border-radius: 12rpx;
+  object-fit: cover;
 }
 
 .attachment-remove {
   position: absolute;
-  top: -12rpx;
-  right: -12rpx;
-  width: 40rpx;
-  height: 40rpx;
-  background-color: #fa3534;
+  top: -10rpx;
+  right: -10rpx;
+  width: 36rpx;
+  height: 36rpx;
+  background-color: rgba(0, 0, 0, 0.5);
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -464,14 +494,41 @@ async function pathToFile(path: string): Promise<File> {
 
 .input-row {
   display: flex;
-  gap: 20rpx;
-  padding: 20rpx 30rpx;
   align-items: flex-end;
+  gap: 16rpx;
 }
 
-.message-input {
+.input-box {
   flex: 1;
-  min-height: 80rpx;
-  max-height: 200rpx;
+  background-color: #f5f6f8;
+  border-radius: 24rpx;
+  padding: 0 24rpx;
+  min-height: 72rpx;
+  display: flex;
+  align-items: center;
+}
+
+.send-btn {
+  width: 72rpx;
+  height: 72rpx;
+  border-radius: 50%;
+  background-color: #d0d0d0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background-color 0.2s, transform 0.15s;
+
+  &--active {
+    background-color: #2979ff;
+  }
+
+  &--loading {
+    background-color: #2979ff;
+  }
+
+  &:active {
+    transform: scale(0.92);
+  }
 }
 </style>
