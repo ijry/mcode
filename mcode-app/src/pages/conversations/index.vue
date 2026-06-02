@@ -317,6 +317,13 @@ import { onPullDownRefresh, onReady, onShow } from "@dcloudio/uni-app"
 import { useAuthStore } from "@/stores/auth"
 import { acpApi } from "@/api/acp"
 import { createGateway } from "@/services/gateway"
+import { toErrorMessage } from "@/services/gateway/error"
+import { ensureConversationSchema } from "@/services/db/migrations"
+import {
+  listConversationSummaries,
+  upsertConversationSummary,
+  type ConversationSummaryRecord,
+} from "@/services/db/repositories/conversationRepository"
 import type { RelaySessionInfo } from "@/services/gateway"
 
 const auth = useAuthStore()
@@ -554,7 +561,7 @@ async function loadOverviewData() {
       projects.value = []
     }
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error)
+    const msg = toErrorMessage(error)
     uni.showToast({ title: `加载失败: ${msg}`, icon: "none", duration: 3000 })
   } finally {
     loading.value = false
@@ -576,27 +583,49 @@ function currentAuthConnectionKey(): string {
 
 async function loadConnectionGroup(conn: ConnectionItem): Promise<ConnectionGroup> {
   const gateway = await createConnectionGateway(conn)
+  const descriptor = gateway.getRemoteInstanceDescriptor()
   const foldersRaw = await gateway.call<unknown>("list_all_folder_details")
   const folders = normalizeList(foldersRaw) as Project[]
+  const tabsRaw = await gateway.call<unknown>("list_opened_tabs")
+  const tabs = normalizeList(tabsRaw) as OpenedTabItem[]
+  const localConversations = await loadLocalConversationSummaries(
+    descriptor.instanceKey,
+    folders
+  )
+
+  if (localConversations) {
+    const group = buildConnectionGroup(conn, folders, tabs, localConversations)
+    void refreshConnectionGroupConversations(
+      conn,
+      gateway,
+      descriptor.instanceKey,
+      folders,
+      tabs
+    )
+    return group
+  }
+
+  const remoteConversations = await fetchRemoteConversations(gateway, folders)
+  await persistConversationSummaries(descriptor.instanceKey, remoteConversations)
+  return buildConnectionGroup(conn, folders, tabs, remoteConversations)
+}
+
+function buildConnectionGroup(
+  conn: ConnectionItem,
+  folders: Project[],
+  tabs: OpenedTabItem[],
+  conversations: Conversation[]
+): ConnectionGroup {
   const folderMap = new Map<number, Project>()
   folders.forEach((folder) => {
     folderMap.set(folder.id, folder)
   })
 
-  let conversationsRaw: unknown = []
-  if (folders.length > 0) {
-    conversationsRaw = await gateway.call<unknown>("list_all_conversations", {
-      folderIds: folders.map((folder) => folder.id),
-    })
-  }
-  const conversations = normalizeList(conversationsRaw) as Conversation[]
   const convMap = new Map<number, Conversation>()
   conversations.forEach((conv) => {
     convMap.set(conv.id, conv)
   })
 
-  const tabsRaw = await gateway.call<unknown>("list_opened_tabs")
-  const tabs = normalizeList(tabsRaw) as OpenedTabItem[]
   const cards = tabs
     .map((tab) => {
       const conversation = tab.conversation_id ? convMap.get(tab.conversation_id) : undefined
@@ -633,6 +662,124 @@ async function loadConnectionGroup(conn: ConnectionItem): Promise<ConnectionGrou
     projects: projectsWithConversations,
     cards,
   }
+}
+
+async function fetchRemoteConversations(
+  gateway: Awaited<ReturnType<typeof createConnectionGateway>>,
+  folders: Project[]
+): Promise<Conversation[]> {
+  if (folders.length === 0) return []
+  const conversationsRaw = await gateway.call<unknown>("list_all_conversations", {
+    folderIds: folders.map((folder) => folder.id),
+  })
+  return normalizeList(conversationsRaw) as Conversation[]
+}
+
+async function loadLocalConversationSummaries(
+  instanceKey: string,
+  folders: Project[]
+): Promise<Conversation[] | null> {
+  try {
+    await ensureConversationSchema()
+    const rows = await Promise.all(
+      folders.map((folder) => listConversationSummaries(instanceKey, folder.id))
+    )
+    return rows
+      .flat()
+      .map(mapSummaryRecordToConversation)
+  } catch (error) {
+    console.warn("load local conversation summaries skipped:", error)
+    return null
+  }
+}
+
+async function persistConversationSummaries(
+  instanceKey: string,
+  conversations: Conversation[]
+) {
+  try {
+    await ensureConversationSchema()
+    await Promise.all(
+      conversations.map((conversation) =>
+        upsertConversationSummary(mapConversationToSummaryRecord(instanceKey, conversation))
+      )
+    )
+  } catch (error) {
+    console.warn("persist conversation summaries skipped:", error)
+  }
+}
+
+async function refreshConnectionGroupConversations(
+  conn: ConnectionItem,
+  gateway: Awaited<ReturnType<typeof createConnectionGateway>>,
+  instanceKey: string,
+  folders: Project[],
+  tabs: OpenedTabItem[]
+) {
+  try {
+    const remoteConversations = await fetchRemoteConversations(gateway, folders)
+    await persistConversationSummaries(instanceKey, remoteConversations)
+    replaceConnectionGroup(buildConnectionGroup(conn, folders, tabs, remoteConversations))
+  } catch (error) {
+    console.warn("refresh connection group conversations skipped:", error)
+  }
+}
+
+function replaceConnectionGroup(nextGroup: ConnectionGroup) {
+  const index = connectionGroups.value.findIndex((group) => group.key === nextGroup.key)
+  if (index < 0) return
+  const nextGroups = [...connectionGroups.value]
+  nextGroups.splice(index, 1, nextGroup)
+  connectionGroups.value = nextGroups
+  if (showHistoryPanel.value && historyGroupKey.value === nextGroup.key) {
+    projects.value = nextGroup.projects
+  }
+}
+
+function mapSummaryRecordToConversation(record: ConversationSummaryRecord): Conversation {
+  return {
+    id: record.id,
+    title: record.title,
+    agent_type: normalizeAgentType(record.agentType),
+    updated_at: formatTimestamp(record.updatedAt || record.lastMessageAt),
+    folder_id: record.folderId,
+    status: normalizeConversationStatus(record.status),
+  }
+}
+
+function mapConversationToSummaryRecord(
+  instanceKey: string,
+  conversation: Conversation
+): ConversationSummaryRecord {
+  const timestamp = parseTimestamp(conversation.updated_at)
+  return {
+    id: conversation.id,
+    instanceKey,
+    folderId: Number(conversation.folder_id || 0),
+    title: conversation.title || "未命名会话",
+    agentType: normalizeAgentType(conversation.agent_type),
+    externalId: null,
+    connectionId: null,
+    status: normalizeConversationStatus(conversation.status),
+    lastTurnId: null,
+    lastMessageAt: timestamp,
+    unreadCount: 0,
+    isPinned: false,
+    deletedAt: null,
+    updatedAt: timestamp,
+  }
+}
+
+function parseTimestamp(value?: string | number): number {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value
+  }
+  const time = value ? new Date(value).getTime() : Date.now()
+  return Number.isFinite(time) ? time : Date.now()
+}
+
+function formatTimestamp(value: number): string {
+  return new Date(value).toISOString()
 }
 
 function normalizeList(input: unknown): any[] {
@@ -992,7 +1139,7 @@ async function confirmCreate() {
     await loadOverviewData()
     openConversation({ id: newConversationId, folder_id: selectedProjectId.value })
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error)
+    const msg = toErrorMessage(error)
     uni.showToast({ title: `创建失败: ${msg}`, icon: "none", duration: 3000 })
   } finally {
     creating.value = false
