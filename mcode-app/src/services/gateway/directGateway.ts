@@ -2,12 +2,27 @@ import type { CodegGateway, EventChannelConnection } from "./types"
 import { toErrorMessage, toResponseErrorMessage } from "./error"
 import { buildRemoteInstanceKey } from "@/services/realtime/instance-key"
 
+declare const plus: any
+
 function getBaseUrl(baseUrl: string): string {
   return baseUrl.replace(/\/$/, "")
 }
 
 function getToken(): string {
   return uni.getStorageSync("mcode_direct_token") || ""
+}
+
+function isH5WebSocketRuntime() {
+  return typeof WebSocket !== "undefined" && typeof plus === "undefined"
+}
+
+function encodeTokenProtocol(token: string) {
+  const utf8 = new TextEncoder().encode(token.trim())
+  let binary = ""
+  utf8.forEach((byte) => {
+    binary += String.fromCharCode(byte)
+  })
+  return `codeg-token.${btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "")}`
 }
 
 export class DirectGateway implements CodegGateway {
@@ -62,6 +77,58 @@ export class DirectGateway implements CodegGateway {
   }
 
   async connectEvents(onEvent: (event: unknown) => void): Promise<EventChannelConnection> {
+    if (isH5WebSocketRuntime()) {
+      const ws = new WebSocket(
+        `${getBaseUrl(this.baseUrl).replace(/^http/, "ws")}/ws/events`,
+        ["codeg-events", encodeTokenProtocol(getToken())]
+      )
+      let opened = false
+      const readyCallbacks = new Set<() => void>()
+      ws.addEventListener("open", () => {
+        opened = true
+        readyCallbacks.forEach((callback) => {
+          try {
+            callback()
+          } catch (error) {
+            console.error("direct websocket ready callback failed", error)
+          }
+        })
+      })
+      ws.addEventListener("close", () => {
+        opened = false
+      })
+      ws.addEventListener("error", () => {
+        opened = false
+      })
+      ws.addEventListener("message", (event) => {
+        try {
+          onEvent(JSON.parse(String(event.data)))
+        } catch {
+          onEvent(event.data)
+        }
+      })
+      return {
+        isOpen: () => opened && ws.readyState === WebSocket.OPEN,
+        send: (frame: object) => {
+          if (ws.readyState !== WebSocket.OPEN) return false
+          ws.send(JSON.stringify(frame))
+          return true
+        },
+        onReady: (callback: () => void) => {
+          if (opened && ws.readyState === WebSocket.OPEN) {
+            callback()
+            return () => {}
+          }
+          readyCallbacks.add(callback)
+          return () => readyCallbacks.delete(callback)
+        },
+        close: () => {
+          readyCallbacks.clear()
+          ws.close()
+        },
+      }
+    }
+
     const socketTask = await uni.connectSocket({
       url: `${getBaseUrl(this.baseUrl).replace(/^http/, "ws")}/ws/events`,
       header: {
@@ -102,6 +169,10 @@ export class DirectGateway implements CodegGateway {
         return true
       },
       onReady: (callback: () => void) => {
+        if (opened) {
+          callback()
+          return () => {}
+        }
         readyCallbacks.add(callback)
         return () => readyCallbacks.delete(callback)
       },

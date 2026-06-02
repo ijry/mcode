@@ -2,6 +2,8 @@ import type { CodegGateway, EventChannelConnection, RelaySessionInfo } from "./t
 import { toErrorMessage, toResponseErrorMessage } from "./error"
 import { buildRemoteInstanceKey } from "@/services/realtime/instance-key"
 
+declare const plus: any
+
 function getHeaders(session?: RelaySessionInfo | null): HeadersInit {
   const headers: Record<string, string> = {
     "content-type": "application/json",
@@ -10,6 +12,19 @@ function getHeaders(session?: RelaySessionInfo | null): HeadersInit {
     headers.authorization = `Bearer ${session.accessToken}`
   }
   return headers
+}
+
+function isH5WebSocketRuntime() {
+  return typeof WebSocket !== "undefined" && typeof plus === "undefined"
+}
+
+function encodeTokenProtocol(token: string) {
+  const utf8 = new TextEncoder().encode(token.trim())
+  let binary = ""
+  utf8.forEach((byte) => {
+    binary += String.fromCharCode(byte)
+  })
+  return `codeg-token.${btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "")}`
 }
 
 export class RelayGateway implements CodegGateway {
@@ -80,6 +95,58 @@ export class RelayGateway implements CodegGateway {
   }
 
   async connectEvents(onEvent: (event: unknown) => void): Promise<EventChannelConnection> {
+    if (isH5WebSocketRuntime()) {
+      const ws = new WebSocket(
+        `${this.relayUrl.replace(/^http/, "ws").replace(/\/$/, "")}/v1/events`,
+        ["codeg-events", encodeTokenProtocol(this.session.accessToken || "")]
+      )
+      let opened = false
+      const readyCallbacks = new Set<() => void>()
+      ws.addEventListener("open", () => {
+        opened = true
+        readyCallbacks.forEach((callback) => {
+          try {
+            callback()
+          } catch (error) {
+            console.error("relay websocket ready callback failed", error)
+          }
+        })
+      })
+      ws.addEventListener("close", () => {
+        opened = false
+      })
+      ws.addEventListener("error", () => {
+        opened = false
+      })
+      ws.addEventListener("message", (event) => {
+        try {
+          onEvent(JSON.parse(String(event.data)))
+        } catch {
+          onEvent(event.data)
+        }
+      })
+      return {
+        isOpen: () => opened && ws.readyState === WebSocket.OPEN,
+        send: (frame: object) => {
+          if (ws.readyState !== WebSocket.OPEN) return false
+          ws.send(JSON.stringify(frame))
+          return true
+        },
+        onReady: (callback: () => void) => {
+          if (opened && ws.readyState === WebSocket.OPEN) {
+            callback()
+            return () => {}
+          }
+          readyCallbacks.add(callback)
+          return () => readyCallbacks.delete(callback)
+        },
+        close: () => {
+          readyCallbacks.clear()
+          ws.close()
+        },
+      }
+    }
+
     const socketTask = await uni.connectSocket({
       url: `${this.relayUrl.replace(/^http/, "ws").replace(/\/$/, "")}/v1/events`,
       header: getHeaders(this.session),
@@ -118,6 +185,10 @@ export class RelayGateway implements CodegGateway {
         return true
       },
       onReady: (callback: () => void) => {
+        if (opened) {
+          callback()
+          return () => {}
+        }
         readyCallbacks.add(callback)
         return () => readyCallbacks.delete(callback)
       },
