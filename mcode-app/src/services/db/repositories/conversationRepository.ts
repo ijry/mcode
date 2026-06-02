@@ -48,6 +48,20 @@ export interface PersistedTurnRow {
   version: number
 }
 
+export interface PersistedTurnPartRow {
+  id: string
+  turnId: string
+  conversationId: number
+  partIndex: number
+  type: string
+  payloadJson: string
+  updatedAt: number
+}
+
+export interface PersistedTurnWithParts extends PersistedTurnRow {
+  parts: PersistedTurnPartRow[]
+}
+
 export async function listConversationSummaries(
   instanceKey: string,
   folderId: number
@@ -77,8 +91,38 @@ export async function listConversationSummaries(
   )
 }
 
+export async function getConversationSummaryById(
+  instanceKey: string,
+  conversationId: number
+) {
+  const rows = await sqliteDriver.query<ConversationSummaryRecord>(
+    `
+      SELECT
+        id,
+        instance_key as instanceKey,
+        folder_id as folderId,
+        title,
+        agent_type as agentType,
+        external_id as externalId,
+        connection_id as connectionId,
+        status,
+        last_turn_id as lastTurnId,
+        last_message_at as lastMessageAt,
+        unread_count as unreadCount,
+        is_pinned as isPinned,
+        deleted_at as deletedAt,
+        updated_at as updatedAt
+      FROM conversations
+      WHERE instance_key = ? AND id = ? AND deleted_at IS NULL
+      LIMIT 1
+    `,
+    [instanceKey, conversationId]
+  )
+  return rows[0] ?? null
+}
+
 export async function getNewestTurns(conversationId: number, limit: number) {
-  return await sqliteDriver.query<PersistedTurnRow>(
+  const turns = await sqliteDriver.query<PersistedTurnRow>(
     `
       SELECT
         id,
@@ -96,6 +140,7 @@ export async function getNewestTurns(conversationId: number, limit: number) {
     `,
     [conversationId, limit]
   )
+  return await hydrateTurnsWithParts(turns)
 }
 
 export async function getOlderTurns(
@@ -103,7 +148,7 @@ export async function getOlderTurns(
   beforeSeq: number,
   limit = 20
 ) {
-  return await sqliteDriver.query<PersistedTurnRow>(
+  const turns = await sqliteDriver.query<PersistedTurnRow>(
     `
       SELECT
         id,
@@ -121,6 +166,7 @@ export async function getOlderTurns(
     `,
     [conversationId, beforeSeq, limit]
   )
+  return await hydrateTurnsWithParts(turns)
 }
 
 export async function upsertConversationSummary(input: ConversationSummaryRecord) {
@@ -234,3 +280,35 @@ export async function insertCompletedTurn(input: PersistedTurnRecord) {
   })
 }
 
+async function hydrateTurnsWithParts(
+  turns: PersistedTurnRow[]
+): Promise<PersistedTurnWithParts[]> {
+  if (turns.length === 0) return []
+  const placeholders = turns.map(() => "?").join(", ")
+  const parts = await sqliteDriver.query<PersistedTurnPartRow>(
+    `
+      SELECT
+        id,
+        turn_id as turnId,
+        conversation_id as conversationId,
+        part_index as partIndex,
+        type,
+        payload_json as payloadJson,
+        updated_at as updatedAt
+      FROM conversation_parts
+      WHERE turn_id IN (${placeholders})
+      ORDER BY part_index ASC
+    `,
+    turns.map((turn) => turn.id)
+  )
+  const partsByTurnId = new Map<string, PersistedTurnPartRow[]>()
+  for (const part of parts) {
+    const bucket = partsByTurnId.get(part.turnId) || []
+    bucket.push(part)
+    partsByTurnId.set(part.turnId, bucket)
+  }
+  return turns.map((turn) => ({
+    ...turn,
+    parts: partsByTurnId.get(turn.id) || [],
+  }))
+}

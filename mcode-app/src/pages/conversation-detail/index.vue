@@ -292,8 +292,17 @@
 import { ref, computed, nextTick, watch } from "vue"
 import { onLoad, onUnload } from "@dcloudio/uni-app"
 import { useAuthStore } from "@/stores/auth"
+import { useConversationCacheStore } from "@/stores/conversationCache"
 import { useConversationRuntimeStore } from "@/stores/conversationRuntime"
 import { acpApi } from "@/api/acp"
+import { toErrorMessage } from "@/services/gateway/error"
+import { ensureConversationSchema } from "@/services/db/migrations"
+import {
+  getConversationSummaryById,
+  getNewestTurns,
+  type PersistedTurnPartRow,
+  type PersistedTurnWithParts,
+} from "@/services/db/repositories/conversationRepository"
 import type { PromptInputBlock, ToolCall, ContentPart, MessageTurn } from "@/types/acp"
 import MessageBubble from "@/components/MessageBubble.vue"
 import ExpertMenu from "@/components/ExpertMenu.vue"
@@ -354,6 +363,7 @@ interface StoredConnectionItem {
 }
 
 const auth = useAuthStore()
+const cacheStore = useConversationCacheStore()
 const runtime = useConversationRuntimeStore()
 
 const loading = ref(false)
@@ -527,8 +537,14 @@ onLoad((options: any) => {
 })
 
 onUnload(() => {
-  if (conversationId.value && session.value?.connectionId) {
-    runtime.disconnect(conversationId.value)
+  if (conversationId.value) {
+    cacheStore.persistViewState({
+      conversationId: conversationId.value,
+      loadedTurnCount: messages.value.length,
+      oldestLoadedSeq: undefined,
+      hasMoreHistory: false,
+      scrollAnchor: scrollIntoView.value || undefined,
+    })
   }
 })
 
@@ -552,19 +568,45 @@ watch(
 async function loadConversation() {
   loading.value = true
   try {
-    const gateway = auth.gateway()
-    const result = await gateway.call<any>("get_folder_conversation", {
-      conversationId: conversationId.value,
-    })
-    const summary = (result?.summary && typeof result.summary === "object")
-      ? result.summary
-      : {}
-    const agentType = firstString(result?.agentType, result?.agent_type, summary?.agent_type) || "claude_code"
-    const resumeSessionId = firstString(result?.sessionId, result?.session_id, summary?.external_id)
+    const runtimeSession = runtime.getOrCreateSession(conversationId.value)
+    const instanceKey = auth.currentRemoteInstance().instanceKey
+    const cachedViewState = cacheStore.restore(conversationId.value)
+
+    let localSummary: Awaited<ReturnType<typeof getConversationSummaryById>> | null = null
+    let localTurns: PersistedTurnWithParts[] = []
+    try {
+      await ensureConversationSchema()
+      localSummary = await getConversationSummaryById(instanceKey, conversationId.value)
+      localTurns = await getNewestTurns(conversationId.value, 10)
+    } catch (error) {
+      console.warn("local conversation hydrate skipped", error)
+    }
+
+    let agentType = firstString(localSummary?.agentType) || "claude_code"
+    let resumeSessionId = firstString(localSummary?.externalId)
     currentAgentType.value = normalizeAgentType(agentType)
 
-    const runtimeSession = runtime.getOrCreateSession(conversationId.value)
-    runtimeSession.localTurns = normalizeTurns(result.turns)
+    if (localTurns.length > 0) {
+      runtimeSession.localTurns = localTurns
+        .slice()
+        .reverse()
+        .map(mapPersistedTurnToMessage)
+      if (cachedViewState?.scrollAnchor) {
+        scrollIntoView.value = cachedViewState.scrollAnchor
+      }
+    } else {
+      const gateway = auth.gateway()
+      const result = await gateway.call<any>("get_folder_conversation", {
+        conversationId: conversationId.value,
+      })
+      const summary = (result?.summary && typeof result.summary === "object")
+        ? result.summary
+        : {}
+      agentType = firstString(result?.agentType, result?.agent_type, summary?.agent_type) || "claude_code"
+      resumeSessionId = firstString(result?.sessionId, result?.session_id, summary?.external_id)
+      currentAgentType.value = normalizeAgentType(agentType)
+      runtimeSession.localTurns = normalizeTurns(result.turns)
+    }
 
     const conn = await runtime.connect(
       conversationId.value,
@@ -601,7 +643,7 @@ async function loadConversation() {
       }))
 
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
+    const message = toErrorMessage(error)
     uni.showToast({ title: `加载失败: ${message}`, icon: "none", duration: 3000 })
   } finally {
     loading.value = false
@@ -611,6 +653,59 @@ async function loadConversation() {
       hasInitialBottomScroll.value = true
     })
   }
+}
+
+function mapPersistedTurnToMessage(turn: PersistedTurnWithParts): MessageTurn {
+  return {
+    id: turn.id,
+    role: turn.role as MessageTurn["role"],
+    timestamp: turn.createdAt,
+    status: (turn.status as MessageTurn["status"] | undefined) || "completed",
+    content: turn.parts
+      .slice()
+      .sort((a, b) => a.partIndex - b.partIndex)
+      .map(mapPersistedPartToContent)
+      .filter(Boolean) as ContentPart[],
+  }
+}
+
+function mapPersistedPartToContent(part: PersistedTurnPartRow): ContentPart | null {
+  try {
+    const payload = JSON.parse(part.payloadJson || "{}") as Record<string, any>
+    if (part.type === "text") {
+      return {
+        type: "text",
+        text: String(payload.text || payload.value || ""),
+      }
+    }
+    if (part.type === "thinking") {
+      return {
+        type: "thinking",
+        thinking: String(payload.thinking || payload.text || payload.value || ""),
+      }
+    }
+    if (part.type === "tool_call") {
+      return {
+        type: "tool_call",
+        tool_call: payload.tool_call || payload,
+      }
+    }
+    if (part.type === "image") {
+      return {
+        type: "image",
+        image: payload.image || payload,
+      }
+    }
+    if (part.type === "plan") {
+      return {
+        type: "plan",
+        plan: payload.plan || payload,
+      }
+    }
+  } catch (error) {
+    console.warn("failed to parse local part payload", error)
+  }
+  return null
 }
 
 function measureMessageListHeight() {
@@ -752,7 +847,7 @@ async function sendDraft(draft: QueuedDraft): Promise<boolean> {
     await acpApi.acpPrompt(conn, blocks, folderId.value, conversationId.value)
     return true
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
+    const message = toErrorMessage(error)
     draft.status = "failed"
     draft.error = message
     uni.showToast({ title: `发送失败: ${message}`, icon: "none", duration: 3000 })
@@ -909,7 +1004,7 @@ async function uploadPickedFiles(files: PickedLocalFile[]) {
       queueItem.progress = 100
     } catch (error) {
       queueItem.status = "error"
-      queueItem.error = error instanceof Error ? error.message : String(error)
+      queueItem.error = toErrorMessage(error)
       uni.showToast({ title: `${file.name} 上传失败`, icon: "none" })
     } finally {
       uploadingCount.value = Math.max(0, uploadingCount.value - 1)
