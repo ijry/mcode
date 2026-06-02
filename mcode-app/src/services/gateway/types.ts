@@ -1,3 +1,5 @@
+import type { RemoteInstanceDescriptor } from "@/services/realtime/types"
+
 export type GatewayMode = "relay" | "direct"
 
 export interface RelaySessionInfo {
@@ -20,6 +22,7 @@ export interface CodegGateway {
   call<T>(command: string, payload?: Record<string, unknown>): Promise<T>
   connectEvents(onEvent: (event: unknown) => void): Promise<() => void>
   refreshAuth(): Promise<void>
+  getRemoteInstanceDescriptor(): RemoteInstanceDescriptor
 }
 
 export interface TargetProfile {

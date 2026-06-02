@@ -1,4 +1,6 @@
 import type { CodegGateway, RelaySessionInfo } from "./types"
+import { toErrorMessage, toResponseErrorMessage } from "./error"
+import { buildRemoteInstanceKey } from "@/services/realtime/instance-key"
 
 function getHeaders(session?: RelaySessionInfo | null): HeadersInit {
   const headers: Record<string, string> = {
@@ -51,27 +53,30 @@ export class RelayGateway implements CodegGateway {
   }
 
   async call<T>(command: string, payload?: Record<string, unknown>): Promise<T> {
-    const res = await uni.request({
-      url: `${this.relayUrl.replace(/\/$/, "")}/v1/proxy/${command}`,
-      method: "POST",
-      data: payload ?? {},
-      header: getHeaders(this.session),
-    })
-    const statusCode = Number((res as any).statusCode || 0)
-    if (statusCode >= 400) {
-      const body = res.data as any
-      const message =
-        (body && typeof body === "object" && String(body.error || body.message || "").trim()) ||
-        `HTTP ${statusCode}`
-      throw new Error(`${command}: ${message}`)
-    }
-    if (res.data && typeof res.data === "object") {
-      const maybeError = (res.data as Record<string, unknown>).error
-      if (typeof maybeError === "string" && maybeError.trim()) {
-        throw new Error(`${command}: ${maybeError.trim()}`)
+    try {
+      const res = await uni.request({
+        url: `${this.relayUrl.replace(/\/$/, "")}/v1/proxy/${command}`,
+        method: "POST",
+        data: payload ?? {},
+        header: getHeaders(this.session),
+      })
+      const statusCode = Number((res as any).statusCode || 0)
+      if (statusCode >= 400) {
+        throw new Error(
+          `${command}: ${toResponseErrorMessage(res.data, statusCode)}`
+        )
       }
+      if (res.data && typeof res.data === "object") {
+        const body = res.data as Record<string, unknown>
+        const maybeError = body.error
+        if (typeof maybeError === "string" && maybeError.trim()) {
+          throw new Error(`${command}: ${maybeError.trim()}`)
+        }
+      }
+      return res.data as T
+    } catch (error) {
+      throw new Error(`${command}: ${toErrorMessage(error)}`)
     }
-    return res.data as T
   }
 
   async connectEvents(onEvent: (event: unknown) => void): Promise<() => void> {
@@ -104,6 +109,27 @@ export class RelayGateway implements CodegGateway {
     }
     if (data.refreshToken) {
       this.session.refreshToken = data.refreshToken
+    }
+  }
+
+  getRemoteInstanceDescriptor() {
+    const baseUrl = this.relayUrl.replace(/\/$/, "")
+    const principal =
+      this.session.targetId ||
+      this.session.refreshToken ||
+      this.session.accessToken ||
+      "relay:anonymous"
+    return {
+      instanceKey: buildRemoteInstanceKey({
+        mode: this.mode,
+        baseUrl,
+        principal,
+      }),
+      mode: this.mode,
+      baseUrl,
+      principal,
+      authToken: this.session.accessToken || undefined,
+      refreshToken: this.session.refreshToken,
     }
   }
 }

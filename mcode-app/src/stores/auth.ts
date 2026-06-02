@@ -2,6 +2,7 @@ import { defineStore } from "pinia"
 
 import { createGateway } from "@/services/gateway"
 import type { GatewayMode, RelaySessionInfo } from "@/services/gateway"
+import { buildRemoteInstanceKey } from "@/services/realtime/instance-key"
 
 export const useAuthStore = defineStore("auth", {
   state: () => ({
@@ -35,6 +36,28 @@ export const useAuthStore = defineStore("auth", {
         directBaseUrl: this.directBaseUrl,
         session: this.relaySession,
       })
+    },
+    currentRemoteInstance() {
+      const gateway = this.gateway()
+      const descriptor = gateway.getRemoteInstanceDescriptor()
+      if (descriptor.instanceKey) return descriptor
+
+      const baseUrl = this.mode === "direct" ? this.directBaseUrl : this.relayUrl
+      const principal =
+        this.mode === "relay"
+          ? this.relaySession?.targetId || this.relaySession?.refreshToken || "relay:anonymous"
+          : (uni.getStorageSync("mcode_direct_token") || "").slice(0, 16) || "direct:anonymous"
+
+      return {
+        ...descriptor,
+        baseUrl,
+        principal,
+        instanceKey: buildRemoteInstanceKey({
+          mode: this.mode,
+          baseUrl,
+          principal,
+        }),
+      }
     },
   },
   persist: {
