@@ -35,6 +35,7 @@
         :scroll-into-view="scrollIntoView"
         :scroll-top="scrollTop"
         :scroll-with-animation="true"
+        @scroll="handleMessageScroll"
       >
         <view v-if="messages.length === 0" class="empty-messages">
           <up-empty mode="message" text="开始新的对话吧"></up-empty>
@@ -182,7 +183,8 @@
               fixed
               :maxlength="10000"
               border="none"
-              height="40rpx"
+              height="34rpx"
+              :customStyle="{ backgroundColor: 'transparent', background: 'transparent', padding: '0', borderColor: 'transparent' }"
             ></up-textarea>
           </view>
 
@@ -363,6 +365,9 @@ const folderId = ref<number>(0)
 const inputText = ref("")
 const scrollIntoView = ref("")
 const scrollTop = ref(0)
+const messageListHeight = ref(0)
+const hasInitialBottomScroll = ref(false)
+const shouldAutoFollowBottom = ref(true)
 const attachments = ref<UploadedAttachment[]>([])
 const uploadQueue = ref<UploadQueueItem[]>([])
 const draftQueue = ref<QueuedDraft[]>([])
@@ -530,6 +535,7 @@ onUnload(() => {
 watch(
   () => messages.value.length,
   () => {
+    if (loading.value || !hasInitialBottomScroll.value || !shouldAutoFollowBottom.value) return
     scrollToBottom()
   }
 )
@@ -600,13 +606,39 @@ async function loadConversation() {
   } finally {
     loading.value = false
     nextTick(() => {
-      scrollToBottom()
+      measureMessageListHeight()
+      scrollToBottom(true)
+      hasInitialBottomScroll.value = true
     })
   }
 }
 
-function scrollToBottom() {
+function measureMessageListHeight() {
+  const query = uni.createSelectorQuery()
+  query
+    .select(".message-list")
+    .boundingClientRect((rect: any) => {
+      const height = Number(rect?.height || 0)
+      if (height > 0) {
+        messageListHeight.value = height
+      }
+    })
+    .exec()
+}
+
+function handleMessageScroll(event: any) {
+  const scrollTopValue = Number(event?.detail?.scrollTop || 0)
+  const scrollHeight = Number(event?.detail?.scrollHeight || 0)
+  const viewportHeight = Number(messageListHeight.value || 0)
+  if (!scrollHeight || !viewportHeight) return
+  const distanceToBottom = Math.max(0, scrollHeight - (scrollTopValue + viewportHeight))
+  shouldAutoFollowBottom.value = distanceToBottom <= 72
+}
+
+function scrollToBottom(force = false) {
   if (!messages.value.length) return
+  if (!force && !shouldAutoFollowBottom.value) return
+  shouldAutoFollowBottom.value = true
   const targetId = `msg-${messages.value.length - 1}`
   scrollIntoView.value = ""
   scrollTop.value += 100000
@@ -1823,7 +1855,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 
 .input-row {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   gap: 12rpx;
 }
 
@@ -1842,27 +1874,39 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   flex: 1;
   background-color: #f5f6f8;
   border-radius: 24rpx;
-  padding: 12rpx 20rpx;
+  padding: 10rpx 20rpx;
   min-height: 64rpx;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
 }
 
 .composer-textarea {
   width: 100%;
+  background: transparent;
 
   :deep(.u-textarea) {
     padding: 0;
     background: transparent;
+    border: none !important;
+  }
+
+  :deep(.u-textarea--no-radius) {
+    background: transparent !important;
   }
 
   :deep(.u-textarea__field),
-  :deep(.uni-textarea-textarea) {
-    min-height: 40rpx;
+  :deep(.uni-textarea-textarea),
+  :deep(textarea) {
+    min-height: 34rpx;
     max-height: 200rpx;
-    line-height: 40rpx;
+    line-height: 34rpx;
     font-size: 28rpx;
+    background: transparent !important;
     overflow-y: auto;
+  }
+
+  :deep(.uni-textarea-wrapper) {
+    background: transparent !important;
   }
 }
 
