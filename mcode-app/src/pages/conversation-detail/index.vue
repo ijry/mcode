@@ -304,6 +304,12 @@ import {
   type PersistedTurnPartRow,
   type PersistedTurnWithParts,
 } from "@/services/db/repositories/conversationRepository"
+import {
+  getRuntime,
+  saveDraftState,
+  type ConversationRuntimeRecord,
+} from "@/services/db/repositories/runtimeRepository"
+import { connectionSessionManager } from "@/services/conversation/connectionSessionManager"
 import type { PromptInputBlock, ToolCall, ContentPart, MessageTurn } from "@/types/acp"
 import MessageBubble from "@/components/MessageBubble.vue"
 import ExpertMenu from "@/components/ExpertMenu.vue"
@@ -541,15 +547,7 @@ onLoad((options: any) => {
 })
 
 onUnload(() => {
-  if (conversationId.value) {
-    cacheStore.persistViewState({
-      conversationId: conversationId.value,
-      loadedTurnCount: messages.value.length,
-      oldestLoadedSeq: undefined,
-      hasMoreHistory: false,
-      scrollAnchor: scrollIntoView.value || undefined,
-    })
-  }
+  persistDetailRuntimeState()
 })
 
 watch(
@@ -575,30 +573,51 @@ async function loadConversation() {
     const runtimeSession = runtime.getOrCreateSession(conversationId.value)
     const instanceKey = auth.currentRemoteInstance().instanceKey
     const cachedViewState = cacheStore.restore(conversationId.value)
+    const managed = connectionSessionManager.getByConversationId(conversationId.value)
+    const hasHotRuntime = hasRuntimeState(runtimeSession)
 
     let localSummary: Awaited<ReturnType<typeof getConversationSummaryById>> | null = null
     let localTurns: PersistedTurnWithParts[] = []
+    let persistedRuntime: ConversationRuntimeRecord | null = null
     try {
       await ensureConversationSchema()
       localSummary = await getConversationSummaryById(instanceKey, conversationId.value)
-      localTurns = await getNewestTurns(conversationId.value, 10)
+      persistedRuntime = await getRuntime(conversationId.value)
+      if (!hasHotRuntime) {
+        localTurns = await getNewestTurns(conversationId.value, 10)
+      }
     } catch (error) {
       console.warn("local conversation hydrate skipped", error)
     }
 
-    let agentType = firstString(localSummary?.agentType) || "claude_code"
-    let resumeSessionId = firstString(localSummary?.externalId)
+    restoreDraftState(cachedViewState, persistedRuntime)
+
+    let agentType =
+      firstString(managed?.connection.agentType, localSummary?.agentType) || "claude_code"
+    let resumeSessionId =
+      firstString(managed?.externalId, managed?.connection.sessionId, localSummary?.externalId)
     currentAgentType.value = normalizeAgentType(agentType)
 
-    if (localTurns.length > 0) {
+    if (hasHotRuntime) {
+      oldestLoadedCursor.value = cachedViewState?.oldestLoadedSeq ?? oldestLoadedCursor.value
+      hasMoreHistory.value = cachedViewState?.hasMoreHistory ?? hasMoreHistory.value
+      if (cachedViewState?.scrollAnchor) {
+        scrollIntoView.value = cachedViewState.scrollAnchor
+      } else if (persistedRuntime?.scrollAnchor) {
+        scrollIntoView.value = persistedRuntime.scrollAnchor
+      }
+    } else if (localTurns.length > 0) {
       runtimeSession.localTurns = localTurns
         .slice()
         .reverse()
         .map(mapPersistedTurnToMessage)
-      oldestLoadedCursor.value = getOldestCursorFromPersistedTurns(localTurns)
-      hasMoreHistory.value = localTurns.length >= 10
+      oldestLoadedCursor.value =
+        cachedViewState?.oldestLoadedSeq ?? getOldestCursorFromPersistedTurns(localTurns)
+      hasMoreHistory.value = cachedViewState?.hasMoreHistory ?? localTurns.length >= 10
       if (cachedViewState?.scrollAnchor) {
         scrollIntoView.value = cachedViewState.scrollAnchor
+      } else if (persistedRuntime?.scrollAnchor) {
+        scrollIntoView.value = persistedRuntime.scrollAnchor
       }
     } else {
       const gateway = auth.gateway()
@@ -612,8 +631,8 @@ async function loadConversation() {
       resumeSessionId = firstString(result?.sessionId, result?.session_id, summary?.external_id)
       currentAgentType.value = normalizeAgentType(agentType)
       runtimeSession.localTurns = normalizeTurns(result.turns)
-      oldestLoadedCursor.value = null
-      hasMoreHistory.value = false
+      oldestLoadedCursor.value = cachedViewState?.oldestLoadedSeq ?? null
+      hasMoreHistory.value = cachedViewState?.hasMoreHistory ?? false
     }
 
     const conn = await runtime.connect(
@@ -661,6 +680,74 @@ async function loadConversation() {
       hasInitialBottomScroll.value = true
     })
   }
+}
+
+function hasRuntimeState(runtimeSession: ReturnType<typeof runtime.getOrCreateSession>) {
+  return Boolean(
+    runtimeSession.connectionId ||
+    runtimeSession.liveMessage ||
+    runtimeSession.localTurns.length > 0 ||
+    runtimeSession.optimisticTurns.length > 0
+  )
+}
+
+function restoreDraftState(
+  cachedViewState: ReturnType<typeof cacheStore.restore>,
+  persistedRuntime: ConversationRuntimeRecord | null
+) {
+  const sourceComposer = cachedViewState?.composerText ?? persistedRuntime?.composerText ?? ""
+  const sourceDraftQueue = cachedViewState?.draftQueue ?? safeParseArray(persistedRuntime?.draftQueueJson)
+  const sourceAttachments = cachedViewState?.attachments ?? safeParseArray(persistedRuntime?.attachmentsJson)
+  const restoredDraftQueue = Array.isArray(sourceDraftQueue) ? (sourceDraftQueue as QueuedDraft[]) : []
+  const restoredAttachments = Array.isArray(sourceAttachments) ? (sourceAttachments as UploadedAttachment[]) : []
+
+  inputText.value = typeof sourceComposer === "string" ? sourceComposer : ""
+  draftQueue.value = restoredDraftQueue
+  attachments.value = restoredAttachments
+  queueExpanded.value =
+    typeof cachedViewState?.queueExpanded === "boolean"
+      ? cachedViewState.queueExpanded
+      : restoredDraftQueue.length > 0
+}
+
+function safeParseArray(value?: string | null) {
+  if (!value) return []
+  try {
+    const parsed = JSON.parse(value)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+function persistDetailRuntimeState() {
+  if (!conversationId.value) return
+  cacheStore.persistViewState({
+    conversationId: conversationId.value,
+    loadedTurnCount: messages.value.length,
+    oldestLoadedSeq: oldestLoadedCursor.value ?? undefined,
+    hasMoreHistory: hasMoreHistory.value,
+    scrollAnchor: scrollIntoView.value || undefined,
+    composerText: inputText.value,
+    draftQueue: draftQueue.value.map((item) => ({ ...item })),
+    attachments: attachments.value.map((item) => ({ ...item })),
+    queueExpanded: queueExpanded.value,
+  })
+  const currentSession = session.value
+  void saveDraftState({
+    conversationId: conversationId.value,
+    instanceKey: auth.currentRemoteInstance().instanceKey,
+    connectionId: currentSession?.connectionId ?? null,
+    composerText: inputText.value,
+    draftQueueJson: JSON.stringify(draftQueue.value),
+    attachmentsJson: JSON.stringify(attachments.value),
+    scrollAnchor: scrollIntoView.value || null,
+    liveMessageJson: currentSession?.liveMessage ? JSON.stringify(currentSession.liveMessage) : null,
+    optimisticJson: JSON.stringify(currentSession?.optimisticTurns || []),
+    isActive: Boolean(currentSession?.connectionId),
+  }).catch((error) => {
+    console.warn("persist detail runtime skipped", error)
+  })
 }
 
 function mapPersistedTurnToMessage(turn: PersistedTurnWithParts): MessageTurn {

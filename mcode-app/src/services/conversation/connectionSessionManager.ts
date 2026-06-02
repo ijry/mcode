@@ -9,6 +9,7 @@ export interface ManagedConversationConnection {
   connection: ConnectionInfo
   externalId?: string | null
   status: "idle" | "connecting" | "connected" | "error"
+  lastTouchedAt: number
 }
 
 const byConversationId = new Map<number, ManagedConversationConnection>()
@@ -29,6 +30,7 @@ export const connectionSessionManager = {
   }) {
     const existing = byConversationId.get(input.conversationId)
     if (existing?.connectionId) {
+      existing.lastTouchedAt = Date.now()
       return existing
     }
 
@@ -46,6 +48,7 @@ export const connectionSessionManager = {
       connection,
       externalId: connection.sessionId || null,
       status: "connected",
+      lastTouchedAt: Date.now(),
     }
 
     byConversationId.set(input.conversationId, managed)
@@ -61,6 +64,18 @@ export const connectionSessionManager = {
     return byConnectionId.get(connectionId) ?? null
   },
 
+  touchConversation(conversationId: number) {
+    const managed = byConversationId.get(conversationId)
+    if (!managed) return
+    managed.lastTouchedAt = Date.now()
+  },
+
+  touchConnection(connectionId: string) {
+    const managed = byConnectionId.get(connectionId)
+    if (!managed) return
+    managed.lastTouchedAt = Date.now()
+  },
+
   async disconnectConversation(conversationId: number) {
     const managed = byConversationId.get(conversationId)
     if (!managed) return
@@ -74,5 +89,16 @@ export const connectionSessionManager = {
     if (!managed) return
     byConversationId.delete(conversationId)
     byConnectionId.delete(managed.connectionId)
+  },
+
+  async sweepInactiveConversations(now = Date.now()) {
+    const staleBefore = now - 10 * 60_000
+    const staleConversations = Array.from(byConversationId.values())
+      .filter((item) => item.lastTouchedAt < staleBefore)
+      .map((item) => item.conversationId)
+
+    for (const conversationId of staleConversations) {
+      await this.disconnectConversation(conversationId).catch(() => {})
+    }
   },
 }

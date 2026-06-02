@@ -196,6 +196,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
    * 处理事件
    */
   function handleEvent(event: EventEnvelope) {
+    connectionSessionManager.touchConnection(event.connectionId)
     const session = Array.from(sessions.value.values()).find(
       (s) => s.connectionId === event.connectionId
     )
@@ -272,6 +273,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
   ) {
     const session = getOrCreateSession(conversationId)
     session.status = "connecting"
+    connectionSessionManager.touchConversation(conversationId)
 
     try {
       const managed = await connectionSessionManager.connectConversation({

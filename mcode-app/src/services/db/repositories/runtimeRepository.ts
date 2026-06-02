@@ -95,6 +95,35 @@ export async function saveRuntime(input: ConversationRuntimeRecord) {
   )
 }
 
+export async function saveDraftState(input: {
+  conversationId: number
+  instanceKey: string
+  connectionId?: string | null
+  composerText: string
+  draftQueueJson: string
+  attachmentsJson: string
+  scrollAnchor?: string | null
+  liveMessageJson?: string | null
+  optimisticJson?: string | null
+  isActive?: boolean
+}) {
+  const current = await getRuntime(input.conversationId)
+  await saveRuntime({
+    conversationId: input.conversationId,
+    instanceKey: input.instanceKey || current?.instanceKey || "",
+    connectionId: input.connectionId ?? current?.connectionId ?? null,
+    liveMessageJson: input.liveMessageJson ?? current?.liveMessageJson ?? null,
+    optimisticJson: input.optimisticJson ?? current?.optimisticJson ?? null,
+    draftQueueJson: input.draftQueueJson,
+    attachmentsJson: input.attachmentsJson,
+    scrollAnchor: input.scrollAnchor ?? current?.scrollAnchor ?? null,
+    composerText: input.composerText,
+    lastAppliedSeq: current?.lastAppliedSeq ?? null,
+    lastSnapshotAt: current?.lastSnapshotAt ?? null,
+    isActive: input.isActive ?? current?.isActive ?? true,
+  })
+}
+
 export async function clearRuntime(conversationId: number) {
   await sqliteDriver.execute(
     `DELETE FROM conversation_runtime WHERE conversation_id = ?`,

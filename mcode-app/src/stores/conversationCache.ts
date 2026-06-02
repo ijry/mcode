@@ -6,6 +6,10 @@ export interface CachedConversationViewState {
   oldestLoadedSeq?: number
   hasMoreHistory: boolean
   scrollAnchor?: string
+  composerText?: string
+  draftQueue?: any[]
+  attachments?: any[]
+  queueExpanded?: boolean
 }
 
 export const useConversationCacheStore = defineStore("conversationCache", {
