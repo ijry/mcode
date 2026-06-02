@@ -3,12 +3,29 @@
     <!-- 头像 -->
     <view class="bubble-avatar">
       <up-avatar
+        v-if="message.role === 'user'"
         :size="36"
-        :text="message.role === 'user' ? '我' : 'AI'"
-        :bgColor="message.role === 'user' ? '#2979ff' : '#f0f0f0'"
-        :color="message.role === 'user' ? '#fff' : '#606266'"
+        text="我"
+        bgColor="#2979ff"
+        color="#fff"
         fontSize="24"
       ></up-avatar>
+      <view v-else class="bubble-avatar__logo">
+        <image
+          v-if="agentLogoPath"
+          class="bubble-avatar__logo-img"
+          :src="agentLogoPath"
+          mode="aspectFit"
+        />
+        <up-avatar
+          v-else
+          :size="36"
+          text="AI"
+          bgColor="#f0f0f0"
+          color="#606266"
+          fontSize="24"
+        ></up-avatar>
+      </view>
     </view>
 
     <!-- 气泡内容 -->
@@ -96,17 +113,30 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from "vue"
 import type { MessageTurn } from "@/types/acp"
 import ToolCallBlock from "./ToolCallBlock.vue"
 
 const props = defineProps<{
   message: MessageTurn
+  agentType?: string
   showRegenerate?: boolean
 }>()
 
 const emit = defineEmits<{
   regenerate: []
 }>()
+
+const agentLogoPath = computed(() => {
+  const key = normalizeAgentType(props.agentType)
+  if (key === "claude_code") return "/static/agent-logos/claude-code.svg"
+  if (key === "codex") return "/static/agent-logos/codex.svg"
+  if (key === "gemini") return "/static/agent-logos/gemini.svg"
+  if (key === "cline") return "/static/agent-logos/cline.svg"
+  if (key === "open_code") return "/static/agent-logos/open-code.svg"
+  if (key === "open_claw") return "/static/agent-logos/open-claw.svg"
+  return ""
+})
 
 function copyMessage() {
   const text = props.message.content
@@ -123,6 +153,20 @@ function copyMessage() {
 function previewImage(url?: string) {
   if (!url) return
   uni.previewImage({ urls: [url], current: url })
+}
+
+function normalizeAgentType(raw?: string) {
+  const value = String(raw || "").trim().toLowerCase().replace(/[\s-]/g, "_")
+  if (!value) return "claude_code"
+  if (value === "claudecode") return "claude_code"
+  if (value === "codex_cli") return "codex"
+  if (value === "gemini_cli" || value === "google_gemini" || value === "gemini_code") return "gemini"
+  if (value === "cline_cli") return "cline"
+  if (value === "opencode") return "open_code"
+  if (value === "open_code_cli") return "open_code"
+  if (value === "openclaw") return "open_claw"
+  if (value === "open_claw_cli") return "open_claw"
+  return value
 }
 </script>
 
@@ -150,6 +194,23 @@ function previewImage(url?: string) {
   margin-top: 4rpx;
 }
 
+.bubble-avatar__logo {
+  width: 72rpx;
+  height: 72rpx;
+  border-radius: 18rpx;
+  background-color: #eef1f5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.bubble-avatar__logo-img {
+  width: 48rpx;
+  height: 48rpx;
+  display: block;
+}
+
 /* ===== 主体 ===== */
 .bubble-body {
   flex: 1;
@@ -165,7 +226,7 @@ function previewImage(url?: string) {
 
 /* ===== 气泡 ===== */
 .bubble {
-  padding: 20rpx 24rpx;
+  padding: 4px 6px;
   border-radius: 20rpx;
   word-break: break-word;
 
@@ -188,8 +249,26 @@ function previewImage(url?: string) {
 }
 
 .part-text {
-  font-size: 28rpx;
-  line-height: 1.65;
+  font-size: 13px;
+  line-height: 1.2;
+
+  :deep(.up-markdown) {
+    padding: 1px 2px !important;
+    font-size: 13px !important;
+    line-height: 1.2 !important;
+  }
+
+  :deep(.up-markdown p) {
+    margin: 1px 0 !important;
+    line-height: 1.2 !important;
+    font-size: 13px !important;
+  }
+
+  :deep(.up-markdown text) {
+    line-height: 1.2 !important;
+    font-size: 13px !important;
+  }
+
   // 用户消息文本颜色（up-markdown 在 user 气泡内需白色）
   .bubble--user & {
     color: #ffffff;
@@ -316,7 +395,7 @@ function previewImage(url?: string) {
 
 /* ===== 操作栏 ===== */
 .bubble-actions {
-  display: flex;
+  display: none;
   gap: 12rpx;
   opacity: 0;
   transition: opacity 0.2s;

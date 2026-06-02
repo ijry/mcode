@@ -57,6 +57,20 @@ export class RelayGateway implements CodegGateway {
       data: payload ?? {},
       header: getHeaders(this.session),
     })
+    const statusCode = Number((res as any).statusCode || 0)
+    if (statusCode >= 400) {
+      const body = res.data as any
+      const message =
+        (body && typeof body === "object" && String(body.error || body.message || "").trim()) ||
+        `HTTP ${statusCode}`
+      throw new Error(`${command}: ${message}`)
+    }
+    if (res.data && typeof res.data === "object") {
+      const maybeError = (res.data as Record<string, unknown>).error
+      if (typeof maybeError === "string" && maybeError.trim()) {
+        throw new Error(`${command}: ${maybeError.trim()}`)
+      }
+    }
     return res.data as T
   }
 

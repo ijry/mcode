@@ -59,7 +59,7 @@
               v-for="card in group.cards"
               :key="`${group.key}-${card.tabId}`"
               class="live-card"
-              @click="openLiveSession(card)"
+              @click="openLiveSession(card, group.key)"
             >
               <view
                 :class="[
@@ -180,11 +180,11 @@
               v-for="conv in getConversationList(slotProps?.item)"
               :key="conv.id"
               class="conv-card"
-              @click="openConversation(conv)"
+              @click="openConversation(conv, historyGroupKey)"
               @longpress="showConversationMenu(conv)"
             >
               <view class="conv-card__icon">
-                <up-icon name="chat-fill" size="20" color="#2979ff"></up-icon>
+                <up-icon name="chat-fill" size="17" color="#2979ff"></up-icon>
               </view>
               <view class="conv-card__body">
                 <text class="conv-card__title u-line-1">{{ conv.title || '未命名会话' }}</text>
@@ -198,7 +198,7 @@
                   <text class="conv-card__time">{{ formatTime(conv.updated_at) }}</text>
                 </view>
               </view>
-              <up-icon name="arrow-right" size="14" color="#c0c4cc"></up-icon>
+              <up-icon name="arrow-right" size="12" color="#c0c4cc"></up-icon>
             </view>
           </view>
         </template>
@@ -651,11 +651,16 @@ function connectionKey(conn: Pick<ConnectionItem, "mode" | "url">): string {
 }
 
 function normalizeAgentType(value?: string): string {
-  const raw = String(value || "")
+  const raw = String(value || "").trim().toLowerCase().replace(/[\s-]/g, "_")
   if (!raw) return "claude_code"
   if (raw === "claudecode") return "claude_code"
+  if (raw === "codex_cli") return "codex"
+  if (raw === "gemini_cli" || raw === "google_gemini" || raw === "gemini_code") return "gemini"
+  if (raw === "cline_cli") return "cline"
   if (raw === "opencode") return "open_code"
+  if (raw === "open_code_cli") return "open_code"
   if (raw === "openclaw") return "open_claw"
+  if (raw === "open_claw_cli") return "open_claw"
   return raw
 }
 
@@ -703,6 +708,10 @@ function agentLogoPath(agentType: string): string {
   const key = normalizeAgentType(agentType)
   if (key === "claude_code") return "/static/agent-logos/claude-code.svg"
   if (key === "codex") return "/static/agent-logos/codex.svg"
+  if (key === "gemini") return "/static/agent-logos/gemini.svg"
+  if (key === "cline") return "/static/agent-logos/cline.svg"
+  if (key === "open_code") return "/static/agent-logos/open-code.svg"
+  if (key === "open_claw") return "/static/agent-logos/open-claw.svg"
   return ""
 }
 
@@ -779,8 +788,9 @@ function applySelectedConnection(connectionKeyValue: string) {
 
 function syncAuthToConnection(conn: ConnectionItem) {
   if (conn.mode === "direct") {
-    if (!conn.directToken) return
-    auth.setDirectMode(conn.url, conn.directToken)
+    const token = conn.directToken || String(uni.getStorageSync("mcode_direct_token") || "")
+    if (!token) return
+    auth.setDirectMode(conn.url, token)
     return
   }
   if (conn.relaySession?.accessToken) {
@@ -852,7 +862,7 @@ function closeHistoryPanel() {
   projects.value = []
 }
 
-function openLiveSession(card: LiveSessionCard) {
+function openLiveSession(card: LiveSessionCard, groupKey?: string) {
   if (!card.conversationId) {
     uni.showToast({ title: "该标签暂无会话记录", icon: "none" })
     return
@@ -864,12 +874,22 @@ function openLiveSession(card: LiveSessionCard) {
     title: card.title,
     status: card.status,
     updated_at: card.updatedAt,
-  })
+  }, groupKey)
 }
 
-function openConversation(conv: Conversation) {
+function syncAuthToConnectionKey(connKey?: string) {
+  if (!connKey) return
+  const conn = getConnectedConnections().find((item) => connectionKey(item) === connKey)
+  if (conn) {
+    syncAuthToConnection(conn)
+  }
+}
+
+function openConversation(conv: Conversation, connKey?: string) {
+  syncAuthToConnectionKey(connKey)
+  const encodedConnKey = connKey ? encodeURIComponent(connKey) : ""
   uni.navigateTo({
-    url: `/pages/conversation-detail/index?id=${conv.id}&folderId=${conv.folder_id}`,
+    url: `/pages/conversation-detail/index?id=${conv.id}&folderId=${conv.folder_id || 0}${encodedConnKey ? `&connectionKey=${encodedConnKey}` : ""}`,
   })
 }
 
@@ -1088,10 +1108,10 @@ function formatTime(time?: string): string {
 }
 
 .group-list {
-  padding: 16rpx 12rpx calc(40rpx + env(safe-area-inset-bottom));
+  padding: 16rpx 20rpx calc(40rpx + env(safe-area-inset-bottom));
   display: flex;
   flex-direction: column;
-  gap: 20rpx;
+  gap: 36rpx;
 }
 
 .group-section__title {
@@ -1121,8 +1141,8 @@ function formatTime(time?: string): string {
   border-radius: 22rpx;
   background-color: #ffffff;
   border: 1rpx solid #ebeef5;
-  box-shadow: 0 2rpx 10rpx rgba(15, 23, 42, 0.04);
-  margin-bottom: 10rpx;
+  box-shadow: none;
+  margin-bottom: 22rpx;
 }
 
 .agent-logo {
@@ -1446,7 +1466,7 @@ function formatTime(time?: string): string {
 
 /* ===== 会话列表 ===== */
 .conv-list {
-  padding: 16rpx 12rpx;
+  padding: 10rpx 16rpx;
   display: flex;
   flex-direction: column;
   gap: 12rpx;
@@ -1455,10 +1475,10 @@ function formatTime(time?: string): string {
 .conv-card {
   display: flex;
   align-items: center;
-  gap: 16rpx;
-  padding: 20rpx 16rpx;
+  gap: 12rpx;
+  padding: 14rpx 12rpx;
   background-color: #ffffff;
-  border-radius: 22rpx;
+  border-radius: 18rpx;
   box-shadow: 0 1rpx 8rpx rgba(0, 0, 0, 0.04);
   transition: transform 0.15s;
 
@@ -1466,10 +1486,10 @@ function formatTime(time?: string): string {
 }
 
 .conv-card__icon {
-  width: 64rpx;
-  height: 64rpx;
+  width: 52rpx;
+  height: 52rpx;
   background-color: #e8f0fe;
-  border-radius: 18rpx;
+  border-radius: 14rpx;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1481,24 +1501,34 @@ function formatTime(time?: string): string {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 8rpx;
+  gap: 4rpx;
 }
 
 .conv-card__title {
-  font-size: 28rpx;
+  font-size: 24rpx;
   font-weight: 500;
   color: #1d1d1f;
+  line-height: 1.3;
 }
 
 .conv-card__meta {
   display: flex;
   align-items: center;
-  gap: 16rpx;
+  gap: 10rpx;
+  min-height: 30rpx;
+}
+
+.conv-card__meta :deep(.u-tag) {
+  transform: scale(0.92);
+  transform-origin: left center;
+  line-height: 16px !important;
+  min-height: 16px !important;
 }
 
 .conv-card__time {
-  font-size: 22rpx;
+  font-size: 20rpx;
   color: #c0c4cc;
+  line-height: 1.2;
 }
 
 /* ===== 空会话 ===== */

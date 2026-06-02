@@ -125,7 +125,7 @@ function formatJson(obj: any): string {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 18rpx 20rpx;
+  padding: 1px 4px;
   transition: background-color 0.15s;
 
   &:active { background-color: #f0f0f0; }
@@ -144,6 +144,11 @@ function formatJson(obj: any): string {
   align-items: center;
   gap: 12rpx;
   flex-shrink: 0;
+}
+
+.tool-hd__right :deep(.u-tag) {
+  line-height: 16px !important;
+  min-height: 16px !important;
 }
 
 .tool-status-dot {
@@ -217,7 +222,7 @@ function formatJson(obj: any): string {
 .code-text {
   font-size: 22rpx;
   font-family: "Courier New", monospace;
-  line-height: 1.6;
+  line-height: 1;
   white-space: pre;
   color: #abb2bf;
 

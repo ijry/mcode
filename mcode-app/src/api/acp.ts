@@ -5,6 +5,7 @@ import type {
   UploadAttachmentResult,
   ConversationDetail,
 } from "@/types/acp"
+import { useAuthStore } from "@/stores/auth"
 
 /**
  * ACP API 客户端
@@ -35,7 +36,22 @@ class AcpApiClient {
       sessionId,
       preferredModeId,
     })
-    return response
+
+    if (typeof response === "string" && response.trim()) {
+      return {
+        id: response.trim(),
+        agentType,
+        sessionId: sessionId || "",
+        status: "connected",
+        workingDir,
+      }
+    }
+
+    if (response && typeof response === "object" && typeof response.id === "string") {
+      return response as ConnectionInfo
+    }
+
+    throw new Error("acp_connect: invalid response")
   }
 
   /**
@@ -120,7 +136,20 @@ class AcpApiClient {
    * 获取会话快照
    */
   async acpGetSessionSnapshot(connectionId: string): Promise<any> {
-    return await this.request("/acp_get_session_snapshot", { connectionId })
+    return await this.request("/acp_get_session_snapshot", {
+      connectionId,
+      connection_id: connectionId,
+    })
+  }
+
+  /**
+   * 按会话获取会话快照
+   */
+  async acpGetSessionSnapshotByConversation(conversationId: number): Promise<any> {
+    return await this.request("/acp_get_session_snapshot_by_conversation", {
+      conversationId,
+      conversation_id: conversationId,
+    })
   }
 
   /**
@@ -256,20 +285,10 @@ class AcpApiClient {
    * 通用请求方法
    */
   private async request(endpoint: string, data: any): Promise<any> {
-    const response = await fetch(`${this.baseUrl}${endpoint}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(data),
-    })
-
-    if (!response.ok) {
-      const error = await response.text()
-      throw new Error(`请求失败: ${error}`)
-    }
-
-    return await response.json()
+    const auth = useAuthStore()
+    const gateway = auth.gateway()
+    const command = String(endpoint || "").replace(/^\/+/, "")
+    return gateway.call(command, data ?? {})
   }
 }
 

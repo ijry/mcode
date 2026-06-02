@@ -15,15 +15,15 @@
     <!-- 功能列表 -->
     <view class="section">
       <view class="section-title">外观设置</view>
-      <view class="menu-list">
-        <view class="menu-item" @click="toggleDarkMode">
-          <view class="menu-left">
-            <u-icon name="moon" size="22" color="#2979ff"></u-icon>
-            <text class="menu-text">深色模式</text>
+        <view class="menu-list">
+          <view class="menu-item" @click="toggleDarkMode">
+            <view class="menu-left">
+            <image class="theme-icon" src="/static/icons/moon.svg" mode="aspectFit"></image>
+              <text class="menu-text">深色模式</text>
+            </view>
+            <u-switch v-model="isDarkMode" @change="onDarkModeChange" size="24"></u-switch>
           </view>
-          <u-switch v-model="isDarkMode" @change="onDarkModeChange" size="24"></u-switch>
         </view>
-      </view>
     </view>
 
     <view class="section">
@@ -242,6 +242,9 @@ function logout() {
 
 .section {
   margin: 20rpx 8rpx;
+  background: transparent;
+  border: none;
+  border-radius: 0;
   padding: 0;
 }
 
@@ -273,6 +276,12 @@ function logout() {
   display: flex;
   align-items: center;
   gap: 20rpx;
+}
+
+.theme-icon {
+  width: 44rpx;
+  height: 44rpx;
+  flex-shrink: 0;
 }
 
 .menu-text {
