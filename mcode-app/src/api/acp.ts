@@ -6,6 +6,8 @@ import type {
   ConversationDetail,
 } from "@/types/acp"
 import { useAuthStore } from "@/stores/auth"
+import { destroyRealtimeTransport, getOrCreateRealtimeTransport, getRealtimeTransport } from "@/services/realtime/transport-registry"
+import type { RealtimeTransport, RealtimeTransportHost, RemoteInstanceDescriptor } from "@/services/realtime/types"
 
 /**
  * ACP API 客户端
@@ -15,6 +17,13 @@ class AcpApiClient {
   private baseUrl: string
   private eventListeners: Map<string, Set<(event: EventEnvelope) => void>>
   private eventSource: any = null
+  private pollingStarted = false
+  private realtimeBridges = new Map<string, {
+    descriptor: RemoteInstanceDescriptor
+    transport: RealtimeTransport
+    detach: () => void
+    attachCapable: boolean
+  }>()
 
   constructor(baseUrl: string = "") {
     this.baseUrl = baseUrl
@@ -216,7 +225,11 @@ class AcpApiClient {
   /**
    * 订阅事件流
    */
-  subscribeEvents(connectionId: string, callback: (event: EventEnvelope) => void) {
+  subscribeEvents(
+    connectionId: string,
+    callback: (event: EventEnvelope) => void,
+    instanceKey?: string
+  ) {
     if (!this.eventListeners.has(connectionId)) {
       this.eventListeners.set(connectionId, new Set())
     }
@@ -224,7 +237,7 @@ class AcpApiClient {
 
     // 如果还没有建立 EventSource 连接，则建立
     if (!this.eventSource) {
-      this.connectEventSource()
+      void this.connectEventSource(instanceKey)
     }
 
     // 返回取消订阅函数
@@ -242,16 +255,23 @@ class AcpApiClient {
   /**
    * 建立 EventSource 连接
    */
-  private connectEventSource() {
-    // 在 uni-app 中，我们需要使用 WebSocket 或轮询来模拟 EventSource
-    // 这里使用轮询方式
-    this.startPolling()
+  private async connectEventSource(instanceKey?: string) {
+    try {
+      await this.ensureRealtimeBridge(instanceKey)
+      this.eventSource = { type: "bridge" }
+    } catch (error) {
+      console.warn("建立实时桥接失败，回退到轮询:", error)
+      this.startPolling()
+      this.eventSource = { type: "polling" }
+    }
   }
 
   /**
    * 开始轮询事件
    */
   private startPolling() {
+    if (this.pollingStarted) return
+    this.pollingStarted = true
     const poll = async () => {
       try {
         const events = await this.request("/acp_poll_events", {})
@@ -275,10 +295,79 @@ class AcpApiClient {
    * 分发事件到监听器
    */
   private dispatchEvent(event: EventEnvelope) {
-    const listeners = this.eventListeners.get(event.connectionId)
+    const normalized = this.normalizeEventEnvelope(event)
+    if (!normalized) return
+    const listeners = this.eventListeners.get(normalized.connectionId)
     if (listeners) {
-      listeners.forEach((callback) => callback(event))
+      listeners.forEach((callback) => callback(normalized))
     }
+  }
+
+  canUseAttachTransport(instanceKey?: string) {
+    const key = instanceKey || this.getCurrentDescriptor().instanceKey
+    return this.realtimeBridges.get(key)?.attachCapable === true
+  }
+
+  getRealtimeTransport(instanceKey?: string) {
+    const key = instanceKey || this.getCurrentDescriptor().instanceKey
+    return this.realtimeBridges.get(key)?.transport ?? getRealtimeTransport(key)
+  }
+
+  async ensureRealtimeBridge(instanceKey?: string) {
+    const descriptor = this.getCurrentDescriptor()
+    const targetKey = instanceKey || descriptor.instanceKey
+    if (this.realtimeBridges.has(targetKey)) {
+      return this.realtimeBridges.get(targetKey)!
+    }
+
+    const auth = useAuthStore()
+    const gateway = auth.gateway()
+    const readyCallbacks = new Set<() => void>()
+    let isOpen = false
+    const host: RealtimeTransportHost = {
+      isOpen: () => isOpen,
+      sendFrame: () => false,
+      onReady: (callback: () => void) => {
+        readyCallbacks.add(callback)
+        return () => {
+          readyCallbacks.delete(callback)
+        }
+      },
+    }
+
+    const transport = getOrCreateRealtimeTransport(descriptor, host)
+    const detach = await gateway.connectEvents((raw) => {
+      if (this.isAttachFrame(raw)) {
+        transport.handleServerFrame(raw)
+        return
+      }
+      const event = this.extractLegacyEvent(raw)
+      if (event) {
+        this.dispatchEvent(event)
+      }
+    })
+
+    isOpen = true
+    readyCallbacks.forEach((callback) => {
+      try {
+        callback()
+      } catch (error) {
+        console.error("实时桥接 ready 回调失败:", error)
+      }
+    })
+
+    const bridge = {
+      descriptor,
+      transport,
+      detach: () => {
+        detach()
+        destroyRealtimeTransport(targetKey)
+        this.realtimeBridges.delete(targetKey)
+      },
+      attachCapable: false,
+    }
+    this.realtimeBridges.set(targetKey, bridge)
+    return bridge
   }
 
   /**
@@ -289,6 +378,47 @@ class AcpApiClient {
     const gateway = auth.gateway()
     const command = String(endpoint || "").replace(/^\/+/, "")
     return gateway.call(command, data ?? {})
+  }
+
+  private getCurrentDescriptor() {
+    const auth = useAuthStore()
+    return auth.currentRemoteInstance()
+  }
+
+  private normalizeEventEnvelope(event: EventEnvelope | Record<string, unknown> | null | undefined) {
+    if (!event || typeof event !== "object") return null
+    const record = event as Record<string, unknown>
+    const connectionId = String(
+      record.connectionId || record.connection_id || ""
+    ).trim()
+    const type = String(record.type || "").trim()
+    if (!connectionId || !type) return null
+    return {
+      connectionId,
+      data: record.data as EventEnvelope["data"],
+      type: type as EventEnvelope["type"],
+    } as EventEnvelope
+  }
+
+  private extractLegacyEvent(raw: unknown) {
+    if (!raw || typeof raw !== "object") return null
+    const record = raw as Record<string, unknown>
+    if (record.channel === "acp://event") {
+      return this.normalizeEventEnvelope(record.payload as Record<string, unknown>)
+    }
+    return this.normalizeEventEnvelope(record)
+  }
+
+  private isAttachFrame(raw: unknown) {
+    if (!raw || typeof raw !== "object") return false
+    const type = String((raw as Record<string, unknown>).type || "").trim()
+    return (
+      type === "snapshot" ||
+      type === "replay" ||
+      type === "event" ||
+      type === "detached" ||
+      type === "pong"
+    )
   }
 }
 

@@ -9,12 +9,21 @@ import type {
   ContentPart,
 } from "@/types/acp"
 import { acpApi } from "@/api/acp"
+import { useAuthStore } from "./auth"
+import { connectionSessionManager } from "@/services/conversation/connectionSessionManager"
+import {
+  attachConversationRealtime,
+  bindConversationEventHandler,
+  detachConversationRealtime,
+  unbindConversationEventHandler,
+} from "@/services/conversation/conversationSyncService"
 
 /**
  * 会话运行时状态管理
  * 管理消息流、连接状态、乐观更新等
  */
 export const useConversationRuntimeStore = defineStore("conversationRuntime", () => {
+  const auth = useAuthStore()
   // 会话状态映射 conversationId -> RuntimeSession
   const sessions = ref<Map<number, RuntimeSession>>(new Map())
 
@@ -265,15 +274,25 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     session.status = "connecting"
 
     try {
-      const conn = await acpApi.acpConnect(agentType, workingDir, sessionId)
-      session.connectionId = conn.id
-      connections.value.set(conn.id, conn)
+      const managed = await connectionSessionManager.connectConversation({
+        conversationId,
+        agentType,
+        workingDir,
+        sessionId,
+        instanceKey: auth.currentRemoteInstance().instanceKey,
+      })
+      session.connectionId = managed.connectionId
+      connections.value.set(managed.connectionId, managed.connection)
       session.status = "connected"
 
-      // 订阅事件
-      acpApi.subscribeEvents(conn.id, handleEvent)
+      bindConversationEventHandler(conversationId, handleEvent)
+      await attachConversationRealtime({
+        conversationId,
+        instanceKey: managed.instanceKey,
+        connectionId: managed.connectionId,
+      })
 
-      return conn
+      return managed.connection
     } catch (error) {
       session.status = "error"
       throw error
@@ -286,7 +305,9 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
   async function disconnect(conversationId: number) {
     const session = sessions.value.get(conversationId)
     if (session?.connectionId) {
-      await acpApi.acpDisconnect(session.connectionId)
+      detachConversationRealtime(conversationId)
+      unbindConversationEventHandler(conversationId)
+      await connectionSessionManager.disconnectConversation(conversationId)
       connections.value.delete(session.connectionId)
       session.connectionId = null
       session.status = "idle"
@@ -297,6 +318,9 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
    * 清理会话
    */
   function clearSession(conversationId: number) {
+    detachConversationRealtime(conversationId)
+    unbindConversationEventHandler(conversationId)
+    connectionSessionManager.clearConversation(conversationId)
     sessions.value.delete(conversationId)
   }
 
