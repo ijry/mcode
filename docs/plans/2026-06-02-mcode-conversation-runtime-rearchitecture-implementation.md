@@ -8,6 +8,13 @@
 
 **Tech Stack:** `uni-app`, `uview-plus`, `Pinia`, `TypeScript`, `codeg-main` web WS attach protocol, Rust web handlers, SQLite plugin adapter, `vue-tsc`, `vitest`, `cargo test`.
 
+## Current Rollout Notes
+
+- Tasks 1 through 8 are implemented in code checkpoints.
+- `mcode-app` type-check currently still reports only the pre-existing `src/components/MarkdownRenderer.vue` typing issue.
+- `codeg-main` focused transport test file exists, but local execution may still be blocked by missing environment dependencies in this workspace.
+- SQLite repository and local-first read paths are in place; the concrete uni-app SQLite driver still needs to be wired behind `sqliteDriver`.
+
 ---
 
 ## File Map

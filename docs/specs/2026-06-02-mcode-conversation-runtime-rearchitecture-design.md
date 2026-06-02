@@ -1,7 +1,7 @@
 # MCode Conversation Runtime Rearchitecture Design
 
 **Date:** 2026-06-02  
-**Status:** Approved for planning  
+**Status:** In implementation  
 **Owner:** mcode team
 
 ## 1. Context and Goals
@@ -144,6 +144,12 @@ Responsibilities:
 3. Write durable state into SQLite.
 4. Trigger remote calibration when event delivery is incomplete or stale.
 
+Current explicit calibration entry points:
+
+1. `calibrateConversationDetail(conversationId)`
+2. `calibrateAfterTurnComplete(conversationId)`
+3. `calibrateAfterReplayGap(conversationId)`
+
 ### 5.6 `ConversationCacheStore`
 
 Responsibilities:
@@ -236,6 +242,8 @@ Columns:
 - `last_applied_seq`
 - `last_snapshot_at`
 - `is_active`
+
+This table now also carries the draft/composer recovery path used when a detail page is left and later re-entered.
 
 ### 6.7 `sync_cursors`
 

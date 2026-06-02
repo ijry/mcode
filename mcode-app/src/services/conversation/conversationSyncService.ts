@@ -104,3 +104,15 @@ export function getConversationIdByConnectionId(connectionId: string) {
   const managed = connectionSessionManager.getByConnectionId(connectionId)
   return managed?.conversationId ?? null
 }
+
+export async function calibrateConversationDetail(conversationId: number) {
+  return await acpApi.getFolderConversation(conversationId)
+}
+
+export async function calibrateAfterTurnComplete(conversationId: number) {
+  return await calibrateConversationDetail(conversationId)
+}
+
+export async function calibrateAfterReplayGap(conversationId: number) {
+  return await calibrateConversationDetail(conversationId)
+}
