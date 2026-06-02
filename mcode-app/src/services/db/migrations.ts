@@ -7,6 +7,7 @@ export async function ensureConversationSchema() {
   await sqliteDriver.execute(TABLE_SQL.folders)
   await sqliteDriver.execute(TABLE_SQL.conversations)
   await sqliteDriver.execute(TABLE_SQL.conversationTurns)
+  await ensureConversationTurnDedupeColumn()
   await sqliteDriver.execute(TABLE_SQL.conversationParts)
   await sqliteDriver.execute(TABLE_SQL.conversationRuntime)
   await sqliteDriver.execute(TABLE_SQL.syncCursors)
@@ -15,3 +16,21 @@ export async function ensureConversationSchema() {
   }
 }
 
+async function ensureConversationTurnDedupeColumn() {
+  const columns = await sqliteDriver.query<{ name?: string }>(
+    `PRAGMA table_info(conversation_turns)`
+  )
+  const hasDedupeKey = columns.some((column) => column.name === "dedupe_key")
+  if (!hasDedupeKey) {
+    await sqliteDriver.execute(
+      `ALTER TABLE conversation_turns ADD COLUMN dedupe_key TEXT`
+    )
+    await sqliteDriver.execute(
+      `
+        UPDATE conversation_turns
+        SET dedupe_key = COALESCE(dedupe_key, 'legacy:' || id)
+        WHERE dedupe_key IS NULL OR dedupe_key = ''
+      `
+    )
+  }
+}

@@ -1,5 +1,5 @@
 import { defineStore } from "pinia"
-import { ref, computed } from "vue"
+import { ref } from "vue"
 import type {
   MessageTurn,
   LiveMessage,
@@ -14,9 +14,18 @@ import { connectionSessionManager } from "@/services/conversation/connectionSess
 import {
   attachConversationRealtime,
   bindConversationEventHandler,
+  calibrateAfterReplayGap,
   detachConversationRealtime,
   unbindConversationEventHandler,
 } from "@/services/conversation/conversationSyncService"
+import { ensureConversationSchema } from "@/services/db/migrations"
+import {
+  getNewestTurns,
+  insertCompletedTurn,
+  type PersistedTurnPartRow,
+  type PersistedTurnWithParts,
+} from "@/services/db/repositories/conversationRepository"
+import { buildPersistedTurnRecord } from "@/services/conversation/conversationDetailPersistence"
 
 /**
  * 会话运行时状态管理
@@ -41,6 +50,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         optimisticTurns: [],
         liveMessage: null,
         connectionId: null,
+        instanceKey: "",
         status: "idle",
         stats: {
           inputTokens: 0,
@@ -145,14 +155,12 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         timestamp: Date.now(),
       }
     }
+    session.status = "thinking"
 
     // 找到或创建对应类型的内容部分
     let part = session.liveMessage.content.find((p) => p.type === contentType)
     if (!part) {
-      part = {
-        type: contentType as any,
-        [contentType]: "",
-      }
+      part = buildEmptyContentPart(contentType)
       session.liveMessage.content.push(part)
     }
 
@@ -161,31 +169,62 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       part.text = (part.text || "") + delta
     } else if (contentType === "thinking") {
       part.thinking = (part.thinking || "") + delta
+    } else if (contentType === "plan") {
+      part.plan = parsePlanDelta(delta, (part.plan as Record<string, any> | undefined)?.steps)
+    }
+  }
+
+  function hydrateLiveSnapshot(conversationId: number, snapshot: any) {
+    const session = getOrCreateSession(conversationId)
+    if (!snapshot || typeof snapshot !== "object") return
+
+    const normalizedLiveMessage = mapSnapshotLiveMessage(snapshot)
+    if (normalizedLiveMessage) {
+      session.liveMessage = normalizedLiveMessage
+    }
+    session.status = deriveRuntimeStatus(snapshot, normalizedLiveMessage)
+
+    const usage = snapshot.usage
+    if (usage && typeof usage === "object") {
+      session.stats.totalTokens = firstNumber(usage.used) || session.stats.totalTokens
     }
   }
 
   /**
    * 完成当前轮次
    */
-  function completeTurn(conversationId: number) {
+  async function completeTurn(conversationId: number, eventData?: any) {
     const session = getOrCreateSession(conversationId)
+    const completedTurns = session.optimisticTurns.map(cloneMessageTurn)
+    const assistantTurn = session.liveMessage
+      ? buildAssistantTurn(session, session.liveMessage, eventData)
+      : null
 
-    // 将乐观消息移到本地
-    if (session.optimisticTurns.length > 0) {
-      session.localTurns.push(...session.optimisticTurns)
-      session.optimisticTurns = []
+    if (assistantTurn) {
+      completedTurns.push(cloneMessageTurn(assistantTurn))
     }
 
-    // 将流式消息移到本地
-    if (session.liveMessage) {
-      session.localTurns.push({
-        id: `turn-${Date.now()}`,
-        role: "assistant",
-        content: session.liveMessage.content,
-        timestamp: session.liveMessage.timestamp,
-        status: "completed",
-      })
-      session.liveMessage = null
+    if (completedTurns.length > 0) {
+      const persisted = await persistCompletedTurns(session, completedTurns)
+      if (persisted) {
+        session.optimisticTurns = []
+        session.liveMessage = null
+        session.localTurns = await reloadLocalTurns(session)
+      } else {
+        session.localTurns.push(...session.optimisticTurns)
+        session.optimisticTurns = []
+        if (assistantTurn) {
+          session.localTurns.push(assistantTurn)
+          session.liveMessage = null
+        }
+      }
+    } else {
+      try {
+        await calibrateAfterReplayGap(conversationId)
+        session.localTurns = await reloadLocalTurns(session)
+      } catch (error) {
+        console.warn("turn_complete remote backfill skipped", error)
+      }
     }
 
     session.status = "idle"
@@ -212,6 +251,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         break
 
       case "tool_call":
+        session.status = "running_tool"
         // 添加工具调用
         if (!session.liveMessage) {
           session.liveMessage = {
@@ -233,6 +273,11 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         break
 
       case "tool_call_update":
+        if (event.data.status === "error") {
+          session.status = "error"
+        } else {
+          session.status = "running_tool"
+        }
         // 更新工具调用
         if (session.liveMessage) {
           const toolCall = session.liveMessage.content.find(
@@ -250,8 +295,12 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         session.status = event.data.status
         break
 
+      case "permission_request":
+        session.status = "waiting_permission"
+        break
+
       case "turn_complete":
-        completeTurn(session.conversationId)
+        void completeTurn(session.conversationId, event.data)
         break
 
       case "usage_update":
@@ -284,6 +333,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         instanceKey: auth.currentRemoteInstance().instanceKey,
       })
       session.connectionId = managed.connectionId
+      session.instanceKey = managed.instanceKey
       connections.value.set(managed.connectionId, managed.connection)
       session.status = "connected"
 
@@ -336,6 +386,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     appendLiveContent,
     completeTurn,
     handleEvent,
+    hydrateLiveSnapshot,
     connect,
     disconnect,
     clearSession,
@@ -348,6 +399,314 @@ interface RuntimeSession {
   optimisticTurns: MessageTurn[]
   liveMessage: LiveMessage | null
   connectionId: string | null
-  status: "idle" | "connecting" | "connected" | "thinking" | "error"
+  instanceKey: string
+  status: "idle" | "connecting" | "connected" | "thinking" | "running_tool" | "waiting_permission" | "error"
   stats: SessionStats
+}
+
+function buildAssistantTurn(
+  session: RuntimeSession,
+  liveMessage: LiveMessage,
+  eventData?: any
+): MessageTurn {
+  const timestamp = firstNumber(eventData?.timestamp, liveMessage.timestamp) || Date.now()
+  return {
+    id:
+      firstString(eventData?.turnId, eventData?.id) ||
+      `turn-${session.conversationId}-${timestamp}`,
+    role: "assistant",
+    content: cloneContentParts(liveMessage.content),
+    timestamp,
+    status: "completed",
+  }
+}
+
+async function persistCompletedTurns(
+  session: RuntimeSession,
+  turns: MessageTurn[]
+) {
+  if (!session.instanceKey) return
+  try {
+    await ensureConversationSchema()
+    for (const turn of turns) {
+      await insertCompletedTurn(
+        buildPersistedTurnRecord({
+          turn,
+          conversationId: session.conversationId,
+          instanceKey: session.instanceKey,
+          seq: turn.timestamp,
+          dedupeId: turn.id,
+        })
+      )
+    }
+    return true
+  } catch (error) {
+    console.warn("persist completed runtime turns skipped", error)
+    return false
+  }
+}
+
+async function reloadLocalTurns(session: RuntimeSession) {
+  const limit = Math.max(session.localTurns.length, 10)
+  const turns = await getNewestTurns(session.conversationId, limit)
+  return turns.slice().reverse().map(mapPersistedTurnToMessage)
+}
+
+function mapPersistedTurnToMessage(turn: PersistedTurnWithParts): MessageTurn {
+  return {
+    id: turn.id,
+    role: turn.role as MessageTurn["role"],
+    timestamp: turn.createdAt,
+    status: (turn.status as MessageTurn["status"] | undefined) || "completed",
+    content: turn.parts
+      .slice()
+      .sort((a, b) => a.partIndex - b.partIndex)
+      .map(mapPersistedPartToContent)
+      .filter(Boolean) as ContentPart[],
+  }
+}
+
+function mapPersistedPartToContent(part: PersistedTurnPartRow): ContentPart | null {
+  try {
+    const payload = JSON.parse(part.payloadJson || "{}") as Record<string, any>
+    if (part.type === "text") {
+      return { type: "text", text: String(payload.text || payload.value || "") }
+    }
+    if (part.type === "thinking") {
+      return {
+        type: "thinking",
+        thinking: String(payload.thinking || payload.text || payload.value || ""),
+      }
+    }
+    if (part.type === "tool_call") {
+      return { type: "tool_call", tool_call: payload.tool_call || payload }
+    }
+    if (part.type === "image") {
+      return { type: "image", image: payload.image || payload }
+    }
+    if (part.type === "plan") {
+      return { type: "plan", plan: payload.plan || payload }
+    }
+  } catch (error) {
+    console.warn("failed to parse persisted runtime part", error)
+  }
+  return null
+}
+
+function cloneMessageTurn(turn: MessageTurn): MessageTurn {
+  return {
+    ...turn,
+    content: cloneContentParts(turn.content),
+  }
+}
+
+function cloneContentParts(parts: ContentPart[]): ContentPart[] {
+  if (parts.length === 0) return []
+  return JSON.parse(JSON.stringify(parts)) as ContentPart[]
+}
+
+function buildEmptyContentPart(contentType: string): ContentPart {
+  if (contentType === "thinking") {
+    return { type: "thinking", thinking: "" }
+  }
+  if (contentType === "plan") {
+    return { type: "plan", plan: { steps: [] } }
+  }
+  return { type: "text", text: "" }
+}
+
+function mapSnapshotLiveMessage(snapshot: any): LiveMessage | null {
+  const rawLiveMessage = snapshot?.live_message
+  const rawToolCalls = Array.isArray(snapshot?.active_tool_calls) ? snapshot.active_tool_calls : []
+  const toolCallMap = new Map<string, ContentPart>()
+  rawToolCalls.forEach((entry: any) => {
+    const part = buildToolCallPart(entry)
+    if (part?.tool_call?.id) {
+      toolCallMap.set(part.tool_call.id, part)
+    }
+  })
+
+  const parts: ContentPart[] = []
+  const rawBlocks = Array.isArray(rawLiveMessage?.content) ? rawLiveMessage.content : []
+  rawBlocks.forEach((block: any) => {
+    const part = mapSnapshotContentBlock(block, toolCallMap)
+    if (part) {
+      parts.push(part)
+    }
+  })
+
+  if (parts.length === 0 && toolCallMap.size > 0) {
+    parts.push(...Array.from(toolCallMap.values()))
+  }
+  if (parts.length === 0) return null
+
+  return {
+    role: "assistant",
+    content: parts,
+    isStreaming: true,
+    timestamp: parseTimestamp(rawLiveMessage?.started_at) || Date.now(),
+  }
+}
+
+function mapSnapshotContentBlock(
+  block: any,
+  toolCallMap: Map<string, ContentPart>
+): ContentPart | null {
+  const kind = firstString(block?.kind)
+  if (kind === "text") {
+    return { type: "text", text: firstString(block?.text) }
+  }
+  if (kind === "thinking") {
+    return { type: "thinking", thinking: firstString(block?.text) }
+  }
+  if (kind === "tool_call_ref") {
+    const toolCallId = firstString(block?.tool_call_id, block?.toolCallId)
+    return toolCallMap.get(toolCallId) || null
+  }
+  if (kind === "plan") {
+    return {
+      type: "plan",
+      plan: normalizePlanEntries(block?.entries),
+    }
+  }
+  return null
+}
+
+function buildToolCallPart(entry: any): ContentPart | null {
+  const id = firstString(entry?.id)
+  if (!id) return null
+  return {
+    type: "tool_call",
+    tool_call: {
+      id,
+      name: firstString(entry?.label, entry?.name) || id,
+      input: normalizeToolCallInput(entry?.input),
+      status: mapToolCallStatus(entry?.status),
+      output: stringifyToolCallOutput(entry?.output),
+      error: extractToolCallError(entry?.output),
+    },
+  }
+}
+
+function deriveRuntimeStatus(snapshot: any, liveMessage: LiveMessage | null) {
+  if (snapshot?.pending_permission) return "waiting_permission"
+  const activeToolCalls = Array.isArray(snapshot?.active_tool_calls) ? snapshot.active_tool_calls : []
+  if (activeToolCalls.some((entry: any) => mapToolCallStatus(entry?.status) === "running")) {
+    return "running_tool"
+  }
+  if (liveMessage) return "thinking"
+
+  const status = firstString(snapshot?.status)
+  if (status === "error") return "error"
+  if (status === "connecting") return "connecting"
+  if (status === "connected") return "connected"
+  if (status === "prompting") return "thinking"
+  return "idle"
+}
+
+function normalizeToolCallInput(input: unknown) {
+  if (input && typeof input === "object" && !Array.isArray(input)) {
+    return input as Record<string, any>
+  }
+  if (typeof input === "string" && input.trim()) {
+    try {
+      const parsed = JSON.parse(input)
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return parsed as Record<string, any>
+      }
+    } catch {
+      return { value: input }
+    }
+  }
+  return {}
+}
+
+function stringifyToolCallOutput(output: any) {
+  if (!output || typeof output !== "object") return firstString(output) || undefined
+  const kind = firstString(output.kind)
+  if (kind === "text") {
+    return firstString(output.content) || undefined
+  }
+  if (kind === "error") {
+    return firstString(output.message) || undefined
+  }
+  if (kind === "json") {
+    try {
+      return JSON.stringify(output.value ?? {}, null, 2)
+    } catch {
+      return undefined
+    }
+  }
+  return undefined
+}
+
+function extractToolCallError(output: any) {
+  if (!output || typeof output !== "object") return undefined
+  if (firstString(output.kind) !== "error") return undefined
+  return firstString(output.message) || undefined
+}
+
+function mapToolCallStatus(status: unknown): "running" | "completed" | "error" {
+  const normalized = firstString(status)
+  if (normalized === "completed") return "completed"
+  if (normalized === "failed" || normalized === "error") return "error"
+  return "running"
+}
+
+function normalizePlanEntries(entries: unknown) {
+  const steps = Array.isArray(entries)
+    ? entries.map((entry) => ({
+      description: firstString((entry as Record<string, unknown>)?.content) || "未命名步骤",
+      completed: firstString((entry as Record<string, unknown>)?.status) === "completed",
+    }))
+    : []
+  return {
+    steps,
+    status: steps.every((step) => step.completed) ? "approved" : "pending",
+  } as ContentPart["plan"]
+}
+
+function parsePlanDelta(delta: string, previousSteps?: any[]) {
+  try {
+    const parsed = JSON.parse(delta)
+    return normalizePlanEntries((parsed as Record<string, unknown>)?.entries ?? parsed)
+  } catch {
+    return {
+      steps: Array.isArray(previousSteps) ? previousSteps : [],
+      status: "pending",
+    } as ContentPart["plan"]
+  }
+}
+
+function parseTimestamp(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Date.parse(value)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return null
+}
+
+function firstString(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim()
+    }
+  }
+  return ""
+}
+
+function firstNumber(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value
+    }
+    if (typeof value === "string" && value.trim()) {
+      const parsed = Number(value)
+      if (Number.isFinite(parsed)) {
+        return parsed
+      }
+    }
+  }
+  return null
 }

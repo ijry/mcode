@@ -77,7 +77,7 @@ export interface ConnectionInfo {
   id: string
   agentType: string
   sessionId: string
-  status: "connecting" | "connected" | "disconnected" | "error"
+  status: "connecting" | "connected" | "prompting" | "disconnected" | "error"
   modes?: ModeInfo[]
   currentMode?: string
   workingDir?: string
@@ -114,7 +114,7 @@ export interface ToolCallUpdateEvent {
 }
 
 export interface StatusChangedEvent {
-  status: "idle" | "thinking" | "running_tool" | "waiting_permission" | "error"
+  status: "idle" | "connecting" | "connected" | "thinking" | "running_tool" | "waiting_permission" | "error"
   message?: string
 }
 

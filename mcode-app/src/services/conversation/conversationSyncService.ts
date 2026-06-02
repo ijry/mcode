@@ -6,6 +6,7 @@ import {
   getConversationSummaryById,
   upsertConversationSummary,
 } from "@/services/db/repositories/conversationRepository"
+import { persistConversationDetailSnapshot } from "./conversationDetailPersistence"
 
 type ConversationEventHandler = (event: EventEnvelope) => void
 
@@ -25,6 +26,12 @@ function routeRealtimeEvent(conversationId: number, event: EventEnvelope) {
   if (handler) {
     handler(event)
   }
+}
+
+function routeNormalizedRealtimeEvent(conversationId: number, rawEvent: unknown) {
+  const normalized = acpApi.normalizeRealtimeEvent(rawEvent)
+  if (!normalized) return
+  routeRealtimeEvent(conversationId, normalized)
 }
 
 export function bindConversationEventHandler(
@@ -64,10 +71,10 @@ export async function attachConversationRealtime(input: {
       {
         onSnapshot: () => {},
         onReplay: (events) => {
-          events.forEach((event) => routeRealtimeEvent(input.conversationId, event as EventEnvelope))
+          events.forEach((event) => routeNormalizedRealtimeEvent(input.conversationId, event))
         },
         onEvent: (event) => {
-          routeRealtimeEvent(input.conversationId, event as EventEnvelope)
+          routeNormalizedRealtimeEvent(input.conversationId, event)
         },
         onDetached: () => {},
       }
@@ -112,15 +119,35 @@ export function getConversationIdByConnectionId(connectionId: string) {
 }
 
 export async function calibrateConversationDetail(conversationId: number) {
-  return await acpApi.getFolderConversation(conversationId)
+  return await calibrateConversationDetailInternal(conversationId, true)
+}
+
+async function calibrateConversationDetailInternal(
+  conversationId: number,
+  persistTurns: boolean
+) {
+  const detail = await acpApi.getFolderConversation(conversationId)
+  const binding = bindings.get(conversationId)
+  if (binding?.instanceKey) {
+    await persistConversationDetailSnapshot({
+      instanceKey: binding.instanceKey,
+      conversationId,
+      detail,
+      fallbackConnectionId: binding.connectionId,
+      persistTurns,
+    }).catch((error) => {
+      console.warn("persist calibrated conversation detail skipped", error)
+    })
+  }
+  return detail
 }
 
 export async function calibrateAfterTurnComplete(conversationId: number) {
-  return await calibrateConversationDetail(conversationId)
+  return await calibrateConversationDetailInternal(conversationId, false)
 }
 
 export async function calibrateAfterReplayGap(conversationId: number) {
-  return await calibrateConversationDetail(conversationId)
+  return await calibrateConversationDetailInternal(conversationId, true)
 }
 
 async function mirrorConversationSummary(conversationId: number, event: EventEnvelope) {
@@ -133,7 +160,7 @@ async function mirrorConversationSummary(conversationId: number, event: EventEnv
   }
 
   if (event.type === "turn_complete") {
-    await refreshSummaryFromCalibration(binding.instanceKey, binding.connectionId, conversationId)
+    await refreshSummaryFromCalibration(conversationId)
   }
 }
 
@@ -153,28 +180,9 @@ async function updateSummaryStatus(
   })
 }
 
-async function refreshSummaryFromCalibration(
-  instanceKey: string,
-  connectionId: string,
-  conversationId: number
-) {
+async function refreshSummaryFromCalibration(conversationId: number) {
   try {
-    const detail = await calibrateAfterTurnComplete(conversationId)
-    const rawDetail = detail as Record<string, any>
-    const current = await readCurrentSummary(instanceKey, conversationId)
-    if (!current) return
-    const summary = rawDetail.summary && typeof rawDetail.summary === "object" ? rawDetail.summary : {}
-    const updatedAt = parseTimestamp(rawDetail.updatedAt, rawDetail.updated_at, summary?.updated_at)
-    await upsertConversationSummary({
-      ...current,
-      title: firstString(rawDetail.title, rawDetail.conversationTitle, summary?.title, current.title) || current.title,
-      agentType: firstString(rawDetail.agentType, rawDetail.agent_type, summary?.agent_type, current.agentType) || current.agentType,
-      externalId: firstString(rawDetail.sessionId, rawDetail.session_id, summary?.external_id, current.externalId) || current.externalId || null,
-      connectionId,
-      status: firstString(rawDetail.status, summary?.status, current.status) || current.status,
-      lastMessageAt: updatedAt,
-      updatedAt,
-    })
+    await calibrateAfterTurnComplete(conversationId)
   } catch (error) {
     console.warn("refresh conversation summary from calibration skipped", error)
   }
@@ -188,28 +196,4 @@ async function readCurrentSummary(instanceKey: string, conversationId: number) {
     console.warn("read current summary skipped", error)
     return null
   }
-}
-
-function firstString(...values: unknown[]) {
-  for (const value of values) {
-    if (typeof value === "string" && value.trim()) {
-      return value.trim()
-    }
-  }
-  return ""
-}
-
-function parseTimestamp(...values: unknown[]) {
-  for (const value of values) {
-    if (typeof value === "number" && Number.isFinite(value)) {
-      return value
-    }
-    if (typeof value === "string" && value.trim()) {
-      const timestamp = new Date(value).getTime()
-      if (Number.isFinite(timestamp)) {
-        return timestamp
-      }
-    }
-  }
-  return Date.now()
 }

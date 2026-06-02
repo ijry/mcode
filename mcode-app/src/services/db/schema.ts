@@ -44,6 +44,7 @@ export const TABLE_SQL = {
       id TEXT PRIMARY KEY,
       conversation_id INTEGER NOT NULL,
       instance_key TEXT NOT NULL,
+      dedupe_key TEXT NOT NULL,
       role TEXT NOT NULL,
       created_at INTEGER NOT NULL,
       seq INTEGER,
@@ -93,7 +94,7 @@ export const TABLE_SQL = {
     `CREATE INDEX IF NOT EXISTS idx_conversations_updated ON conversations(instance_key, updated_at DESC)`,
     `CREATE INDEX IF NOT EXISTS idx_turns_conversation_created ON conversation_turns(conversation_id, created_at DESC)`,
     `CREATE INDEX IF NOT EXISTS idx_turns_conversation_seq ON conversation_turns(conversation_id, seq DESC)`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_turns_conversation_dedupe ON conversation_turns(conversation_id, dedupe_key)`,
     `CREATE INDEX IF NOT EXISTS idx_parts_turn_index ON conversation_parts(turn_id, part_index ASC)`,
   ],
 } as const
-

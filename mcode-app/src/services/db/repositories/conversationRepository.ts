@@ -29,6 +29,7 @@ export interface PersistedTurnRecord {
   id: string
   conversationId: number
   instanceKey: string
+  dedupeKey: string
   role: "user" | "assistant"
   createdAt: number
   seq?: number | null
@@ -41,6 +42,7 @@ export interface PersistedTurnRow {
   id: string
   conversationId: number
   instanceKey: string
+  dedupeKey: string
   role: string
   createdAt: number
   seq?: number | null
@@ -128,6 +130,7 @@ export async function getNewestTurns(conversationId: number, limit: number) {
         id,
         conversation_id as conversationId,
         instance_key as instanceKey,
+        dedupe_key as dedupeKey,
         role,
         created_at as createdAt,
         seq,
@@ -154,6 +157,7 @@ export async function getOlderTurns(
         id,
         conversation_id as conversationId,
         instance_key as instanceKey,
+        dedupe_key as dedupeKey,
         role,
         created_at as createdAt,
         seq,
@@ -223,23 +227,43 @@ export async function upsertConversationSummary(input: ConversationSummaryRecord
 
 export async function insertCompletedTurn(input: PersistedTurnRecord) {
   await sqliteDriver.transaction(async () => {
+    const existing = await sqliteDriver.query<{ id: string }>(
+      `
+        SELECT id
+        FROM conversation_turns
+        WHERE conversation_id = ? AND dedupe_key = ?
+        LIMIT 1
+      `,
+      [input.conversationId, input.dedupeKey]
+    )
+    const persistedTurnId = existing[0]?.id || input.id
+
     await sqliteDriver.execute(
       `
-        INSERT OR REPLACE INTO conversation_turns (
+        INSERT INTO conversation_turns (
           id,
           conversation_id,
           instance_key,
+          dedupe_key,
           role,
           created_at,
           seq,
           status,
           version
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(conversation_id, dedupe_key) DO UPDATE SET
+          instance_key = excluded.instance_key,
+          role = excluded.role,
+          created_at = excluded.created_at,
+          seq = excluded.seq,
+          status = excluded.status,
+          version = excluded.version
       `,
       [
-        input.id,
+        persistedTurnId,
         input.conversationId,
         input.instanceKey,
+        input.dedupeKey,
         input.role,
         input.createdAt,
         input.seq ?? null,
@@ -250,7 +274,7 @@ export async function insertCompletedTurn(input: PersistedTurnRecord) {
 
     await sqliteDriver.execute(
       `DELETE FROM conversation_parts WHERE turn_id = ?`,
-      [input.id]
+      [persistedTurnId]
     )
 
     for (const part of input.parts) {
@@ -267,8 +291,8 @@ export async function insertCompletedTurn(input: PersistedTurnRecord) {
           ) VALUES (?, ?, ?, ?, ?, ?, ?)
         `,
         [
-          part.id,
-          input.id,
+          `${persistedTurnId}:${part.partIndex}`,
+          persistedTurnId,
           input.conversationId,
           part.partIndex,
           part.type,

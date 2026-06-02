@@ -310,6 +310,7 @@ import {
   type ConversationRuntimeRecord,
 } from "@/services/db/repositories/runtimeRepository"
 import { connectionSessionManager } from "@/services/conversation/connectionSessionManager"
+import { persistConversationDetailSnapshot } from "@/services/conversation/conversationDetailPersistence"
 import type { PromptInputBlock, ToolCall, ContentPart, MessageTurn } from "@/types/acp"
 import MessageBubble from "@/components/MessageBubble.vue"
 import ExpertMenu from "@/components/ExpertMenu.vue"
@@ -596,7 +597,36 @@ async function loadConversation() {
       firstString(managed?.connection.agentType, localSummary?.agentType) || "claude_code"
     let resumeSessionId =
       firstString(managed?.externalId, managed?.connection.sessionId, localSummary?.externalId)
+    let remoteDetail: any = null
     currentAgentType.value = normalizeAgentType(agentType)
+
+    if (!managed && !resumeSessionId) {
+      try {
+        const gateway = auth.gateway()
+        remoteDetail = await gateway.call<any>("get_folder_conversation", {
+          conversationId: conversationId.value,
+        })
+        const summary = (remoteDetail?.summary && typeof remoteDetail.summary === "object")
+          ? remoteDetail.summary
+          : {}
+        agentType =
+          firstString(remoteDetail?.agentType, remoteDetail?.agent_type, summary?.agent_type) ||
+          agentType
+        resumeSessionId =
+          firstString(remoteDetail?.sessionId, remoteDetail?.session_id, summary?.external_id) ||
+          resumeSessionId
+        currentAgentType.value = normalizeAgentType(agentType)
+        await persistConversationDetailSnapshot({
+          instanceKey,
+          conversationId: conversationId.value,
+          detail: remoteDetail,
+          fallbackFolderId: folderId.value,
+          persistTurns: false,
+        })
+      } catch (error) {
+        console.warn("remote conversation metadata hydrate skipped", error)
+      }
+    }
 
     if (hasHotRuntime) {
       oldestLoadedCursor.value = cachedViewState?.oldestLoadedSeq ?? oldestLoadedCursor.value
@@ -620,8 +650,7 @@ async function loadConversation() {
         scrollIntoView.value = persistedRuntime.scrollAnchor
       }
     } else {
-      const gateway = auth.gateway()
-      const result = await gateway.call<any>("get_folder_conversation", {
+      const result = remoteDetail || await auth.gateway().call<any>("get_folder_conversation", {
         conversationId: conversationId.value,
       })
       const summary = (result?.summary && typeof result.summary === "object")
@@ -630,9 +659,38 @@ async function loadConversation() {
       agentType = firstString(result?.agentType, result?.agent_type, summary?.agent_type) || "claude_code"
       resumeSessionId = firstString(result?.sessionId, result?.session_id, summary?.external_id)
       currentAgentType.value = normalizeAgentType(agentType)
-      runtimeSession.localTurns = normalizeTurns(result.turns)
-      oldestLoadedCursor.value = cachedViewState?.oldestLoadedSeq ?? null
-      hasMoreHistory.value = cachedViewState?.hasMoreHistory ?? false
+      let persistedTurns: PersistedTurnWithParts[] = []
+      let persistedTurnCount = 0
+      try {
+        const persisted = await persistConversationDetailSnapshot({
+          instanceKey,
+          conversationId: conversationId.value,
+          detail: result,
+          fallbackFolderId: folderId.value,
+        })
+        persistedTurnCount = persisted.persistedTurnCount
+        persistedTurns = await getNewestTurns(conversationId.value, 10)
+      } catch (error) {
+        console.warn("persist remote conversation detail skipped", error)
+      }
+
+      if (persistedTurns.length > 0) {
+        runtimeSession.localTurns = persistedTurns
+          .slice()
+          .reverse()
+          .map(mapPersistedTurnToMessage)
+        oldestLoadedCursor.value =
+          cachedViewState?.oldestLoadedSeq ?? getOldestCursorFromPersistedTurns(persistedTurns)
+        hasMoreHistory.value =
+          cachedViewState?.hasMoreHistory ?? persistedTurnCount > persistedTurns.length
+      } else {
+        const fallbackTurns = normalizeTurns(result.turns)
+        const visibleTurns = fallbackTurns.slice(-10)
+        runtimeSession.localTurns = visibleTurns
+        oldestLoadedCursor.value = cachedViewState?.oldestLoadedSeq ?? null
+        hasMoreHistory.value =
+          cachedViewState?.hasMoreHistory ?? fallbackTurns.length > visibleTurns.length
+      }
     }
 
     const conn = await runtime.connect(
@@ -653,6 +711,67 @@ async function loadConversation() {
         snapshot = await acpApi.acpGetSessionSnapshot(conn.id)
       } catch (error) {
         console.warn("acp_get_session_snapshot failed", error)
+      }
+    }
+    if (snapshot) {
+      const snapshotSessionId = firstString(snapshot.external_id, snapshot.externalId)
+      if (snapshotSessionId) {
+        try {
+          await persistConversationDetailSnapshot({
+            instanceKey,
+            conversationId: conversationId.value,
+            detail: {
+              session_id: snapshotSessionId,
+              agent_type: agentType,
+              status: snapshot.status,
+              summary: {
+                external_id: snapshotSessionId,
+                agent_type: agentType,
+                status: snapshot.status,
+              },
+            },
+            fallbackFolderId: folderId.value,
+            fallbackConnectionId: conn.id,
+            persistTurns: false,
+          })
+        } catch (error) {
+          console.warn("persist live snapshot metadata skipped", error)
+        }
+      }
+      runtime.hydrateLiveSnapshot(conversationId.value, snapshot)
+      if (!hasHotRuntime) {
+        const remoteStatus = firstString(snapshot.status)
+        const shouldBackfillRemoteTurns =
+          runtimeSession.localTurns.length === 0 ||
+          remoteStatus === "connected" ||
+          remoteStatus === "prompting" ||
+          Array.isArray(snapshot.active_tool_calls) && snapshot.active_tool_calls.length > 0 ||
+          Boolean(snapshot.live_message)
+        if (shouldBackfillRemoteTurns) {
+          try {
+            const liveDetail = await auth.gateway().call<any>("get_folder_conversation", {
+              conversationId: conversationId.value,
+            })
+            await persistConversationDetailSnapshot({
+              instanceKey,
+              conversationId: conversationId.value,
+              detail: liveDetail,
+              fallbackFolderId: folderId.value,
+            })
+            const refreshedTurns = await getNewestTurns(conversationId.value, 10)
+            if (refreshedTurns.length > 0) {
+              runtimeSession.localTurns = refreshedTurns
+                .slice()
+                .reverse()
+                .map(mapPersistedTurnToMessage)
+              oldestLoadedCursor.value =
+                cachedViewState?.oldestLoadedSeq ?? getOldestCursorFromPersistedTurns(refreshedTurns)
+              hasMoreHistory.value = cachedViewState?.hasMoreHistory ?? refreshedTurns.length >= 10
+            }
+          } catch (error) {
+            console.warn("remote conversation catch-up skipped", error)
+          }
+        }
       }
     }
     const availableCommands = Array.isArray(snapshot?.available_commands)

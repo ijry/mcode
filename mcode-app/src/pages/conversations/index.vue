@@ -364,6 +364,8 @@ interface Conversation {
   updated_at?: string
   folder_id?: number
   status?: string
+  external_id?: string
+  externalId?: string
 }
 
 interface ConnectionItem {
@@ -758,7 +760,7 @@ function mapConversationToSummaryRecord(
     folderId: Number(conversation.folder_id || 0),
     title: conversation.title || "未命名会话",
     agentType: normalizeAgentType(conversation.agent_type),
-    externalId: null,
+    externalId: firstString(conversation.external_id, conversation.externalId) || null,
     connectionId: null,
     status: normalizeConversationStatus(conversation.status),
     lastTurnId: null,
@@ -776,6 +778,15 @@ function parseTimestamp(value?: string | number): number {
   }
   const time = value ? new Date(value).getTime() : Date.now()
   return Number.isFinite(time) ? time : Date.now()
+}
+
+function firstString(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim()
+    }
+  }
+  return ""
 }
 
 function formatTimestamp(value: number): string {

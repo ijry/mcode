@@ -303,6 +303,10 @@ class AcpApiClient {
     }
   }
 
+  normalizeRealtimeEvent(raw: unknown) {
+    return this.normalizeEventEnvelope(raw as Record<string, unknown> | null | undefined)
+  }
+
   canUseAttachTransport(instanceKey?: string) {
     const key = instanceKey || this.getCurrentDescriptor().instanceKey
     return this.realtimeBridges.get(key)?.attachCapable === true
@@ -399,16 +403,22 @@ class AcpApiClient {
   private normalizeEventEnvelope(event: EventEnvelope | Record<string, unknown> | null | undefined) {
     if (!event || typeof event !== "object") return null
     const record = event as Record<string, unknown>
-    const connectionId = String(
-      record.connectionId || record.connection_id || ""
-    ).trim()
-    const type = String(record.type || "").trim()
-    if (!connectionId || !type) return null
-    return {
-      connectionId,
-      data: record.data as EventEnvelope["data"],
-      type: type as EventEnvelope["type"],
-    } as EventEnvelope
+    const connectionId = String(record.connectionId || record.connection_id || "").trim()
+    const rawType = String(record.type || "").trim()
+    if (!connectionId || !rawType) return null
+
+    const normalized = this.normalizeAcpEventRecord(connectionId, rawType, record)
+    if (normalized) return normalized
+
+    if ("data" in record) {
+      return {
+        connectionId,
+        data: record.data as EventEnvelope["data"],
+        type: rawType as EventEnvelope["type"],
+      } as EventEnvelope
+    }
+
+    return null
   }
 
   private extractLegacyEvent(raw: unknown) {
@@ -431,7 +441,218 @@ class AcpApiClient {
       type === "pong"
     )
   }
+
+  private normalizeAcpEventRecord(
+    connectionId: string,
+    rawType: string,
+    record: Record<string, unknown>
+  ): EventEnvelope | null {
+    switch (rawType) {
+      case "content_delta":
+        return {
+          connectionId,
+          type: "stream_batch",
+          data: {
+            delta: firstString(record.text),
+            contentType: "text",
+          },
+        }
+      case "thinking":
+        return {
+          connectionId,
+          type: "stream_batch",
+          data: {
+            delta: firstString(record.text),
+            contentType: "thinking",
+          },
+        }
+      case "plan_update":
+        return {
+          connectionId,
+          type: "stream_batch",
+          data: {
+            delta: JSON.stringify(record.entries ?? []),
+            contentType: "plan",
+            entries: Array.isArray(record.entries) ? record.entries : [],
+          },
+        }
+      case "tool_call":
+        return {
+          connectionId,
+          type: "tool_call",
+          data: {
+            id: firstString(record.tool_call_id, record.toolCallId),
+            name: firstString(record.title, record.name),
+            input: parseJsonRecord(record.raw_input) ?? {},
+            status: mapToolCallStatus(firstString(record.status)),
+            kind: firstString(record.kind),
+            content: firstString(record.content),
+            rawInput: firstString(record.raw_input),
+            rawOutput: firstString(record.raw_output),
+            locations: record.locations,
+            meta: record.meta,
+            images: Array.isArray(record.images) ? record.images : [],
+          },
+        }
+      case "tool_call_update":
+        return {
+          connectionId,
+          type: "tool_call_update",
+          data: {
+            id: firstString(record.tool_call_id, record.toolCallId),
+            output:
+              firstString(record.content) ||
+              firstString(record.raw_output) ||
+              undefined,
+            error: extractErrorText(record.raw_output),
+            status: mapToolCallStatus(firstString(record.status)) || undefined,
+            title: firstString(record.title) || undefined,
+            rawOutput: firstString(record.raw_output) || undefined,
+            rawOutputAppend: record.raw_output_append === true,
+            locations: record.locations,
+            meta: record.meta,
+            images: Array.isArray(record.images) ? record.images : undefined,
+          },
+        }
+      case "status_changed":
+        return {
+          connectionId,
+          type: "status_changed",
+          data: {
+            status: mapConnectionStatus(firstString(record.status)),
+            message: firstString(record.message) || undefined,
+          },
+        }
+      case "conversation_status_changed":
+        return {
+          connectionId,
+          type: "status_changed",
+          data: {
+            status: mapConversationStatus(firstString(record.status)),
+          },
+        }
+      case "turn_complete":
+        return {
+          connectionId,
+          type: "turn_complete",
+          data: {
+            sessionId: firstString(record.session_id, record.sessionId),
+            stopReason: firstString(record.stop_reason, record.stopReason),
+            agentType: firstString(record.agent_type, record.agentType),
+          },
+        }
+      case "usage_update":
+        return {
+          connectionId,
+          type: "usage_update",
+          data: {
+            inputTokens: firstNumber(record.used) ?? 0,
+            outputTokens: 0,
+            totalTokens: firstNumber(record.used) ?? 0,
+            size: firstNumber(record.size) ?? 0,
+          },
+        }
+      case "permission_request":
+        return {
+          connectionId,
+          type: "permission_request",
+          data: {
+            id: firstString(record.request_id, record.requestId),
+            description: describePermission(record.tool_call),
+            details: record.tool_call,
+            toolCall: record.tool_call,
+            options: Array.isArray(record.options)
+              ? record.options.map((option) => ({
+                id: firstString((option as Record<string, unknown>)?.option_id, (option as Record<string, unknown>)?.id),
+                label:
+                  firstString((option as Record<string, unknown>)?.name, (option as Record<string, unknown>)?.label) ||
+                  firstString((option as Record<string, unknown>)?.kind),
+                description: firstString((option as Record<string, unknown>)?.kind) || undefined,
+              }))
+              : [],
+          },
+        }
+      default:
+        return null
+    }
+  }
 }
 
 // 导出单例
 export const acpApi = new AcpApiClient()
+
+function firstString(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value.trim()
+  }
+  return ""
+}
+
+function firstNumber(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "number" && Number.isFinite(value)) return value
+    if (typeof value === "string" && value.trim()) {
+      const parsed = Number(value)
+      if (Number.isFinite(parsed)) return parsed
+    }
+  }
+  return null
+}
+
+function parseJsonRecord(raw: unknown) {
+  if (raw && typeof raw === "object") return raw as Record<string, unknown>
+  if (typeof raw !== "string" || !raw.trim()) return null
+  try {
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : null
+  } catch {
+    return null
+  }
+}
+
+function extractErrorText(rawOutput: unknown) {
+  const parsed = parseJsonRecord(rawOutput)
+  const message = firstString(parsed?.error, parsed?.message)
+  return message || undefined
+}
+
+function mapConnectionStatus(status: string) {
+  switch (status) {
+    case "prompting":
+      return "thinking"
+    case "error":
+      return "error"
+    case "disconnected":
+      return "idle"
+    default:
+      return "connected"
+  }
+}
+
+function mapConversationStatus(status: string) {
+  switch (status) {
+    case "in_progress":
+      return "thinking"
+    case "pending_review":
+    case "completed":
+    case "cancelled":
+      return "idle"
+    default:
+      return "connected"
+  }
+}
+
+function describePermission(toolCall: unknown) {
+  if (!toolCall || typeof toolCall !== "object") return ""
+  const record = toolCall as Record<string, unknown>
+  return (
+    firstString(record.title, record.name, record.kind) ||
+    firstString(record.tool_call_id, record.toolCallId)
+  )
+}
+
+function mapToolCallStatus(status: string) {
+  if (status === "completed") return "completed"
+  if (status === "failed" || status === "error") return "error"
+  return "running"
+}
