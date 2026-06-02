@@ -299,6 +299,7 @@ import { toErrorMessage } from "@/services/gateway/error"
 import { ensureConversationSchema } from "@/services/db/migrations"
 import {
   getConversationSummaryById,
+  getOlderTurns,
   getNewestTurns,
   type PersistedTurnPartRow,
   type PersistedTurnWithParts,
@@ -378,6 +379,9 @@ const scrollTop = ref(0)
 const messageListHeight = ref(0)
 const hasInitialBottomScroll = ref(false)
 const shouldAutoFollowBottom = ref(true)
+const loadingOlder = ref(false)
+const hasMoreHistory = ref(false)
+const oldestLoadedCursor = ref<number | null>(null)
 const attachments = ref<UploadedAttachment[]>([])
 const uploadQueue = ref<UploadQueueItem[]>([])
 const draftQueue = ref<QueuedDraft[]>([])
@@ -591,6 +595,8 @@ async function loadConversation() {
         .slice()
         .reverse()
         .map(mapPersistedTurnToMessage)
+      oldestLoadedCursor.value = getOldestCursorFromPersistedTurns(localTurns)
+      hasMoreHistory.value = localTurns.length >= 10
       if (cachedViewState?.scrollAnchor) {
         scrollIntoView.value = cachedViewState.scrollAnchor
       }
@@ -606,6 +612,8 @@ async function loadConversation() {
       resumeSessionId = firstString(result?.sessionId, result?.session_id, summary?.external_id)
       currentAgentType.value = normalizeAgentType(agentType)
       runtimeSession.localTurns = normalizeTurns(result.turns)
+      oldestLoadedCursor.value = null
+      hasMoreHistory.value = false
     }
 
     const conn = await runtime.connect(
@@ -708,6 +716,12 @@ function mapPersistedPartToContent(part: PersistedTurnPartRow): ContentPart | nu
   return null
 }
 
+function getOldestCursorFromPersistedTurns(turns: PersistedTurnWithParts[]) {
+  if (turns.length === 0) return null
+  const tail = turns[turns.length - 1]
+  return Number(tail.seq ?? tail.createdAt ?? 0) || null
+}
+
 function measureMessageListHeight() {
   const query = uni.createSelectorQuery()
   query
@@ -725,9 +739,45 @@ function handleMessageScroll(event: any) {
   const scrollTopValue = Number(event?.detail?.scrollTop || 0)
   const scrollHeight = Number(event?.detail?.scrollHeight || 0)
   const viewportHeight = Number(messageListHeight.value || 0)
+  if (scrollTopValue <= 48) {
+    void loadOlderTurns()
+  }
   if (!scrollHeight || !viewportHeight) return
   const distanceToBottom = Math.max(0, scrollHeight - (scrollTopValue + viewportHeight))
   shouldAutoFollowBottom.value = distanceToBottom <= 72
+}
+
+async function loadOlderTurns() {
+  if (loadingOlder.value || !hasMoreHistory.value || oldestLoadedCursor.value == null) return
+  loadingOlder.value = true
+  try {
+    const older = await getOlderTurns(conversationId.value, oldestLoadedCursor.value, 20)
+    if (older.length === 0) {
+      hasMoreHistory.value = false
+      return
+    }
+    const runtimeSession = runtime.getOrCreateSession(conversationId.value)
+    const firstVisibleMessageId = runtimeSession.localTurns[0]?.id || null
+    runtimeSession.localTurns = [
+      ...older.slice().reverse().map(mapPersistedTurnToMessage),
+      ...runtimeSession.localTurns,
+    ]
+    oldestLoadedCursor.value = getOldestCursorFromPersistedTurns(older)
+    hasMoreHistory.value = older.length >= 20
+    if (firstVisibleMessageId) {
+      nextTick(() => {
+        const index = messages.value.findIndex((item) => item.id === firstVisibleMessageId)
+        if (index >= 0) {
+          scrollIntoView.value = `msg-${index}`
+        }
+      })
+    }
+  } catch (error) {
+    console.warn("load older turns skipped", error)
+    hasMoreHistory.value = false
+  } finally {
+    loadingOlder.value = false
+  }
 }
 
 function scrollToBottom(force = false) {
