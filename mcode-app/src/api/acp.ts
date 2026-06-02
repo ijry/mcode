@@ -322,11 +322,11 @@ class AcpApiClient {
 
     const auth = useAuthStore()
     const gateway = auth.gateway()
+    let eventConnection: Awaited<ReturnType<typeof gateway.connectEvents>> | null = null
     const readyCallbacks = new Set<() => void>()
-    let isOpen = false
     const host: RealtimeTransportHost = {
-      isOpen: () => isOpen,
-      sendFrame: () => false,
+      isOpen: () => eventConnection?.isOpen() ?? false,
+      sendFrame: (frame: object) => eventConnection?.send(frame) ?? false,
       onReady: (callback: () => void) => {
         readyCallbacks.add(callback)
         return () => {
@@ -334,9 +334,9 @@ class AcpApiClient {
         }
       },
     }
-
     const transport = getOrCreateRealtimeTransport(descriptor, host)
-    const detach = await gateway.connectEvents((raw) => {
+
+    eventConnection = await gateway.connectEvents((raw) => {
       if (this.isAttachFrame(raw)) {
         transport.handleServerFrame(raw)
         return
@@ -346,25 +346,36 @@ class AcpApiClient {
         this.dispatchEvent(event)
       }
     })
-
-    isOpen = true
-    readyCallbacks.forEach((callback) => {
-      try {
-        callback()
-      } catch (error) {
-        console.error("实时桥接 ready 回调失败:", error)
-      }
+    eventConnection.onReady(() => {
+      readyCallbacks.forEach((callback) => {
+        try {
+          callback()
+        } catch (error) {
+          console.error("实时桥接 ready 回调失败:", error)
+        }
+      })
     })
+    if (eventConnection.isOpen()) {
+      readyCallbacks.forEach((callback) => {
+        try {
+          callback()
+        } catch (error) {
+          console.error("实时桥接 ready 回调失败:", error)
+        }
+      })
+    }
+
+    const detach = () => {
+      eventConnection.close()
+      destroyRealtimeTransport(targetKey)
+      this.realtimeBridges.delete(targetKey)
+    }
 
     const bridge = {
       descriptor,
       transport,
-      detach: () => {
-        detach()
-        destroyRealtimeTransport(targetKey)
-        this.realtimeBridges.delete(targetKey)
-      },
-      attachCapable: false,
+      detach,
+      attachCapable: true,
     }
     this.realtimeBridges.set(targetKey, bridge)
     return bridge

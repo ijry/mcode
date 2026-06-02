@@ -20,9 +20,16 @@ export interface CodegGateway {
   readonly mode: GatewayMode
   pair(params: PairParams): Promise<RelaySessionInfo | null>
   call<T>(command: string, payload?: Record<string, unknown>): Promise<T>
-  connectEvents(onEvent: (event: unknown) => void): Promise<() => void>
+  connectEvents(onEvent: (event: unknown) => void): Promise<EventChannelConnection>
   refreshAuth(): Promise<void>
   getRemoteInstanceDescriptor(): RemoteInstanceDescriptor
+}
+
+export interface EventChannelConnection {
+  isOpen(): boolean
+  send(frame: object): boolean
+  onReady(callback: () => void): () => void
+  close(): void
 }
 
 export interface TargetProfile {

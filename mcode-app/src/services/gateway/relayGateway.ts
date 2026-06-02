@@ -1,4 +1,4 @@
-import type { CodegGateway, RelaySessionInfo } from "./types"
+import type { CodegGateway, EventChannelConnection, RelaySessionInfo } from "./types"
 import { toErrorMessage, toResponseErrorMessage } from "./error"
 import { buildRemoteInstanceKey } from "@/services/realtime/instance-key"
 
@@ -79,10 +79,28 @@ export class RelayGateway implements CodegGateway {
     }
   }
 
-  async connectEvents(onEvent: (event: unknown) => void): Promise<() => void> {
+  async connectEvents(onEvent: (event: unknown) => void): Promise<EventChannelConnection> {
     const socketTask = await uni.connectSocket({
       url: `${this.relayUrl.replace(/^http/, "ws").replace(/\/$/, "")}/v1/events`,
       header: getHeaders(this.session),
+    })
+    let opened = false
+    const readyCallbacks = new Set<() => void>()
+    socketTask.onOpen(() => {
+      opened = true
+      readyCallbacks.forEach((callback) => {
+        try {
+          callback()
+        } catch (error) {
+          console.error("relay socket ready callback failed", error)
+        }
+      })
+    })
+    socketTask.onClose(() => {
+      opened = false
+    })
+    socketTask.onError(() => {
+      opened = false
     })
     socketTask.onMessage((msg: { data: unknown }) => {
       try {
@@ -91,8 +109,22 @@ export class RelayGateway implements CodegGateway {
         onEvent(msg.data)
       }
     })
-    return async () => {
-      socketTask.close({})
+
+    return {
+      isOpen: () => opened,
+      send: (frame: object) => {
+        if (!opened) return false
+        socketTask.send({ data: JSON.stringify(frame) })
+        return true
+      },
+      onReady: (callback: () => void) => {
+        readyCallbacks.add(callback)
+        return () => readyCallbacks.delete(callback)
+      },
+      close: () => {
+        readyCallbacks.clear()
+        socketTask.close({})
+      },
     }
   }
 
