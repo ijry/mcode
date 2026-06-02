@@ -65,6 +65,7 @@
     "@vue/runtime-dom": "3.4.21",
     "pinia": "^3.0.4",
     "pinia-plugin-persistedstate": "^4.7.1",
+    "sql.js": "^1.14.1",
     "uview-plus": "^3.4.70",
     "vue": "^3.4.21"
   },
@@ -76,6 +77,7 @@
     "@dcloudio/vite-plugin-uni": "3.0.0-5000720260410001",
     "@iconify/json": "^2.2.481",
     "@types/node": "^22.13.10",
+    "@types/sql.js": "^1.4.11",
     "@unocss/transformer-directives": "^0.58.9",
     "@vue/compiler-sfc": "^3.4.21",
     "@vue/tsconfig": "^0.7.0",
