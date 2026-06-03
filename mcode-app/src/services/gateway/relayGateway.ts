@@ -2,8 +2,6 @@ import type { CodegGateway, EventChannelConnection, RelaySessionInfo } from "./t
 import { toErrorMessage, toResponseErrorMessage } from "./error"
 import { buildRemoteInstanceKey } from "@/services/realtime/instance-key"
 
-declare const plus: any
-
 function getHeaders(session?: RelaySessionInfo | null): HeadersInit {
   const headers: Record<string, string> = {
     "content-type": "application/json",
@@ -15,7 +13,10 @@ function getHeaders(session?: RelaySessionInfo | null): HeadersInit {
 }
 
 function isH5WebSocketRuntime() {
-  return typeof WebSocket !== "undefined" && typeof plus === "undefined"
+  // #ifdef H5
+  return true
+  // #endif
+  return false
 }
 
 function encodeTokenProtocol(token: string) {

@@ -807,7 +807,10 @@ async function ensureRelaySession(conn: ConnectionItem): Promise<RelaySessionInf
 }
 
 function isH5WebSocketRuntime() {
-  return typeof WebSocket !== "undefined" && typeof plus === "undefined"
+  // #ifdef H5
+  return true
+  // #endif
+  return false
 }
 
 function encodeTokenProtocol(token: string) {

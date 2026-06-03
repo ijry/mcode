@@ -2,8 +2,6 @@ import type { CodegGateway, EventChannelConnection } from "./types"
 import { toErrorMessage, toResponseErrorMessage } from "./error"
 import { buildRemoteInstanceKey } from "@/services/realtime/instance-key"
 
-declare const plus: any
-
 function getBaseUrl(baseUrl: string): string {
   return baseUrl.replace(/\/$/, "")
 }
@@ -13,7 +11,10 @@ function getToken(): string {
 }
 
 function isH5WebSocketRuntime() {
-  return typeof WebSocket !== "undefined" && typeof plus === "undefined"
+  // #ifdef H5
+  return true
+  // #endif
+  return false
 }
 
 function encodeTokenProtocol(token: string) {

@@ -273,11 +273,13 @@ function normalizeAgentType(raw?: string) {
 .part-text {
   font-size: 13px;
   line-height: 1.2;
+  color: #303133;
 
   :deep(.up-markdown) {
     padding: 1px 2px !important;
     font-size: 13px !important;
     line-height: 1.2 !important;
+    color: inherit !important;
   }
 
   :deep(.up-markdown p) {
@@ -289,6 +291,21 @@ function normalizeAgentType(raw?: string) {
   :deep(.up-markdown text) {
     line-height: 1.2 !important;
     font-size: 13px !important;
+    color: inherit !important;
+  }
+
+  :deep(.up-markdown ._root) {
+    color: inherit !important;
+  }
+
+  :deep(.up-markdown rich-text) {
+    color: inherit !important;
+    font-size: 13px !important;
+    line-height: 1.2 !important;
+  }
+
+  :deep(.up-markdown ._a) {
+    color: inherit !important;
   }
 
   // 用户消息文本颜色（up-markdown 在 user 气泡内需白色）
