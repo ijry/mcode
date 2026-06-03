@@ -12,7 +12,13 @@
       </up-empty>
     </view>
 
-    <view v-else class="main-wrap">
+    <view
+      v-else
+      :class="[
+        'main-wrap',
+        showHistoryPanel ? 'main-wrap--history' : 'main-wrap--overview',
+      ]"
+    >
 
       <!-- 顶部搜索 -->
       <view class="search-bar">
@@ -32,13 +38,7 @@
       </view>
 
       <!-- 默认：连接分组会话总览 -->
-      <scroll-view
-        v-if="!showHistoryPanel"
-        class="group-scroll"
-        scroll-y
-        enhanced
-        show-scrollbar="false"
-      >
+      <view v-if="!showHistoryPanel" class="group-panel">
         <view v-if="loading && filteredConnectionGroups.length === 0" class="inline-loading">
           <up-loading-icon color="#2979ff" size="28"></up-loading-icon>
           <text class="inline-loading__text">加载中...</text>
@@ -112,7 +112,7 @@
             </view>
           </view>
         </view>
-      </scroll-view>
+      </view>
 
       <!-- 历史模式：展示原 up-cate-tab -->
       <view v-else class="cate-wrap">
@@ -536,6 +536,11 @@ onMounted(() => {
 })
 
 onPullDownRefresh(() => {
+  if (showHistoryPanel.value) {
+    uni.stopPullDownRefresh()
+    return
+  }
+
   loadOverviewData().finally(() => {
     uni.stopPullDownRefresh()
     syncCateTabHeight()
@@ -1328,6 +1333,14 @@ function formatTime(time?: string): string {
 }
 
 .main-wrap {
+  width: 100%;
+}
+
+.main-wrap--overview {
+  display: block;
+}
+
+.main-wrap--history {
   flex: 1;
   min-height: 0;
   display: flex;
@@ -1353,8 +1366,8 @@ function formatTime(time?: string): string {
   height: 100%;
 }
 
-.group-scroll {
-  flex: 1;
+.group-panel {
+  display: block;
   min-height: 0;
 }
 
