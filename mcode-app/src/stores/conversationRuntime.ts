@@ -52,6 +52,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         connectionId: null,
         instanceKey: "",
         status: "idle",
+        lastAppliedSeq: null,
         stats: {
           inputTokens: 0,
           outputTokens: 0,
@@ -76,7 +77,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     // 如果有流式消息，添加到末尾
     if (session.liveMessage) {
       messages.push({
-        id: `live-${Date.now()}`,
+        id: `live-${conversationId}`,
         role: "assistant",
         content: session.liveMessage.content,
         timestamp: session.liveMessage.timestamp,
@@ -193,6 +194,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       session.liveMessage = normalizedLiveMessage
     }
     session.status = deriveRuntimeStatus(snapshot, normalizedLiveMessage)
+    session.lastAppliedSeq = firstNumber(snapshot?.event_seq, snapshot?.eventSeq) ?? session.lastAppliedSeq
 
     const usage = snapshot.usage
     if (usage && typeof usage === "object") {
@@ -250,6 +252,9 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       (s) => s.connectionId === event.connectionId
     )
     if (!session) return
+    if (typeof event.seq === "number" && Number.isFinite(event.seq)) {
+      session.lastAppliedSeq = Math.max(session.lastAppliedSeq || 0, event.seq)
+    }
 
     switch (event.type) {
       case "stream_batch":
@@ -343,7 +348,8 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     conversationId: number,
     agentType: string,
     workingDir?: string,
-    sessionId?: string
+    sessionId?: string,
+    sinceSeq?: number
   ) {
     const session = getOrCreateSession(conversationId)
     session.status = "connecting"
@@ -391,6 +397,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         conversationId,
         instanceKey: managed.instanceKey,
         connectionId: managed.connectionId,
+        sinceSeq,
       })
 
       return managed.connection
@@ -450,6 +457,7 @@ interface RuntimeSession {
   connectionId: string | null
   instanceKey: string
   status: "idle" | "connecting" | "connected" | "thinking" | "running_tool" | "waiting_permission" | "error"
+  lastAppliedSeq: number | null
   stats: SessionStats
 }
 

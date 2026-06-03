@@ -408,11 +408,15 @@ class AcpApiClient {
     if (!connectionId || !rawType) return null
 
     const normalized = this.normalizeAcpEventRecord(connectionId, rawType, record)
-    if (normalized) return normalized
+    if (normalized) {
+      normalized.seq = firstNumber(record.seq) ?? undefined
+      return normalized
+    }
 
     if ("data" in record) {
       return {
         connectionId,
+        seq: firstNumber(record.seq) ?? undefined,
         data: record.data as EventEnvelope["data"],
         type: rawType as EventEnvelope["type"],
       } as EventEnvelope

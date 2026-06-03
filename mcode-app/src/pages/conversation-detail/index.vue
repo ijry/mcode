@@ -29,40 +29,50 @@
         </view>
       </view>
 
+      <view v-if="historyStatusText" class="history-status">
+        <up-loading-icon v-if="loadingOlder" mode="circle" size="16" color="#909399"></up-loading-icon>
+        <text class="history-status__text">{{ historyStatusText }}</text>
+      </view>
+
       <scroll-view
         class="message-list"
         scroll-y
+        :style="messageListStyle"
+        :upper-threshold="120"
         :scroll-into-view="scrollIntoView"
         :scroll-top="scrollTop"
         :scroll-with-animation="true"
+        @scrolltoupper="handleMessageReachTop"
         @scroll="handleMessageScroll"
       >
-        <view v-if="messages.length === 0" class="empty-messages">
-          <up-empty mode="message" text="开始新的对话吧"></up-empty>
-        </view>
+        <view class="message-list__content">
+          <view v-if="messages.length === 0" class="empty-messages">
+            <up-empty mode="message" text="开始新的对话吧"></up-empty>
+          </view>
 
-        <view
-          v-for="(msg, index) in messages"
-          :key="msg.id"
-          :id="`msg-${index}`"
-          class="message-item"
-        >
-          <MessageBubble
-            :message="msg"
-            :agent-type="currentAgentType"
-            :showRegenerate="index === messages.length - 1 && msg.role === 'assistant'"
-            @regenerate="regenerateLastMessage"
-          />
-        </view>
+          <view
+            v-for="(msg, index) in messages"
+            :key="msg.id"
+            :id="`msg-${index}`"
+            class="message-item"
+          >
+            <MessageBubble
+              :message="msg"
+              :agent-type="currentAgentType"
+              :showRegenerate="index === messages.length - 1 && msg.role === 'assistant'"
+              @regenerate="regenerateLastMessage"
+            />
+          </view>
 
-        <view v-if="stats.totalTokens > 0" class="stats-bar">
-          <up-icon name="file-text" size="14" color="#c0c4cc"></up-icon>
-          <text class="stats-text">
-            {{ stats.inputTokens }} / {{ stats.outputTokens }} / {{ stats.totalTokens }} tokens
-          </text>
-        </view>
+          <view v-if="stats.totalTokens > 0" class="stats-bar">
+            <up-icon name="file-text" size="14" color="#c0c4cc"></up-icon>
+            <text class="stats-text">
+              {{ stats.inputTokens }} / {{ stats.outputTokens }} / {{ stats.totalTokens }} tokens
+            </text>
+          </view>
 
-        <view class="list-bottom"></view>
+          <view class="list-bottom"></view>
+        </view>
       </scroll-view>
 
       <view class="input-wrap">
@@ -290,7 +300,7 @@
 
 <script setup lang="ts">
 import { ref, computed, nextTick, watch } from "vue"
-import { onLoad, onUnload } from "@dcloudio/uni-app"
+import { onHide, onLoad, onShow, onUnload } from "@dcloudio/uni-app"
 import { useAuthStore } from "@/stores/auth"
 import { useConversationCacheStore } from "@/stores/conversationCache"
 import { useConversationRuntimeStore } from "@/stores/conversationRuntime"
@@ -298,6 +308,7 @@ import { acpApi } from "@/api/acp"
 import { toErrorMessage } from "@/services/gateway/error"
 import { ensureConversationSchema } from "@/services/db/migrations"
 import {
+  countConversationTurns,
   getConversationSummaryById,
   getOlderTurns,
   getNewestTurns,
@@ -373,6 +384,7 @@ interface StoredConnectionItem {
 const auth = useAuthStore()
 const cacheStore = useConversationCacheStore()
 const runtime = useConversationRuntimeStore()
+const INITIAL_TURN_BATCH = 50
 
 const loading = ref(false)
 const sending = ref(false)
@@ -384,6 +396,7 @@ const inputText = ref("")
 const scrollIntoView = ref("")
 const scrollTop = ref(0)
 const messageListHeight = ref(0)
+const messageListViewportHeight = ref(0)
 const hasInitialBottomScroll = ref(false)
 const shouldAutoFollowBottom = ref(true)
 const loadingOlder = ref(false)
@@ -400,6 +413,17 @@ const showPlanDrawer = ref(false)
 const modelColumns = ref<any[]>([])
 const permissionColumns = ref<any[]>([])
 const currentAgentType = ref("claude_code")
+const hasLoadedOnce = ref(false)
+const HISTORY_LOADING_MIN_MS = 200
+
+function detailDebugLog(stage: string, payload?: Record<string, unknown>) {
+  if (!conversationId.value) return
+  console.warn("[conversation-detail-debug]", {
+    conversationId: conversationId.value,
+    stage,
+    ...(payload || {}),
+  })
+}
 
 const messages = computed(() => {
   if (!conversationId.value) return []
@@ -409,6 +433,19 @@ const messages = computed(() => {
 const session = computed(() => {
   if (!conversationId.value) return null
   return runtime.getOrCreateSession(conversationId.value)
+})
+
+const messageListStyle = computed(() => {
+  if (messageListViewportHeight.value <= 0) return undefined
+  return {
+    height: `${messageListViewportHeight.value}px`,
+  }
+})
+
+const historyStatusText = computed(() => {
+  if (loadingOlder.value) return "历史加载中..."
+  if (messages.value.length > 0 && !hasMoreHistory.value) return "没有更多历史了"
+  return ""
 })
 
 const runtimeStatus = computed<string>(() => String(session.value?.status || "idle"))
@@ -545,6 +582,16 @@ onLoad((options: any) => {
   if (conversationId.value) {
     loadConversation()
   }
+  hasLoadedOnce.value = true
+})
+
+onShow(() => {
+  if (!hasLoadedOnce.value || !conversationId.value || loading.value) return
+  loadConversation()
+})
+
+onHide(() => {
+  persistDetailRuntimeState()
 })
 
 onUnload(() => {
@@ -571,6 +618,18 @@ watch(
   }
 )
 
+watch(
+  () => historyStatusText.value,
+  () => {
+    nextTick(() => {
+      measureMessageListHeight()
+      if (hasInitialBottomScroll.value && shouldAutoFollowBottom.value) {
+        scrollToBottom(true)
+      }
+    })
+  }
+)
+
 async function loadConversation() {
   loading.value = true
   let initialLoadFinished = false
@@ -588,8 +647,12 @@ async function loadConversation() {
     const runtimeSession = runtime.getOrCreateSession(conversationId.value)
     const instanceKey = auth.currentRemoteInstance().instanceKey
     const cachedViewState = cacheStore.restore(conversationId.value)
+    const initialTurnLimit = resolveInitialTurnLimit(
+      cachedViewState,
+      runtimeSession.localTurns.length
+    )
     const managed = connectionSessionManager.getByConversationId(conversationId.value)
-    const hasHotRuntime = hasRuntimeState(runtimeSession)
+    const hasHotRuntime = hasActiveRuntimeState(runtimeSession)
 
     let localSummary: Awaited<ReturnType<typeof getConversationSummaryById>> | null = null
     let localTurns: PersistedTurnWithParts[] = []
@@ -599,7 +662,7 @@ async function loadConversation() {
       localSummary = await getConversationSummaryById(instanceKey, conversationId.value)
       persistedRuntime = await getRuntime(conversationId.value)
       if (!hasHotRuntime) {
-        localTurns = await getNewestTurns(conversationId.value, 10)
+        localTurns = await getNewestTurns(conversationId.value, initialTurnLimit)
       }
     } catch (error) {
       console.warn("local conversation hydrate skipped", error)
@@ -653,13 +716,13 @@ async function loadConversation() {
       }
       finishInitialLoad()
     } else if (localTurns.length > 0) {
+      const totalLocalTurnCount = await countConversationTurns(conversationId.value)
       runtimeSession.localTurns = localTurns
         .slice()
         .reverse()
         .map(mapPersistedTurnToMessage)
-      oldestLoadedCursor.value =
-        cachedViewState?.oldestLoadedSeq ?? getOldestCursorFromPersistedTurns(localTurns)
-      hasMoreHistory.value = cachedViewState?.hasMoreHistory ?? localTurns.length >= 10
+      oldestLoadedCursor.value = getOldestCursorFromPersistedTurns(localTurns)
+      hasMoreHistory.value = totalLocalTurnCount > localTurns.length
       if (cachedViewState?.scrollAnchor) {
         scrollIntoView.value = cachedViewState.scrollAnchor
       } else if (persistedRuntime?.scrollAnchor) {
@@ -677,38 +740,20 @@ async function loadConversation() {
       agentType = firstString(result?.agentType, result?.agent_type, summary?.agent_type) || "claude_code"
       resumeSessionId = firstString(result?.sessionId, result?.session_id, summary?.external_id)
       currentAgentType.value = normalizeAgentType(agentType)
-      let persistedTurns: PersistedTurnWithParts[] = []
-      let persistedTurnCount = 0
       try {
-        const persisted = await persistConversationDetailSnapshot({
+        detailDebugLog("initial-remote-detail", summarizeDetailTurns(result))
+        await persistConversationDetailSnapshot({
           instanceKey,
           conversationId: conversationId.value,
           detail: result,
           fallbackFolderId: folderId.value,
         })
-        persistedTurnCount = persisted.persistedTurnCount
-        persistedTurns = await getNewestTurns(conversationId.value, 10)
       } catch (error) {
+        detailDebugLog("initial-persist-failed", { message: toErrorMessage(error) })
         console.warn("persist remote conversation detail skipped", error)
       }
 
-      if (persistedTurns.length > 0) {
-        runtimeSession.localTurns = persistedTurns
-          .slice()
-          .reverse()
-          .map(mapPersistedTurnToMessage)
-        oldestLoadedCursor.value =
-          cachedViewState?.oldestLoadedSeq ?? getOldestCursorFromPersistedTurns(persistedTurns)
-        hasMoreHistory.value =
-          cachedViewState?.hasMoreHistory ?? persistedTurnCount > persistedTurns.length
-      } else {
-        const fallbackTurns = normalizeTurns(result.turns)
-        const visibleTurns = fallbackTurns.slice(-10)
-        runtimeSession.localTurns = visibleTurns
-        oldestLoadedCursor.value = cachedViewState?.oldestLoadedSeq ?? null
-        hasMoreHistory.value =
-          cachedViewState?.hasMoreHistory ?? fallbackTurns.length > visibleTurns.length
-      }
+      await refreshSessionTurnsFromDb(runtimeSession, cachedViewState, initialTurnLimit)
       finishInitialLoad()
     }
 
@@ -717,7 +762,8 @@ async function loadConversation() {
       conversationId.value,
       agentType,
       undefined,
-      resumeSessionId
+      resumeSessionId,
+      persistedRuntime?.lastAppliedSeq ?? runtimeSession.lastAppliedSeq ?? undefined
     )
 
     let snapshot: any = null
@@ -766,31 +812,21 @@ async function loadConversation() {
       }
       runtime.hydrateLiveSnapshot(conversationId.value, snapshot)
     }
-    if (!hasHotRuntime) {
-      try {
-        const liveDetail = await auth.gateway().call<any>("get_folder_conversation", {
-          conversationId: conversationId.value,
-        })
-        await persistConversationDetailSnapshot({
-          instanceKey,
-          conversationId: conversationId.value,
-          detail: liveDetail,
-          fallbackFolderId: folderId.value,
-        })
-        const refreshedTurns = await getNewestTurns(conversationId.value, 10)
-        if (refreshedTurns.length > 0) {
-          runtimeSession.localTurns = refreshedTurns
-            .slice()
-            .reverse()
-            .map(mapPersistedTurnToMessage)
-          oldestLoadedCursor.value =
-            cachedViewState?.oldestLoadedSeq ?? getOldestCursorFromPersistedTurns(refreshedTurns)
-          hasMoreHistory.value =
-            cachedViewState?.hasMoreHistory ?? refreshedTurns.length >= 10
-        }
-      } catch (error) {
-        console.warn("remote conversation catch-up skipped", error)
-      }
+    try {
+      const liveDetail = await auth.gateway().call<any>("get_folder_conversation", {
+        conversationId: conversationId.value,
+      })
+      detailDebugLog("catchup-remote-detail", summarizeDetailTurns(liveDetail))
+      await persistConversationDetailSnapshot({
+        instanceKey,
+        conversationId: conversationId.value,
+        detail: liveDetail,
+        fallbackFolderId: folderId.value,
+      })
+      await refreshSessionTurnsFromDb(runtimeSession, cachedViewState, initialTurnLimit)
+    } catch (error) {
+      detailDebugLog("catchup-persist-failed", { message: toErrorMessage(error) })
+      console.warn("remote conversation catch-up skipped", error)
     }
     const availableCommands = Array.isArray(snapshot?.available_commands)
       ? snapshot.available_commands
@@ -814,13 +850,69 @@ async function loadConversation() {
   }
 }
 
-function hasRuntimeState(runtimeSession: ReturnType<typeof runtime.getOrCreateSession>) {
+function hasActiveRuntimeState(runtimeSession: ReturnType<typeof runtime.getOrCreateSession>) {
   return Boolean(
     runtimeSession.connectionId ||
     runtimeSession.liveMessage ||
-    runtimeSession.localTurns.length > 0 ||
     runtimeSession.optimisticTurns.length > 0
   )
+}
+
+async function refreshSessionTurnsFromDb(
+  runtimeSession: ReturnType<typeof runtime.getOrCreateSession>,
+  cachedViewState: ReturnType<typeof cacheStore.restore>,
+  limit = resolveInitialTurnLimit(cachedViewState)
+) {
+  const refreshedTurns = await getNewestTurns(conversationId.value, limit)
+  const totalTurnCount = await countConversationTurns(conversationId.value)
+  detailDebugLog("db-refresh", {
+    limit,
+    count: refreshedTurns.length,
+    totalCount: totalTurnCount,
+    newestTurnId: refreshedTurns[0]?.id ?? null,
+    oldestTurnId: refreshedTurns[refreshedTurns.length - 1]?.id ?? null,
+    newestSeq: refreshedTurns[0]?.seq ?? null,
+    oldestSeq: refreshedTurns[refreshedTurns.length - 1]?.seq ?? null,
+  })
+  if (refreshedTurns.length === 0) {
+    runtimeSession.localTurns = []
+    oldestLoadedCursor.value = null
+    hasMoreHistory.value = false
+    return
+  }
+
+  runtimeSession.localTurns = refreshedTurns
+    .slice()
+    .reverse()
+    .map(mapPersistedTurnToMessage)
+  oldestLoadedCursor.value = getOldestCursorFromPersistedTurns(refreshedTurns)
+  hasMoreHistory.value = totalTurnCount > refreshedTurns.length
+}
+
+function resolveInitialTurnLimit(
+  cachedViewState: ReturnType<typeof cacheStore.restore>,
+  currentLoadedCount = 0
+) {
+  const cachedCount = Number(cachedViewState?.loadedTurnCount || 0)
+  const liveCount = Number(currentLoadedCount || 0)
+  return Math.max(
+    INITIAL_TURN_BATCH,
+    Number.isFinite(cachedCount) ? cachedCount : 0,
+    Number.isFinite(liveCount) ? liveCount : 0
+  )
+}
+
+function summarizeDetailTurns(detail: any) {
+  const turns = Array.isArray(detail?.turns) ? detail.turns : []
+  const newest = turns[turns.length - 1]
+  const oldest = turns[0]
+  return {
+    remoteTurnCount: turns.length,
+    newestRemoteTurnId: firstString(newest?.id) || null,
+    newestRemoteTurnTs: firstString(newest?.timestamp) || null,
+    oldestRemoteTurnId: firstString(oldest?.id) || null,
+    oldestRemoteTurnTs: firstString(oldest?.timestamp) || null,
+  }
 }
 
 function restoreDraftState(
@@ -876,6 +968,7 @@ function persistDetailRuntimeState() {
     scrollAnchor: scrollIntoView.value || null,
     liveMessageJson: currentSession?.liveMessage ? JSON.stringify(currentSession.liveMessage) : null,
     optimisticJson: JSON.stringify(currentSession?.optimisticTurns || []),
+    lastAppliedSeq: currentSession?.lastAppliedSeq ?? null,
     isActive: Boolean(currentSession?.connectionId),
   }).catch((error) => {
     console.warn("persist detail runtime skipped", error)
@@ -944,30 +1037,75 @@ function getOldestCursorFromPersistedTurns(turns: PersistedTurnWithParts[]) {
 function measureMessageListHeight() {
   const query = uni.createSelectorQuery()
   query
-    .select(".message-list")
-    .boundingClientRect((rect: any) => {
-      const height = Number(rect?.height || 0)
+    .select(".toolbar")
+    .boundingClientRect()
+    .select(".history-status")
+    .boundingClientRect()
+    .select(".input-wrap")
+    .boundingClientRect()
+    .exec((rects: any[]) => {
+      const toolbarRect = rects?.[0]
+      const historyStatusRect = rects?.[1]
+      const inputRect = rects?.[2]
+      const windowHeight = Number(uni.getSystemInfoSync().windowHeight || 0)
+      const toolbarHeight = Number(toolbarRect?.height || 0)
+      const historyStatusHeight = Number(historyStatusRect?.height || 0)
+      const inputHeight = Number(inputRect?.height || 0)
+      const toolbarBottom = Number(toolbarRect?.bottom || toolbarHeight || 0)
+      const historyStatusBottom = Number(historyStatusRect?.bottom || 0)
+      const inputTop = Number(inputRect?.top || windowHeight || 0)
+      const headerBottom = historyStatusBottom || toolbarBottom
+      const height = Math.max(0, windowHeight - toolbarHeight - historyStatusHeight - inputHeight)
       if (height > 0) {
+        messageListViewportHeight.value = height
         messageListHeight.value = height
+        detailDebugLog("message-list-height", {
+          windowHeight,
+          toolbarHeight,
+          historyStatusHeight,
+          inputHeight,
+          toolbarBottom,
+          historyStatusBottom,
+          inputTop,
+          headerBottom,
+          height,
+        })
       }
     })
-    .exec()
 }
 
 function handleMessageScroll(event: any) {
   const scrollTopValue = Number(event?.detail?.scrollTop || 0)
   const scrollHeight = Number(event?.detail?.scrollHeight || 0)
   const viewportHeight = Number(messageListHeight.value || 0)
-  if (scrollTopValue <= 48) {
-    void loadOlderTurns()
-  }
   if (!scrollHeight || !viewportHeight) return
   const distanceToBottom = Math.max(0, scrollHeight - (scrollTopValue + viewportHeight))
   shouldAutoFollowBottom.value = distanceToBottom <= 72
+  if (scrollTopValue <= 120) {
+    detailDebugLog("scroll-near-top", {
+      scrollTop: scrollTopValue,
+      scrollHeight,
+      viewportHeight,
+      hasMoreHistory: hasMoreHistory.value,
+      oldestLoadedCursor: oldestLoadedCursor.value,
+      loadingOlder: loadingOlder.value,
+    })
+    void loadOlderTurns()
+  }
+}
+
+function handleMessageReachTop() {
+  detailDebugLog("scrolltoupper", {
+    hasMoreHistory: hasMoreHistory.value,
+    oldestLoadedCursor: oldestLoadedCursor.value,
+    loadingOlder: loadingOlder.value,
+  })
+  void loadOlderTurns()
 }
 
 async function loadOlderTurns() {
   if (loadingOlder.value || !hasMoreHistory.value || oldestLoadedCursor.value == null) return
+  const startedAt = Date.now()
   loadingOlder.value = true
   try {
     const older = await getOlderTurns(conversationId.value, oldestLoadedCursor.value, 20)
@@ -995,6 +1133,10 @@ async function loadOlderTurns() {
     console.warn("load older turns skipped", error)
     hasMoreHistory.value = false
   } finally {
+    const elapsed = Date.now() - startedAt
+    if (elapsed < HISTORY_LOADING_MIN_MS) {
+      await new Promise((resolve) => setTimeout(resolve, HISTORY_LOADING_MIN_MS - elapsed))
+    }
     loadingOlder.value = false
   }
 }
@@ -1843,10 +1985,12 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 
 <style scoped lang="scss">
 .page {
+  height: 100vh;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
   background-color: #f2f3f5;
+  overflow: hidden;
 }
 
 .loading-container,
@@ -1858,7 +2002,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 }
 
 .detail-container {
-  flex: 1;
+  height: 100%;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -1944,10 +2088,17 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 }
 
 .message-list {
-  flex: 1;
+  flex: none;
   min-height: 0;
   padding: 0;
   box-sizing: border-box;
+}
+
+.message-list__content {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
 }
 
 .message-item {
@@ -1957,6 +2108,21 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 
 .empty-messages {
   padding-top: 48rpx;
+}
+
+.history-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10rpx;
+  flex-shrink: 0;
+  padding: 12rpx 24rpx;
+  background-color: #f2f3f5;
+}
+
+.history-status__text {
+  font-size: 22rpx;
+  color: #909399;
 }
 
 .stats-bar {
@@ -1973,7 +2139,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 }
 
 .list-bottom {
-  height: calc(220rpx + env(safe-area-inset-bottom));
+  height: calc(24rpx + env(safe-area-inset-bottom));
 }
 
 .input-wrap {

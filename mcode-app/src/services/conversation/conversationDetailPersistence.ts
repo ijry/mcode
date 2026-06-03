@@ -2,7 +2,7 @@ import type { ContentPart, MessageTurn } from "@/types/acp"
 import { ensureConversationSchema } from "@/services/db/migrations"
 import {
   getConversationSummaryById,
-  insertCompletedTurn,
+  insertCompletedTurns,
   upsertConversationSummary,
   type ConversationSummaryRecord,
   type PersistedTurnRecord,
@@ -50,8 +50,8 @@ export async function persistConversationDetailSnapshot(
   }
 
   if (input.persistTurns !== false) {
-    for (const turn of normalizedTurns) {
-      await insertCompletedTurn(
+    await insertCompletedTurns(
+      normalizedTurns.map((turn) =>
         buildPersistedTurnRecord({
           turn,
           conversationId: input.conversationId,
@@ -60,7 +60,7 @@ export async function persistConversationDetailSnapshot(
           dedupeId: turn.id,
         })
       )
-    }
+    )
   }
 
   return {
@@ -157,8 +157,13 @@ export function buildPersistedTurnRecord(
     content: turn.content,
     timestamp: turn.timestamp,
   })
+  const persistedTurnId = buildPersistedTurnStorageId(
+    input.instanceKey,
+    input.conversationId,
+    dedupeKey
+  )
   return {
-    id: turn.id,
+    id: persistedTurnId,
     conversationId: input.conversationId,
     instanceKey: input.instanceKey,
     dedupeKey,
@@ -168,7 +173,7 @@ export function buildPersistedTurnRecord(
     status: turn.status ?? "completed",
     version: 1,
     parts: turn.content.map((part, index) => ({
-      id: `${turn.id}:${index}`,
+      id: `${persistedTurnId}:${index}`,
       partIndex: index,
       type: part.type,
       payloadJson: JSON.stringify(toPersistedPartPayload(part)),
@@ -201,6 +206,14 @@ function buildFallbackTurnFingerprint(
   const contentHash = stableHashString(stableSerializeContent(content))
   const timeBucket = Math.floor(Number(timestamp || 0) / 1000)
   return `fp:${role}:${contentHash}:${timeBucket}`
+}
+
+function buildPersistedTurnStorageId(
+  instanceKey: string,
+  conversationId: number,
+  dedupeKey: string
+) {
+  return `turn:${stableHashString(`${instanceKey}:${conversationId}:${dedupeKey}`)}`
 }
 
 function toPersistedPartPayload(part: ContentPart): Record<string, any> {

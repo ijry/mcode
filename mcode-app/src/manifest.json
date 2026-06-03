@@ -4,6 +4,7 @@
   "description": "MCode mobile client",
   "versionName": "0.1.0",
   "versionCode": "1",
+  "vueVersion": "3",
   "app-plus": {
     "usingComponents": true
   },

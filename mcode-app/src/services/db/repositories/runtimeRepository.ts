@@ -105,6 +105,7 @@ export async function saveDraftState(input: {
   scrollAnchor?: string | null
   liveMessageJson?: string | null
   optimisticJson?: string | null
+  lastAppliedSeq?: number | null
   isActive?: boolean
 }) {
   const current = await getRuntime(input.conversationId)
@@ -118,7 +119,7 @@ export async function saveDraftState(input: {
     attachmentsJson: input.attachmentsJson,
     scrollAnchor: input.scrollAnchor ?? current?.scrollAnchor ?? null,
     composerText: input.composerText,
-    lastAppliedSeq: current?.lastAppliedSeq ?? null,
+    lastAppliedSeq: input.lastAppliedSeq ?? current?.lastAppliedSeq ?? null,
     lastSnapshotAt: current?.lastSnapshotAt ?? null,
     isActive: input.isActive ?? current?.isActive ?? true,
   })

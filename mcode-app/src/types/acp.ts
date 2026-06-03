@@ -92,6 +92,7 @@ export interface ModeInfo {
 export interface EventEnvelope {
   type: "stream_batch" | "tool_call" | "tool_call_update" | "status_changed" | "turn_complete" | "usage_update" | "permission_request"
   connectionId: string
+  seq?: number
   data: any
 }
 

@@ -52,6 +52,28 @@
             <ToolCallBlock :toolCall="part.tool_call!" />
           </view>
 
+          <!-- 工具结果 -->
+          <view v-else-if="part.type === 'tool_result'" class="part-tool-result">
+            <view class="tool-result-hd">
+              <up-icon
+                :name="part.tool_result?.is_error ? 'close-circle' : 'checkmark-circle'"
+                size="15"
+                :color="part.tool_result?.is_error ? '#fa3534' : '#19be6b'"
+              ></up-icon>
+              <text
+                :class="[
+                  'tool-result-hd__label',
+                  part.tool_result?.is_error && 'tool-result-hd__label--error',
+                ]"
+              >
+                {{ part.tool_result?.is_error ? '工具执行失败' : '工具执行结果' }}
+              </text>
+            </view>
+            <text class="tool-result__text">
+              {{ part.tool_result?.output || '（无输出）' }}
+            </text>
+          </view>
+
           <!-- 图片 -->
           <view v-else-if="part.type === 'image'" class="part-image">
             <image
@@ -282,6 +304,38 @@ function normalizeAgentType(raw?: string) {
   background-color: #fffbf0;
   border-radius: 12rpx;
   border-left: 4rpx solid #f0a020;
+}
+
+.part-tool-result {
+  padding: 16rpx 20rpx;
+  background-color: #f7f8fa;
+  border-radius: 12rpx;
+  border-left: 4rpx solid #19be6b;
+}
+
+.tool-result-hd {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  margin-bottom: 12rpx;
+}
+
+.tool-result-hd__label {
+  font-size: 24rpx;
+  font-weight: 600;
+  color: #19be6b;
+}
+
+.tool-result-hd__label--error {
+  color: #fa3534;
+}
+
+.tool-result__text {
+  font-size: 24rpx;
+  color: #606266;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .thinking-hd {

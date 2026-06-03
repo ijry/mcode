@@ -13,11 +13,17 @@ export interface SqliteDriver {
 const APP_DB_NAME = "mcode_runtime"
 const APP_DB_PATH = "_doc/mcode-runtime.db"
 const H5_DB_STORAGE_KEY = "mcode_runtime_sqlite_base64"
+const H5_IDB_NAME = "mcode_runtime_storage"
+const H5_IDB_VERSION = 1
+const H5_IDB_STORE = "sqlite_blobs"
+const H5_IDB_KEY = "runtime"
 
 let opened = false
 let transactionDepth = 0
 let sqlJs: SqlJsStatic | null = null
 let h5Db: Database | null = null
+let h5StorageDbPromise: Promise<IDBDatabase> | null = null
+let h5PersistQueue = Promise.resolve()
 
 function isAppPlusRuntime() {
   return typeof plus !== "undefined" && Boolean(plus?.sqlite)
@@ -50,7 +56,8 @@ async function openH5Database() {
       locateFile: () => sqlWasmUrl,
     })
   }
-  const stored = readStoredH5Database()
+  clearLegacyH5Storage()
+  const stored = await readStoredH5Database()
   h5Db = stored ? new sqlJs.Database(stored) : new sqlJs.Database()
 }
 
@@ -86,18 +93,15 @@ async function queryAppSql<T>(sql: string) {
 async function persistH5Database() {
   if (!h5Db) return
   if (transactionDepth > 0) return
-  const bytes = h5Db.export()
-  uni.setStorageSync(H5_DB_STORAGE_KEY, bytesToBase64(bytes))
+  const bytes = new Uint8Array(h5Db.export())
+  h5PersistQueue = h5PersistQueue
+    .catch(() => {})
+    .then(() => writeStoredH5Database(bytes))
+  await h5PersistQueue
 }
 
 function readStoredH5Database() {
-  const raw = uni.getStorageSync(H5_DB_STORAGE_KEY)
-  if (!raw || typeof raw !== "string") return null
-  try {
-    return base64ToBytes(raw)
-  } catch {
-    return null
-  }
+  return readStoredH5DatabaseFromIndexedDb()
 }
 
 function normalizeParams(params?: unknown[]) {
@@ -136,23 +140,81 @@ function normalizeSqliteError(error: unknown) {
   return new Error(String(error || "sqlite operation failed"))
 }
 
-function bytesToBase64(bytes: Uint8Array) {
-  let binary = ""
-  const chunkSize = 0x8000
-  for (let index = 0; index < bytes.length; index += chunkSize) {
-    const chunk = bytes.subarray(index, index + chunkSize)
-    binary += String.fromCharCode(...chunk)
+function getIndexedDb() {
+  if (typeof indexedDB === "undefined") {
+    throw new Error("IndexedDB is unavailable in H5 runtime")
   }
-  return btoa(binary)
+  return indexedDB
 }
 
-function base64ToBytes(value: string) {
-  const binary = atob(value)
-  const bytes = new Uint8Array(binary.length)
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index)
+function getH5StorageDb() {
+  if (!h5StorageDbPromise) {
+    h5StorageDbPromise = new Promise<IDBDatabase>((resolve, reject) => {
+      const request = getIndexedDb().open(H5_IDB_NAME, H5_IDB_VERSION)
+      request.onupgradeneeded = () => {
+        const database = request.result
+        if (!database.objectStoreNames.contains(H5_IDB_STORE)) {
+          database.createObjectStore(H5_IDB_STORE)
+        }
+      }
+      request.onsuccess = () => resolve(request.result)
+      request.onerror = () => reject(normalizeSqliteError(request.error))
+      request.onblocked = () => reject(new Error("IndexedDB open blocked"))
+    })
   }
-  return bytes
+  return h5StorageDbPromise
+}
+
+function clearLegacyH5Storage() {
+  try {
+    uni.removeStorageSync(H5_DB_STORAGE_KEY)
+  } catch {}
+}
+
+async function readStoredH5DatabaseFromIndexedDb() {
+  const database = await getH5StorageDb()
+  return await new Promise<Uint8Array | null>((resolve, reject) => {
+    const transaction = database.transaction(H5_IDB_STORE, "readonly")
+    const store = transaction.objectStore(H5_IDB_STORE)
+    const request = store.get(H5_IDB_KEY)
+
+    request.onsuccess = () => {
+      const result = request.result
+      if (result instanceof ArrayBuffer) {
+        resolve(new Uint8Array(result))
+        return
+      }
+      if (ArrayBuffer.isView(result)) {
+        const view = result as ArrayBufferView
+        resolve(
+          new Uint8Array(
+            view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength)
+          )
+        )
+        return
+      }
+      resolve(null)
+    }
+    request.onerror = () => reject(normalizeSqliteError(request.error))
+    transaction.onabort = () => reject(normalizeSqliteError(transaction.error))
+  })
+}
+
+async function writeStoredH5Database(bytes: Uint8Array) {
+  const database = await getH5StorageDb()
+  const buffer = bytes.buffer.slice(
+    bytes.byteOffset,
+    bytes.byteOffset + bytes.byteLength
+  )
+  await new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction(H5_IDB_STORE, "readwrite")
+    const store = transaction.objectStore(H5_IDB_STORE)
+    store.put(buffer, H5_IDB_KEY)
+
+    transaction.oncomplete = () => resolve()
+    transaction.onabort = () => reject(normalizeSqliteError(transaction.error))
+    transaction.onerror = () => reject(normalizeSqliteError(transaction.error))
+  })
 }
 
 export const sqliteDriver: SqliteDriver = {
