@@ -1,6 +1,7 @@
 import type { CodegGateway, EventChannelConnection, RelaySessionInfo } from "./types"
 import { toErrorMessage, toResponseErrorMessage } from "./error"
 import { buildRemoteInstanceKey } from "@/services/realtime/instance-key"
+import { decodeSocketPayload } from "./socketPayload"
 
 function getHeaders(session?: RelaySessionInfo | null): HeadersInit {
   const headers: Record<string, string> = {
@@ -120,11 +121,7 @@ export class RelayGateway implements CodegGateway {
         opened = false
       })
       ws.addEventListener("message", (event) => {
-        try {
-          onEvent(JSON.parse(String(event.data)))
-        } catch {
-          onEvent(event.data)
-        }
+        onEvent(decodeSocketPayload(event.data))
       })
       return {
         isOpen: () => opened && ws.readyState === WebSocket.OPEN,
@@ -148,9 +145,10 @@ export class RelayGateway implements CodegGateway {
       }
     }
 
-    const socketTask = await uni.connectSocket({
+    const socketTask: any = uni.connectSocket({
       url: `${this.relayUrl.replace(/^http/, "ws").replace(/\/$/, "")}/v1/events`,
       header: getHeaders(this.session),
+      complete: () => {},
     })
     let opened = false
     const readyCallbacks = new Set<() => void>()
@@ -171,11 +169,7 @@ export class RelayGateway implements CodegGateway {
       opened = false
     })
     socketTask.onMessage((msg: { data: unknown }) => {
-      try {
-        onEvent(JSON.parse(String(msg.data)))
-      } catch {
-        onEvent(msg.data)
-      }
+      onEvent(decodeSocketPayload(msg.data))
     })
 
     return {

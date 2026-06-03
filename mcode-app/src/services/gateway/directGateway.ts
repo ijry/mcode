@@ -1,6 +1,7 @@
 import type { CodegGateway, EventChannelConnection } from "./types"
 import { toErrorMessage, toResponseErrorMessage } from "./error"
 import { buildRemoteInstanceKey } from "@/services/realtime/instance-key"
+import { decodeSocketPayload } from "./socketPayload"
 
 function getBaseUrl(baseUrl: string): string {
   return baseUrl.replace(/\/$/, "")
@@ -102,11 +103,7 @@ export class DirectGateway implements CodegGateway {
         opened = false
       })
       ws.addEventListener("message", (event) => {
-        try {
-          onEvent(JSON.parse(String(event.data)))
-        } catch {
-          onEvent(event.data)
-        }
+        onEvent(decodeSocketPayload(event.data))
       })
       return {
         isOpen: () => opened && ws.readyState === WebSocket.OPEN,
@@ -130,11 +127,10 @@ export class DirectGateway implements CodegGateway {
       }
     }
 
-    const socketTask = await uni.connectSocket({
+    const socketTask: any = uni.connectSocket({
       url: `${getBaseUrl(this.baseUrl).replace(/^http/, "ws")}/ws/events`,
-      header: {
-        authorization: `Bearer ${getToken()}`,
-      },
+      protocols: ["codeg-events", encodeTokenProtocol(getToken())],
+      complete: () => {},
     })
     let opened = false
     const readyCallbacks = new Set<() => void>()
@@ -155,11 +151,7 @@ export class DirectGateway implements CodegGateway {
       opened = false
     })
     socketTask.onMessage((msg: { data: unknown }) => {
-      try {
-        onEvent(JSON.parse(String(msg.data)))
-      } catch {
-        onEvent(msg.data)
-      }
+      onEvent(decodeSocketPayload(msg.data))
     })
 
     return {

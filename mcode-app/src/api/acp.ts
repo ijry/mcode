@@ -18,6 +18,7 @@ class AcpApiClient {
   private eventListeners: Map<string, Set<(event: EventEnvelope) => void>>
   private eventSource: any = null
   private pollingStarted = false
+  private ensureBridgePromises = new Map<string, Promise<any>>()
   private realtimeBridges = new Map<string, {
     descriptor: RemoteInstanceDescriptor
     transport: RealtimeTransport
@@ -273,6 +274,7 @@ class AcpApiClient {
     if (this.pollingStarted) return
     this.pollingStarted = true
     const poll = async () => {
+      let shouldContinue = true
       try {
         const events = await this.request("/acp_poll_events", {})
         if (Array.isArray(events)) {
@@ -282,10 +284,21 @@ class AcpApiClient {
         }
       } catch (error) {
         console.error("轮询事件失败:", error)
+        const message = error instanceof Error ? error.message : String(error || "")
+        if (
+          message.includes("acp_poll_events") &&
+          message.includes("not available in web mode")
+        ) {
+          shouldContinue = false
+          this.pollingStarted = false
+          this.eventSource = null
+        }
       }
 
       // 继续轮询
-      setTimeout(poll, 1000)
+      if (shouldContinue) {
+        setTimeout(poll, 1000)
+      }
     }
 
     poll()
@@ -324,6 +337,20 @@ class AcpApiClient {
       return this.realtimeBridges.get(targetKey)!
     }
 
+    // 防止并发调用导致 uni.connectSocket 重复创建（Android 会报 "same name already open"）
+    const existing = this.ensureBridgePromises.get(targetKey)
+    if (existing) return existing
+
+    const promise = this.createRealtimeBridge(targetKey, descriptor)
+    this.ensureBridgePromises.set(targetKey, promise)
+    try {
+      return await promise
+    } finally {
+      this.ensureBridgePromises.delete(targetKey)
+    }
+  }
+
+  private async createRealtimeBridge(targetKey: string, descriptor: RemoteInstanceDescriptor) {
     const auth = useAuthStore()
     const gateway = auth.gateway()
     let eventConnection: Awaited<ReturnType<typeof gateway.connectEvents>> | null = null
