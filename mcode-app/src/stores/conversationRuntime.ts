@@ -1,5 +1,5 @@
 import { defineStore } from "pinia"
-import { ref } from "vue"
+import { reactive, ref } from "vue"
 import type {
   MessageTurn,
   LiveMessage,
@@ -44,7 +44,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
    */
   function getOrCreateSession(conversationId: number): RuntimeSession {
     if (!sessions.value.has(conversationId)) {
-      sessions.value.set(conversationId, {
+      sessions.value.set(conversationId, reactive({
         conversationId,
         localTurns: [],
         optimisticTurns: [],
@@ -58,7 +58,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
           totalTokens: 0,
           turnCount: 0,
         },
-      })
+      }) as RuntimeSession)
     }
     return sessions.value.get(conversationId)!
   }
@@ -157,20 +157,30 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     }
     session.status = "thinking"
 
-    // 找到或创建对应类型的内容部分
-    let part = session.liveMessage.content.find((p) => p.type === contentType)
-    if (!part) {
-      part = buildEmptyContentPart(contentType)
-      session.liveMessage.content.push(part)
-    }
+    const currentLiveMessage = session.liveMessage
+    const nextContent = currentLiveMessage.content.slice()
+    const partIndex = nextContent.findIndex((p) => p.type === contentType)
+    const part = partIndex >= 0
+      ? cloneContentPart(nextContent[partIndex])
+      : buildEmptyContentPart(contentType)
 
-    // 追加内容
     if (contentType === "text") {
       part.text = (part.text || "") + delta
     } else if (contentType === "thinking") {
       part.thinking = (part.thinking || "") + delta
     } else if (contentType === "plan") {
       part.plan = parsePlanDelta(delta, (part.plan as Record<string, any> | undefined)?.steps)
+    }
+
+    if (partIndex >= 0) {
+      nextContent.splice(partIndex, 1, part)
+    } else {
+      nextContent.push(part)
+    }
+
+    session.liveMessage = {
+      ...currentLiveMessage,
+      content: nextContent,
     }
   }
 
@@ -252,44 +262,59 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
 
       case "tool_call":
         session.status = "running_tool"
-        // 添加工具调用
-        if (!session.liveMessage) {
-          session.liveMessage = {
-            role: "assistant",
-            content: [],
-            isStreaming: true,
-            timestamp: Date.now(),
-          }
+        const currentLiveMessage = session.liveMessage ?? {
+          role: "assistant" as const,
+          content: [],
+          isStreaming: true,
+          timestamp: Date.now(),
         }
-        session.liveMessage.content.push({
-          type: "tool_call",
-          tool_call: {
-            id: event.data.id,
-            name: event.data.name,
-            input: event.data.input,
-            status: "running",
-          },
-        })
+        session.liveMessage = {
+          ...currentLiveMessage,
+          content: [
+            ...currentLiveMessage.content,
+            {
+              type: "tool_call",
+              tool_call: {
+                id: event.data.id,
+                name: event.data.name,
+                input: event.data.input,
+                status: "running",
+              },
+            },
+          ],
+        }
         break
 
-      case "tool_call_update":
+      case "tool_call_update": {
         if (event.data.status === "error") {
           session.status = "error"
         } else {
           session.status = "running_tool"
         }
-        // 更新工具调用
-        if (session.liveMessage) {
-          const toolCall = session.liveMessage.content.find(
-            (p) => p.type === "tool_call" && p.tool_call?.id === event.data.id
-          )
-          if (toolCall && toolCall.tool_call) {
-            toolCall.tool_call.output = event.data.output
-            toolCall.tool_call.status = event.data.status
-            toolCall.tool_call.error = event.data.error
+        if (!session.liveMessage) break
+
+        const nextContent = session.liveMessage.content.map((part) => {
+          if (part.type !== "tool_call" || part.tool_call?.id !== event.data.id) {
+            return part
           }
+          const currentToolCall = part.tool_call
+          if (!currentToolCall) return part
+          return {
+            ...part,
+            tool_call: {
+              ...currentToolCall,
+              output: event.data.output,
+              status: event.data.status,
+              error: event.data.error,
+            },
+          }
+        })
+        session.liveMessage = {
+          ...session.liveMessage,
+          content: nextContent,
         }
         break
+      }
 
       case "status_changed":
         session.status = event.data.status
@@ -325,13 +350,37 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     connectionSessionManager.touchConversation(conversationId)
 
     try {
-      const managed = await connectionSessionManager.connectConversation({
-        conversationId,
-        agentType,
-        workingDir,
-        sessionId,
-        instanceKey: auth.currentRemoteInstance().instanceKey,
-      })
+      const instanceKey = auth.currentRemoteInstance().instanceKey
+      let managed = connectionSessionManager.getByConversationId(conversationId)
+
+      if (!managed) {
+        let snapshot: any = null
+        try {
+          snapshot = await acpApi.acpGetSessionSnapshotByConversation(conversationId)
+        } catch {}
+        const snapshotConnectionId = firstString(snapshot?.connection_id, snapshot?.connectionId)
+        if (snapshotConnectionId) {
+          managed = connectionSessionManager.adoptConversation({
+            conversationId,
+            instanceKey,
+            connectionId: snapshotConnectionId,
+            agentType,
+            sessionId: firstString(snapshot?.external_id, snapshot?.externalId) || null,
+            status: normalizeConnectionInfoStatus(snapshot?.status),
+          })
+        }
+      }
+
+      if (!managed) {
+        managed = await connectionSessionManager.connectConversation({
+          conversationId,
+          agentType,
+          workingDir,
+          sessionId,
+          instanceKey,
+        })
+      }
+
       session.connectionId = managed.connectionId
       session.instanceKey = managed.instanceKey
       connections.value.set(managed.connectionId, managed.connection)
@@ -505,6 +554,10 @@ function cloneContentParts(parts: ContentPart[]): ContentPart[] {
   return JSON.parse(JSON.stringify(parts)) as ContentPart[]
 }
 
+function cloneContentPart(part: ContentPart): ContentPart {
+  return JSON.parse(JSON.stringify(part)) as ContentPart
+}
+
 function buildEmptyContentPart(contentType: string): ContentPart {
   if (contentType === "thinking") {
     return { type: "thinking", thinking: "" }
@@ -638,6 +691,15 @@ function stringifyToolCallOutput(output: any) {
     }
   }
   return undefined
+}
+
+function normalizeConnectionInfoStatus(value: unknown): ConnectionInfo["status"] {
+  const status = firstString(value)
+  if (status === "connecting") return "connecting"
+  if (status === "error") return "error"
+  if (status === "disconnected") return "disconnected"
+  if (status === "prompting") return "prompting"
+  return "connected"
 }
 
 function extractToolCallError(output: any) {

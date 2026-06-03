@@ -21,6 +21,34 @@ function getCurrentInstanceKey() {
 }
 
 export const connectionSessionManager = {
+  adoptConversation(input: {
+    conversationId: number
+    instanceKey?: string
+    connectionId: string
+    agentType: string
+    sessionId?: string | null
+    status?: ConnectionInfo["status"]
+  }) {
+    const instanceKey = input.instanceKey || getCurrentInstanceKey()
+    const managed: ManagedConversationConnection = {
+      conversationId: input.conversationId,
+      instanceKey,
+      connectionId: input.connectionId,
+      connection: {
+        id: input.connectionId,
+        agentType: input.agentType,
+        sessionId: input.sessionId || "",
+        status: input.status || "connected",
+      },
+      externalId: input.sessionId || null,
+      status: "connected",
+      lastTouchedAt: Date.now(),
+    }
+    byConversationId.set(input.conversationId, managed)
+    byConnectionId.set(input.connectionId, managed)
+    return managed
+  },
+
   async connectConversation(input: {
     conversationId: number
     agentType: string

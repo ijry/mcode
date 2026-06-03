@@ -721,8 +721,10 @@ async function loadConversation() {
     )
 
     let snapshot: any = null
+    let snapshotFromConversation = false
     try {
       snapshot = await acpApi.acpGetSessionSnapshotByConversation(conversationId.value)
+      snapshotFromConversation = Boolean(snapshot)
     } catch (error) {
       console.warn("acp_get_session_snapshot_by_conversation failed", error)
     }
@@ -735,7 +737,11 @@ async function loadConversation() {
     }
     if (snapshot) {
       const snapshotSessionId = firstString(snapshot.external_id, snapshot.externalId)
-      if (snapshotSessionId) {
+      const trustSnapshotMetadata =
+        Boolean(snapshotFromConversation) ||
+        Boolean(resumeSessionId) ||
+        Boolean(managed?.externalId)
+      if (snapshotSessionId && trustSnapshotMetadata) {
         try {
           await persistConversationDetailSnapshot({
             instanceKey,
@@ -759,39 +765,31 @@ async function loadConversation() {
         }
       }
       runtime.hydrateLiveSnapshot(conversationId.value, snapshot)
-      if (!hasHotRuntime) {
-        const remoteStatus = firstString(snapshot.status)
-        const shouldBackfillRemoteTurns =
-          runtimeSession.localTurns.length === 0 ||
-          remoteStatus === "connected" ||
-          remoteStatus === "prompting" ||
-          Array.isArray(snapshot.active_tool_calls) && snapshot.active_tool_calls.length > 0 ||
-          Boolean(snapshot.live_message)
-        if (shouldBackfillRemoteTurns) {
-          try {
-            const liveDetail = await auth.gateway().call<any>("get_folder_conversation", {
-              conversationId: conversationId.value,
-            })
-            await persistConversationDetailSnapshot({
-              instanceKey,
-              conversationId: conversationId.value,
-              detail: liveDetail,
-              fallbackFolderId: folderId.value,
-            })
-            const refreshedTurns = await getNewestTurns(conversationId.value, 10)
-            if (refreshedTurns.length > 0) {
-              runtimeSession.localTurns = refreshedTurns
-                .slice()
-                .reverse()
-                .map(mapPersistedTurnToMessage)
-              oldestLoadedCursor.value =
-                cachedViewState?.oldestLoadedSeq ?? getOldestCursorFromPersistedTurns(refreshedTurns)
-              hasMoreHistory.value = cachedViewState?.hasMoreHistory ?? refreshedTurns.length >= 10
-            }
-          } catch (error) {
-            console.warn("remote conversation catch-up skipped", error)
-          }
+    }
+    if (!hasHotRuntime) {
+      try {
+        const liveDetail = await auth.gateway().call<any>("get_folder_conversation", {
+          conversationId: conversationId.value,
+        })
+        await persistConversationDetailSnapshot({
+          instanceKey,
+          conversationId: conversationId.value,
+          detail: liveDetail,
+          fallbackFolderId: folderId.value,
+        })
+        const refreshedTurns = await getNewestTurns(conversationId.value, 10)
+        if (refreshedTurns.length > 0) {
+          runtimeSession.localTurns = refreshedTurns
+            .slice()
+            .reverse()
+            .map(mapPersistedTurnToMessage)
+          oldestLoadedCursor.value =
+            cachedViewState?.oldestLoadedSeq ?? getOldestCursorFromPersistedTurns(refreshedTurns)
+          hasMoreHistory.value =
+            cachedViewState?.hasMoreHistory ?? refreshedTurns.length >= 10
         }
+      } catch (error) {
+        console.warn("remote conversation catch-up skipped", error)
       }
     }
     const availableCommands = Array.isArray(snapshot?.available_commands)
