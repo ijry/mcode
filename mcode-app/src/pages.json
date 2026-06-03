@@ -29,6 +29,13 @@
       }
     },
     {
+      "path": "pages/todos/index",
+      "style": {
+        "navigationBarTitleText": "待办",
+        "enablePullDownRefresh": false
+      }
+    },
+    {
       "path": "pages/profile/index",
       "style": {
         "navigationBarTitleText": "我的",
@@ -49,6 +56,10 @@
       {
         "pagePath": "pages/conversations/index",
         "text": "会话"
+      },
+      {
+        "pagePath": "pages/todos/index",
+        "text": "待办"
       },
       {
         "pagePath": "pages/profile/index",
