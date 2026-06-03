@@ -39,6 +39,10 @@
         enhanced
         show-scrollbar="false"
       >
+        <view v-if="loading && filteredConnectionGroups.length === 0" class="inline-loading">
+          <up-loading-icon color="#2979ff" size="28"></up-loading-icon>
+          <text class="inline-loading__text">加载中...</text>
+        </view>
         <view v-if="!loading && filteredConnectionGroups.length === 0" class="empty-fullpage">
           <up-empty mode="list" text="暂无分组会话"></up-empty>
         </view>
@@ -120,7 +124,11 @@
           <text class="history-mode-title u-line-1">{{ historyGroupTitle }}</text>
         </view>
 
-        <view v-if="!loading && projects.length === 0" class="empty-fullpage">
+        <view v-if="historyLoading && projects.length === 0" class="inline-loading">
+          <up-loading-icon color="#2979ff" size="28"></up-loading-icon>
+          <text class="inline-loading__text">加载中...</text>
+        </view>
+        <view v-if="!historyLoading && projects.length === 0" class="empty-fullpage">
           <up-empty mode="list" text="暂无历史会话"></up-empty>
         </view>
 
@@ -181,7 +189,6 @@
               :key="conv.id"
               class="conv-card"
               @click="openConversation(conv, historyGroupKey)"
-              @longpress="showConversationMenu(conv)"
             >
               <view class="conv-card__icon">
                 <up-icon name="chat-fill" size="17" color="#2979ff"></up-icon>
@@ -198,7 +205,12 @@
                   <text class="conv-card__time">{{ formatTime(conv.updated_at) }}</text>
                 </view>
               </view>
-              <up-icon name="arrow-right" size="12" color="#c0c4cc"></up-icon>
+              <view class="conv-card__actions">
+                <view class="conv-card__menu" @click.stop="showConversationMenu(conv)">
+                  <up-icon name="more-dot-fill" size="16" color="#909399"></up-icon>
+                </view>
+                <up-icon name="arrow-right" size="12" color="#c0c4cc"></up-icon>
+              </view>
             </view>
           </view>
         </template>
@@ -307,7 +319,6 @@
       @close="showActionSheet = false"
     ></up-action-sheet>
 
-    <up-loading-page :loading="loading" loading-text="加载中..."></up-loading-page>
   </view>
 </template>
 
@@ -320,6 +331,7 @@ import { createGateway } from "@/services/gateway"
 import { toErrorMessage } from "@/services/gateway/error"
 import { ensureConversationSchema } from "@/services/db/migrations"
 import {
+  getConversationSummaryById,
   listConversationSummaries,
   upsertConversationSummary,
   type ConversationSummaryRecord,
@@ -349,6 +361,10 @@ const cateTabHeight = ref("calc(100vh - 160rpx)")
 const showHistoryPanel = ref(false)
 const historyGroupKey = ref("")
 const historyGroupTitle = ref("")
+const historyLoading = ref(false)
+let overviewLoadPromise: Promise<void> | null = null
+let lastOverviewLoadedAt = 0
+const historyLoadPromiseMap = new Map<string, Promise<void>>()
 
 interface Project {
   id: number
@@ -516,7 +532,6 @@ function onTabChange(idx: number) {
 }
 
 onMounted(() => {
-  void loadOverviewData()
   syncCateTabHeight()
 })
 
@@ -537,6 +552,22 @@ onShow(() => {
 })
 
 async function loadOverviewData() {
+  if (overviewLoadPromise) {
+    return await overviewLoadPromise
+  }
+  if (connectionGroups.value.length > 0 && Date.now() - lastOverviewLoadedAt < 15000) {
+    return
+  }
+
+  overviewLoadPromise = loadOverviewDataInternal()
+  try {
+    await overviewLoadPromise
+  } finally {
+    overviewLoadPromise = null
+  }
+}
+
+async function loadOverviewDataInternal() {
   loading.value = true
   try {
     const connected = getConnectedConnections()
@@ -553,6 +584,7 @@ async function loadOverviewData() {
       if (current) {
         projects.value = current.projects
         if (current.projects.length > 0) currentTab.value = 0
+        void ensureHistoryProjectsLoaded(current)
       } else {
         showHistoryPanel.value = false
         historyGroupKey.value = ""
@@ -562,6 +594,7 @@ async function loadOverviewData() {
     } else {
       projects.value = []
     }
+    lastOverviewLoadedAt = Date.now()
   } catch (error) {
     const msg = toErrorMessage(error)
     uni.showToast({ title: `加载失败: ${msg}`, icon: "none", duration: 3000 })
@@ -590,26 +623,11 @@ async function loadConnectionGroup(conn: ConnectionItem): Promise<ConnectionGrou
   const folders = normalizeList(foldersRaw) as Project[]
   const tabsRaw = await gateway.call<unknown>("list_opened_tabs")
   const tabs = normalizeList(tabsRaw) as OpenedTabItem[]
-  const localConversations = await loadLocalConversationSummaries(
+  const localConversations = await loadLocalConversationSummariesForTabs(
     descriptor.instanceKey,
-    folders
+    tabs
   )
-
-  if (localConversations) {
-    const group = buildConnectionGroup(conn, folders, tabs, localConversations)
-    void refreshConnectionGroupConversations(
-      conn,
-      gateway,
-      descriptor.instanceKey,
-      folders,
-      tabs
-    )
-    return group
-  }
-
-  const remoteConversations = await fetchRemoteConversations(gateway, folders)
-  await persistConversationSummaries(descriptor.instanceKey, remoteConversations)
-  return buildConnectionGroup(conn, folders, tabs, remoteConversations)
+  return buildConnectionGroup(conn, folders, tabs, localConversations)
 }
 
 function buildConnectionGroup(
@@ -695,6 +713,33 @@ async function loadLocalConversationSummaries(
   }
 }
 
+async function loadLocalConversationSummariesForTabs(
+  instanceKey: string,
+  tabs: OpenedTabItem[]
+): Promise<Conversation[]> {
+  try {
+    await ensureConversationSchema()
+    const conversationIds = Array.from(
+      new Set(
+        tabs
+          .map((tab) => Number(tab.conversation_id || 0))
+          .filter((conversationId) => conversationId > 0)
+      )
+    )
+    if (conversationIds.length === 0) return []
+
+    const rows = await Promise.all(
+      conversationIds.map((conversationId) => getConversationSummaryById(instanceKey, conversationId))
+    )
+    return rows
+      .filter((row): row is ConversationSummaryRecord => Boolean(row))
+      .map(mapSummaryRecordToConversation)
+  } catch (error) {
+    console.warn("load local tab conversation summaries skipped:", error)
+    return []
+  }
+}
+
 async function persistConversationSummaries(
   instanceKey: string,
   conversations: Conversation[]
@@ -711,22 +756,6 @@ async function persistConversationSummaries(
   }
 }
 
-async function refreshConnectionGroupConversations(
-  conn: ConnectionItem,
-  gateway: Awaited<ReturnType<typeof createConnectionGateway>>,
-  instanceKey: string,
-  folders: Project[],
-  tabs: OpenedTabItem[]
-) {
-  try {
-    const remoteConversations = await fetchRemoteConversations(gateway, folders)
-    await persistConversationSummaries(instanceKey, remoteConversations)
-    replaceConnectionGroup(buildConnectionGroup(conn, folders, tabs, remoteConversations))
-  } catch (error) {
-    console.warn("refresh connection group conversations skipped:", error)
-  }
-}
-
 function replaceConnectionGroup(nextGroup: ConnectionGroup) {
   const index = connectionGroups.value.findIndex((group) => group.key === nextGroup.key)
   if (index < 0) return
@@ -736,6 +765,24 @@ function replaceConnectionGroup(nextGroup: ConnectionGroup) {
   if (showHistoryPanel.value && historyGroupKey.value === nextGroup.key) {
     projects.value = nextGroup.projects
   }
+}
+
+function applyHistoryProjects(
+  groupKey: string,
+  folders: Project[],
+  conversations: Conversation[]
+) {
+  const nextProjects = folders.map((folder) => ({
+    ...folder,
+    conversations: conversations.filter((conv) => conv.folder_id === folder.id),
+  }))
+  const current = connectionGroups.value.find((group) => group.key === groupKey)
+  if (!current) return
+
+  replaceConnectionGroup({
+    ...current,
+    projects: nextProjects,
+  })
 }
 
 function mapSummaryRecordToConversation(record: ConversationSummaryRecord): Conversation {
@@ -1011,6 +1058,7 @@ function openHistoryPanel(group: ConnectionGroup) {
   currentTab.value = 0
   showHistoryPanel.value = true
   syncCateTabHeight()
+  void ensureHistoryProjectsLoaded(group)
 }
 
 function closeHistoryPanel() {
@@ -1018,6 +1066,51 @@ function closeHistoryPanel() {
   historyGroupKey.value = ""
   historyGroupTitle.value = ""
   projects.value = []
+}
+
+async function ensureHistoryProjectsLoaded(group: ConnectionGroup) {
+  if (group.projects.some((project) => Array.isArray(project.conversations))) {
+    return
+  }
+
+  const key = group.key
+  if (historyLoadPromiseMap.has(key)) {
+    await historyLoadPromiseMap.get(key)
+    return
+  }
+
+  const task = (async () => {
+    historyLoading.value = true
+    try {
+      const conn = getConnectedConnections().find((item) => connectionKey(item) === key)
+      if (!conn) return
+
+      const gateway = await createConnectionGateway(conn)
+      const descriptor = gateway.getRemoteInstanceDescriptor()
+      const folders = group.projects.map((project) => ({
+        id: project.id,
+        name: project.name,
+        path: project.path,
+      }))
+
+      const localConversations = await loadLocalConversationSummaries(descriptor.instanceKey, folders)
+      if (localConversations) {
+        applyHistoryProjects(key, folders, localConversations)
+      }
+
+      const remoteConversations = await fetchRemoteConversations(gateway, folders)
+      await persistConversationSummaries(descriptor.instanceKey, remoteConversations)
+      applyHistoryProjects(key, folders, remoteConversations)
+    } catch (error) {
+      console.warn("load history projects skipped:", error)
+    } finally {
+      historyLoading.value = false
+      historyLoadPromiseMap.delete(key)
+    }
+  })()
+
+  historyLoadPromiseMap.set(key, task)
+  await task
 }
 
 function openLiveSession(card: LiveSessionCard, groupKey?: string) {
@@ -1473,6 +1566,20 @@ function formatTime(time?: string): string {
   border-radius: 18rpx;
 }
 
+.inline-loading {
+  min-height: 320rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16rpx;
+}
+
+.inline-loading__text {
+  font-size: 24rpx;
+  color: #909399;
+}
+
 .history-mode-bar {
   display: flex;
   align-items: center;
@@ -1687,6 +1794,22 @@ function formatTime(time?: string): string {
   font-size: 20rpx;
   color: #c0c4cc;
   line-height: 1.2;
+}
+
+.conv-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  flex-shrink: 0;
+}
+
+.conv-card__menu {
+  width: 44rpx;
+  height: 44rpx;
+  border-radius: 12rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 /* ===== 空会话 ===== */

@@ -1,7 +1,26 @@
 import { TABLE_SQL } from "./schema"
 import { sqliteDriver } from "./sqlite"
 
+let schemaReady = false
+let schemaPromise: Promise<void> | null = null
+
 export async function ensureConversationSchema() {
+  if (schemaReady) return
+  if (!schemaPromise) {
+    schemaPromise = ensureConversationSchemaInternal()
+      .then(() => {
+        schemaReady = true
+      })
+      .finally(() => {
+        if (!schemaReady) {
+          schemaPromise = null
+        }
+      })
+  }
+  await schemaPromise
+}
+
+async function ensureConversationSchemaInternal() {
   await sqliteDriver.open()
   await sqliteDriver.execute(TABLE_SQL.remoteInstances)
   await sqliteDriver.execute(TABLE_SQL.folders)

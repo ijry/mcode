@@ -31,7 +31,6 @@
         :key="index"
         class="connection-item"
         @click="activateConnection(conn)"
-        @longpress="showConnectionMenu(conn, index)"
       >
         <view
           class="connection-icon"
@@ -164,6 +163,8 @@ import { useAuthStore } from "@/stores/auth"
 import { createGateway } from "@/services/gateway"
 import type { RelaySessionInfo } from "@/services/gateway"
 
+declare const plus: any
+
 const auth = useAuthStore()
 const showAddPopup = ref(false)
 const subsectionIndex = ref(0)
@@ -172,8 +173,10 @@ const showActionSheet = ref(false)
 const currentConnectionIndex = ref(-1)
 const connectedMap = ref<Record<string, boolean>>({})
 const onlineMap = ref<Record<string, boolean>>({})
-const statusSocketMap = new Map<string, UniApp.SocketTask>()
+type StatusSocket = Pick<UniApp.SocketTask, "onOpen" | "onClose" | "onError" | "close">
+const statusSocketMap = new Map<string, StatusSocket>()
 const reconnectTimerMap = new Map<string, ReturnType<typeof setTimeout>>()
+const stoppedWatcherKeys = new Set<string>()
 
 interface ConnectionItem {
   name: string
@@ -622,19 +625,26 @@ async function startOnlineWatcher(conn: ConnectionItem) {
 
   try {
     const socketTask = await createStatusSocket(conn)
+    stoppedWatcherKeys.delete(key)
     statusSocketMap.set(key, socketTask)
+    let disconnected = false
+    const handleDisconnect = () => {
+      if (disconnected) return
+      disconnected = true
+      statusSocketMap.delete(key)
+      setOnlineStatus(key, false)
+      if (stoppedWatcherKeys.has(key)) {
+        stoppedWatcherKeys.delete(key)
+        return
+      }
+      scheduleReconnect(key)
+    }
     socketTask.onOpen(() => {
       setOnlineStatus(key, true)
       clearReconnectTimer(key)
     })
-    socketTask.onClose(() => {
-      statusSocketMap.delete(key)
-      setOnlineStatus(key, false)
-      scheduleReconnect(key)
-    })
-    socketTask.onError(() => {
-      setOnlineStatus(key, false)
-    })
+    socketTask.onClose(handleDisconnect)
+    socketTask.onError(handleDisconnect)
   } catch {
     setOnlineStatus(key, false)
     scheduleReconnect(key)
@@ -645,10 +655,13 @@ function stopOnlineWatcher(key: string) {
   clearReconnectTimer(key)
   const socketTask = statusSocketMap.get(key)
   if (socketTask) {
+    stoppedWatcherKeys.add(key)
     try {
       socketTask.close({ code: 1000, reason: "manual_disconnect" })
     } catch {}
     statusSocketMap.delete(key)
+  } else {
+    stoppedWatcherKeys.delete(key)
   }
 }
 
@@ -684,26 +697,35 @@ function setOnlineStatus(key: string, online: boolean) {
   onlineMap.value = next
 }
 
-async function createStatusSocket(conn: ConnectionItem): Promise<UniApp.SocketTask> {
+async function createStatusSocket(conn: ConnectionItem): Promise<StatusSocket> {
   if (conn.mode === "direct") {
     const token = conn.directToken || ""
+    const url = `${normalizeBaseUrl(conn.url).replace(/^http/, "ws")}/ws/events`
+    if (isH5WebSocketRuntime()) {
+      return createH5StatusSocket(url, token)
+    }
     return uni.connectSocket({
-      url: `${normalizeBaseUrl(conn.url).replace(/^http/, "ws")}/ws/events?token=${encodeURIComponent(token)}`,
+      url,
+      protocols: ["codeg-events", encodeTokenProtocol(token)],
       complete: () => {},
-    }) as UniApp.SocketTask
+    }) as StatusSocket
   }
 
   const session = await ensureRelaySession(conn)
   if (!session?.accessToken) {
     throw new Error("missing relay session")
   }
+  const url = `${normalizeBaseUrl(conn.url).replace(/^http/, "ws")}/v1/events`
+  if (isH5WebSocketRuntime()) {
+    return createH5StatusSocket(url, session.accessToken)
+  }
   return uni.connectSocket({
-    url: `${normalizeBaseUrl(conn.url).replace(/^http/, "ws")}/v1/events`,
+    url,
     header: {
       authorization: `Bearer ${session.accessToken}`,
     },
     complete: () => {},
-  }) as UniApp.SocketTask
+  }) as StatusSocket
 }
 
 async function probeConnectionOnline(conn: ConnectionItem): Promise<boolean> {
@@ -782,6 +804,43 @@ async function ensureRelaySession(conn: ConnectionItem): Promise<RelaySessionInf
   conn.relaySession = session
   saveConnection(conn)
   return session
+}
+
+function isH5WebSocketRuntime() {
+  return typeof WebSocket !== "undefined" && typeof plus === "undefined"
+}
+
+function encodeTokenProtocol(token: string) {
+  const utf8 = new TextEncoder().encode(String(token || "").trim())
+  let binary = ""
+  utf8.forEach((byte) => {
+    binary += String.fromCharCode(byte)
+  })
+  return `codeg-token.${btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "")}`
+}
+
+function createH5StatusSocket(url: string, token: string): StatusSocket {
+  const socket = new WebSocket(url, ["codeg-events", encodeTokenProtocol(token)])
+  return {
+    onOpen(callback) {
+      socket.addEventListener("open", () => {
+        callback({ header: {} } as UniApp.OnSocketOpenCallbackResult)
+      })
+    },
+    onClose(callback) {
+      socket.addEventListener("close", () => {
+        callback({ errMsg: "close" })
+      })
+    },
+    onError(callback) {
+      socket.addEventListener("error", () => {
+        callback({ errMsg: "error" })
+      })
+    },
+    close(options?: { code?: number; reason?: string }) {
+      socket.close(options?.code, options?.reason)
+    },
+  }
 }
 
 function isCurrentConnection(conn: ConnectionItem): boolean {

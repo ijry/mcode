@@ -549,6 +549,9 @@ onLoad((options: any) => {
 
 onUnload(() => {
   persistDetailRuntimeState()
+  if (conversationId.value) {
+    runtime.clearSession(conversationId.value)
+  }
 })
 
 watch(
@@ -570,6 +573,17 @@ watch(
 
 async function loadConversation() {
   loading.value = true
+  let initialLoadFinished = false
+  const finishInitialLoad = () => {
+    if (initialLoadFinished) return
+    initialLoadFinished = true
+    loading.value = false
+    nextTick(() => {
+      measureMessageListHeight()
+      scrollToBottom(true)
+      hasInitialBottomScroll.value = true
+    })
+  }
   try {
     const runtimeSession = runtime.getOrCreateSession(conversationId.value)
     const instanceKey = auth.currentRemoteInstance().instanceKey
@@ -600,7 +614,8 @@ async function loadConversation() {
     let remoteDetail: any = null
     currentAgentType.value = normalizeAgentType(agentType)
 
-    if (!managed && !resumeSessionId) {
+    const hydrateRemoteMetadata = async () => {
+      if (managed || resumeSessionId || remoteDetail) return
       try {
         const gateway = auth.gateway()
         remoteDetail = await gateway.call<any>("get_folder_conversation", {
@@ -636,6 +651,7 @@ async function loadConversation() {
       } else if (persistedRuntime?.scrollAnchor) {
         scrollIntoView.value = persistedRuntime.scrollAnchor
       }
+      finishInitialLoad()
     } else if (localTurns.length > 0) {
       runtimeSession.localTurns = localTurns
         .slice()
@@ -649,7 +665,9 @@ async function loadConversation() {
       } else if (persistedRuntime?.scrollAnchor) {
         scrollIntoView.value = persistedRuntime.scrollAnchor
       }
+      finishInitialLoad()
     } else {
+      await hydrateRemoteMetadata()
       const result = remoteDetail || await auth.gateway().call<any>("get_folder_conversation", {
         conversationId: conversationId.value,
       })
@@ -691,8 +709,10 @@ async function loadConversation() {
         hasMoreHistory.value =
           cachedViewState?.hasMoreHistory ?? fallbackTurns.length > visibleTurns.length
       }
+      finishInitialLoad()
     }
 
+    await hydrateRemoteMetadata()
     const conn = await runtime.connect(
       conversationId.value,
       agentType,
@@ -792,12 +812,7 @@ async function loadConversation() {
     const message = toErrorMessage(error)
     uni.showToast({ title: `加载失败: ${message}`, icon: "none", duration: 3000 })
   } finally {
-    loading.value = false
-    nextTick(() => {
-      measureMessageListHeight()
-      scrollToBottom(true)
-      hasInitialBottomScroll.value = true
-    })
+    finishInitialLoad()
   }
 }
 
