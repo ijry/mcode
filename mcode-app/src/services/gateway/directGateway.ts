@@ -2,6 +2,7 @@ import type { CodegGateway, EventChannelConnection } from "./types"
 import { toErrorMessage, toResponseErrorMessage } from "./error"
 import { buildRemoteInstanceKey } from "@/services/realtime/instance-key"
 import { decodeSocketPayload } from "./socketPayload"
+import { buildWebSocketProtocols } from "./wsProtocol"
 
 function getBaseUrl(baseUrl: string): string {
   return baseUrl.replace(/\/$/, "")
@@ -16,15 +17,6 @@ function isH5WebSocketRuntime() {
   return true
   // #endif
   return false
-}
-
-function encodeTokenProtocol(token: string) {
-  const utf8 = new TextEncoder().encode(token.trim())
-  let binary = ""
-  utf8.forEach((byte) => {
-    binary += String.fromCharCode(byte)
-  })
-  return `codeg-token.${btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "")}`
 }
 
 export class DirectGateway implements CodegGateway {
@@ -82,7 +74,7 @@ export class DirectGateway implements CodegGateway {
     if (isH5WebSocketRuntime()) {
       const ws = new WebSocket(
         `${getBaseUrl(this.baseUrl).replace(/^http/, "ws")}/ws/events`,
-        ["codeg-events", encodeTokenProtocol(getToken())]
+        buildWebSocketProtocols(getToken())
       )
       let opened = false
       const readyCallbacks = new Set<() => void>()
@@ -129,7 +121,7 @@ export class DirectGateway implements CodegGateway {
 
     const socketTask: any = uni.connectSocket({
       url: `${getBaseUrl(this.baseUrl).replace(/^http/, "ws")}/ws/events`,
-      protocols: ["codeg-events", encodeTokenProtocol(getToken())],
+      protocols: buildWebSocketProtocols(getToken()),
       complete: () => {},
     })
     let opened = false

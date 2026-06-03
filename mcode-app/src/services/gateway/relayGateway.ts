@@ -2,6 +2,7 @@ import type { CodegGateway, EventChannelConnection, RelaySessionInfo } from "./t
 import { toErrorMessage, toResponseErrorMessage } from "./error"
 import { buildRemoteInstanceKey } from "@/services/realtime/instance-key"
 import { decodeSocketPayload } from "./socketPayload"
+import { buildWebSocketProtocols } from "./wsProtocol"
 
 function getHeaders(session?: RelaySessionInfo | null): HeadersInit {
   const headers: Record<string, string> = {
@@ -18,15 +19,6 @@ function isH5WebSocketRuntime() {
   return true
   // #endif
   return false
-}
-
-function encodeTokenProtocol(token: string) {
-  const utf8 = new TextEncoder().encode(token.trim())
-  let binary = ""
-  utf8.forEach((byte) => {
-    binary += String.fromCharCode(byte)
-  })
-  return `codeg-token.${btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "")}`
 }
 
 export class RelayGateway implements CodegGateway {
@@ -100,7 +92,7 @@ export class RelayGateway implements CodegGateway {
     if (isH5WebSocketRuntime()) {
       const ws = new WebSocket(
         `${this.relayUrl.replace(/^http/, "ws").replace(/\/$/, "")}/v1/events`,
-        ["codeg-events", encodeTokenProtocol(this.session.accessToken || "")]
+        buildWebSocketProtocols(this.session.accessToken || "")
       )
       let opened = false
       const readyCallbacks = new Set<() => void>()

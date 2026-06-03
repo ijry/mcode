@@ -162,6 +162,7 @@ import { ref, computed, onMounted, onUnmounted } from "vue"
 import { useAuthStore } from "@/stores/auth"
 import { createGateway } from "@/services/gateway"
 import type { RelaySessionInfo } from "@/services/gateway"
+import { buildWebSocketProtocols } from "@/services/gateway/wsProtocol"
 
 declare const plus: any
 
@@ -706,7 +707,7 @@ async function createStatusSocket(conn: ConnectionItem): Promise<StatusSocket> {
     }
     return uni.connectSocket({
       url,
-      protocols: ["codeg-events", encodeTokenProtocol(token)],
+      protocols: buildWebSocketProtocols(token),
       complete: () => {},
     }) as StatusSocket
   }
@@ -813,17 +814,8 @@ function isH5WebSocketRuntime() {
   return false
 }
 
-function encodeTokenProtocol(token: string) {
-  const utf8 = new TextEncoder().encode(String(token || "").trim())
-  let binary = ""
-  utf8.forEach((byte) => {
-    binary += String.fromCharCode(byte)
-  })
-  return `codeg-token.${btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "")}`
-}
-
 function createH5StatusSocket(url: string, token: string): StatusSocket {
-  const socket = new WebSocket(url, ["codeg-events", encodeTokenProtocol(token)])
+  const socket = new WebSocket(url, buildWebSocketProtocols(token))
   return {
     onOpen(callback) {
       socket.addEventListener("open", () => {
