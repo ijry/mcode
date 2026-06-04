@@ -1090,6 +1090,99 @@ function persistConnectedMap() {
   color: #303133;
 }
 
+.tutorial-entry {
+  margin-bottom: 24rpx;
+  padding: 22rpx 24rpx;
+  border-radius: 16rpx;
+  background-color: #f4f8ff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+
+  &:active {
+    background-color: #ebf2ff;
+  }
+}
+
+.tutorial-entry__copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+
+.tutorial-entry__title {
+  font-size: 28rpx;
+  font-weight: 600;
+  color: #2979ff;
+}
+
+.tutorial-entry__desc {
+  font-size: 24rpx;
+  color: #5c6b77;
+}
+
+.tutorial-popup {
+  width: 640rpx;
+  max-width: calc(100vw - 64rpx);
+  padding: 36rpx 30rpx;
+  background-color: #ffffff;
+  border-radius: 24rpx;
+}
+
+.tutorial-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 24rpx;
+}
+
+.tutorial-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 18rpx;
+}
+
+.tutorial-step__index {
+  width: 40rpx;
+  height: 40rpx;
+  border-radius: 999rpx;
+  background-color: #2979ff;
+  color: #ffffff;
+  font-size: 24rpx;
+  font-weight: 600;
+  line-height: 40rpx;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.tutorial-step__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+
+.tutorial-step__title {
+  font-size: 28rpx;
+  line-height: 1.6;
+  color: #303133;
+}
+
+.tutorial-step__desc {
+  font-size: 24rpx;
+  line-height: 1.6;
+  color: #606266;
+}
+
+.tutorial-step__link {
+  font-size: 24rpx;
+  line-height: 1.6;
+  color: #2979ff;
+  word-break: break-all;
+}
+
 .form-container {
   margin-top: 40rpx;
 }
