@@ -6,6 +6,9 @@ export interface CachedConversationViewState {
   oldestLoadedSeq?: number
   hasMoreHistory: boolean
   scrollAnchor?: string
+  scrollTop?: number
+  nearBottom?: boolean
+  anchorMessageId?: string
   composerText?: string
   draftQueue?: any[]
   attachments?: any[]

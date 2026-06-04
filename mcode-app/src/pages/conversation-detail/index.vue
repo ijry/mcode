@@ -16,8 +16,18 @@
         </view>
         <view class="toolbar-right">
           <ExpertMenu @select="handleCommandSelect" />
-          <view class="icon-btn" @click="openAttachActions">
-            <up-icon name="attach" size="20" color="#606266"></up-icon>
+          <view
+            class="icon-btn"
+            :class="{ 'icon-btn--disabled': loading }"
+            @click="refreshConversation"
+          >
+            <up-loading-icon
+              v-if="loading"
+              mode="circle"
+              size="18"
+              color="#606266"
+            ></up-loading-icon>
+            <up-icon v-else name="reload" size="20" color="#606266"></up-icon>
           </view>
           <view
             v-if="runtimeStatus === 'thinking' || runtimeStatus === 'running_tool'"
@@ -53,7 +63,7 @@
           <view
             v-for="(msg, index) in messages"
             :key="msg.id"
-            :id="`msg-${index}`"
+            :id="messageAnchorId(msg.id)"
             class="message-item"
           >
             <MessageBubble
@@ -71,7 +81,7 @@
             </text>
           </view>
 
-          <view class="list-bottom"></view>
+          <view id="message-list-bottom" class="list-bottom"></view>
         </view>
       </scroll-view>
 
@@ -195,6 +205,8 @@
               border="none"
               height="34rpx"
               :customStyle="{ backgroundColor: 'transparent', background: 'transparent', padding: '0', borderColor: 'transparent' }"
+              @linechange="handleComposerLayoutChange"
+              @keyboardheightchange="handleComposerLayoutChange"
             ></up-textarea>
           </view>
 
@@ -211,6 +223,16 @@
             <up-icon v-else name="arrow-up" size="22" color="#ffffff"></up-icon>
           </view>
         </view>
+      </view>
+
+      <view
+        v-if="showScrollToBottomFab"
+        class="scroll-bottom-fab"
+        :class="{ 'scroll-bottom-fab--stacked': planTasks.length > 0 }"
+        @click="handleScrollToBottomFab"
+      >
+        <up-icon name="arrow-down" size="18" color="#ffffff"></up-icon>
+        <view v-if="hasUnreadBelow" class="scroll-bottom-fab__dot"></view>
       </view>
 
       <view
@@ -398,7 +420,12 @@ const scrollTop = ref(0)
 const messageListHeight = ref(0)
 const messageListViewportHeight = ref(0)
 const hasInitialBottomScroll = ref(false)
+const isRestoringScroll = ref(false)
+const restoredInitialScroll = ref(false)
+const lastMeasuredScrollTop = ref(0)
+const anchorMessageId = ref("")
 const shouldAutoFollowBottom = ref(true)
+const hasUnreadBelow = ref(false)
 const loadingOlder = ref(false)
 const hasMoreHistory = ref(false)
 const oldestLoadedCursor = ref<number | null>(null)
@@ -560,6 +587,13 @@ const filteredPlanTasks = computed(() => {
   return planTasks.value.filter((task) => task.status === planStatusFilter.value)
 })
 
+const showScrollToBottomFab = computed(
+  () =>
+    messages.value.length > 0 &&
+    !shouldAutoFollowBottom.value &&
+    !isRestoringScroll.value
+)
+
 const planFilterItems = computed<
   Array<{ key: PlanTaskFilter; label: string; count: number }>
 >(() => [
@@ -602,10 +636,24 @@ onUnload(() => {
 })
 
 watch(
-  () => messages.value.length,
-  () => {
-    if (loading.value || !hasInitialBottomScroll.value || !shouldAutoFollowBottom.value) return
-    scrollToBottom()
+  () => messages.value.map((msg) => ({
+    id: msg.id,
+    role: msg.role,
+    status: msg.status,
+    content: JSON.stringify(msg.content || []),
+  })),
+  (nextMessages, prevMessages) => {
+    if (loading.value || !hasInitialBottomScroll.value || isRestoringScroll.value) return
+    const latest = nextMessages[nextMessages.length - 1]
+    const previousLatest = prevMessages?.[prevMessages.length - 1]
+    const hasAssistantDelta =
+      latest?.role === "assistant" &&
+      (!!latest?.content && latest.content !== previousLatest?.content || latest?.id !== previousLatest?.id)
+
+    if (!shouldAutoFollowBottom.value && hasAssistantDelta) {
+      hasUnreadBelow.value = true
+    }
+    scheduleViewportSync()
   }
 )
 
@@ -621,25 +669,42 @@ watch(
 watch(
   () => historyStatusText.value,
   () => {
-    nextTick(() => {
-      measureMessageListHeight()
-      if (hasInitialBottomScroll.value && shouldAutoFollowBottom.value) {
-        scrollToBottom(true)
-      }
-    })
+    if (!hasInitialBottomScroll.value) return
+    scheduleViewportSync()
+  }
+)
+
+watch(
+  () => [
+    attachments.value.length,
+    uploadQueue.value.length,
+    draftQueue.value.length,
+    queueExpanded.value,
+    slashState.value.visible,
+    filteredSlashCommands.value.length,
+  ],
+  () => {
+    if (!hasInitialBottomScroll.value) return
+    scheduleViewportSync()
   }
 )
 
 async function loadConversation() {
   loading.value = true
+  scrollIntoView.value = ""
+  isRestoringScroll.value = false
+  restoredInitialScroll.value = false
   let initialLoadFinished = false
-  const finishInitialLoad = () => {
+  const finishInitialLoad = (
+    cachedViewState: ReturnType<typeof cacheStore.restore>,
+    persistedRuntime: ConversationRuntimeRecord | null
+  ) => {
     if (initialLoadFinished) return
     initialLoadFinished = true
     loading.value = false
     nextTick(() => {
       measureMessageListHeight()
-      scrollToBottom(true)
+      restoreScrollState(cachedViewState, persistedRuntime)
       hasInitialBottomScroll.value = true
     })
   }
@@ -660,6 +725,7 @@ async function loadConversation() {
     try {
       await ensureConversationSchema()
       localSummary = await getConversationSummaryById(instanceKey, conversationId.value)
+      syncConversationTitle(localSummary?.title)
       persistedRuntime = await getRuntime(conversationId.value)
       if (!hasHotRuntime) {
         localTurns = await getNewestTurns(conversationId.value, initialTurnLimit)
@@ -694,6 +760,7 @@ async function loadConversation() {
           firstString(remoteDetail?.sessionId, remoteDetail?.session_id, summary?.external_id) ||
           resumeSessionId
         currentAgentType.value = normalizeAgentType(agentType)
+        syncConversationTitle(firstString(summary?.title, remoteDetail?.title))
         await persistConversationDetailSnapshot({
           instanceKey,
           conversationId: conversationId.value,
@@ -709,12 +776,7 @@ async function loadConversation() {
     if (hasHotRuntime) {
       oldestLoadedCursor.value = cachedViewState?.oldestLoadedSeq ?? oldestLoadedCursor.value
       hasMoreHistory.value = cachedViewState?.hasMoreHistory ?? hasMoreHistory.value
-      if (cachedViewState?.scrollAnchor) {
-        scrollIntoView.value = cachedViewState.scrollAnchor
-      } else if (persistedRuntime?.scrollAnchor) {
-        scrollIntoView.value = persistedRuntime.scrollAnchor
-      }
-      finishInitialLoad()
+      finishInitialLoad(cachedViewState, persistedRuntime)
     } else if (localTurns.length > 0) {
       const totalLocalTurnCount = await countConversationTurns(conversationId.value)
       runtimeSession.localTurns = localTurns
@@ -723,12 +785,7 @@ async function loadConversation() {
         .map(mapPersistedTurnToMessage)
       oldestLoadedCursor.value = getOldestCursorFromPersistedTurns(localTurns)
       hasMoreHistory.value = totalLocalTurnCount > localTurns.length
-      if (cachedViewState?.scrollAnchor) {
-        scrollIntoView.value = cachedViewState.scrollAnchor
-      } else if (persistedRuntime?.scrollAnchor) {
-        scrollIntoView.value = persistedRuntime.scrollAnchor
-      }
-      finishInitialLoad()
+      finishInitialLoad(cachedViewState, persistedRuntime)
     } else {
       await hydrateRemoteMetadata()
       const result = remoteDetail || await auth.gateway().call<any>("get_folder_conversation", {
@@ -737,6 +794,7 @@ async function loadConversation() {
       const summary = (result?.summary && typeof result.summary === "object")
         ? result.summary
         : {}
+      syncConversationTitle(firstString(summary?.title, result?.title))
       agentType = firstString(result?.agentType, result?.agent_type, summary?.agent_type) || "claude_code"
       resumeSessionId = firstString(result?.sessionId, result?.session_id, summary?.external_id)
       currentAgentType.value = normalizeAgentType(agentType)
@@ -754,7 +812,7 @@ async function loadConversation() {
       }
 
       await refreshSessionTurnsFromDb(runtimeSession, cachedViewState, initialTurnLimit)
-      finishInitialLoad()
+      finishInitialLoad(cachedViewState, persistedRuntime)
     }
 
     await hydrateRemoteMetadata()
@@ -846,8 +904,23 @@ async function loadConversation() {
     const message = toErrorMessage(error)
     uni.showToast({ title: `加载失败: ${message}`, icon: "none", duration: 3000 })
   } finally {
-    finishInitialLoad()
+    finishInitialLoad(cachedViewState, persistedRuntime)
   }
+}
+
+function syncConversationTitle(title?: string | null) {
+  uni.setNavigationBarTitle({
+    title: firstString(title) || "未命名会话",
+  })
+}
+
+function refreshConversation() {
+  if (!conversationId.value || loading.value) return
+  loadConversation()
+    .then(() => {
+      uni.showToast({ title: "会话已刷新", icon: "none" })
+    })
+    .catch(() => {})
 }
 
 function hasActiveRuntimeState(runtimeSession: ReturnType<typeof runtime.getOrCreateSession>) {
@@ -952,6 +1025,9 @@ function persistDetailRuntimeState() {
     oldestLoadedSeq: oldestLoadedCursor.value ?? undefined,
     hasMoreHistory: hasMoreHistory.value,
     scrollAnchor: scrollIntoView.value || undefined,
+    scrollTop: lastMeasuredScrollTop.value || scrollTop.value || 0,
+    nearBottom: shouldAutoFollowBottom.value,
+    anchorMessageId: anchorMessageId.value || undefined,
     composerText: inputText.value,
     draftQueue: draftQueue.value.map((item) => ({ ...item })),
     attachments: attachments.value.map((item) => ({ ...item })),
@@ -1047,23 +1123,15 @@ function measureMessageListHeight() {
       const toolbarRect = rects?.[0]
       const historyStatusRect = rects?.[1]
       const inputRect = rects?.[2]
-      const windowHeight = Number(uni.getSystemInfoSync().windowHeight || 0)
-      const toolbarHeight = Number(toolbarRect?.height || 0)
-      const historyStatusHeight = Number(historyStatusRect?.height || 0)
-      const inputHeight = Number(inputRect?.height || 0)
-      const toolbarBottom = Number(toolbarRect?.bottom || toolbarHeight || 0)
+      const toolbarBottom = Number(toolbarRect?.bottom || toolbarRect?.height || 0)
       const historyStatusBottom = Number(historyStatusRect?.bottom || 0)
-      const inputTop = Number(inputRect?.top || windowHeight || 0)
+      const inputTop = Number(inputRect?.top || 0)
       const headerBottom = historyStatusBottom || toolbarBottom
-      const height = Math.max(0, windowHeight - toolbarHeight - historyStatusHeight - inputHeight)
+      const height = Math.max(0, inputTop - headerBottom)
       if (height > 0) {
         messageListViewportHeight.value = height
         messageListHeight.value = height
         detailDebugLog("message-list-height", {
-          windowHeight,
-          toolbarHeight,
-          historyStatusHeight,
-          inputHeight,
           toolbarBottom,
           historyStatusBottom,
           inputTop,
@@ -1078,9 +1146,18 @@ function handleMessageScroll(event: any) {
   const scrollTopValue = Number(event?.detail?.scrollTop || 0)
   const scrollHeight = Number(event?.detail?.scrollHeight || 0)
   const viewportHeight = Number(messageListHeight.value || 0)
+  lastMeasuredScrollTop.value = scrollTopValue
+  scrollTop.value = scrollTopValue
   if (!scrollHeight || !viewportHeight) return
   const distanceToBottom = Math.max(0, scrollHeight - (scrollTopValue + viewportHeight))
   shouldAutoFollowBottom.value = distanceToBottom <= 72
+  if (shouldAutoFollowBottom.value) {
+    hasUnreadBelow.value = false
+  }
+  if (shouldAutoFollowBottom.value) {
+    const tail = messages.value[messages.value.length - 1]
+    anchorMessageId.value = tail?.id || ""
+  }
   if (scrollTopValue <= 120) {
     detailDebugLog("scroll-near-top", {
       scrollTop: scrollTopValue,
@@ -1114,7 +1191,7 @@ async function loadOlderTurns() {
       return
     }
     const runtimeSession = runtime.getOrCreateSession(conversationId.value)
-    const firstVisibleMessageId = runtimeSession.localTurns[0]?.id || null
+    const firstVisibleMessageId = messages.value[0]?.id || anchorMessageId.value || ""
     runtimeSession.localTurns = [
       ...older.slice().reverse().map(mapPersistedTurnToMessage),
       ...runtimeSession.localTurns,
@@ -1123,10 +1200,7 @@ async function loadOlderTurns() {
     hasMoreHistory.value = older.length >= 20
     if (firstVisibleMessageId) {
       nextTick(() => {
-        const index = messages.value.findIndex((item) => item.id === firstVisibleMessageId)
-        if (index >= 0) {
-          scrollIntoView.value = `msg-${index}`
-        }
+        setProgrammaticAnchor(firstVisibleMessageId)
       })
     }
   } catch (error) {
@@ -1145,12 +1219,98 @@ function scrollToBottom(force = false) {
   if (!messages.value.length) return
   if (!force && !shouldAutoFollowBottom.value) return
   shouldAutoFollowBottom.value = true
-  const targetId = `msg-${messages.value.length - 1}`
+  hasUnreadBelow.value = false
+  anchorMessageId.value = ""
+  const targetId = getBottomAnchorId()
   scrollIntoView.value = ""
   scrollTop.value += 100000
   nextTick(() => {
     scrollIntoView.value = targetId
   })
+}
+
+function messageAnchorId(messageId: string) {
+  return `msg-${String(messageId).replace(/[^a-zA-Z0-9_-]/g, "_")}`
+}
+
+function getBottomAnchorId() {
+  return "message-list-bottom"
+}
+
+function setProgrammaticAnchor(messageId: string) {
+  anchorMessageId.value = messageId
+  scrollIntoView.value = ""
+  nextTick(() => {
+    scrollIntoView.value = messageAnchorId(messageId)
+  })
+}
+
+function restoreScrollState(
+  cachedViewState: ReturnType<typeof cacheStore.restore>,
+  persistedRuntime: ConversationRuntimeRecord | null
+) {
+  const cachedNearBottom = cachedViewState?.nearBottom
+  const cachedScrollTop = cachedViewState?.scrollTop
+  const cachedAnchorMessageId = cachedViewState?.anchorMessageId
+  const persistedAnchor = persistedRuntime?.scrollAnchor || ""
+
+  if (!cachedViewState && !persistedAnchor) {
+    scrollToBottom(true)
+    restoredInitialScroll.value = true
+    return
+  }
+
+  if (cachedNearBottom) {
+    scrollToBottom(true)
+    restoredInitialScroll.value = true
+    return
+  }
+
+  isRestoringScroll.value = true
+  shouldAutoFollowBottom.value = false
+
+  if (typeof cachedScrollTop === "number" && cachedScrollTop > 0) {
+    scrollIntoView.value = ""
+    scrollTop.value = cachedScrollTop
+    lastMeasuredScrollTop.value = cachedScrollTop
+  } else if (cachedAnchorMessageId) {
+    scrollIntoView.value = ""
+    scrollIntoView.value = messageAnchorId(cachedAnchorMessageId)
+  } else if (persistedAnchor) {
+    scrollIntoView.value = ""
+    scrollIntoView.value = persistedAnchor
+  } else {
+    scrollToBottom(true)
+  }
+
+  nextTick(() => {
+    restoredInitialScroll.value = true
+    isRestoringScroll.value = false
+  })
+}
+
+function scheduleViewportSync(forceBottom = false) {
+  nextTick(() => {
+    measureMessageListHeight()
+    if (isRestoringScroll.value) return
+    if (forceBottom || shouldAutoFollowBottom.value) {
+      scrollToBottom(true)
+      return
+    }
+    scrollTop.value = lastMeasuredScrollTop.value
+  })
+}
+
+function handleComposerLayoutChange() {
+  if (!hasInitialBottomScroll.value) return
+  scheduleViewportSync()
+}
+
+function handleScrollToBottomFab() {
+  shouldAutoFollowBottom.value = true
+  hasUnreadBelow.value = false
+  anchorMessageId.value = ""
+  scrollToBottom(true)
 }
 
 function handleCommandSelect(command: any) {
@@ -1219,6 +1379,8 @@ async function sendDraft(draft: QueuedDraft): Promise<boolean> {
   sending.value = true
   draft.status = "sending"
   draft.error = undefined
+  shouldAutoFollowBottom.value = true
+  anchorMessageId.value = ""
 
   try {
     const imageAtts = draft.attachments.filter((item) => item.kind === "image")
@@ -1228,6 +1390,7 @@ async function sendDraft(draft: QueuedDraft): Promise<boolean> {
       buildOptimisticText(draft.text, fileAtts),
       imageAtts
     )
+    scheduleViewportSync(true)
 
     const blocks: PromptInputBlock[] = []
     if (draft.text) {
@@ -2082,6 +2245,10 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
     background-color: #e8e8e8;
   }
 
+  &--disabled {
+    opacity: 0.6;
+  }
+
   &--danger {
     background-color: #fff1f0;
   }
@@ -2457,6 +2624,38 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   &--loading {
     background-color: #2979ff;
   }
+}
+
+.scroll-bottom-fab {
+  position: fixed;
+  right: 24rpx;
+  bottom: calc(136rpx + env(safe-area-inset-bottom));
+  z-index: 30;
+  width: 72rpx;
+  height: 72rpx;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #2979ff, #5f7bff);
+  box-shadow: 0 10rpx 24rpx rgba(41, 121, 255, 0.24);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: visible;
+
+  &--stacked {
+    bottom: calc(224rpx + env(safe-area-inset-bottom));
+  }
+}
+
+.scroll-bottom-fab__dot {
+  position: absolute;
+  top: 10rpx;
+  right: 8rpx;
+  width: 16rpx;
+  height: 16rpx;
+  border-radius: 50%;
+  background-color: #fa3534;
+  border: 2rpx solid #ffffff;
+  box-sizing: border-box;
 }
 
 .plan-fab {

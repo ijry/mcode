@@ -11,7 +11,13 @@
           @confirm="addTodo"
         ></u-input>
       </view>
-      <u-button type="primary" size="small" :disabled="!newTodoText.trim()" @click="addTodo">
+      <u-button
+        class="add-btn"
+        type="primary"
+        size="small"
+        :disabled="!newTodoText.trim()"
+        @click="addTodo"
+      >
         添加
       </u-button>
     </view>
@@ -591,9 +597,15 @@ async function confirmSend() {
 
 .add-input-wrap {
   flex: 1;
+  min-width: 0;
   background-color: #f5f6f8;
   border-radius: 16rpx;
   padding: 8rpx 20rpx;
+}
+
+.add-btn {
+  width: auto !important;
+  flex-shrink: 0;
 }
 
 .todo-list {

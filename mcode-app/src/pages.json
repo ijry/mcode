@@ -51,19 +51,27 @@
     "list": [
       {
         "pagePath": "pages/connections/index",
-        "text": "连接"
+        "text": "连接",
+        "iconPath": "static/tabbar/connections.png",
+        "selectedIconPath": "static/tabbar/connections-active.png"
       },
       {
         "pagePath": "pages/conversations/index",
-        "text": "会话"
+        "text": "会话",
+        "iconPath": "static/tabbar/conversations.png",
+        "selectedIconPath": "static/tabbar/conversations-active.png"
       },
       {
         "pagePath": "pages/todos/index",
-        "text": "待办"
+        "text": "待办",
+        "iconPath": "static/tabbar/todos.png",
+        "selectedIconPath": "static/tabbar/todos-active.png"
       },
       {
         "pagePath": "pages/profile/index",
-        "text": "我的"
+        "text": "我的",
+        "iconPath": "static/tabbar/profile.png",
+        "selectedIconPath": "static/tabbar/profile-active.png"
       }
     ]
   },

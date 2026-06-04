@@ -160,9 +160,12 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
 
     const currentLiveMessage = session.liveMessage
     const nextContent = currentLiveMessage.content.slice()
-    const partIndex = nextContent.findIndex((p) => p.type === contentType)
-    const part = partIndex >= 0
-      ? cloneContentPart(nextContent[partIndex])
+    const tailIndex = nextContent.length - 1
+    const shouldMergeWithTail =
+      tailIndex >= 0 && nextContent[tailIndex]?.type === contentType
+    const partIndex = shouldMergeWithTail ? tailIndex : -1
+    const part = shouldMergeWithTail
+      ? cloneContentPart(nextContent[tailIndex])
       : buildEmptyContentPart(contentType)
 
     if (contentType === "text") {

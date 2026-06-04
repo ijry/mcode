@@ -172,10 +172,11 @@ async function updateSummaryStatus(
 ) {
   const current = await readCurrentSummary(instanceKey, conversationId)
   if (!current) return
+  const normalizedStatus = mapRuntimeStatusToSummaryStatus(nextStatus, current.status)
   await upsertConversationSummary({
     ...current,
     connectionId,
-    status: String(nextStatus || current.status || "idle"),
+    status: normalizedStatus,
     updatedAt: Date.now(),
   })
 }
@@ -196,4 +197,24 @@ async function readCurrentSummary(instanceKey: string, conversationId: number) {
     console.warn("read current summary skipped", error)
     return null
   }
+}
+
+function mapRuntimeStatusToSummaryStatus(nextStatus: unknown, currentStatus: string) {
+  const status = String(nextStatus || "").trim().toLowerCase()
+  if (
+    status === "thinking" ||
+    status === "running_tool" ||
+    status === "waiting_permission" ||
+    status === "connecting" ||
+    status === "connected"
+  ) {
+    return "in_progress"
+  }
+  if (status === "error") {
+    return "failed"
+  }
+  if (status === "idle") {
+    return currentStatus || "pending_review"
+  }
+  return currentStatus || "pending_review"
 }

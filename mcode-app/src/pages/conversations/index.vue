@@ -541,7 +541,7 @@ onPullDownRefresh(() => {
     return
   }
 
-  loadOverviewData().finally(() => {
+  loadOverviewData({ force: true }).finally(() => {
     uni.stopPullDownRefresh()
     syncCateTabHeight()
   })
@@ -552,15 +552,20 @@ onReady(() => {
 })
 
 onShow(() => {
-  void loadOverviewData()
+  void loadOverviewData({ force: true })
   syncCateTabHeight()
 })
 
-async function loadOverviewData() {
+async function loadOverviewData(options?: { force?: boolean }) {
+  const force = options?.force === true
   if (overviewLoadPromise) {
     return await overviewLoadPromise
   }
-  if (connectionGroups.value.length > 0 && Date.now() - lastOverviewLoadedAt < 15000) {
+  if (
+    !force &&
+    connectionGroups.value.length > 0 &&
+    Date.now() - lastOverviewLoadedAt < 15000
+  ) {
     return
   }
 
@@ -1018,7 +1023,7 @@ function parseConversationId(input: unknown): number {
 }
 
 function loadData() {
-  return loadOverviewData()
+  return loadOverviewData({ force: true })
 }
 
 function syncCateTabHeight() {
@@ -1245,7 +1250,7 @@ async function confirmCreate() {
     newTaskContent.value = ""
     selectedAgentType.value = "claude_code"
     selectedAgentName.value = "Claude Code"
-    await loadOverviewData()
+    await loadOverviewData({ force: true })
     openConversation({ id: newConversationId, folder_id: selectedProjectId.value })
   } catch (error) {
     const msg = toErrorMessage(error)
