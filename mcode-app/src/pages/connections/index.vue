@@ -9,6 +9,7 @@
     </view>
 
     <view class="header">
+      <text class="header-slogan">随时随地 AI Coding</text>
       <view class="add-conn-btn" @click="showAddPopup = true">
         <u-icon name="plus" size="18" color="#2979ff"></u-icon>
         <text class="add-conn-btn__text">新增连接</text>
@@ -972,6 +973,16 @@ function persistConnectedMap() {
   font-size: 28rpx;
   color: #2979ff;
   font-weight: 500;
+}
+
+.header-slogan {
+  display: block;
+  margin-bottom: 20rpx;
+  padding-left: 4rpx;
+  font-size: 24rpx;
+  line-height: 1.6;
+  color: #5c6b77;
+  letter-spacing: 1rpx;
 }
 
 .empty-container {
