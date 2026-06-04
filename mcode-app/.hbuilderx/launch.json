@@ -4,6 +4,16 @@
         {
             "playground" : "standard",
             "type" : "uni-app:app-android"
+        },
+        {
+            "customPlaygroundType" : "device",
+            "playground" : "custom",
+            "type" : "uni-app:app-ios"
+        },
+        {
+            "customPlaygroundType" : "device",
+            "playground" : "standard",
+            "type" : "uni-app:app-ios_simulator"
         }
     ]
 }
