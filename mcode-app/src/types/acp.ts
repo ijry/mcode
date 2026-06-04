@@ -71,6 +71,7 @@ export interface LiveMessage {
   content: ContentPart[]
   isStreaming: boolean
   timestamp: number
+  isPlaceholderThinking?: boolean
 }
 
 export interface ConnectionInfo {

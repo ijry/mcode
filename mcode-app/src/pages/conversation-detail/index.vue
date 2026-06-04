@@ -1419,8 +1419,10 @@ async function sendDraft(draft: QueuedDraft): Promise<boolean> {
     const conn = session.value?.connectionId
     if (!conn) throw new Error("未连接到代理")
     await acpApi.acpPrompt(conn, blocks, folderId.value, conversationId.value)
+    runtime.beginPlaceholderThinking(conversationId.value)
     return true
   } catch (error) {
+    runtime.clearLiveMessage(conversationId.value)
     const message = toErrorMessage(error)
     draft.status = "failed"
     draft.error = message

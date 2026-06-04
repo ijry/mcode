@@ -126,6 +126,41 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     session.optimisticTurns.push(turn)
   }
 
+  function createLiveMessage(content: ContentPart[] = [], isStreaming = true): LiveMessage {
+    return {
+      role: "assistant",
+      content,
+      isStreaming,
+      timestamp: Date.now(),
+      isPlaceholderThinking: false,
+    }
+  }
+
+  function beginPlaceholderThinking(conversationId: number) {
+    const session = getOrCreateSession(conversationId)
+    if (
+      session.liveMessage &&
+      !session.liveMessage.isPlaceholderThinking &&
+      session.liveMessage.content.length > 0
+    ) {
+      return
+    }
+    if (session.liveMessage?.isPlaceholderThinking) {
+      session.status = "thinking"
+      return
+    }
+    session.status = "thinking"
+    session.liveMessage = {
+      ...createLiveMessage([{ type: "thinking", thinking: "思考中…" }]),
+      isPlaceholderThinking: true,
+    }
+  }
+
+  function clearLiveMessage(conversationId: number) {
+    const session = getOrCreateSession(conversationId)
+    session.liveMessage = null
+  }
+
   /**
    * 设置流式消息
    */
@@ -135,12 +170,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     isStreaming: boolean
   ) {
     const session = getOrCreateSession(conversationId)
-    session.liveMessage = {
-      role: "assistant",
-      content,
-      isStreaming,
-      timestamp: Date.now(),
-    }
+    session.liveMessage = createLiveMessage(content, isStreaming)
   }
 
   /**
@@ -149,16 +179,13 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
   function appendLiveContent(conversationId: number, delta: string, contentType: string) {
     const session = getOrCreateSession(conversationId)
     if (!session.liveMessage) {
-      session.liveMessage = {
-        role: "assistant",
-        content: [],
-        isStreaming: true,
-        timestamp: Date.now(),
-      }
+      session.liveMessage = createLiveMessage()
     }
     session.status = "thinking"
 
-    const currentLiveMessage = session.liveMessage
+    const currentLiveMessage = session.liveMessage.isPlaceholderThinking
+      ? clearPlaceholderLiveMessage(session) ?? createLiveMessage()
+      : session.liveMessage
     const nextContent = currentLiveMessage.content.slice()
     const tailIndex = nextContent.length - 1
     const shouldMergeWithTail =
@@ -185,6 +212,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     session.liveMessage = {
       ...currentLiveMessage,
       content: nextContent,
+      isPlaceholderThinking: false,
     }
   }
 
@@ -196,7 +224,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     if (normalizedLiveMessage) {
       session.liveMessage = normalizedLiveMessage
     }
-    session.status = deriveRuntimeStatus(snapshot, normalizedLiveMessage)
+    session.status = deriveRuntimeStatus(snapshot, normalizedLiveMessage ?? session.liveMessage)
     session.lastAppliedSeq = firstNumber(snapshot?.event_seq, snapshot?.eventSeq) ?? session.lastAppliedSeq
 
     const usage = snapshot.usage
@@ -212,6 +240,8 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     const session = getOrCreateSession(conversationId)
     const completedTurns = session.optimisticTurns.map(cloneMessageTurn)
     const assistantTurn = session.liveMessage
+      && !session.liveMessage.isPlaceholderThinking
+      && session.liveMessage.content.length > 0
       ? buildAssistantTurn(session, session.liveMessage, eventData)
       : null
 
@@ -230,10 +260,11 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         session.optimisticTurns = []
         if (assistantTurn) {
           session.localTurns.push(assistantTurn)
-          session.liveMessage = null
         }
+        session.liveMessage = null
       }
     } else {
+      session.liveMessage = null
       try {
         await calibrateAfterReplayGap(conversationId)
         session.localTurns = await reloadLocalTurns(session)
@@ -268,16 +299,14 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         )
         break
 
-      case "tool_call":
+      case "tool_call": {
         session.status = "running_tool"
-        const currentLiveMessage = session.liveMessage ?? {
-          role: "assistant" as const,
-          content: [],
-          isStreaming: true,
-          timestamp: Date.now(),
-        }
+        const currentLiveMessage = session.liveMessage?.isPlaceholderThinking
+          ? clearPlaceholderLiveMessage(session) ?? createLiveMessage()
+          : session.liveMessage ?? createLiveMessage()
         session.liveMessage = {
           ...currentLiveMessage,
+          isPlaceholderThinking: false,
           content: [
             ...currentLiveMessage.content,
             {
@@ -292,6 +321,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
           ],
         }
         break
+      }
 
       case "tool_call_update": {
         if (event.data.status === "error") {
@@ -441,6 +471,8 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     getOrCreateSession,
     getMessages,
     addOptimisticUserMessage,
+    beginPlaceholderThinking,
+    clearLiveMessage,
     setLiveMessage,
     appendLiveContent,
     completeTurn,
@@ -569,6 +601,19 @@ function cloneContentPart(part: ContentPart): ContentPart {
   return JSON.parse(JSON.stringify(part)) as ContentPart
 }
 
+function clearPlaceholderLiveMessage(session: RuntimeSession) {
+  const current = session.liveMessage
+  if (!current?.isPlaceholderThinking) return current
+
+  const nextLiveMessage: LiveMessage = {
+    ...current,
+    content: [],
+    isPlaceholderThinking: false,
+  }
+  session.liveMessage = nextLiveMessage
+  return nextLiveMessage
+}
+
 function buildEmptyContentPart(contentType: string): ContentPart {
   if (contentType === "thinking") {
     return { type: "thinking", thinking: "" }
@@ -609,6 +654,7 @@ function mapSnapshotLiveMessage(snapshot: any): LiveMessage | null {
     content: parts,
     isStreaming: true,
     timestamp: parseTimestamp(rawLiveMessage?.started_at) || Date.now(),
+    isPlaceholderThinking: false,
   }
 }
 
