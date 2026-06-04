@@ -552,6 +552,7 @@ class AcpApiClient {
           data: {
             status: mapConnectionStatus(firstString(record.status)),
             message: firstString(record.message) || undefined,
+            scope: "connection",
           },
         }
       case "conversation_status_changed":
@@ -560,6 +561,7 @@ class AcpApiClient {
           type: "status_changed",
           data: {
             status: mapConversationStatus(firstString(record.status)),
+            scope: "conversation",
           },
         }
       case "turn_complete":

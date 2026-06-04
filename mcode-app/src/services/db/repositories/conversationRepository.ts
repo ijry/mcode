@@ -1,4 +1,8 @@
 import { sqliteDriver } from "../sqlite"
+import {
+  mergeConversationSummaryStatus,
+  normalizeConversationSummaryStatus,
+} from "@/services/conversation/conversationSummaryStatus"
 
 export interface ConversationSummaryRecord {
   id: number
@@ -186,6 +190,11 @@ export async function getOlderTurns(
 }
 
 export async function upsertConversationSummary(input: ConversationSummaryRecord) {
+  const current = await getConversationSummaryById(input.instanceKey, input.id)
+  const next = current
+    ? mergeConversationSummaryRecord(current, input)
+    : normalizeConversationSummaryRecord(input)
+
   await sqliteDriver.execute(
     `
       INSERT INTO conversations (
@@ -219,22 +228,133 @@ export async function upsertConversationSummary(input: ConversationSummaryRecord
         updated_at = excluded.updated_at
     `,
     [
-      input.id,
-      input.instanceKey,
-      input.folderId,
-      input.title,
-      input.agentType,
-      input.externalId ?? null,
-      input.connectionId ?? null,
-      input.status,
-      input.lastTurnId ?? null,
-      input.lastMessageAt,
-      input.unreadCount,
-      input.isPinned ? 1 : 0,
-      input.deletedAt ?? null,
-      input.updatedAt,
+      next.id,
+      next.instanceKey,
+      next.folderId,
+      next.title,
+      next.agentType,
+      next.externalId ?? null,
+      next.connectionId ?? null,
+      next.status,
+      next.lastTurnId ?? null,
+      next.lastMessageAt,
+      next.unreadCount,
+      next.isPinned ? 1 : 0,
+      next.deletedAt ?? null,
+      next.updatedAt,
     ]
   )
+}
+
+function mergeConversationSummaryRecord(
+  currentInput: ConversationSummaryRecord,
+  incomingInput: ConversationSummaryRecord
+): ConversationSummaryRecord {
+  const current = normalizeConversationSummaryRecord(currentInput)
+  const incoming = normalizeConversationSummaryRecord(incomingInput)
+  const incomingIsNewer = incoming.updatedAt >= current.updatedAt
+
+  return {
+    id: current.id,
+    instanceKey: current.instanceKey,
+    folderId: incomingIsNewer
+      ? pickFolderId(incoming.folderId, current.folderId)
+      : pickFolderId(current.folderId, incoming.folderId),
+    title: incomingIsNewer
+      ? pickString(incoming.title, current.title) || `会话 #${current.id}`
+      : pickString(current.title, incoming.title) || `会话 #${current.id}`,
+    agentType: incomingIsNewer
+      ? pickString(incoming.agentType, current.agentType) || "claude_code"
+      : pickString(current.agentType, incoming.agentType) || "claude_code",
+    externalId: incomingIsNewer
+      ? pickOptionalString(incoming.externalId, current.externalId)
+      : pickOptionalString(current.externalId, incoming.externalId),
+    connectionId: incomingIsNewer
+      ? pickOptionalString(incoming.connectionId, current.connectionId)
+      : pickOptionalString(current.connectionId, incoming.connectionId),
+    status: mergeConversationSummaryStatus({
+      currentStatus: current.status,
+      currentUpdatedAt: current.updatedAt,
+      incomingStatus: incoming.status,
+      incomingUpdatedAt: incoming.updatedAt,
+    }),
+    lastTurnId: incomingIsNewer
+      ? pickOptionalString(incoming.lastTurnId, current.lastTurnId)
+      : pickOptionalString(current.lastTurnId, incoming.lastTurnId),
+    lastMessageAt: Math.max(current.lastMessageAt, incoming.lastMessageAt),
+    unreadCount: incomingIsNewer ? incoming.unreadCount : current.unreadCount,
+    isPinned: incomingIsNewer ? incoming.isPinned : current.isPinned,
+    deletedAt: incomingIsNewer ? incoming.deletedAt ?? null : current.deletedAt ?? null,
+    updatedAt: Math.max(current.updatedAt, incoming.updatedAt),
+  }
+}
+
+function normalizeConversationSummaryRecord(
+  input: ConversationSummaryRecord
+): ConversationSummaryRecord {
+  const lastMessageAt = normalizeTimestamp(input.lastMessageAt, Date.now())
+  const updatedAt = normalizeTimestamp(input.updatedAt, lastMessageAt)
+  return {
+    ...input,
+    folderId: pickFolderId(input.folderId, 0),
+    title: pickString(input.title) || `会话 #${input.id}`,
+    agentType: pickString(input.agentType) || "claude_code",
+    externalId: pickOptionalString(input.externalId),
+    connectionId: pickOptionalString(input.connectionId),
+    status: normalizeConversationSummaryStatus(input.status),
+    lastTurnId: pickOptionalString(input.lastTurnId),
+    lastMessageAt,
+    unreadCount: normalizeCount(input.unreadCount),
+    isPinned: Boolean(input.isPinned),
+    deletedAt: normalizeOptionalTimestamp(input.deletedAt),
+    updatedAt,
+  }
+}
+
+function pickString(...values: Array<string | null | undefined>) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim()
+    }
+  }
+  return ""
+}
+
+function pickOptionalString(...values: Array<string | null | undefined>) {
+  const next = pickString(...values)
+  return next || null
+}
+
+function pickFolderId(...values: Array<number | null | undefined>) {
+  for (const value of values) {
+    const next = Number(value || 0)
+    if (Number.isFinite(next) && next > 0) {
+      return next
+    }
+  }
+  return 0
+}
+
+function normalizeCount(value: number | null | undefined) {
+  const next = Number(value || 0)
+  if (!Number.isFinite(next) || next < 0) return 0
+  return Math.floor(next)
+}
+
+function normalizeTimestamp(value: number | null | undefined, fallback: number) {
+  const next = Number(value || 0)
+  if (Number.isFinite(next) && next > 0) {
+    return next
+  }
+  return fallback
+}
+
+function normalizeOptionalTimestamp(value: number | null | undefined) {
+  const next = Number(value || 0)
+  if (Number.isFinite(next) && next > 0) {
+    return next
+  }
+  return null
 }
 
 export async function insertCompletedTurn(input: PersistedTurnRecord) {

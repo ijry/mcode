@@ -322,7 +322,7 @@
 
 <script setup lang="ts">
 import { ref, computed, nextTick, watch } from "vue"
-import { onHide, onLoad, onShow, onUnload } from "@dcloudio/uni-app"
+import { onBackPress, onHide, onLoad, onShow, onUnload } from "@dcloudio/uni-app"
 import { useAuthStore } from "@/stores/auth"
 import { useConversationCacheStore } from "@/stores/conversationCache"
 import { useConversationRuntimeStore } from "@/stores/conversationRuntime"
@@ -640,6 +640,13 @@ onUnload(() => {
   }
 })
 
+onBackPress(() => {
+  uni.switchTab({
+    url: "/pages/conversations/index",
+  })
+  return true
+})
+
 watch(
   () => messages.value.map((msg) => ({
     id: msg.id,
@@ -699,6 +706,8 @@ async function loadConversation() {
   scrollIntoView.value = ""
   isRestoringScroll.value = false
   restoredInitialScroll.value = false
+  const cachedViewState = cacheStore.restore(conversationId.value)
+  let persistedRuntime: ConversationRuntimeRecord | null = null
   let initialLoadFinished = false
   const finishInitialLoad = (
     cachedViewState: ReturnType<typeof cacheStore.restore>,
@@ -716,7 +725,6 @@ async function loadConversation() {
   try {
     const runtimeSession = runtime.getOrCreateSession(conversationId.value)
     const instanceKey = auth.currentRemoteInstance().instanceKey
-    const cachedViewState = cacheStore.restore(conversationId.value)
     const initialTurnLimit = resolveInitialTurnLimit(
       cachedViewState,
       runtimeSession.localTurns.length
@@ -726,7 +734,6 @@ async function loadConversation() {
 
     let localSummary: Awaited<ReturnType<typeof getConversationSummaryById>> | null = null
     let localTurns: PersistedTurnWithParts[] = []
-    let persistedRuntime: ConversationRuntimeRecord | null = null
     try {
       await ensureConversationSchema()
       localSummary = await getConversationSummaryById(instanceKey, conversationId.value)
@@ -858,11 +865,9 @@ async function loadConversation() {
             detail: {
               session_id: snapshotSessionId,
               agent_type: agentType,
-              status: snapshot.status,
               summary: {
                 external_id: snapshotSessionId,
                 agent_type: agentType,
-                status: snapshot.status,
               },
             },
             fallbackFolderId: folderId.value,

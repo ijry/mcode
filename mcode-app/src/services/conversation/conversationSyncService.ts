@@ -7,6 +7,10 @@ import {
   upsertConversationSummary,
 } from "@/services/db/repositories/conversationRepository"
 import { persistConversationDetailSnapshot } from "./conversationDetailPersistence"
+import {
+  mapRealtimeConversationStatusToSummaryStatus,
+  normalizeConversationSummaryStatus,
+} from "./conversationSummaryStatus"
 
 type ConversationEventHandler = (event: EventEnvelope) => void
 
@@ -14,6 +18,7 @@ interface ConversationRealtimeBinding {
   conversationId: number
   instanceKey: string
   connectionId: string
+  lastAppliedSeq?: number | null
   unsubscribe?: () => void
 }
 
@@ -69,14 +74,47 @@ export async function attachConversationRealtime(input: {
       input.connectionId,
       { sinceSeq: input.sinceSeq },
       {
-        onSnapshot: () => {},
-        onReplay: (events) => {
+        onSnapshot: (_snapshot, eventSeq) => {
+          const activeBinding = bindings.get(input.conversationId)
+          if (activeBinding) {
+            activeBinding.lastAppliedSeq = eventSeq
+          }
+        },
+        onReplay: (events, highWaterSeq) => {
+          const activeBinding = bindings.get(input.conversationId)
+          if (activeBinding) {
+            activeBinding.lastAppliedSeq = highWaterSeq
+          }
           events.forEach((event) => routeNormalizedRealtimeEvent(input.conversationId, event))
         },
         onEvent: (event) => {
+          const normalized = acpApi.normalizeRealtimeEvent(event)
+          const activeBinding = bindings.get(input.conversationId)
+          if (
+            activeBinding &&
+            normalized &&
+            typeof normalized.seq === "number" &&
+            Number.isFinite(normalized.seq)
+          ) {
+            activeBinding.lastAppliedSeq = normalized.seq
+          }
           routeNormalizedRealtimeEvent(input.conversationId, event)
         },
-        onDetached: () => {},
+        onDetached: (reason, detail) => {
+          const activeBinding = bindings.get(input.conversationId)
+          const lastAppliedSeq =
+            detail.lastAppliedSeq ?? activeBinding?.lastAppliedSeq ?? input.sinceSeq ?? null
+          if (activeBinding) {
+            activeBinding.lastAppliedSeq = lastAppliedSeq
+          }
+          console.warn("[conversation-realtime] detached", {
+            conversationId: input.conversationId,
+            connectionId: input.connectionId,
+            instanceKey: input.instanceKey,
+            reason,
+            lastAppliedSeq,
+          })
+        },
       }
     )
     if (subscription) {
@@ -96,6 +134,7 @@ export async function attachConversationRealtime(input: {
     conversationId: input.conversationId,
     instanceKey: input.instanceKey,
     connectionId: input.connectionId,
+    lastAppliedSeq: input.sinceSeq ?? null,
     unsubscribe,
   }
   bindings.set(input.conversationId, binding)
@@ -155,7 +194,13 @@ async function mirrorConversationSummary(conversationId: number, event: EventEnv
   if (!binding) return
 
   if (event.type === "status_changed") {
-    await updateSummaryStatus(binding.instanceKey, binding.connectionId, conversationId, event.data?.status)
+    await updateSummaryStatus(
+      binding.instanceKey,
+      binding.connectionId,
+      conversationId,
+      event.data?.status,
+      event.data?.scope
+    )
     return
   }
 
@@ -168,11 +213,34 @@ async function updateSummaryStatus(
   instanceKey: string,
   connectionId: string,
   conversationId: number,
-  nextStatus: unknown
+  nextStatus: unknown,
+  scope?: unknown
 ) {
   const current = await readCurrentSummary(instanceKey, conversationId)
-  if (!current) return
-  const normalizedStatus = mapRuntimeStatusToSummaryStatus(nextStatus, current.status)
+  if (!current) {
+    console.warn("[conversation-summary] status update skipped: missing current summary", {
+      conversationId,
+      connectionId,
+      instanceKey,
+      scope: String(scope || ""),
+      rawStatus: nextStatus ?? null,
+    })
+    return
+  }
+  const normalizedStatus =
+    scope === "conversation"
+      ? normalizeConversationSummaryStatus(String(nextStatus || ""))
+      : mapRealtimeConversationStatusToSummaryStatus(nextStatus, current.status)
+  console.warn("[conversation-summary] status update", {
+    conversationId,
+    connectionId,
+    instanceKey,
+    scope: String(scope || ""),
+    rawStatus: nextStatus ?? null,
+    currentStatus: current.status,
+    nextStatus: normalizedStatus,
+    currentUpdatedAt: current.updatedAt,
+  })
   await upsertConversationSummary({
     ...current,
     connectionId,
@@ -183,7 +251,15 @@ async function updateSummaryStatus(
 
 async function refreshSummaryFromCalibration(conversationId: number) {
   try {
-    await calibrateAfterTurnComplete(conversationId)
+    const detail = await calibrateAfterTurnComplete(conversationId)
+    console.warn("[conversation-summary] turn_complete calibration", {
+      conversationId,
+      detailStatus:
+        detail?.status ??
+        detail?.summary?.status ??
+        null,
+      turnCount: Array.isArray(detail?.turns) ? detail.turns.length : null,
+    })
   } catch (error) {
     console.warn("refresh conversation summary from calibration skipped", error)
   }
@@ -197,24 +273,4 @@ async function readCurrentSummary(instanceKey: string, conversationId: number) {
     console.warn("read current summary skipped", error)
     return null
   }
-}
-
-function mapRuntimeStatusToSummaryStatus(nextStatus: unknown, currentStatus: string) {
-  const status = String(nextStatus || "").trim().toLowerCase()
-  if (
-    status === "thinking" ||
-    status === "running_tool" ||
-    status === "waiting_permission" ||
-    status === "connecting" ||
-    status === "connected"
-  ) {
-    return "in_progress"
-  }
-  if (status === "error") {
-    return "failed"
-  }
-  if (status === "idle") {
-    return currentStatus || "pending_review"
-  }
-  return currentStatus || "pending_review"
 }

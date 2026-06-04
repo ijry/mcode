@@ -79,8 +79,21 @@ export class InstanceEventStream implements RealtimeTransport {
         safeInvoke(() => active.handlers.onEvent(frame.envelope))
         break
       case "detached":
+        console.warn("[realtime] subscription detached", {
+          instanceKey: this.descriptor.instanceKey,
+          baseUrl: this.descriptor.baseUrl,
+          principal: this.descriptor.principal,
+          connectionId: active.connectionId,
+          subscriptionId: frame.subscription_id,
+          reason: frame.reason,
+          lastAppliedSeq: active.lastAppliedSeq ?? null,
+        })
         this.subscriptions.delete(frame.subscription_id)
-        safeInvoke(() => active.handlers.onDetached(frame.reason))
+        safeInvoke(() =>
+          active.handlers.onDetached(frame.reason, {
+            lastAppliedSeq: active.lastAppliedSeq ?? null,
+          })
+        )
         break
     }
   }

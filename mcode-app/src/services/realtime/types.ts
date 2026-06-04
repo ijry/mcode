@@ -17,7 +17,7 @@ export interface AttachHandlers {
   onSnapshot: (snapshot: unknown, eventSeq: number) => void
   onReplay: (events: unknown[], highWaterSeq: number) => void
   onEvent: (event: unknown) => void
-  onDetached: (reason: string) => void
+  onDetached: (reason: string, detail: { lastAppliedSeq?: number | null }) => void
 }
 
 export interface EventStreamSubscription {

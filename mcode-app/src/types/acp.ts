@@ -118,6 +118,7 @@ export interface ToolCallUpdateEvent {
 export interface StatusChangedEvent {
   status: "idle" | "connecting" | "connected" | "thinking" | "running_tool" | "waiting_permission" | "error"
   message?: string
+  scope?: "connection" | "conversation"
 }
 
 export interface TurnCompleteEvent {

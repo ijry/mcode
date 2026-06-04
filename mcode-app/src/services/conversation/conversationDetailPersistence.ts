@@ -7,6 +7,7 @@ import {
   type ConversationSummaryRecord,
   type PersistedTurnRecord,
 } from "@/services/db/repositories/conversationRepository"
+import { normalizeConversationSummaryStatus } from "./conversationSummaryStatus"
 
 interface PersistConversationDetailInput {
   instanceKey: string
@@ -46,6 +47,18 @@ export async function persistConversationDetailSnapshot(
   const summary = buildSummaryRecord(input, currentSummary, normalizedTurns)
 
   if (summary) {
+    console.warn("[conversation-summary] persist detail snapshot", {
+      conversationId: input.conversationId,
+      instanceKey: input.instanceKey,
+      persistTurns: input.persistTurns !== false,
+      currentStatus: currentSummary?.status ?? null,
+      detailStatus:
+        input.detail?.status ??
+        input.detail?.summary?.status ??
+        null,
+      nextStatus: summary.status,
+      turnCount: normalizedTurns.length,
+    })
     await upsertConversationSummary(summary)
   }
 
@@ -134,8 +147,9 @@ function buildSummaryRecord(
         summary.connection_id,
         currentSummary?.connectionId
       ) || null,
-    status:
-      firstString(rawDetail.status, summary.status, currentSummary?.status) || "idle",
+    status: normalizeConversationSummaryStatus(
+      firstString(rawDetail.status, summary.status, currentSummary?.status) || "unknown"
+    ),
     lastTurnId: newestTurn?.id || currentSummary?.lastTurnId || null,
     lastMessageAt,
     unreadCount: currentSummary?.unreadCount ?? 0,

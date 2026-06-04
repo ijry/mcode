@@ -334,6 +334,7 @@ import {
   consumeConversationListDirty,
   markConversationListDirty,
 } from "@/services/conversation/conversationListRefresh"
+import { normalizeConversationSummaryStatus } from "@/services/conversation/conversationSummaryStatus"
 import {
   getConversationSummaryById,
   listConversationSummaries,
@@ -885,11 +886,7 @@ function normalizeAgentType(value?: string): string {
 }
 
 function normalizeConversationStatus(value?: string): string {
-  const raw = String(value || "").trim().toLowerCase()
-  if (!raw) return "unknown"
-  if (raw === "inprogress") return "in_progress"
-  if (raw === "pendingreview") return "pending_review"
-  return raw
+  return normalizeConversationSummaryStatus(value)
 }
 
 function statusLabel(status: string): string {
