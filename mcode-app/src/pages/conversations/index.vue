@@ -1020,9 +1020,17 @@ function syncAuthToConnection(conn: ConnectionItem) {
 
 function parseConversationId(input: unknown): number {
   if (typeof input === "number" && Number.isFinite(input)) return input
+  if (typeof input === "string") {
+    const parsed = Number(input)
+    if (Number.isFinite(parsed) && parsed > 0) return parsed
+  }
   if (input && typeof input === "object") {
     const maybeId = (input as any).id ?? (input as any).conversationId
     if (typeof maybeId === "number" && Number.isFinite(maybeId)) return maybeId
+    if (typeof maybeId === "string") {
+      const parsed = Number(maybeId)
+      if (Number.isFinite(parsed) && parsed > 0) return parsed
+    }
   }
   return 0
 }
@@ -1257,7 +1265,10 @@ async function confirmCreate() {
     selectedAgentName.value = "Claude Code"
     markConversationListDirty()
     await loadOverviewData({ force: true })
-    openConversation({ id: newConversationId, folder_id: selectedProjectId.value })
+    openConversation(
+      { id: newConversationId, folder_id: selectedProjectId.value },
+      selectedConnectionKey.value
+    )
   } catch (error) {
     const msg = toErrorMessage(error)
     uni.showToast({ title: `创建失败: ${msg}`, icon: "none", duration: 3000 })
