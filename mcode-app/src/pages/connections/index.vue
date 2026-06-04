@@ -202,6 +202,8 @@
         </view>
       </view>
     </u-popup>
+
+    <IosAddToHomePrompt />
   </view>
 </template>
 

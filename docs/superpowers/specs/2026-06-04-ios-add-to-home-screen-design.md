@@ -26,6 +26,7 @@
 - 仅在首页连接页展示底部弹层引导文案
 - 用户关闭后 `7 天` 内不再提示，超过 `7 天` 可再次提示
 - 补齐 iOS Web App 所需的页面 meta，确保添加到主屏幕后可以以全屏方式打开
+- H5 页面禁止双指缩放和双击缩放
 
 ## Non-Goals
 
@@ -215,14 +216,23 @@ const IOS_A2HS_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000
 - `apple-mobile-web-app-capable=yes`
 - `apple-mobile-web-app-status-bar-style=default` 或与当前视觉更匹配的值
 - `apple-mobile-web-app-title=MCode`
+- `viewport` 增加 `user-scalable=no`、`maximum-scale=1.0`、`minimum-scale=1.0`
 
 同时增加 `apple-touch-icon` 指向项目现有图标资源。
 
-本次优先复用现有 `180x180` 图标内容，但应放到 H5 可稳定直链的位置，例如：
+本次优先复用现有 `180x180` 图标内容，但应放到当前 uni H5 构建会稳定复制的静态路径，例如：
 
-- `mcode-app/public/apple-touch-icon.png`
+- `mcode-app/src/static/icons/apple-touch-icon.png`
 
 然后让 `index.html` 指向该稳定路径。
+
+为兼容 iOS Safari 的缩放行为，还需要在 `index.html` 增加一段前置脚本：
+
+- 拦截多指 `touchstart`
+- 拦截 300ms 内连续 `touchend`
+- 拦截 `gesturestart`
+
+这样可以同时覆盖双指缩放和双击缩放。
 
 ### 7. 状态与生命周期
 
@@ -271,7 +281,7 @@ const showIosAddToHomePrompt = ref(false)
 
 - Modify: `mcode-app/src/pages/connections/index.vue`
 - Modify: `mcode-app/index.html`
-- Add: `mcode-app/public/apple-touch-icon.png`
+- Add: `mcode-app/src/static/icons/apple-touch-icon.png`
 
 ## Proposed API Shape
 
@@ -293,6 +303,7 @@ function dismissIosAddToHomePrompt(): void
 - 存储读取失败时，按“未关闭过”处理
 - 存储写入失败时，仍允许关闭弹层，只是后续可能再次出现
 - 图标路径错误不应阻断页面运行，但会影响添加到桌面的图标显示，需要在实现后手工验证
+- 缩放拦截脚本若只需作用于 iOS，应先做 UA 判断，避免影响非 iOS 触摸手势
 
 ## Testing Strategy
 
@@ -313,12 +324,17 @@ function dismissIosAddToHomePrompt(): void
 
 5. **iOS Chrome / Edge / Firefox 打开**
    - 预期：不出现提示
+   - 预期：页面不因首页提示脚本报错
 
 6. **非 iOS 设备打开**
    - 预期：不出现提示
 
 7. **冷却时间超过 7 天后重新进入首页**
    - 预期：再次满足环境条件时可重新出现提示
+
+8. **iPhone Safari 页面缩放验证**
+   - 预期：双指缩放无效
+   - 预期：连续双击不会触发页面放大
 
 ## Acceptance Criteria
 
@@ -328,4 +344,5 @@ function dismissIosAddToHomePrompt(): void
 - 用户关闭后 `7 天` 内不再提示
 - 超过 `7 天` 后允许再次提示
 - H5 页面头包含 iOS Web App 相关 meta
+- H5 页面禁止双指缩放和双击缩放
 - 添加到主屏幕后可从桌面以全屏方式打开 `MCode`
