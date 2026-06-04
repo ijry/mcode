@@ -343,6 +343,7 @@ import {
   type ConversationRuntimeRecord,
 } from "@/services/db/repositories/runtimeRepository"
 import { connectionSessionManager } from "@/services/conversation/connectionSessionManager"
+import { markConversationListDirty } from "@/services/conversation/conversationListRefresh"
 import { persistConversationDetailSnapshot } from "@/services/conversation/conversationDetailPersistence"
 import type { PromptInputBlock, ToolCall, ContentPart, MessageTurn } from "@/types/acp"
 import MessageBubble from "@/components/MessageBubble.vue"
@@ -626,11 +627,15 @@ onShow(() => {
 
 onHide(() => {
   persistDetailRuntimeState()
+  if (conversationId.value) {
+    markConversationListDirty()
+  }
 })
 
 onUnload(() => {
   persistDetailRuntimeState()
   if (conversationId.value) {
+    markConversationListDirty()
     runtime.clearSession(conversationId.value)
   }
 })

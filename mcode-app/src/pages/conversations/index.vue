@@ -331,6 +331,10 @@ import { createGateway } from "@/services/gateway"
 import { toErrorMessage } from "@/services/gateway/error"
 import { ensureConversationSchema } from "@/services/db/migrations"
 import {
+  consumeConversationListDirty,
+  markConversationListDirty,
+} from "@/services/conversation/conversationListRefresh"
+import {
   getConversationSummaryById,
   listConversationSummaries,
   upsertConversationSummary,
@@ -552,7 +556,8 @@ onReady(() => {
 })
 
 onShow(() => {
-  void loadOverviewData({ force: true })
+  const shouldForceRefresh = consumeConversationListDirty()
+  void loadOverviewData(shouldForceRefresh ? { force: true } : undefined)
   syncCateTabHeight()
 })
 
@@ -1250,6 +1255,7 @@ async function confirmCreate() {
     newTaskContent.value = ""
     selectedAgentType.value = "claude_code"
     selectedAgentName.value = "Claude Code"
+    markConversationListDirty()
     await loadOverviewData({ force: true })
     openConversation({ id: newConversationId, folder_id: selectedProjectId.value })
   } catch (error) {
@@ -1276,6 +1282,7 @@ async function handleActionSelect(e: any) {
           try {
             await acpApi.deleteConversation(currentConversation.value!.id)
             uni.showToast({ title: "删除成功", icon: "success" })
+            markConversationListDirty()
             await loadData()
           } catch (err) {
             uni.showToast({ title: "删除失败", icon: "none" })
@@ -1297,6 +1304,7 @@ async function handleActionSelect(e: any) {
               title: res.content,
             })
             uni.showToast({ title: "重命名成功", icon: "success" })
+            markConversationListDirty()
             await loadData()
           } catch {
             uni.showToast({ title: "重命名失败", icon: "none" })
