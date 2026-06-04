@@ -82,6 +82,14 @@
           <u-icon name="close" size="24" @click="showAddPopup = false"></u-icon>
         </view>
 
+        <view class="tutorial-entry" @click="openTutorialPopup">
+          <view class="tutorial-entry__copy">
+            <text class="tutorial-entry__title">部署教程</text>
+            <text class="tutorial-entry__desc">首次使用前请先完成电脑端配置</text>
+          </view>
+          <u-icon name="arrow-right" size="16" color="#2979ff"></u-icon>
+        </view>
+
         <u-subsection
           :list="['手动配置', '扫码连接']"
           :current="subsectionIndex"
@@ -154,6 +162,46 @@
         </view>
       </view>
     </u-popup>
+
+    <u-popup v-model:show="showTutorialPopup" mode="center" :round="16">
+      <view class="tutorial-popup">
+        <view class="popup-header">
+          <text class="popup-title">部署教程</text>
+          <u-icon name="close" size="24" @click="showTutorialPopup = false"></u-icon>
+        </view>
+
+        <view class="tutorial-steps">
+          <view class="tutorial-step">
+            <text class="tutorial-step__index">1</text>
+            <view class="tutorial-step__body">
+              <text class="tutorial-step__title">在自己电脑下载安装 codeg</text>
+              <text class="tutorial-step__link" @click="openDeploymentGuideLink">
+                https://github.com/xintaofei/codeg/releases/tag/v0.14.11
+              </text>
+            </view>
+          </view>
+
+          <view class="tutorial-step">
+            <text class="tutorial-step__index">2</text>
+            <view class="tutorial-step__body">
+              <text class="tutorial-step__title">
+                打开 codeg，点击右上角齿轮图标，然后点击 web服务 开启
+              </text>
+              <text class="tutorial-step__desc">拷贝这里的连接地址和访问 token</text>
+            </view>
+          </view>
+
+          <view class="tutorial-step">
+            <text class="tutorial-step__index">3</text>
+            <view class="tutorial-step__body">
+              <text class="tutorial-step__title">
+                如果需要外网访问，请使用 ngrok 等内网穿透工具即可
+              </text>
+            </view>
+          </view>
+        </view>
+      </view>
+    </u-popup>
   </view>
 </template>
 
@@ -168,6 +216,7 @@ declare const plus: any
 
 const auth = useAuthStore()
 const showAddPopup = ref(false)
+const showTutorialPopup = ref(false)
 const subsectionIndex = ref(0)
 const loading = ref(false)
 const showActionSheet = ref(false)
@@ -236,6 +285,10 @@ function loadConnections() {
 
 function subsectionChange(index: number) {
   subsectionIndex.value = index
+}
+
+function openTutorialPopup() {
+  showTutorialPopup.value = true
 }
 
 async function submitConnection() {
