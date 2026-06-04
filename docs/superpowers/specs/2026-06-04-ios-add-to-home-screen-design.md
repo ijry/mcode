@@ -1,8 +1,8 @@
 # iOS Add To Home Screen Prompt Design
 
 **Date:** 2026-06-04  
-**Scope:** `mcode-app` H5 端 iPhone/iPad Safari 首次访问提示  
-**Primary Files:** `mcode-app/src/App.vue`, `mcode-app/index.html`
+**Scope:** `mcode-app` H5 端首页连接页 iPhone/iPad Safari 访问提示  
+**Primary Files:** `mcode-app/src/pages/connections/index.vue`, `mcode-app/index.html`
 
 ---
 
@@ -19,11 +19,11 @@
 
 ## Goal
 
-为 `mcode-app` 的 H5 端增加一套 iOS Safari 专用的“添加到桌面”提示，满足以下目标：
+为 `mcode-app` 的 H5 端首页连接页增加一套 iOS Safari 专用的“添加到桌面”提示，满足以下目标：
 
 - 仅在 `iPhone/iPad` 的 `Safari` 浏览器中触发
 - 已经以桌面全屏模式打开时不再提示
-- 使用全局底部弹层展示引导文案
+- 仅在首页连接页展示底部弹层引导文案
 - 用户关闭后 `7 天` 内不再提示，超过 `7 天` 可再次提示
 - 补齐 iOS Web App 所需的页面 meta，确保添加到主屏幕后可以以全屏方式打开
 
@@ -37,25 +37,25 @@
 
 ## Options Considered
 
-### 1. 全局根组件底部弹层 + 本地冷却时间戳 + Apple Web App meta（采用）
+### 1. 首页连接页底部弹层 + 本地冷却时间戳 + Apple Web App meta（采用）
 
 **做法**
 
-- 在 `App.vue` 启动后做一次 H5 环境检测
+- 在首页连接页加载后做一次 H5 环境检测
 - 若满足 iOS Safari、非独立模式、且未命中 7 天冷却，则展示底部弹层
 - 用户关闭后记录本地时间戳
 - 在 `index.html` 增加 Apple Web App 相关 meta 和触屏图标
 
 **优点**
 
-- 改动集中，所有 H5 页面自动生效
+- 改动最小，只影响用户指定的首页入口
 - 与现有 `uview-plus` 组件体系一致，样式可控
 - 关闭策略简单清晰，后续易维护
 - 同时覆盖“引导”和“全屏基础配置”两个缺口
 
 **缺点**
 
-- 需要在根组件加入少量平台判断逻辑
+- 如果用户直接深链进入其他页面，则本次不会看到提示
 
 ### 2. 页面内横幅提示
 
@@ -90,7 +90,7 @@
 
 ## Chosen Design
 
-采用 **方案 1**：在根组件实现 iOS Safari 检测与全局底部弹层，同时补充 Apple Web App meta。
+采用 **方案 1**：在首页连接页实现 iOS Safari 检测与底部弹层，同时补充 Apple Web App meta。
 
 核心原则如下：
 
@@ -103,13 +103,13 @@
 
 ### 1. 触发时机
 
-在 `mcode-app/src/App.vue` 的 `onLaunch` 中执行检测逻辑。
+在 `mcode-app/src/pages/connections/index.vue` 页面挂载后执行检测逻辑。
 
 原因：
 
-- `App.vue` 是全局入口，最适合承载一次性环境判断
-- 当前文件逻辑较少，接入成本低
-- 不需要让具体页面各自重复实现
+- 用户明确要求“直接放在首页”
+- `pages/connections/index` 是当前首页入口
+- 只在该页面接入可以避免影响其他页面结构
 
 检测只在 `H5` 端运行，其他端直接跳过。
 
@@ -173,7 +173,7 @@ const IOS_A2HS_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000
 
 - 记录当前时间戳到本地存储
 
-当应用启动时：
+当用户进入首页连接页时：
 
 - 读取该时间戳
 - 若当前时间减去时间戳小于 `IOS_A2HS_COOLDOWN_MS`，则本次不展示
@@ -183,7 +183,7 @@ const IOS_A2HS_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000
 
 ### 4. 交互形式
 
-使用 `uview-plus` 的 `up-popup` 做底部弹层，挂载在 `App.vue` 中。
+使用 `uview-plus` 的 `up-popup` 做底部弹层，挂载在 `mcode-app/src/pages/connections/index.vue` 中。
 
 交互元素保持精简：
 
@@ -218,15 +218,15 @@ const IOS_A2HS_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000
 
 同时增加 `apple-touch-icon` 指向项目现有图标资源。
 
-本次优先复用已存在资源，例如：
+本次优先复用现有 `180x180` 图标内容，但应放到 H5 可稳定直链的位置，例如：
 
-- `mcode-app/unpackage/res/icons/180x180.png`
+- `mcode-app/public/apple-touch-icon.png`
 
-如果该路径在 H5 构建产物中不稳定，则在可被 H5 静态访问的位置补一份等价图标资源，并让 `index.html` 指向该稳定路径。
+然后让 `index.html` 指向该稳定路径。
 
 ### 7. 状态与生命周期
 
-根组件维护一个布尔状态，例如：
+首页连接页维护一个布尔状态，例如：
 
 ```ts
 const showIosAddToHomePrompt = ref(false)
@@ -234,13 +234,15 @@ const showIosAddToHomePrompt = ref(false)
 
 生命周期流程如下：
 
-1. `onLaunch` 执行检测
+1. 首页连接页挂载后执行检测
 2. 命中条件则设置 `showIosAddToHomePrompt = true`
 3. 用户点击关闭按钮或遮罩关闭
 4. 统一写入关闭时间戳
 5. 设置 `showIosAddToHomePrompt = false`
 
 为避免用户误触遮罩导致未记录冷却，遮罩关闭与按钮关闭都应走同一个关闭处理函数。
+
+这里的“页面首次进入”指首页连接页组件创建并挂载后的首次判断，而不是应用全局生命周期。
 
 ### 8. 错误与降级
 
@@ -255,25 +257,25 @@ const showIosAddToHomePrompt = ref(false)
 
 ## Data Flow
 
-1. H5 启动进入 `App.vue`
+1. H5 打开并进入首页连接页
 2. 执行 iOS Safari 环境检测
 3. 检查当前是否为独立全屏模式
 4. 读取本地关闭时间戳
 5. 若满足显示条件，则打开底部弹层
 6. 用户关闭弹层
 7. 写入当前时间戳
-8. 未来 7 天内再次访问时跳过提示
-9. 超过 7 天后再次访问，可重新提示
+8. 未来 7 天内再次访问首页时跳过提示
+9. 超过 7 天后再次进入首页，可重新提示
 
 ## Files
 
-- Modify: `mcode-app/src/App.vue`
+- Modify: `mcode-app/src/pages/connections/index.vue`
 - Modify: `mcode-app/index.html`
-- Optional Add: `mcode-app/src/static/...` 中稳定可访问的 iOS 触屏图标资源（仅在现有图标路径不适合 H5 直链时）
+- Add: `mcode-app/public/apple-touch-icon.png`
 
 ## Proposed API Shape
 
-推荐在 `App.vue` 内部使用小型私有函数组织逻辑：
+推荐在首页连接页内部使用小型私有函数组织逻辑：
 
 ```ts
 function shouldShowIosAddToHomePrompt(): boolean
@@ -296,17 +298,17 @@ function dismissIosAddToHomePrompt(): void
 
 手工验证以下场景：
 
-1. **iPhone Safari 普通网页打开**
+1. **iPhone Safari 打开首页连接页**
    - 预期：出现底部弹层
 
-2. **iPhone Safari 关闭提示后再次立即打开**
+2. **iPhone Safari 关闭提示后再次进入首页**
    - 预期：7 天内不再提示
 
-3. **iPhone Safari 添加到主屏幕后从桌面打开**
+3. **iPhone Safari 添加到主屏幕后从桌面打开首页**
    - 预期：不出现提示
    - 预期：以全屏模式打开
 
-4. **iPad Safari 普通网页打开**
+4. **iPad Safari 打开首页连接页**
    - 预期：出现底部弹层
 
 5. **iOS Chrome / Edge / Firefox 打开**
@@ -315,14 +317,14 @@ function dismissIosAddToHomePrompt(): void
 6. **非 iOS 设备打开**
    - 预期：不出现提示
 
-7. **冷却时间超过 7 天**
+7. **冷却时间超过 7 天后重新进入首页**
    - 预期：再次满足环境条件时可重新出现提示
 
 ## Acceptance Criteria
 
 - 仅 `iPhone/iPad Safari` 命中提示
 - 已以桌面独立模式打开时不提示
-- 提示使用全局底部弹层呈现
+- 提示仅在首页连接页以底部弹层呈现
 - 用户关闭后 `7 天` 内不再提示
 - 超过 `7 天` 后允许再次提示
 - H5 页面头包含 iOS Web App 相关 meta
