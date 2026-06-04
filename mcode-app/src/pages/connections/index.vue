@@ -176,7 +176,7 @@
             <view class="tutorial-step__body">
               <text class="tutorial-step__title">在自己电脑下载安装 codeg</text>
               <text class="tutorial-step__link" @click="openDeploymentGuideLink">
-                https://github.com/xintaofei/codeg/releases/tag/v0.14.11
+                {{ DEPLOYMENT_GUIDE_URL }}
               </text>
             </view>
           </view>
@@ -213,6 +213,9 @@ import type { RelaySessionInfo } from "@/services/gateway"
 import { buildWebSocketProtocols } from "@/services/gateway/wsProtocol"
 
 declare const plus: any
+
+const DEPLOYMENT_GUIDE_URL =
+  "https://github.com/xintaofei/codeg/releases/tag/v0.14.11"
 
 const auth = useAuthStore()
 const showAddPopup = ref(false)
@@ -289,6 +292,28 @@ function subsectionChange(index: number) {
 
 function openTutorialPopup() {
   showTutorialPopup.value = true
+}
+
+function openDeploymentGuideLink() {
+  try {
+    if (isH5WebSocketRuntime()) {
+      window.open(DEPLOYMENT_GUIDE_URL, "_blank", "noopener,noreferrer")
+      return
+    }
+
+    if (typeof plus !== "undefined" && plus?.runtime?.openURL) {
+      plus.runtime.openURL(DEPLOYMENT_GUIDE_URL)
+      return
+    }
+
+    throw new Error("unsupported runtime")
+  } catch {
+    uni.showToast({
+      title: "打开链接失败，请手动访问",
+      icon: "none",
+      duration: 2500,
+    })
+  }
 }
 
 async function submitConnection() {
