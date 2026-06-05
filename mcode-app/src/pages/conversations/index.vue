@@ -509,6 +509,7 @@ const historyLoading = ref(false)
 let overviewLoadPromise: Promise<void> | null = null
 let lastOverviewLoadedAt = 0
 const historyLoadPromiseMap = new Map<string, Promise<void>>()
+const overviewRefreshPromiseMap = new Map<string, Promise<void>>()
 const loadingCreateAgents = ref(false)
 let createAgentProbeToken = 0
 let createAgentListToken = 0
@@ -953,11 +954,7 @@ async function loadOverviewDataInternal() {
     const groups = await Promise.all(
       connected.map(async (conn) => {
         try {
-          const initialGroup = await loadConnectionGroup(conn)
-          void refreshConnectionGroupFromRemote(conn, initialGroup).catch((error) => {
-            console.warn("refresh connection group from remote skipped:", error)
-          })
-          return initialGroup
+          return await loadConnectionGroup(conn)
         } catch (error) {
           const message = toErrorMessage(error)
           console.warn("[conversations] load connection group failed", {
@@ -1021,17 +1018,32 @@ async function loadConnectionGroup(conn: ConnectionItem): Promise<ConnectionGrou
     descriptor.instanceKey,
     folders
   )) || []
-  return toConnectionGroup(
-    buildConnectionConversationSnapshot({
-      connectionKey: connectionKey(conn),
-      connectionName: conn.name,
-      mode: conn.mode,
-      url: conn.url,
+
+  if (localConversations.length > 0) {
+    const initialGroup = buildConnectionGroupSnapshot({
+      conn,
       folders,
       tabs,
       conversations: localConversations,
     })
-  )
+    void scheduleOverviewConversationRefresh({
+      conn,
+      gateway,
+      instanceKey: descriptor.instanceKey,
+      folders,
+      tabs,
+    })
+    return initialGroup
+  }
+
+  const remoteConversations = await fetchRemoteConversations(gateway, folders)
+  await persistConversationSummaries(descriptor.instanceKey, remoteConversations)
+  return buildConnectionGroupSnapshot({
+    conn,
+    folders,
+    tabs,
+    conversations: remoteConversations,
+  })
 }
 
 function buildConnectionErrorGroup(
@@ -1089,17 +1101,12 @@ async function loadRemoteConnectionSnapshot(
   const descriptor = gateway.getRemoteInstanceDescriptor()
   const remoteConversations = await fetchRemoteConversations(gateway, folders)
   await persistConversationSummaries(descriptor.instanceKey, remoteConversations)
-  return toConnectionGroup(
-    buildConnectionConversationSnapshot({
-      connectionKey: connectionKey(conn),
-      connectionName: conn.name,
-      mode: conn.mode,
-      url: conn.url,
-      folders,
-      tabs,
-      conversations: remoteConversations,
-    })
-  )
+  return buildConnectionGroupSnapshot({
+    conn,
+    folders,
+    tabs,
+    conversations: remoteConversations,
+  })
 }
 
 async function refreshConnectionGroupFromRemote(conn: ConnectionItem, current: ConnectionGroup) {
@@ -1110,6 +1117,41 @@ async function refreshConnectionGroupFromRemote(conn: ConnectionItem, current: C
   const tabs = normalizeList(tabsRaw) as OpenedTabItem[]
   const nextGroup = await loadRemoteConnectionSnapshot(conn, folders, tabs)
   replaceConnectionGroup(nextGroup)
+}
+
+async function scheduleOverviewConversationRefresh(input: {
+  conn: ConnectionItem
+  gateway: Awaited<ReturnType<typeof createConnectionGateway>>
+  instanceKey: string
+  folders: Project[]
+  tabs: OpenedTabItem[]
+}) {
+  const key = connectionKey(input.conn)
+  if (overviewRefreshPromiseMap.has(key)) {
+    return await overviewRefreshPromiseMap.get(key)
+  }
+
+  const task = (async () => {
+    try {
+      const remoteConversations = await fetchRemoteConversations(input.gateway, input.folders)
+      await persistConversationSummaries(input.instanceKey, remoteConversations)
+      replaceConnectionGroup(
+        buildConnectionGroupSnapshot({
+          conn: input.conn,
+          folders: input.folders,
+          tabs: input.tabs,
+          conversations: remoteConversations,
+        })
+      )
+    } catch (error) {
+      console.warn("refresh connection group conversations skipped:", error)
+    } finally {
+      overviewRefreshPromiseMap.delete(key)
+    }
+  })()
+
+  overviewRefreshPromiseMap.set(key, task)
+  await task
 }
 
 async function persistConversationSummaries(
@@ -1133,6 +1175,25 @@ function toConnectionGroup(snapshot: ConnectionConversationSnapshot): Connection
     ...snapshot,
     cards: [...snapshot.openTabCards, ...snapshot.recentActiveCards],
   }
+}
+
+function buildConnectionGroupSnapshot(input: {
+  conn: ConnectionItem
+  folders: Project[]
+  tabs: OpenedTabItem[]
+  conversations: Conversation[]
+}) {
+  return toConnectionGroup(
+    buildConnectionConversationSnapshot({
+      connectionKey: connectionKey(input.conn),
+      connectionName: input.conn.name,
+      mode: input.conn.mode,
+      url: input.conn.url,
+      folders: input.folders,
+      tabs: input.tabs,
+      conversations: input.conversations,
+    })
+  )
 }
 
 function replaceConnectionGroup(nextGroup: ConnectionGroup) {
