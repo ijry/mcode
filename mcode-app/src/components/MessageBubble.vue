@@ -2,15 +2,15 @@
   <view :class="['bubble-wrap', `bubble-wrap--${message.role}`]">
     <!-- 头像 -->
     <view class="bubble-avatar">
-      <up-avatar
+      <!-- <up-avatar
         v-if="message.role === 'user'"
         :size="36"
         text="我"
         bgColor="#2979ff"
         color="#fff"
         fontSize="24"
-      ></up-avatar>
-      <view v-else class="bubble-avatar__logo">
+      ></up-avatar> -->
+      <!-- <view v-else class="bubble-avatar__logo">
         <image
           v-if="agentLogoPath"
           class="bubble-avatar__logo-img"
@@ -25,7 +25,7 @@
           color="#606266"
           fontSize="24"
         ></up-avatar>
-      </view>
+      </view> -->
     </view>
 
     <!-- 气泡内容 -->
