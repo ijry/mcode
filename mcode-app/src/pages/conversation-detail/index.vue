@@ -86,6 +86,43 @@
       </scroll-view>
 
       <view class="input-wrap">
+        <view v-if="pendingPermissionCard" class="permission-card">
+          <view class="permission-card__header">
+            <view class="permission-card__badge"></view>
+            <text class="permission-card__title">需要授权</text>
+          </view>
+          <text class="permission-card__desc">{{ pendingPermissionDescription }}</text>
+          <view
+            v-if="pendingPermissionCard.options.length > 0"
+            class="permission-card__actions"
+          >
+            <view
+              v-for="option in pendingPermissionCard.options"
+              :key="option.id"
+              class="permission-card__option"
+            >
+              <button
+                class="permission-card__action"
+                :class="{
+                  'permission-card__action--loading': permissionSubmitting && pendingPermissionSubmittingOptionId === option.id,
+                }"
+                :disabled="permissionSubmitting"
+                @click="respondToPermission(option.id)"
+              >
+                {{
+                  permissionSubmitting && pendingPermissionSubmittingOptionId === option.id
+                    ? "提交中..."
+                    : option.label
+                }}
+              </button>
+              <text v-if="option.description" class="permission-card__option-desc">
+                {{ option.description }}
+              </text>
+            </view>
+          </view>
+          <text v-else class="permission-card__empty">当前授权请求没有可用选项</text>
+        </view>
+
         <view
           v-if="slashState.visible && filteredSlashCommands.length > 0"
           class="slash-panel"
@@ -252,13 +289,6 @@
       @cancel="showModelPicker = false"
     ></up-picker>
 
-    <up-picker
-      :show="showPermissionPicker"
-      :columns="permissionColumns"
-      @confirm="onPermissionConfirm"
-      @cancel="showPermissionPicker = false"
-    ></up-picker>
-
     <up-popup v-model:show="showPlanDrawer" mode="bottom" :round="20">
       <view class="plan-drawer">
         <view class="plan-drawer__hd">
@@ -345,7 +375,13 @@ import {
 import { connectionSessionManager } from "@/services/conversation/connectionSessionManager"
 import { markConversationListDirty } from "@/services/conversation/conversationListRefresh"
 import { persistConversationDetailSnapshot } from "@/services/conversation/conversationDetailPersistence"
-import type { PromptInputBlock, ToolCall, ContentPart, MessageTurn } from "@/types/acp"
+import type {
+  PromptInputBlock,
+  ToolCall,
+  ContentPart,
+  MessageTurn,
+  PermissionRequest,
+} from "@/types/acp"
 import MessageBubble from "@/components/MessageBubble.vue"
 import ExpertMenu from "@/components/ExpertMenu.vue"
 
@@ -436,13 +472,13 @@ const draftQueue = ref<QueuedDraft[]>([])
 const queueExpanded = ref(false)
 const uploadingCount = ref(0)
 const showModelPicker = ref(false)
-const showPermissionPicker = ref(false)
 const showPlanDrawer = ref(false)
 const modelColumns = ref<any[]>([])
-const permissionColumns = ref<any[]>([])
 const currentAgentType = ref("claude_code")
 const hasLoadedOnce = ref(false)
 const HISTORY_LOADING_MIN_MS = 200
+const permissionSubmitting = ref(false)
+const pendingPermissionSubmittingOptionId = ref("")
 
 function detailDebugLog(stage: string, payload?: Record<string, unknown>) {
   if (!conversationId.value) return
@@ -477,6 +513,10 @@ const historyStatusText = computed(() => {
 })
 
 const runtimeStatus = computed<string>(() => String(session.value?.status || "idle"))
+const pendingPermissionCard = computed<PermissionRequest | null>(() => session.value?.pendingPermission || null)
+const pendingPermissionDescription = computed(() => {
+  return pendingPermissionCard.value?.description || "智能体请求继续当前操作"
+})
 
 const stats = computed(() => session.value?.stats || {
   inputTokens: 0,
@@ -1761,7 +1801,32 @@ function createLocalId(prefix: string): string {
 }
 
 function onModelConfirm() {}
-function onPermissionConfirm() {}
+
+async function respondToPermission(optionId: string) {
+  if (permissionSubmitting.value) return
+  const pending = pendingPermissionCard.value
+  const conn = session.value?.connectionId
+  if (!pending?.id || !conn) {
+    uni.showToast({ title: "授权请求信息不完整", icon: "none" })
+    return
+  }
+
+  permissionSubmitting.value = true
+  pendingPermissionSubmittingOptionId.value = optionId
+  try {
+    await acpApi.acpRespondPermission(conn, pending.id, optionId)
+    runtime.clearPendingPermission(conversationId.value, pending.id)
+    uni.showToast({ title: "已提交授权", icon: "success" })
+  } catch (error) {
+    uni.showToast({
+      title: toErrorMessage(error, "授权失败"),
+      icon: "none",
+    })
+  } finally {
+    permissionSubmitting.value = false
+    pendingPermissionSubmittingOptionId.value = ""
+  }
+}
 
 function mergeTaskFromToolCall(
   taskMap: Map<string, PlanTask>,
@@ -2332,6 +2397,94 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   padding: 14rpx 16rpx;
   padding-bottom: calc(14rpx + env(safe-area-inset-bottom));
   box-sizing: border-box;
+}
+
+.permission-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14rpx;
+  margin-bottom: 16rpx;
+  padding: 22rpx 24rpx;
+  border-radius: 22rpx;
+  background: linear-gradient(180deg, #fffaf0 0%, #ffffff 100%);
+  border: 1rpx solid rgba(250, 173, 20, 0.28);
+  box-shadow: 0 10rpx 28rpx rgba(250, 173, 20, 0.08);
+}
+
+.permission-card__header {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+}
+
+.permission-card__badge {
+  width: 16rpx;
+  height: 16rpx;
+  border-radius: 999rpx;
+  background-color: #faad14;
+  box-shadow: 0 0 0 6rpx rgba(250, 173, 20, 0.14);
+}
+
+.permission-card__title {
+  font-size: 26rpx;
+  font-weight: 600;
+  color: #7c4a03;
+}
+
+.permission-card__desc {
+  font-size: 24rpx;
+  line-height: 1.6;
+  color: #5c5f66;
+}
+
+.permission-card__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 14rpx;
+}
+
+.permission-card__option {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+
+.permission-card__action {
+  width: 100%;
+  min-height: 72rpx;
+  padding: 0 24rpx;
+  border: none;
+  border-radius: 18rpx;
+  background: #fff7e6;
+  color: #8a5200;
+  font-size: 24rpx;
+  font-weight: 600;
+  line-height: 72rpx;
+  text-align: center;
+  box-sizing: border-box;
+}
+
+.permission-card__action::after {
+  border: none;
+}
+
+.permission-card__action[disabled] {
+  opacity: 0.72;
+}
+
+.permission-card__action--loading {
+  background: #ffe7ba;
+}
+
+.permission-card__option-desc {
+  font-size: 22rpx;
+  line-height: 1.5;
+  color: #8c8c8c;
+}
+
+.permission-card__empty {
+  font-size: 22rpx;
+  color: #8c8c8c;
 }
 
 .slash-panel {

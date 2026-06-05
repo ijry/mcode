@@ -7,6 +7,8 @@ import type {
   EventEnvelope,
   SessionStats,
   ContentPart,
+  PermissionRequest,
+  PermissionOption,
 } from "@/types/acp"
 import { acpApi } from "@/api/acp"
 import { useAuthStore } from "./auth"
@@ -52,6 +54,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         connectionId: null,
         instanceKey: "",
         status: "idle",
+        pendingPermission: null,
         lastAppliedSeq: null,
         stats: {
           inputTokens: 0,
@@ -224,6 +227,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     if (normalizedLiveMessage) {
       session.liveMessage = normalizedLiveMessage
     }
+    session.pendingPermission = normalizePendingPermission(snapshot?.pending_permission)
     session.status = deriveRuntimeStatus(snapshot, normalizedLiveMessage ?? session.liveMessage)
     session.lastAppliedSeq = firstNumber(snapshot?.event_seq, snapshot?.eventSeq) ?? session.lastAppliedSeq
 
@@ -265,6 +269,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       }
     } else {
       session.liveMessage = null
+      session.pendingPermission = null
       try {
         await calibrateAfterReplayGap(conversationId)
         session.localTurns = await reloadLocalTurns(session)
@@ -274,6 +279,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     }
 
     session.status = "idle"
+    session.pendingPermission = null
     session.stats.turnCount++
   }
 
@@ -292,6 +298,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
 
     switch (event.type) {
       case "stream_batch":
+        session.pendingPermission = null
         appendLiveContent(
           session.conversationId,
           event.data.delta,
@@ -301,6 +308,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
 
       case "tool_call": {
         session.status = "running_tool"
+        session.pendingPermission = null
         const currentLiveMessage = session.liveMessage?.isPlaceholderThinking
           ? clearPlaceholderLiveMessage(session) ?? createLiveMessage()
           : session.liveMessage ?? createLiveMessage()
@@ -324,6 +332,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       }
 
       case "tool_call_update": {
+        session.pendingPermission = null
         if (event.data.status === "error") {
           session.status = "error"
         } else {
@@ -356,10 +365,14 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
 
       case "status_changed":
         session.status = event.data.status
+        if (event.data.status !== "waiting_permission") {
+          session.pendingPermission = null
+        }
         break
 
       case "permission_request":
         session.status = "waiting_permission"
+        session.pendingPermission = normalizePermissionRequest(event.data)
         break
 
       case "turn_complete":
@@ -452,6 +465,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       connections.value.delete(session.connectionId)
       session.connectionId = null
       session.status = "idle"
+      session.pendingPermission = null
     }
   }
 
@@ -463,6 +477,20 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     unbindConversationEventHandler(conversationId)
     connectionSessionManager.clearConversation(conversationId)
     sessions.value.delete(conversationId)
+  }
+
+  function clearPendingPermission(conversationId: number, requestId?: string | null) {
+    const session = sessions.value.get(conversationId)
+    if (!session?.pendingPermission) return
+    if (requestId && session.pendingPermission.id !== requestId) return
+    session.pendingPermission = null
+    if (session.status === "waiting_permission") {
+      session.status = session.liveMessage
+        ? "thinking"
+        : session.connectionId
+          ? "connected"
+          : "idle"
+    }
   }
 
   function bindCreatedConversationRuntime(input: {
@@ -504,6 +532,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     connect,
     disconnect,
     clearSession,
+    clearPendingPermission,
     bindCreatedConversationRuntime,
   }
 })
@@ -516,6 +545,7 @@ interface RuntimeSession {
   connectionId: string | null
   instanceKey: string
   status: "idle" | "connecting" | "connected" | "thinking" | "running_tool" | "waiting_permission" | "error"
+  pendingPermission: PermissionRequest | null
   lastAppliedSeq: number | null
   stats: SessionStats
 }
@@ -736,6 +766,83 @@ function deriveRuntimeStatus(snapshot: any, liveMessage: LiveMessage | null) {
   if (status === "connected") return "connected"
   if (status === "prompting") return "thinking"
   return "idle"
+}
+
+function normalizePendingPermission(raw: any): PermissionRequest | null {
+  if (!raw || typeof raw !== "object") return null
+  const requestId = firstString(raw.request_id, raw.requestId, raw.id)
+  if (!requestId) return null
+
+  const toolCall = raw.tool_call && typeof raw.tool_call === "object" ? raw.tool_call : raw.details
+  return {
+    id: requestId,
+    type: normalizePermissionType(raw.kind, toolCall),
+    description:
+      describePermission(toolCall) ||
+      firstString(raw.description, raw.title) ||
+      "智能体请求继续当前操作",
+    details: toolCall || raw,
+    options: normalizePermissionOptions(raw.options),
+  }
+}
+
+function normalizePermissionRequest(raw: any): PermissionRequest | null {
+  if (!raw || typeof raw !== "object") return null
+  const requestId = firstString(raw.id, raw.request_id, raw.requestId)
+  if (!requestId) return null
+
+  return {
+    id: requestId,
+    type: normalizePermissionType(raw.type, raw.details),
+    description:
+      firstString(raw.description) ||
+      describePermission(raw.details) ||
+      "智能体请求继续当前操作",
+    details: raw.details,
+    options: normalizePermissionOptions(raw.options),
+  }
+}
+
+function normalizePermissionOptions(rawOptions: unknown): PermissionOption[] {
+  if (!Array.isArray(rawOptions)) return []
+  const normalized: PermissionOption[] = []
+  for (const option of rawOptions) {
+    if (!option || typeof option !== "object") continue
+    const id = firstString((option as any).id, (option as any).option_id, (option as any).optionId)
+    if (!id) continue
+    normalized.push({
+      id,
+      label:
+        firstString((option as any).label, (option as any).name, (option as any).kind) ||
+        "确认",
+      description: firstString((option as any).description, (option as any).kind) || undefined,
+    })
+  }
+  return normalized
+}
+
+function normalizePermissionType(...values: unknown[]): PermissionRequest["type"] {
+  const normalized = values.map((value) => {
+    if (typeof value === "string") return value
+    if (value && typeof value === "object") {
+      return firstString((value as any).kind, (value as any).type, (value as any).name) || ""
+    }
+    return ""
+  })
+  const raw = firstString(...normalized)?.toLowerCase()
+  if (raw === "file_change" || raw === "filechange" || raw === "edit") return "file_change"
+  if (raw === "network") return "network"
+  if (raw === "plan") return "plan"
+  return "command"
+}
+
+function describePermission(toolCall: unknown) {
+  if (!toolCall || typeof toolCall !== "object") return ""
+  const record = toolCall as Record<string, unknown>
+  return (
+    firstString(record.title, record.name, record.kind, record.description) ||
+    firstString(record.tool_call_id, record.toolCallId)
+  )
 }
 
 function normalizeToolCallInput(input: unknown) {
