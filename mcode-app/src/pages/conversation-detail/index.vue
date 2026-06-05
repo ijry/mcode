@@ -123,6 +123,96 @@
           <text v-else class="permission-card__empty">当前授权请求没有可用选项</text>
         </view>
 
+        <view v-if="showComposerTools" class="composer-tools">
+          <view class="composer-tools__section">
+            <text class="composer-tools__title">快捷操作</text>
+            <view class="composer-tools__actions">
+              <view class="composer-tools__action" @click="toggleAttachmentKinds">
+                <text class="composer-tools__action-text">附件上传</text>
+              </view>
+              <view class="composer-tools__action" @click="openTodoPicker">
+                <text class="composer-tools__action-text">从待办选择获取任务</text>
+              </view>
+            </view>
+            <view v-if="showAttachmentKinds" class="composer-tools__subactions">
+              <view class="composer-tools__subaction" @click="handleChooseImages">图片</view>
+              <view class="composer-tools__subaction" @click="handleChooseFiles">文件</view>
+            </view>
+          </view>
+
+          <view class="composer-tools__section">
+            <text class="composer-tools__title">会话配置</text>
+            <view
+              :class="['composer-config-row', !hasModelOptions && 'composer-config-row--disabled']"
+              @click="toggleConfigRow('model')"
+            >
+              <text class="composer-config-row__label">模型</text>
+              <text class="composer-config-row__value">{{ modelSummary }}</text>
+            </view>
+            <view
+              v-if="expandedConfigKey === 'model' && hasModelOptions"
+              class="config-chip-grid"
+            >
+              <view
+                v-for="mode in detailAgentConfig.modes?.available_modes || []"
+                :key="mode.id"
+                :class="['config-chip', detailAgentConfig.selectedModeId === mode.id && 'config-chip--active']"
+                @click.stop="selectDetailMode(mode.id)"
+              >
+                <text class="config-chip__title">{{ mode.name }}</text>
+              </view>
+            </view>
+
+            <view
+              :class="['composer-config-row', !reasoningOption && 'composer-config-row--disabled']"
+              @click="toggleConfigRow('reasoning')"
+            >
+              <text class="composer-config-row__label">推理强度</text>
+              <text class="composer-config-row__value">{{ reasoningSummary }}</text>
+            </view>
+            <view
+              v-if="expandedConfigKey === 'reasoning' && reasoningOption"
+              class="config-chip-grid"
+            >
+              <view
+                v-for="value in reasoningOption.kind.options"
+                :key="value.value"
+                :class="[
+                  'config-chip',
+                  detailAgentConfig.selectedValues[reasoningOption.id] === value.value && 'config-chip--active',
+                ]"
+                @click.stop="selectDetailConfigValue(reasoningOption.id, value.value)"
+              >
+                <text class="config-chip__title">{{ value.name }}</text>
+              </view>
+            </view>
+
+            <view
+              :class="['composer-config-row', !permissionOption && 'composer-config-row--disabled']"
+              @click="toggleConfigRow('permission')"
+            >
+              <text class="composer-config-row__label">授权类型</text>
+              <text class="composer-config-row__value">{{ permissionSummary }}</text>
+            </view>
+            <view
+              v-if="expandedConfigKey === 'permission' && permissionOption"
+              class="config-chip-grid"
+            >
+              <view
+                v-for="value in permissionOption.kind.options"
+                :key="value.value"
+                :class="[
+                  'config-chip',
+                  detailAgentConfig.selectedValues[permissionOption.id] === value.value && 'config-chip--active',
+                ]"
+                @click.stop="selectDetailConfigValue(permissionOption.id, value.value)"
+              >
+                <text class="config-chip__title">{{ value.name }}</text>
+              </view>
+            </view>
+          </view>
+        </view>
+
         <view
           v-if="slashState.visible && filteredSlashCommands.length > 0"
           class="slash-panel"
@@ -227,8 +317,8 @@
         </view>
 
         <view class="input-row">
-          <view class="input-action" @click="openAttachActions">
-            <up-icon name="plus" size="18" color="#606266"></up-icon>
+          <view class="input-action" @click="toggleComposerTools">
+            <up-icon :name="showComposerTools ? 'close' : 'plus'" size="18" color="#606266"></up-icon>
           </view>
 
           <view class="input-box">
@@ -281,13 +371,6 @@
         <text class="plan-fab__text">计划 {{ inProgressTaskCount }}/{{ planTasks.length }}</text>
       </view>
     </view>
-
-    <up-picker
-      :show="showModelPicker"
-      :columns="modelColumns"
-      @confirm="onModelConfirm"
-      @cancel="showModelPicker = false"
-    ></up-picker>
 
     <up-popup v-model:show="showPlanDrawer" mode="bottom" :round="20">
       <view class="plan-drawer">
@@ -347,6 +430,25 @@
         </scroll-view>
       </view>
     </up-popup>
+
+    <up-popup v-model:show="showTodoPicker" mode="bottom" :round="20">
+      <view class="todo-picker">
+        <view class="todo-picker__hd">
+          <text class="todo-picker__title">选择待办</text>
+        </view>
+        <view v-if="availableTodos.length === 0" class="todo-picker__empty">
+          <text class="todo-picker__empty-text">暂无未完成待办</text>
+        </view>
+        <view
+          v-for="item in availableTodos"
+          :key="item.id"
+          class="todo-picker__item"
+          @click="selectTodoForComposer(item)"
+        >
+          <text class="todo-picker__text">{{ item.text }}</text>
+        </view>
+      </view>
+    </up-popup>
   </view>
 </template>
 
@@ -375,6 +477,18 @@ import {
 import { connectionSessionManager } from "@/services/conversation/connectionSessionManager"
 import { markConversationListDirty } from "@/services/conversation/conversationListRefresh"
 import { persistConversationDetailSnapshot } from "@/services/conversation/conversationDetailPersistence"
+import {
+  createEmptyDetailAgentConfigState,
+  createReadyDetailAgentConfigState,
+  findModeName,
+  findPermissionOption,
+  findReasoningOption,
+  findSelectedOptionValueName,
+  parseIncompleteTodos,
+  type ComposerConfigKey,
+  type ComposerTodoItem,
+  type DetailAgentConfigState,
+} from "@/services/conversation/composerTools"
 import type {
   PromptInputBlock,
   ToolCall,
@@ -471,14 +585,19 @@ const uploadQueue = ref<UploadQueueItem[]>([])
 const draftQueue = ref<QueuedDraft[]>([])
 const queueExpanded = ref(false)
 const uploadingCount = ref(0)
-const showModelPicker = ref(false)
 const showPlanDrawer = ref(false)
-const modelColumns = ref<any[]>([])
+const showComposerTools = ref(false)
+const showAttachmentKinds = ref(false)
+const showTodoPicker = ref(false)
+const expandedConfigKey = ref<ComposerConfigKey>("")
+const detailAgentConfig = ref<DetailAgentConfigState>(createEmptyDetailAgentConfigState())
+const availableTodos = ref<ComposerTodoItem[]>([])
 const currentAgentType = ref("claude_code")
 const hasLoadedOnce = ref(false)
 const HISTORY_LOADING_MIN_MS = 200
 const permissionSubmitting = ref(false)
 const pendingPermissionSubmittingOptionId = ref("")
+let detailAgentProbeToken = 0
 
 function detailDebugLog(stage: string, payload?: Record<string, unknown>) {
   if (!conversationId.value) return
@@ -516,6 +635,33 @@ const runtimeStatus = computed<string>(() => String(session.value?.status || "id
 const pendingPermissionCard = computed<PermissionRequest | null>(() => session.value?.pendingPermission || null)
 const pendingPermissionDescription = computed(() => {
   return pendingPermissionCard.value?.description || "智能体请求继续当前操作"
+})
+const hasModelOptions = computed(() =>
+  Boolean(detailAgentConfig.value.modes?.available_modes?.length)
+)
+const reasoningOption = computed(() =>
+  findReasoningOption(detailAgentConfig.value.configOptions)
+)
+const permissionOption = computed(() =>
+  findPermissionOption(detailAgentConfig.value.configOptions)
+)
+const modelSummary = computed(() => {
+  if (detailAgentConfig.value.status === "loading") return "加载中"
+  return findModeName(detailAgentConfig.value.modes, detailAgentConfig.value.selectedModeId)
+    || detailAgentConfig.value.message
+    || "远端未提供"
+})
+const reasoningSummary = computed(() => {
+  if (detailAgentConfig.value.status === "loading") return "加载中"
+  return findSelectedOptionValueName(reasoningOption.value, detailAgentConfig.value.selectedValues)
+    || detailAgentConfig.value.message
+    || "远端未提供"
+})
+const permissionSummary = computed(() => {
+  if (detailAgentConfig.value.status === "loading") return "加载中"
+  return findSelectedOptionValueName(permissionOption.value, detailAgentConfig.value.selectedValues)
+    || detailAgentConfig.value.message
+    || "远端未提供"
 })
 
 const stats = computed(() => session.value?.stats || {
@@ -727,6 +873,15 @@ watch(
 )
 
 watch(
+  () => [currentAgentType.value, session.value?.connectionId] as const,
+  ([agentType, connectionId]) => {
+    if (!conversationId.value || !agentType || !connectionId) return
+    void loadDetailAgentConfig()
+    void applyPendingComposerConfig()
+  }
+)
+
+watch(
   () => [
     attachments.value.length,
     uploadQueue.value.length,
@@ -734,6 +889,10 @@ watch(
     queueExpanded.value,
     slashState.value.visible,
     filteredSlashCommands.value.length,
+    showComposerTools.value,
+    showAttachmentKinds.value,
+    showTodoPicker.value,
+    expandedConfigKey.value,
   ],
   () => {
     if (!hasInitialBottomScroll.value) return
@@ -936,6 +1095,7 @@ async function loadConversation() {
       detailDebugLog("catchup-persist-failed", { message: toErrorMessage(error) })
       console.warn("remote conversation catch-up skipped", error)
     }
+    await loadDetailAgentConfig()
     const availableCommands = Array.isArray(snapshot?.available_commands)
       ? snapshot.available_commands
       : Array.isArray(snapshot?.availableCommands)
@@ -1368,17 +1528,126 @@ function handleCommandSelect(command: any) {
   uni.showToast({ title: `已插入: ${command.name}`, icon: "success" })
 }
 
-function openAttachActions() {
-  uni.showActionSheet({
-    itemList: ["上传图片", "上传文件"],
-    success: (res) => {
-      if (res.tapIndex === 0) {
-        chooseImages()
-      } else {
-        chooseFiles()
-      }
-    },
-  })
+async function loadDetailAgentConfig() {
+  if (!conversationId.value || !currentAgentType.value) {
+    detailAgentConfig.value = createEmptyDetailAgentConfigState()
+    return
+  }
+
+  const token = ++detailAgentProbeToken
+  detailAgentConfig.value = {
+    ...createEmptyDetailAgentConfigState(),
+    status: "loading",
+  }
+
+  try {
+    const snapshot = await acpApi.acpDescribeAgentOptions(currentAgentType.value, undefined)
+    if (token !== detailAgentProbeToken) return
+    detailAgentConfig.value = createReadyDetailAgentConfigState(snapshot, {
+      selectedModeId: detailAgentConfig.value.selectedModeId,
+      selectedValues: detailAgentConfig.value.selectedValues,
+    })
+  } catch (error) {
+    if (token !== detailAgentProbeToken) return
+    detailAgentConfig.value = {
+      ...createEmptyDetailAgentConfigState("读取失败，将使用远端默认配置"),
+      status: "failed",
+    }
+  }
+}
+
+function toggleConfigRow(key: ComposerConfigKey) {
+  if (key === "model" && !hasModelOptions.value) return
+  if (key === "reasoning" && !reasoningOption.value) return
+  if (key === "permission" && !permissionOption.value) return
+  expandedConfigKey.value = expandedConfigKey.value === key ? "" : key
+}
+
+async function selectDetailMode(modeId: string) {
+  if (!modeId) return
+  const conn = session.value?.connectionId
+  if (!conn) {
+    detailAgentConfig.value.selectedModeId = modeId
+    return
+  }
+  try {
+    await acpApi.acpSetMode(conn, modeId)
+    detailAgentConfig.value.selectedModeId = modeId
+  } catch (error) {
+    uni.showToast({ title: `模型切换失败: ${toErrorMessage(error)}`, icon: "none" })
+  }
+}
+
+async function selectDetailConfigValue(configId: string, valueId: string) {
+  if (!configId || !valueId) return
+  const conn = session.value?.connectionId
+  if (!conn) {
+    detailAgentConfig.value.selectedValues = {
+      ...detailAgentConfig.value.selectedValues,
+      [configId]: valueId,
+    }
+    return
+  }
+  try {
+    await acpApi.acpSetConfigOption(conn, configId, valueId)
+    detailAgentConfig.value.selectedValues = {
+      ...detailAgentConfig.value.selectedValues,
+      [configId]: valueId,
+    }
+  } catch (error) {
+    uni.showToast({ title: `配置切换失败: ${toErrorMessage(error)}`, icon: "none" })
+  }
+}
+
+async function applyPendingComposerConfig() {
+  const conn = session.value?.connectionId
+  if (!conn) return
+
+  if (detailAgentConfig.value.selectedModeId) {
+    await acpApi.acpSetMode(conn, detailAgentConfig.value.selectedModeId).catch(() => {})
+  }
+
+  for (const option of detailAgentConfig.value.configOptions) {
+    const selectedValueId = detailAgentConfig.value.selectedValues[option.id]
+    if (!selectedValueId) continue
+    await acpApi.acpSetConfigOption(conn, option.id, selectedValueId).catch(() => {})
+  }
+}
+
+function toggleComposerTools() {
+  showComposerTools.value = !showComposerTools.value
+  if (!showComposerTools.value) {
+    expandedConfigKey.value = ""
+    showAttachmentKinds.value = false
+  }
+}
+
+function closeComposerTools() {
+  showComposerTools.value = false
+  showAttachmentKinds.value = false
+  expandedConfigKey.value = ""
+}
+
+function toggleAttachmentKinds() {
+  showAttachmentKinds.value = !showAttachmentKinds.value
+}
+
+function loadAvailableTodos() {
+  const raw = uni.getStorageSync("mcode_todos")
+  availableTodos.value = parseIncompleteTodos(raw)
+}
+
+function openTodoPicker() {
+  loadAvailableTodos()
+  showTodoPicker.value = true
+}
+
+function selectTodoForComposer(item: ComposerTodoItem) {
+  inputText.value = inputText.value.trim()
+    ? `${inputText.value}\n${item.text}`
+    : item.text
+  showTodoPicker.value = false
+  closeComposerTools()
 }
 
 async function sendMessage() {
@@ -1608,6 +1877,18 @@ function chooseFiles() {
   })
 }
 
+function handleChooseImages() {
+  showAttachmentKinds.value = false
+  closeComposerTools()
+  chooseImages()
+}
+
+function handleChooseFiles() {
+  showAttachmentKinds.value = false
+  closeComposerTools()
+  chooseFiles()
+}
+
 async function uploadPickedFiles(files: PickedLocalFile[]) {
   for (const file of files) {
     const queueItem: UploadQueueItem = {
@@ -1799,8 +2080,6 @@ function createLocalId(prefix: string): string {
   sequence.value += 1
   return `${prefix}-${Date.now()}-${sequence.value}`
 }
-
-function onModelConfirm() {}
 
 async function respondToPermission(optionId: string) {
   if (permissionSubmitting.value) return
@@ -2495,6 +2774,103 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   overflow: hidden;
 }
 
+.composer-tools {
+  margin-bottom: 12rpx;
+  padding: 22rpx 20rpx;
+  border-radius: 20rpx;
+  background: #ffffff;
+  border: 1rpx solid #eef1f6;
+  box-shadow: 0 10rpx 28rpx rgba(15, 23, 42, 0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 18rpx;
+}
+
+.composer-tools__section {
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+}
+
+.composer-tools__title {
+  font-size: 22rpx;
+  font-weight: 600;
+  color: #5f6470;
+}
+
+.composer-tools__actions,
+.composer-tools__subactions {
+  display: flex;
+  gap: 12rpx;
+  flex-wrap: wrap;
+}
+
+.composer-tools__action,
+.composer-tools__subaction {
+  min-width: 160rpx;
+  padding: 16rpx 18rpx;
+  border-radius: 16rpx;
+  background: #f6f8fc;
+  border: 1rpx solid #e8edf5;
+  color: #303133;
+  font-size: 23rpx;
+  line-height: 1.4;
+  box-sizing: border-box;
+}
+
+.composer-tools__action-text {
+  font-size: 23rpx;
+  color: #303133;
+}
+
+.composer-config-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12rpx;
+  padding: 16rpx 18rpx;
+  border-radius: 16rpx;
+  background: #f8f9fc;
+  border: 1rpx solid #eef2f7;
+}
+
+.composer-config-row--disabled {
+  opacity: 0.72;
+}
+
+.composer-config-row__label {
+  font-size: 23rpx;
+  color: #303133;
+}
+
+.composer-config-row__value {
+  font-size: 22rpx;
+  color: #909399;
+}
+
+.config-chip-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
+}
+
+.config-chip {
+  padding: 14rpx 20rpx;
+  border-radius: 999rpx;
+  background: #f5f6f8;
+  border: 2rpx solid transparent;
+}
+
+.config-chip--active {
+  background: #eef4ff;
+  border-color: #2979ff;
+}
+
+.config-chip__title {
+  font-size: 24rpx;
+  color: #303133;
+}
+
 .slash-item {
   padding: 16rpx 18rpx;
   display: flex;
@@ -2989,5 +3365,47 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 
 .plan-drawer__safe {
   height: calc(24rpx + env(safe-area-inset-bottom));
+}
+
+.todo-picker {
+  padding: 24rpx 24rpx calc(24rpx + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 14rpx;
+}
+
+.todo-picker__hd {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.todo-picker__title {
+  font-size: 28rpx;
+  font-weight: 600;
+  color: #1f2329;
+}
+
+.todo-picker__empty {
+  padding: 24rpx 0;
+  text-align: center;
+}
+
+.todo-picker__empty-text {
+  font-size: 24rpx;
+  color: #a0a7b4;
+}
+
+.todo-picker__item {
+  padding: 20rpx 18rpx;
+  border-radius: 18rpx;
+  background: #f7f9fc;
+  border: 1rpx solid #ebeff5;
+}
+
+.todo-picker__text {
+  font-size: 24rpx;
+  line-height: 1.5;
+  color: #303133;
 }
 </style>

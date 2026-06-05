@@ -97,15 +97,47 @@ export function parseIncompleteTodos(raw: unknown): ComposerTodoItem[] {
     .filter((item) => item.id && item.text && !item.completed)
 }
 
-export function createReadyDetailAgentConfigState(snapshot: AgentOptionsSnapshot): DetailAgentConfigState {
+function projectSelectedModeId(
+  modes: SessionModeStateInfo | null,
+  previousSelectedModeId?: string | null
+) {
+  if (!modes) return null
+  if (previousSelectedModeId && modes.available_modes.some((mode) => mode.id === previousSelectedModeId)) {
+    return previousSelectedModeId
+  }
+  return modes.current_mode_id ?? null
+}
+
+function projectSelectedValues(
+  configOptions: SessionConfigOptionInfo[],
+  previousSelectedValues?: Record<string, string>
+) {
+  const defaults = buildDefaultSelectedValues(configOptions)
+  if (!previousSelectedValues) return defaults
+
+  const next: Record<string, string> = { ...defaults }
+  for (const option of configOptions) {
+    const previousValue = previousSelectedValues[option.id]
+    if (!previousValue) continue
+    if (option.kind.options.some((item) => item.value === previousValue)) {
+      next[option.id] = previousValue
+    }
+  }
+  return next
+}
+
+export function createReadyDetailAgentConfigState(
+  snapshot: AgentOptionsSnapshot,
+  previousState?: Pick<DetailAgentConfigState, "selectedModeId" | "selectedValues">
+): DetailAgentConfigState {
   const configOptions = Array.isArray(snapshot?.config_options) ? snapshot.config_options : []
   const modes = snapshot?.modes ?? null
   return {
     status: "ready",
     modes,
     configOptions,
-    selectedModeId: modes?.current_mode_id ?? null,
-    selectedValues: buildDefaultSelectedValues(configOptions),
+    selectedModeId: projectSelectedModeId(modes, previousState?.selectedModeId),
+    selectedValues: projectSelectedValues(configOptions, previousState?.selectedValues),
     message: !modes && configOptions.length === 0 ? "该智能体将使用远端默认配置" : "",
   }
 }
