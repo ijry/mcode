@@ -263,34 +263,36 @@
             <up-loading-icon size="18" color="#2979ff"></up-loading-icon>
             <text class="config-loading__text">正在读取智能体...</text>
           </view>
-          <view class="agent-grid">
-            <view
-              v-for="agent in createAgentOptions"
-              :key="agent.value"
-              :class="[
-                'agent-card',
-                selectedAgentType === agent.value && 'agent-card--active',
-              ]"
-              @click="selectAgent(agent.value)"
-            >
+          <scroll-view class="agent-scroll" scroll-x show-scrollbar="false" enhanced>
+            <view class="agent-grid">
               <view
+                v-for="agent in createAgentOptions"
+                :key="agent.value"
                 :class="[
-                  'agent-card__logo',
-                  agentLogoClass(agent.value),
-                  agentLogoPath(agent.value) && 'agent-card__logo--real',
+                  'agent-card',
+                  selectedAgentType === agent.value && 'agent-card--active',
                 ]"
+                @click="selectAgent(agent.value)"
               >
-                <image
-                  v-if="agentLogoPath(agent.value)"
-                  class="agent-card__logo-img"
-                  :src="agentLogoPath(agent.value)"
-                  mode="aspectFit"
-                />
-                <text v-else class="agent-card__logo-text">{{ agentLogoText(agent.value) }}</text>
+                <view
+                  :class="[
+                    'agent-card__logo',
+                    agentLogoClass(agent.value),
+                    agentLogoPath(agent.value) && 'agent-card__logo--real',
+                  ]"
+                >
+                  <image
+                    v-if="agentLogoPath(agent.value)"
+                    class="agent-card__logo-img"
+                    :src="agentLogoPath(agent.value)"
+                    mode="aspectFit"
+                  />
+                  <text v-else class="agent-card__logo-text">{{ agentLogoText(agent.value) }}</text>
+                </view>
+                <text class="agent-card__label">{{ agent.label }}</text>
               </view>
-              <text class="agent-card__label">{{ agent.label }}</text>
             </view>
-          </view>
+          </scroll-view>
           <text
             v-if="!loadingCreateAgents && createAgentOptions.length === 0"
             class="form-helper-text"
@@ -2440,10 +2442,16 @@ function formatTime(time?: string): string {
   word-break: break-all;
 }
 
+.agent-scroll {
+  width: 100%;
+  white-space: nowrap;
+}
+
 .agent-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  display: flex;
+  align-items: stretch;
   gap: 16rpx;
+  padding-right: 8rpx;
 }
 
 .agent-card {
@@ -2452,6 +2460,9 @@ function formatTime(time?: string): string {
   align-items: center;
   justify-content: center;
   gap: 12rpx;
+  width: 180rpx;
+  min-width: 180rpx;
+  flex-shrink: 0;
   padding: 20rpx 12rpx 18rpx;
   border-radius: 24rpx;
   background: #f7f8fa;
