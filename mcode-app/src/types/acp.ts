@@ -143,7 +143,7 @@ export interface AcpAgentInfo {
 }
 
 export interface EventEnvelope {
-  type: "stream_batch" | "tool_call" | "tool_call_update" | "status_changed" | "turn_complete" | "usage_update" | "permission_request"
+  type: "stream_batch" | "tool_call" | "tool_call_update" | "status_changed" | "turn_complete" | "usage_update" | "permission_request" | "permission_resolved"
   connectionId: string
   seq?: number
   data: any
@@ -191,6 +191,10 @@ export interface PermissionRequest {
   description: string
   details: any
   options: PermissionOption[]
+}
+
+export interface PermissionResolvedEvent {
+  requestId: string
 }
 
 export interface PermissionOption {

@@ -375,6 +375,10 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         session.pendingPermission = normalizePermissionRequest(event.data)
         break
 
+      case "permission_resolved":
+        clearPendingPermission(session.conversationId, firstString(event.data?.requestId))
+        break
+
       case "turn_complete":
         void completeTurn(session.conversationId, event.data)
         break

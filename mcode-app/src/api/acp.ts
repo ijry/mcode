@@ -627,6 +627,14 @@ class AcpApiClient {
               : [],
           },
         }
+      case "permission_resolved":
+        return {
+          connectionId,
+          type: "permission_resolved",
+          data: {
+            requestId: firstString(record.request_id, record.requestId),
+          },
+        }
       default:
         return null
     }
