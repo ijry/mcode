@@ -459,12 +459,19 @@ import {
   consumeConversationListDirty,
   markConversationListDirty,
 } from "@/services/conversation/conversationListRefresh"
+import {
+  buildConnectionConversationSnapshot,
+  mapConversationSummaryRecordToConversation,
+  mapConversationToSummaryRecord,
+  type ConnectionConversationSnapshot,
+  type ConversationOverviewConversation,
+  type ConversationOverviewProject,
+  type ConversationOverviewOpenedTab,
+} from "@/services/conversation/conversationOverviewSnapshot"
 import { normalizeConversationSummaryStatus } from "@/services/conversation/conversationSummaryStatus"
 import {
-  getConversationSummaryById,
   listConversationSummaries,
   upsertConversationSummary,
-  type ConversationSummaryRecord,
 } from "@/services/db/repositories/conversationRepository"
 import type { RelaySessionInfo } from "@/services/gateway"
 import type {
@@ -531,23 +538,8 @@ const createAgentConfig = ref<CreateAgentConfigState>({
   message: "",
 })
 
-interface Project {
-  id: number
-  name: string
-  path: string
-  conversations?: Conversation[]
-}
-
-interface Conversation {
-  id: number
-  title?: string
-  agent_type?: string
-  updated_at?: string
-  folder_id?: number
-  status?: string
-  external_id?: string
-  externalId?: string
-}
+type Project = ConversationOverviewProject
+type Conversation = ConversationOverviewConversation
 
 interface ConnectionItem {
   name: string
@@ -559,15 +551,7 @@ interface ConnectionItem {
   relaySession?: RelaySessionInfo
 }
 
-interface OpenedTabItem {
-  id: number
-  folder_id: number
-  conversation_id?: number | null
-  agent_type?: string
-  position?: number
-  is_active?: boolean
-  is_pinned?: boolean
-}
+type OpenedTabItem = ConversationOverviewOpenedTab
 
 interface LiveSessionCard {
   tabId: number
@@ -581,14 +565,8 @@ interface LiveSessionCard {
   isActive: boolean
 }
 
-interface ConnectionGroup {
-  key: string
-  name: string
-  mode: "direct" | "relay"
-  url: string
-  projects: Project[]
+interface ConnectionGroup extends ConnectionConversationSnapshot {
   cards: LiveSessionCard[]
-  loadError?: string | null
 }
 
 const projects = ref<Project[]>([])
@@ -960,7 +938,11 @@ async function loadOverviewDataInternal() {
     const groups = await Promise.all(
       connected.map(async (conn) => {
         try {
-          return await loadConnectionGroup(conn)
+          const initialGroup = await loadConnectionGroup(conn)
+          void refreshConnectionGroupFromRemote(conn, initialGroup).catch((error) => {
+            console.warn("refresh connection group from remote skipped:", error)
+          })
+          return initialGroup
         } catch (error) {
           const message = toErrorMessage(error)
           console.warn("[conversations] load connection group failed", {
@@ -1020,11 +1002,21 @@ async function loadConnectionGroup(conn: ConnectionItem): Promise<ConnectionGrou
   const folders = normalizeList(foldersRaw) as Project[]
   const tabsRaw = await gateway.call<unknown>("list_opened_tabs")
   const tabs = normalizeList(tabsRaw) as OpenedTabItem[]
-  const localConversations = await loadLocalConversationSummariesForTabs(
+  const localConversations = (await loadLocalConversationSummaries(
     descriptor.instanceKey,
-    tabs
+    folders
+  )) || []
+  return toConnectionGroup(
+    buildConnectionConversationSnapshot({
+      connectionKey: connectionKey(conn),
+      connectionName: conn.name,
+      mode: conn.mode,
+      url: conn.url,
+      folders,
+      tabs,
+      conversations: localConversations,
+    })
   )
-  return buildConnectionGroup(conn, folders, tabs, localConversations)
 }
 
 function buildConnectionErrorGroup(
@@ -1037,63 +1029,10 @@ function buildConnectionErrorGroup(
     mode: conn.mode,
     url: conn.url,
     projects: [],
+    openTabCards: [],
+    recentActiveCards: [],
     cards: [],
     loadError: message,
-  }
-}
-
-function buildConnectionGroup(
-  conn: ConnectionItem,
-  folders: Project[],
-  tabs: OpenedTabItem[],
-  conversations: Conversation[]
-): ConnectionGroup {
-  const folderMap = new Map<number, Project>()
-  folders.forEach((folder) => {
-    folderMap.set(folder.id, folder)
-  })
-
-  const convMap = new Map<number, Conversation>()
-  conversations.forEach((conv) => {
-    convMap.set(conv.id, conv)
-  })
-
-  const cards = tabs
-    .map((tab) => {
-      const conversation = tab.conversation_id ? convMap.get(tab.conversation_id) : undefined
-      const project = folderMap.get(tab.folder_id)
-      return {
-        tabId: tab.id,
-        conversationId: tab.conversation_id || undefined,
-        folderId: tab.folder_id,
-        projectName: project?.name || project?.path || "未命名项目",
-        agentType: normalizeAgentType(tab.agent_type || conversation?.agent_type),
-        title: conversation?.title || `标签会话 #${tab.id}`,
-        updatedAt: conversation?.updated_at,
-        status: normalizeConversationStatus(conversation?.status),
-        isActive: Boolean(tab.is_active),
-      } satisfies LiveSessionCard
-    })
-    .sort((a, b) => {
-      const aActive = a.isActive ? 1 : 0
-      const bActive = b.isActive ? 1 : 0
-      if (aActive !== bActive) return bActive - aActive
-      return Number(a.tabId) - Number(b.tabId)
-    })
-
-  const projectsWithConversations = folders.map((folder) => ({
-    ...folder,
-    conversations: conversations.filter((conv) => conv.folder_id === folder.id),
-  }))
-
-  return {
-    key: connectionKey(conn),
-    name: conn.name,
-    mode: conn.mode,
-    url: conn.url,
-    projects: projectsWithConversations,
-    cards,
-    loadError: null,
   }
 }
 
@@ -1119,38 +1058,43 @@ async function loadLocalConversationSummaries(
     )
     return rows
       .flat()
-      .map(mapSummaryRecordToConversation)
+      .map(mapConversationSummaryRecordToConversation)
   } catch (error) {
     console.warn("load local conversation summaries skipped:", error)
     return null
   }
 }
 
-async function loadLocalConversationSummariesForTabs(
-  instanceKey: string,
+async function loadRemoteConnectionSnapshot(
+  conn: ConnectionItem,
+  folders: Project[],
   tabs: OpenedTabItem[]
-): Promise<Conversation[]> {
-  try {
-    await ensureConversationSchema()
-    const conversationIds = Array.from(
-      new Set(
-        tabs
-          .map((tab) => Number(tab.conversation_id || 0))
-          .filter((conversationId) => conversationId > 0)
-      )
-    )
-    if (conversationIds.length === 0) return []
+): Promise<ConnectionGroup> {
+  const gateway = await createConnectionGateway(conn)
+  const descriptor = gateway.getRemoteInstanceDescriptor()
+  const remoteConversations = await fetchRemoteConversations(gateway, folders)
+  await persistConversationSummaries(descriptor.instanceKey, remoteConversations)
+  return toConnectionGroup(
+    buildConnectionConversationSnapshot({
+      connectionKey: connectionKey(conn),
+      connectionName: conn.name,
+      mode: conn.mode,
+      url: conn.url,
+      folders,
+      tabs,
+      conversations: remoteConversations,
+    })
+  )
+}
 
-    const rows = await Promise.all(
-      conversationIds.map((conversationId) => getConversationSummaryById(instanceKey, conversationId))
-    )
-    return rows
-      .filter((row): row is ConversationSummaryRecord => Boolean(row))
-      .map(mapSummaryRecordToConversation)
-  } catch (error) {
-    console.warn("load local tab conversation summaries skipped:", error)
-    return []
-  }
+async function refreshConnectionGroupFromRemote(conn: ConnectionItem, current: ConnectionGroup) {
+  const gateway = await createConnectionGateway(conn)
+  const foldersRaw = await gateway.call<unknown>("list_all_folder_details")
+  const folders = normalizeList(foldersRaw) as Project[]
+  const tabsRaw = await gateway.call<unknown>("list_opened_tabs")
+  const tabs = normalizeList(tabsRaw) as OpenedTabItem[]
+  const nextGroup = await loadRemoteConnectionSnapshot(conn, folders, tabs)
+  replaceConnectionGroup(nextGroup)
 }
 
 async function persistConversationSummaries(
@@ -1169,6 +1113,13 @@ async function persistConversationSummaries(
   }
 }
 
+function toConnectionGroup(snapshot: ConnectionConversationSnapshot): ConnectionGroup {
+  return {
+    ...snapshot,
+    cards: [...snapshot.openTabCards, ...snapshot.recentActiveCards],
+  }
+}
+
 function replaceConnectionGroup(nextGroup: ConnectionGroup) {
   const index = connectionGroups.value.findIndex((group) => group.key === nextGroup.key)
   if (index < 0) return
@@ -1180,55 +1131,65 @@ function replaceConnectionGroup(nextGroup: ConnectionGroup) {
   }
 }
 
-function applyHistoryProjects(
-  groupKey: string,
-  folders: Project[],
-  conversations: Conversation[]
-) {
-  const nextProjects = folders.map((folder) => ({
-    ...folder,
-    conversations: conversations.filter((conv) => conv.folder_id === folder.id),
-  }))
-  const current = connectionGroups.value.find((group) => group.key === groupKey)
-  if (!current) return
+async function seedCreatedConversationSummary(input: {
+  gateway: Awaited<ReturnType<typeof createConnectionGateway>>
+  instanceKey: string
+  conversationId: number
+  folderId: number
+  title: string
+  agentType: string
+  hasTaskContent: boolean
+}) {
+  const now = Date.now()
 
-  replaceConnectionGroup({
-    ...current,
-    projects: nextProjects,
-  })
-}
-
-function mapSummaryRecordToConversation(record: ConversationSummaryRecord): Conversation {
-  return {
-    id: record.id,
-    title: record.title,
-    agent_type: normalizeAgentType(record.agentType),
-    updated_at: formatTimestamp(record.updatedAt || record.lastMessageAt),
-    folder_id: record.folderId,
-    status: normalizeConversationStatus(record.status),
-  }
-}
-
-function mapConversationToSummaryRecord(
-  instanceKey: string,
-  conversation: Conversation
-): ConversationSummaryRecord {
-  const timestamp = parseTimestamp(conversation.updated_at)
-  return {
-    id: conversation.id,
-    instanceKey,
-    folderId: Number(conversation.folder_id || 0),
-    title: conversation.title || "未命名会话",
-    agentType: normalizeAgentType(conversation.agent_type),
-    externalId: firstString(conversation.external_id, conversation.externalId) || null,
+  await upsertConversationSummary({
+    id: input.conversationId,
+    instanceKey: input.instanceKey,
+    folderId: input.folderId,
+    title: input.title.trim() || `会话 #${input.conversationId}`,
+    agentType: normalizeAgentType(input.agentType),
+    externalId: null,
     connectionId: null,
-    status: normalizeConversationStatus(conversation.status),
+    status: normalizeConversationStatus(input.hasTaskContent ? "in_progress" : "unknown"),
     lastTurnId: null,
-    lastMessageAt: timestamp,
+    lastMessageAt: now,
     unreadCount: 0,
     isPinned: false,
     deletedAt: null,
-    updatedAt: timestamp,
+    updatedAt: now,
+  })
+
+  try {
+    const detail = await input.gateway.call<any>("get_folder_conversation", {
+      conversationId: input.conversationId,
+    })
+    const summary =
+      detail?.summary && typeof detail.summary === "object"
+        ? detail.summary
+        : {}
+    const title = firstString(detail?.title, summary?.title, input.title)
+    await upsertConversationSummary({
+      id: input.conversationId,
+      instanceKey: input.instanceKey,
+      folderId: Number(detail?.folder_id || detail?.folderId || summary?.folder_id || input.folderId),
+      title: title || `会话 #${input.conversationId}`,
+      agentType: normalizeAgentType(
+        firstString(detail?.agent_type, detail?.agentType, summary?.agent_type, input.agentType)
+      ),
+      externalId: firstString(detail?.session_id, detail?.sessionId, summary?.external_id) || null,
+      connectionId: null,
+      status: normalizeConversationStatus(
+        firstString(detail?.status, summary?.status, input.hasTaskContent ? "in_progress" : "unknown")
+      ),
+      lastTurnId: null,
+      lastMessageAt: now,
+      unreadCount: 0,
+      isPinned: false,
+      deletedAt: null,
+      updatedAt: now,
+    })
+  } catch (error) {
+    console.warn("seed created conversation detail skipped:", error)
   }
 }
 
@@ -1491,9 +1452,6 @@ function closeHistoryPanel() {
 
 async function ensureHistoryProjectsLoaded(group: ConnectionGroup) {
   if (group.loadError) return
-  if (group.projects.some((project) => Array.isArray(project.conversations))) {
-    return
-  }
 
   const key = group.key
   if (historyLoadPromiseMap.has(key)) {
@@ -1506,23 +1464,7 @@ async function ensureHistoryProjectsLoaded(group: ConnectionGroup) {
     try {
       const conn = getConnectedConnections().find((item) => connectionKey(item) === key)
       if (!conn) return
-
-      const gateway = await createConnectionGateway(conn)
-      const descriptor = gateway.getRemoteInstanceDescriptor()
-      const folders = group.projects.map((project) => ({
-        id: project.id,
-        name: project.name,
-        path: project.path,
-      }))
-
-      const localConversations = await loadLocalConversationSummaries(descriptor.instanceKey, folders)
-      if (localConversations) {
-        applyHistoryProjects(key, folders, localConversations)
-      }
-
-      const remoteConversations = await fetchRemoteConversations(gateway, folders)
-      await persistConversationSummaries(descriptor.instanceKey, remoteConversations)
-      applyHistoryProjects(key, folders, remoteConversations)
+      await refreshConnectionGroupFromRemote(conn, group)
     } catch (error) {
       console.warn("load history projects skipped:", error)
     } finally {
@@ -1696,6 +1638,16 @@ async function confirmCreate() {
     }
 
     const taskContent = newTaskContent.value.trim()
+    await seedCreatedConversationSummary({
+      gateway,
+      instanceKey: gateway.getRemoteInstanceDescriptor().instanceKey,
+      conversationId: newConversationId,
+      folderId: selectedProjectId.value,
+      title: newConversationTitle.value,
+      agentType: selectedAgentType.value,
+      hasTaskContent: Boolean(taskContent),
+    })
+
     if (taskContent) {
       await gateway.call("acp_prompt", {
         connectionId,
