@@ -53,11 +53,11 @@
 
         <!-- 操作按钮 -->
         <view class="todo-actions">
-          <view class="todo-action-btn" @click="openSendSheet(item)">
+          <view class="todo-action-btn" @click.stop="openSendSheet(item)">
             <u-icon name="chat" size="20" color="#2979ff"></u-icon>
           </view>
-          <view class="todo-action-btn" @click="deleteTodo(item.id)">
-            <u-icon name="close-circle" size="20" color="#c0c4cc"></u-icon>
+          <view class="todo-action-btn" @click.stop="openTodoMenu(item)">
+            <u-icon name="more-dot-fill" size="18" color="#c0c4cc"></u-icon>
           </view>
         </view>
       </view>
@@ -159,6 +159,13 @@
       @confirm="onAgentConfirm"
       @cancel="showAgentPicker = false"
     ></up-picker>
+
+    <up-action-sheet
+      :show="showTodoActionSheet"
+      :actions="todoActions"
+      @select="handleTodoActionSelect"
+      @close="showTodoActionSheet = false"
+    ></up-action-sheet>
   </view>
 </template>
 
@@ -217,6 +224,8 @@ const showSendDialog = ref(false)
 const sendingTodo = ref<TodoItem | null>(null)
 const sendExtraContent = ref("")
 const sending = ref(false)
+const showTodoActionSheet = ref(false)
+const currentTodo = ref<TodoItem | null>(null)
 
 const showConnectionPicker = ref(false)
 const showProjectPicker = ref(false)
@@ -236,6 +245,10 @@ const connectionColumns = computed(() => [
     value: group.key,
   })),
 ])
+const todoActions = [
+  { name: "复制", color: "#2979ff" },
+  { name: "删除", color: "#fa3534" },
+]
 
 const selectedConnectionGroup = computed(() =>
   connectionGroups.value.find((group) => group.key === selectedConnectionKey.value)
@@ -324,6 +337,58 @@ function finishEdit(item: TodoItem) {
 function deleteTodo(id: string) {
   todos.value = todos.value.filter((t) => t.id !== id)
   saveTodos()
+}
+
+function openTodoMenu(item: TodoItem) {
+  currentTodo.value = item
+  showTodoActionSheet.value = true
+}
+
+function resolveTodoActionName(e: any): string {
+  if (typeof e === "string") return e
+  if (e && typeof e.name === "string") return e.name
+  if (e && typeof e.index === "number") {
+    return todoActions[e.index]?.name || ""
+  }
+  return ""
+}
+
+function copyTodoText(text: string) {
+  uni.setClipboardData({
+    data: text,
+    success: () => {
+      uni.showToast({ title: "已复制", icon: "success" })
+    },
+    fail: () => {
+      uni.showToast({ title: "复制失败", icon: "none" })
+    },
+  })
+}
+
+function confirmDeleteTodo(item: TodoItem) {
+  uni.showModal({
+    title: "确认删除",
+    content: "确定要删除这个待办吗？此操作不可恢复。",
+    success: (res) => {
+      if (!res.confirm) return
+      deleteTodo(item.id)
+      uni.showToast({ title: "删除成功", icon: "success" })
+    },
+  })
+}
+
+function handleTodoActionSelect(e: any) {
+  const item = currentTodo.value
+  const action = resolveTodoActionName(e)
+  showTodoActionSheet.value = false
+  if (!item || !action) return
+  if (action === "复制") {
+    copyTodoText(item.text)
+    return
+  }
+  if (action === "删除") {
+    confirmDeleteTodo(item)
+  }
 }
 
 /* ===== 连接相关工具函数 ===== */
