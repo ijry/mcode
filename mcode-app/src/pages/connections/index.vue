@@ -10,7 +10,7 @@
 
     <view class="header">
       <text class="header-slogan">随时随地 AI Coding</text>
-      <view class="add-conn-btn" @click="showAddPopup = true">
+      <view class="add-conn-btn" @click="openAddPopup()">
         <u-icon name="plus" size="18" color="#2979ff"></u-icon>
         <text class="add-conn-btn__text">新增连接</text>
       </view>
@@ -19,7 +19,7 @@
     <view v-if="connections.length === 0" class="empty-container">
       <u-empty mode="data" text="暂无连接">
         <template #bottom>
-          <u-button type="primary" @click="showAddPopup = true" size="normal">
+          <u-button type="primary" @click="openAddPopup()" size="normal">
             立即添加
           </u-button>
         </template>
@@ -76,11 +76,11 @@
       @close="showActionSheet = false"
     ></u-action-sheet>
 
-    <u-popup v-model:show="showAddPopup" mode="bottom" :round="10">
+    <u-popup :show="showAddPopup" mode="bottom" :round="10" @close="closeAddPopup">
       <view class="popup-content">
         <view class="popup-header">
-          <text class="popup-title">新增连接</text>
-          <u-icon name="close" size="24" @click="showAddPopup = false"></u-icon>
+          <text class="popup-title">{{ popupTitle }}</text>
+          <u-icon name="close" size="24" @click="closeAddPopup()"></u-icon>
         </view>
 
         <view class="tutorial-entry" @click="openTutorialPopup">
@@ -227,6 +227,7 @@ const subsectionIndex = ref(0)
 const loading = ref(false)
 const showActionSheet = ref(false)
 const currentConnectionIndex = ref(-1)
+const editingConnectionKey = ref("")
 const connectedMap = ref<Record<string, boolean>>({})
 const onlineMap = ref<Record<string, boolean>>({})
 type StatusSocket = Pick<UniApp.SocketTask, "onOpen" | "onClose" | "onError" | "close">
@@ -256,6 +257,7 @@ const form = ref({
 })
 
 const connections = ref<ConnectionItem[]>([])
+const popupTitle = computed(() => (editingConnectionKey.value ? "编辑连接" : "新增连接"))
 
 const connectionActions = computed(() => {
   const current = connections.value[currentConnectionIndex.value]
@@ -328,6 +330,7 @@ async function submitConnection() {
   loading.value = true
 
   try {
+    const previousKey = editingConnectionKey.value
     if (form.value.mode === "direct") {
       if (!form.value.directBaseUrl || !form.value.directToken) {
         uni.showToast({ title: "请填写完整信息", icon: "none" })
@@ -354,9 +357,8 @@ async function submitConnection() {
         directToken: form.value.directToken,
       }
 
-      saveConnection(newConnection)
-      setConnectionConnected(newConnection, true)
-      persistConnectedMap()
+      saveConnection(newConnection, previousKey || undefined)
+      syncConnectionRuntimeState(previousKey, newConnection)
       uni.showToast({ title: "连接成功", icon: "success" })
     } else {
       if (!form.value.relayUrl || !form.value.pairCode || !form.value.pairSecret) {
@@ -389,15 +391,13 @@ async function submitConnection() {
           relaySession: session,
         }
 
-        saveConnection(newConnection)
-        setConnectionConnected(newConnection, true)
-        persistConnectedMap()
+        saveConnection(newConnection, previousKey || undefined)
+        syncConnectionRuntimeState(previousKey, newConnection)
         uni.showToast({ title: "配对成功", icon: "success" })
       }
     }
 
-    showAddPopup.value = false
-    resetForm()
+    closeAddPopup()
     loadConnections()
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
@@ -407,12 +407,12 @@ async function submitConnection() {
   }
 }
 
-function saveConnection(conn: ConnectionItem) {
+function saveConnection(conn: ConnectionItem, originalKey?: string) {
   const savedConnections = uni.getStorageSync("mcode_connections") || []
 
-  const existingIndex = savedConnections.findIndex(
-    (c: ConnectionItem) => c.mode === conn.mode && c.url === conn.url
-  )
+  const existingIndex = originalKey
+    ? savedConnections.findIndex((c: ConnectionItem) => connectionKey(c) === originalKey)
+    : savedConnections.findIndex((c: ConnectionItem) => connectionKey(c) === connectionKey(conn))
 
   if (existingIndex >= 0) {
     savedConnections[existingIndex] = conn
@@ -426,6 +426,42 @@ function saveConnection(conn: ConnectionItem) {
 function showConnectionMenu(conn: ConnectionItem, index: number) {
   currentConnectionIndex.value = index
   showActionSheet.value = true
+}
+
+function openAddPopup() {
+  resetForm()
+  showAddPopup.value = true
+}
+
+function closeAddPopup() {
+  showAddPopup.value = false
+  resetForm()
+}
+
+function syncConnectionRuntimeState(previousKey: string, conn: ConnectionItem) {
+  const nextKey = connectionKey(conn)
+  const wasConnected = previousKey ? Boolean(connectedMap.value[previousKey]) : false
+
+  if (previousKey && previousKey !== nextKey) {
+    const nextConnected = { ...connectedMap.value }
+    delete nextConnected[previousKey]
+    if (wasConnected) {
+      nextConnected[nextKey] = true
+    }
+    connectedMap.value = nextConnected
+
+    stopOnlineWatcher(previousKey)
+    clearReconnectTimer(previousKey)
+
+    const nextOnline = { ...onlineMap.value }
+    delete nextOnline[previousKey]
+    onlineMap.value = nextOnline
+  }
+
+  setConnectionConnected(conn, true)
+  persistConnectedMap()
+  syncOnlineWatchers()
+  void refreshOnlineStatus()
 }
 
 function handleActionSelect(e: any) {
@@ -538,6 +574,7 @@ function disconnectConnection(conn: ConnectionItem) {
 }
 
 function editConnection(conn: ConnectionItem, index: number) {
+  editingConnectionKey.value = connectionKey(conn)
   form.value.name = conn.name
   form.value.mode = conn.mode
 
@@ -581,6 +618,7 @@ function deleteConnection(index: number) {
 }
 
 function resetForm() {
+  editingConnectionKey.value = ""
   form.value = {
     name: "",
     mode: "direct",
