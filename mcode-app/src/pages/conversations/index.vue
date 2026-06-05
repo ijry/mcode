@@ -101,11 +101,11 @@
               </view>
 
               <view class="card-status-corner">
-                <view :class="['status-chip', `status-chip--${statusClass(card.status)}`]">
-                  <text class="status-chip__text">{{ statusLabel(card.status) }}</text>
+                <view :class="['status-chip', `status-chip--${statusClass(card.displayStatus)}`]">
+                  <text class="status-chip__text">{{ statusLabel(card.displayStatus) }}</text>
                 </view>
                 <view
-                  v-if="statusClass(card.status) === 'running'"
+                  v-if="statusClass(card.displayStatus) === 'running'"
                   class="status-wave"
                 ></view>
               </view>
@@ -565,6 +565,14 @@ interface LiveSessionCard {
   isActive: boolean
 }
 
+interface DisplayLiveSessionCard extends LiveSessionCard {
+  displayStatus: string
+}
+
+interface DisplayConnectionGroup extends ConnectionGroup {
+  cards: DisplayLiveSessionCard[]
+}
+
 interface ConnectionGroup extends ConnectionConversationSnapshot {
   cards: LiveSessionCard[]
 }
@@ -588,10 +596,17 @@ const tabList = computed(() => {
   })
 })
 
-const filteredConnectionGroups = computed(() => {
+const filteredConnectionGroups = computed<DisplayConnectionGroup[]>(() => {
   const kw = searchKeyword.value.trim().toLowerCase()
-  if (!kw) return connectionGroups.value
-  return connectionGroups.value
+  const groups = connectionGroups.value.map((group) => ({
+    ...group,
+    cards: group.cards.map((card) => ({
+      ...card,
+      displayStatus: resolveOverviewCardStatus(card),
+    })),
+  }))
+  if (!kw) return groups
+  return groups
     .map((group) => ({
       ...group,
       cards: group.cards.filter((card) =>
@@ -1245,6 +1260,41 @@ function normalizeAgentType(value?: string): string {
 
 function normalizeConversationStatus(value?: string): string {
   return normalizeConversationSummaryStatus(value)
+}
+
+function mapRuntimeStatusToOverviewStatus(status?: string | null): string | null {
+  const normalized = String(status || "").trim().toLowerCase()
+  if (!normalized) return null
+  if (
+    normalized === "waiting_permission" ||
+    normalized === "thinking" ||
+    normalized === "running_tool" ||
+    normalized === "connecting" ||
+    normalized === "connected"
+  ) {
+    return "in_progress"
+  }
+  if (normalized === "error") {
+    return "failed"
+  }
+  if (normalized === "idle") {
+    return null
+  }
+  return null
+}
+
+function resolveOverviewCardStatus(card: LiveSessionCard): string {
+  const conversationId = Number(card.conversationId || 0)
+  if (conversationId <= 0) {
+    return card.status
+  }
+
+  const runtimeSession = runtime.sessions.get(conversationId)
+  if (!runtimeSession) {
+    return card.status
+  }
+
+  return mapRuntimeStatusToOverviewStatus(runtimeSession.status) || card.status
 }
 
 function statusLabel(status: string): string {
