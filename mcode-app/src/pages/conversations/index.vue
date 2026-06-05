@@ -53,10 +53,21 @@
             :key="group.key"
             class="group-section"
           >
-            <text class="group-section__title">{{ group.name }}</text>
+            <view class="group-section__header">
+              <text class="group-section__title">{{ group.name }}</text>
+              <view
+                v-if="group.loadError"
+                class="group-section__error"
+                @click.stop="showGroupError(group)"
+              >
+                <up-icon name="warning-fill" size="14" color="#fa3534"></up-icon>
+              </view>
+            </view>
 
             <view v-if="group.cards.length === 0" class="group-empty">
-              <text class="group-empty__text">暂无打开中的标签会话</text>
+              <text class="group-empty__text">
+                {{ group.loadError ? "该连接加载失败" : "暂无打开中的标签会话" }}
+              </text>
             </view>
 
             <view
@@ -444,6 +455,7 @@ const tabList = computed(() => {
       label: p.name || p.path || "未命名项目",
       projectId: p.id,
       count: convs.length,
+  loadError?: string | null
       conversations: convs,
     }
   })
@@ -587,7 +599,21 @@ async function loadOverviewDataInternal() {
   loading.value = true
   try {
     const connected = getConnectedConnections()
-    const groups = await Promise.all(connected.map((conn) => loadConnectionGroup(conn)))
+    const groups = await Promise.all(
+      connected.map(async (conn) => {
+        try {
+          return await loadConnectionGroup(conn)
+        } catch (error) {
+          const message = toErrorMessage(error)
+          console.warn("[conversations] load connection group failed", {
+            connection: conn.name,
+            key: connectionKey(conn),
+            message,
+          })
+          return buildConnectionErrorGroup(conn, message)
+        }
+      })
+    )
     connectionGroups.value = groups.filter((group) => !!group)
     if (connectionGroups.value.length === 0) {
       showHistoryPanel.value = false
@@ -611,9 +637,6 @@ async function loadOverviewDataInternal() {
       projects.value = []
     }
     lastOverviewLoadedAt = Date.now()
-  } catch (error) {
-    const msg = toErrorMessage(error)
-    uni.showToast({ title: `加载失败: ${msg}`, icon: "none", duration: 3000 })
   } finally {
     loading.value = false
   }
@@ -667,6 +690,21 @@ function buildConnectionGroup(
       const conversation = tab.conversation_id ? convMap.get(tab.conversation_id) : undefined
       const project = folderMap.get(tab.folder_id)
       return {
+function buildConnectionErrorGroup(
+  conn: ConnectionItem,
+  message: string
+): ConnectionGroup {
+  return {
+    key: connectionKey(conn),
+    name: conn.name,
+    mode: conn.mode,
+    url: conn.url,
+    projects: [],
+    cards: [],
+    loadError: message,
+  }
+}
+
         tabId: tab.id,
         conversationId: tab.conversation_id || undefined,
         folderId: tab.folder_id,
@@ -718,6 +756,7 @@ async function loadLocalConversationSummaries(
   try {
     await ensureConversationSchema()
     const rows = await Promise.all(
+    loadError: null,
       folders.map((folder) => listConversationSummaries(instanceKey, folder.id))
     )
     return rows
@@ -1110,6 +1149,7 @@ async function ensureHistoryProjectsLoaded(group: ConnectionGroup) {
       const folders = group.projects.map((project) => ({
         id: project.id,
         name: project.name,
+  if (group.loadError) return
         path: project.path,
       }))
 
@@ -1224,6 +1264,15 @@ async function confirmCreate() {
   try {
     const targetConn = getConnectedConnections().find(
       (item) => connectionKey(item) === selectedConnectionKey.value
+
+function showGroupError(group: ConnectionGroup) {
+  if (!group.loadError) return
+  uni.showModal({
+    title: `${group.name} 连接异常`,
+    content: group.loadError,
+    showCancel: false,
+    confirmText: "知道了",
+  })
     )
     if (!targetConn) {
       throw new Error("连接不存在或已断开")
@@ -1399,8 +1448,10 @@ function formatTime(time?: string): string {
   gap: 36rpx;
 }
 
-.group-section__title {
-  display: block;
+.group-section__header {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
   margin-bottom: 10rpx;
   padding-left: 4rpx;
   font-size: 28rpx;
@@ -1453,9 +1504,24 @@ function formatTime(time?: string): string {
   height: 58rpx;
   display: block;
 }
+}
+
+.group-section__title {
+  display: block;
 
 .agent-logo--real {
   background-color: #eef1f5 !important;
+  flex: 0 1 auto;
+}
+
+.group-section__error {
+  width: 34rpx;
+  height: 34rpx;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999rpx;
+  background: rgba(250, 53, 52, 0.1);
   border: 1rpx solid #e3e8ef;
 }
 
