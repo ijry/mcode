@@ -1013,7 +1013,7 @@ function currentAuthConnectionKey(): string {
 async function loadConnectionGroup(conn: ConnectionItem): Promise<ConnectionGroup> {
   const gateway = await createConnectionGateway(conn)
   const descriptor = gateway.getRemoteInstanceDescriptor()
-  const foldersRaw = await gateway.call<unknown>("list_all_folder_details")
+  const foldersRaw = await gateway.call<unknown>("list_open_folder_details")
   const folders = normalizeList(foldersRaw) as Project[]
   const tabsRaw = await gateway.call<unknown>("list_opened_tabs")
   const tabs = normalizeList(tabsRaw) as OpenedTabItem[]
@@ -1104,7 +1104,7 @@ async function loadRemoteConnectionSnapshot(
 
 async function refreshConnectionGroupFromRemote(conn: ConnectionItem, current: ConnectionGroup) {
   const gateway = await createConnectionGateway(conn)
-  const foldersRaw = await gateway.call<unknown>("list_all_folder_details")
+  const foldersRaw = await gateway.call<unknown>("list_open_folder_details")
   const folders = normalizeList(foldersRaw) as Project[]
   const tabsRaw = await gateway.call<unknown>("list_opened_tabs")
   const tabs = normalizeList(tabsRaw) as OpenedTabItem[]
@@ -1655,7 +1655,7 @@ async function confirmCreate() {
     }
     const gateway = await createConnectionGateway(targetConn)
     syncAuthToConnection(targetConn)
-    const foldersRaw = await gateway.call<unknown>("list_all_folder_details")
+    const foldersRaw = await gateway.call<unknown>("list_open_folder_details")
     const selectedProject = normalizeList(foldersRaw).find(
       (project) => Number((project as Project | null | undefined)?.id || 0) === selectedProjectId.value
     ) as Project | undefined

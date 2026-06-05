@@ -21,7 +21,7 @@ const projects = computed(() => session.projects)
 
 async function loadProjects() {
   const gateway = auth.gateway()
-  const result = await gateway.call<unknown[]>("list_folders")
+  const result = await gateway.call<unknown[]>("list_open_folder_details")
   session.setProjects(result as Record<string, unknown>[])
 }
 </script>

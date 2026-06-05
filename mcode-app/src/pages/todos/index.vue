@@ -418,7 +418,7 @@ async function loadConnectionGroups() {
   for (const conn of connected) {
     try {
       const gateway = await createConnectionGateway(conn)
-      const foldersRaw = await gateway.call<unknown>("list_all_folder_details")
+      const foldersRaw = await gateway.call<unknown>("list_open_folder_details")
       const folders = normalizeList(foldersRaw) as Project[]
       groups.push({
         key: connectionKey(conn),
