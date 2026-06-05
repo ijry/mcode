@@ -169,6 +169,7 @@ import { useAuthStore } from "@/stores/auth"
 import { createGateway } from "@/services/gateway"
 import { toErrorMessage } from "@/services/gateway/error"
 import type { RelaySessionInfo } from "@/services/gateway"
+import type { ConnectionInfo } from "@/types/acp"
 
 /* ===== 类型 ===== */
 interface TodoItem {
@@ -512,6 +513,11 @@ function parseConversationId(input: unknown): number {
   return 0
 }
 
+function resolveConnectedSessionId(connection: ConnectionInfo | null | undefined) {
+  if (!connection || typeof connection !== "object") return ""
+  return String(connection.sessionId || "").trim()
+}
+
 async function confirmSend() {
   if (!sendingTodo.value) return
   if (!selectedConnectionKey.value) {
@@ -533,6 +539,12 @@ async function confirmSend() {
     }
     const gateway = await createConnectionGateway(targetConn)
     syncAuthToConnection(targetConn)
+    const selectedProject = selectedConnectionGroup.value?.projects.find(
+      (project) => Number(project.id || 0) === selectedProjectId.value
+    )
+    if (!selectedProject) {
+      throw new Error("项目不存在或列表已过期，请重新选择")
+    }
 
     // 组装发送内容
     const extra = sendExtraContent.value.trim()
@@ -552,15 +564,30 @@ async function confirmSend() {
     }
 
     // 连接并发送第一条消息
-    const acpConnectionId = await gateway.call<string>("acp_connect", {
+    const connectionInfo = await gateway.call<ConnectionInfo>("acp_connect", {
       agentType: selectedAgentType.value,
+      workingDir: selectedProject.path || undefined,
     })
+    const acpConnectionId = typeof connectionInfo === "string"
+      ? connectionInfo
+      : String(connectionInfo?.id || "").trim()
+    if (!acpConnectionId) {
+      throw new Error("智能体连接失败：返回数据异常")
+    }
     await gateway.call("acp_prompt", {
       connectionId: acpConnectionId,
       blocks: [{ type: "text", text: taskContent }],
       folderId: selectedProjectId.value,
       conversationId: newConversationId,
     })
+
+    const sessionId = resolveConnectedSessionId(connectionInfo)
+    if (!sessionId) {
+      console.warn("todo send conversation missing sessionId after acp_connect", {
+        conversationId: newConversationId,
+        connectionId: acpConnectionId,
+      })
+    }
 
     // 标记待办已完成
     const item = todos.value.find((t) => t.id === sendingTodo.value!.id)
