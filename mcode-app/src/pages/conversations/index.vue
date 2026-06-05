@@ -254,13 +254,69 @@
             <text class="form-readonly__text">{{ selectedProjectName || '请选择' }}</text>
             <up-icon name="arrow-down" size="14" color="#c0c4cc"></up-icon>
           </view>
+          <text v-if="selectedProjectPath" class="form-helper-text">{{ selectedProjectPath }}</text>
         </view>
 
         <view class="form-group">
-          <text class="form-label">模型</text>
-          <view class="form-readonly" @click="showAgentPicker = true">
-            <text class="form-readonly__text">{{ selectedAgentName }}</text>
-            <up-icon name="arrow-down" size="14" color="#c0c4cc"></up-icon>
+          <text class="form-label">智能体</text>
+          <view v-if="loadingCreateAgents" class="config-loading">
+            <up-loading-icon size="18" color="#2979ff"></up-loading-icon>
+            <text class="config-loading__text">正在读取智能体...</text>
+          </view>
+          <view class="agent-grid">
+            <view
+              v-for="agent in createAgentOptions"
+              :key="agent.value"
+              :class="[
+                'agent-card',
+                selectedAgentType === agent.value && 'agent-card--active',
+              ]"
+              @click="selectAgent(agent.value)"
+            >
+              <view
+                :class="[
+                  'agent-card__logo',
+                  agentLogoClass(agent.value),
+                  agentLogoPath(agent.value) && 'agent-card__logo--real',
+                ]"
+              >
+                <image
+                  v-if="agentLogoPath(agent.value)"
+                  class="agent-card__logo-img"
+                  :src="agentLogoPath(agent.value)"
+                  mode="aspectFit"
+                />
+                <text v-else class="agent-card__logo-text">{{ agentLogoText(agent.value) }}</text>
+              </view>
+              <text class="agent-card__label">{{ agent.label }}</text>
+            </view>
+          </view>
+          <text
+            v-if="!loadingCreateAgents && createAgentOptions.length === 0"
+            class="form-helper-text"
+          >未读取到可用智能体</text>
+        </view>
+
+        <view class="form-group">
+          <text class="form-label">智能体配置</text>
+
+          <view v-if="createAgentConfig.status === 'loading'" class="config-loading">
+            <up-loading-icon size="18" color="#2979ff"></up-loading-icon>
+            <text class="config-loading__text">正在读取可用配置...</text>
+          </view>
+
+          <view
+            v-else
+            class="form-readonly form-readonly--config"
+            @click="openCreateConfigDialog"
+          >
+            <view class="form-readonly__stack">
+              <text class="form-readonly__text">{{ createConfigSummary }}</text>
+              <text v-if="createAgentConfig.message" class="form-helper-inline">
+                {{ createAgentConfig.message }}
+              </text>
+            </view>
+            <up-icon name="arrow-right" size="14" color="#c0c4cc"></up-icon>
           </view>
         </view>
 
@@ -298,6 +354,69 @@
       </view>
     </up-popup>
 
+    <up-popup v-model:show="showCreateConfigDialog" mode="bottom" :round="28">
+      <view class="create-sheet">
+        <view class="create-sheet__hd">
+          <text class="create-sheet__title">智能体配置</text>
+          <view class="create-sheet__close" @click="showCreateConfigDialog = false">
+            <up-icon name="close" size="20" color="#909399"></up-icon>
+          </view>
+        </view>
+
+        <view v-if="createAgentConfig.message" class="config-hint">
+          <text class="config-hint__text">{{ createAgentConfig.message }}</text>
+        </view>
+
+        <view v-if="showStandaloneCreateMode" class="config-section">
+          <text class="config-section__title">模式</text>
+          <view class="config-chip-grid">
+            <view
+              v-for="mode in createAgentConfig.modes?.available_modes || []"
+              :key="mode.id"
+              :class="[
+                'config-chip',
+                createAgentConfig.selectedModeId === mode.id && 'config-chip--active',
+              ]"
+              @click="selectCreateMode(mode.id)"
+            >
+              <text class="config-chip__title">{{ mode.name }}</text>
+            </view>
+          </view>
+        </view>
+
+        <view
+          v-for="option in createAgentConfig.configOptions"
+          :key="option.id"
+          class="config-section"
+        >
+          <text class="config-section__title">{{ option.name }}</text>
+          <text v-if="option.description" class="config-section__desc">{{ option.description }}</text>
+          <view class="config-chip-grid">
+            <view
+              v-for="value in option.kind.options"
+              :key="value.value"
+              :class="[
+                'config-chip',
+                createAgentConfig.selectedValues[option.id] === value.value && 'config-chip--active',
+              ]"
+              @click="selectCreateConfigValue(option.id, value.value)"
+            >
+              <text class="config-chip__title">{{ value.name }}</text>
+            </view>
+          </view>
+        </view>
+
+        <view
+          v-if="!showStandaloneCreateMode && createAgentConfig.configOptions.length === 0"
+          class="config-hint"
+        >
+          <text class="config-hint__text">该智能体将使用远端默认配置</text>
+        </view>
+
+        <view class="safe-bottom"></view>
+      </view>
+    </up-popup>
+
     <!-- 项目 Picker -->
     <up-picker
       :show="showConnectionPicker"
@@ -314,14 +433,6 @@
       @cancel="showProjectPicker = false"
     ></up-picker>
 
-    <!-- 智能体 Picker -->
-    <up-picker
-      :show="showAgentPicker"
-      :columns="agentColumns"
-      @confirm="onAgentConfirm"
-      @cancel="showAgentPicker = false"
-    ></up-picker>
-
     <!-- 会话操作菜单 -->
     <up-action-sheet
       :show="showActionSheet"
@@ -334,9 +445,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick, getCurrentInstance } from "vue"
+import { ref, computed, onMounted, nextTick, getCurrentInstance, watch } from "vue"
 import { onPullDownRefresh, onReady, onShow } from "@dcloudio/uni-app"
 import { useAuthStore } from "@/stores/auth"
+import { useConversationRuntimeStore } from "@/stores/conversationRuntime"
 import { acpApi } from "@/api/acp"
 import { createGateway } from "@/services/gateway"
 import { toErrorMessage } from "@/services/gateway/error"
@@ -353,23 +465,30 @@ import {
   type ConversationSummaryRecord,
 } from "@/services/db/repositories/conversationRepository"
 import type { RelaySessionInfo } from "@/services/gateway"
+import type {
+  AgentOptionsSnapshot,
+  AcpAgentInfo,
+  ConnectionInfo,
+  SessionConfigOptionInfo,
+  SessionModeStateInfo,
+} from "@/types/acp"
 
 const auth = useAuthStore()
+const runtime = useConversationRuntimeStore()
 const loading = ref(false)
 const creating = ref(false)
 const currentTab = ref(0)
 const searchKeyword = ref("")
 const showCreateDialog = ref(false)
+const showCreateConfigDialog = ref(false)
 const showConnectionPicker = ref(false)
 const showProjectPicker = ref(false)
-const showAgentPicker = ref(false)
 const showActionSheet = ref(false)
 const selectedConnectionKey = ref("")
 const selectedConnectionName = ref("")
 const selectedProjectId = ref<number>(0)
 const selectedProjectName = ref("")
 const selectedAgentType = ref("claude_code")
-const selectedAgentName = ref("Claude Code")
 const newConversationTitle = ref("")
 const newTaskContent = ref("")
 const currentConversation = ref<Conversation | null>(null)
@@ -381,6 +500,34 @@ const historyLoading = ref(false)
 let overviewLoadPromise: Promise<void> | null = null
 let lastOverviewLoadedAt = 0
 const historyLoadPromiseMap = new Map<string, Promise<void>>()
+const loadingCreateAgents = ref(false)
+let createAgentProbeToken = 0
+let createAgentListToken = 0
+
+interface CreateAgentOption {
+  label: string
+  value: string
+  description?: string
+}
+
+interface CreateAgentConfigState {
+  status: "idle" | "loading" | "ready" | "failed"
+  modes: SessionModeStateInfo | null
+  configOptions: SessionConfigOptionInfo[]
+  selectedModeId: string | null
+  selectedValues: Record<string, string>
+  message: string
+}
+
+const createAgentOptions = ref<CreateAgentOption[]>([])
+const createAgentConfig = ref<CreateAgentConfigState>({
+  status: "idle",
+  modes: null,
+  configOptions: [],
+  selectedModeId: null,
+  selectedValues: {},
+  message: "",
+})
 
 interface Project {
   id: number
@@ -439,6 +586,7 @@ interface ConnectionGroup {
   url: string
   projects: Project[]
   cards: LiveSessionCard[]
+  loadError?: string | null
 }
 
 const projects = ref<Project[]>([])
@@ -455,7 +603,6 @@ const tabList = computed(() => {
       label: p.name || p.path || "未命名项目",
       projectId: p.id,
       count: convs.length,
-  loadError?: string | null
       conversations: convs,
     }
   })
@@ -490,10 +637,31 @@ const selectedConnectionGroup = computed(() =>
   connectionGroups.value.find((group) => group.key === selectedConnectionKey.value)
 )
 
+const selectedProjectPath = computed(() => {
+  const project = selectedConnectionGroup.value?.projects.find(
+    (item) => item.id === selectedProjectId.value
+  )
+  return project?.path || ""
+})
+
 const canCreateInHistory = computed(() => {
   if (!showHistoryPanel.value || !historyGroupKey.value) return false
   return historyGroupKey.value === currentAuthConnectionKey()
 })
+
+watch(
+  () => [showCreateDialog.value, selectedConnectionKey.value, selectedAgentType.value] as const,
+  ([open]) => {
+    if (!open) {
+      createAgentProbeToken += 1
+      showCreateConfigDialog.value = false
+      resetCreateAgentConfig("")
+      return
+    }
+    void loadCreateAgents()
+    void loadCreateAgentConfig()
+  }
+)
 
 const connectionColumns = computed(() => [
   connectionGroups.value.map((group) => ({
@@ -509,16 +677,52 @@ const projectColumns = computed(() => [
   })),
 ])
 
-const agentColumns = ref([
-  [
-    { text: "Claude Code", value: "claude_code" },
-    { text: "Codex CLI",   value: "codex"       },
-    { text: "OpenCode",    value: "open_code"   },
-    { text: "Gemini CLI",  value: "gemini"      },
-    { text: "OpenClaw",    value: "open_claw"   },
-    { text: "Cline",       value: "cline"       },
-  ],
-])
+const hasCreateConfigOptions = computed(() => createAgentConfig.value.configOptions.length > 0)
+
+const showStandaloneCreateMode = computed(() => {
+  const modes = createAgentConfig.value.modes
+  if (!modes || !Array.isArray(modes.available_modes) || modes.available_modes.length === 0) {
+    return false
+  }
+  return !hasCreateConfigOptions.value
+})
+
+const createConfigSummary = computed(() => {
+  if (createAgentConfig.value.status === "loading") return "正在读取可用配置..."
+  const parts: string[] = []
+
+  if (showStandaloneCreateMode.value && createAgentConfig.value.modes) {
+    const activeMode = createAgentConfig.value.modes.available_modes.find(
+      (item) => item.id === createAgentConfig.value.selectedModeId
+    )
+    if (activeMode?.name) {
+      parts.push(activeMode.name)
+    }
+  }
+
+  for (const option of createAgentConfig.value.configOptions) {
+    const selectedValue = option.kind.options.find(
+      (item) => item.value === createAgentConfig.value.selectedValues[option.id]
+    )
+    if (selectedValue?.name) {
+      parts.push(selectedValue.name)
+    }
+  }
+
+  if (parts.length === 0) {
+    return createAgentConfig.value.message || "使用远端默认配置"
+  }
+  return parts.join(" · ")
+})
+
+const DEFAULT_CREATE_AGENT_OPTIONS: CreateAgentOption[] = [
+  { label: "Claude Code", value: "claude_code" },
+  { label: "Codex CLI", value: "codex" },
+  { label: "OpenCode", value: "open_code" },
+  { label: "Gemini CLI", value: "gemini" },
+  { label: "OpenClaw", value: "open_claw" },
+  { label: "Cline", value: "cline" },
+]
 
 const AGENT_LABELS: Record<string, string> = {
   claude_code: "Claude Code",
@@ -531,6 +735,158 @@ const AGENT_LABELS: Record<string, string> = {
 
 function formatAgentType(t?: string) {
   return t ? (AGENT_LABELS[t] ?? t) : "未知"
+}
+
+function resetCreateAgentConfig(message = "") {
+  createAgentConfig.value = {
+    status: "idle",
+    modes: null,
+    configOptions: [],
+    selectedModeId: null,
+    selectedValues: {},
+    message,
+  }
+}
+
+function buildDefaultSelectedValues(options: SessionConfigOptionInfo[]) {
+  const selected: Record<string, string> = {}
+  for (const option of options) {
+    const current = typeof option.kind?.current_value === "string" && option.kind.current_value
+      ? option.kind.current_value
+      : option.kind?.options?.[0]?.value
+    if (current) selected[option.id] = current
+  }
+  return selected
+}
+
+function normalizeCreateAgentOptions(raw: unknown): CreateAgentOption[] {
+  const list = normalizeList(raw) as AcpAgentInfo[]
+  const normalized = list
+    .filter((item) => item && item.enabled !== false && item.available !== false)
+    .map((item) => {
+      const value = normalizeAgentType(item.agent_type)
+      return {
+        value,
+        label: String(item.name || AGENT_LABELS[value] || value),
+        description: item.description ? String(item.description) : "",
+        sortOrder: typeof item.sort_order === "number" ? item.sort_order : Number.MAX_SAFE_INTEGER,
+      }
+    })
+    .filter((item) => Boolean(item.value))
+    .sort((a, b) => {
+      if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder
+      return a.label.localeCompare(b.label)
+    })
+    .map(({ sortOrder: _sortOrder, ...item }) => item)
+
+  return normalized.length > 0 ? normalized : DEFAULT_CREATE_AGENT_OPTIONS
+}
+
+async function loadCreateAgents() {
+  if (!showCreateDialog.value || !selectedConnectionKey.value) return
+  const targetConn = getConnectedConnections().find(
+    (item) => connectionKey(item) === selectedConnectionKey.value
+  )
+  if (!targetConn) {
+    createAgentOptions.value = DEFAULT_CREATE_AGENT_OPTIONS
+    return
+  }
+
+  const token = ++createAgentListToken
+  loadingCreateAgents.value = true
+  try {
+    const gateway = await createConnectionGateway(targetConn)
+    const remoteAgents = await gateway.call<unknown>("acp_list_agents", {})
+    if (token !== createAgentListToken) return
+    const nextOptions = normalizeCreateAgentOptions(remoteAgents)
+    createAgentOptions.value = nextOptions
+    if (!nextOptions.some((item) => item.value === selectedAgentType.value)) {
+      const fallback = nextOptions[0]
+      if (fallback) selectedAgentType.value = fallback.value
+    }
+  } catch (error) {
+    if (token !== createAgentListToken) return
+    console.warn("load create agents failed:", error)
+    createAgentOptions.value = DEFAULT_CREATE_AGENT_OPTIONS
+  } finally {
+    if (token === createAgentListToken) {
+      loadingCreateAgents.value = false
+    }
+  }
+}
+
+async function loadCreateAgentConfig() {
+  if (!showCreateDialog.value || !selectedConnectionKey.value || !selectedAgentType.value) {
+    resetCreateAgentConfig("")
+    return
+  }
+
+  const targetConn = getConnectedConnections().find(
+    (item) => connectionKey(item) === selectedConnectionKey.value
+  )
+  if (!targetConn) {
+    resetCreateAgentConfig("连接不可用，将使用远端默认配置")
+    return
+  }
+
+  const token = ++createAgentProbeToken
+  createAgentConfig.value = {
+    status: "loading",
+    modes: null,
+    configOptions: [],
+    selectedModeId: null,
+    selectedValues: {},
+    message: "",
+  }
+
+  try {
+    const gateway = await createConnectionGateway(targetConn)
+    const snapshot = await gateway.call<AgentOptionsSnapshot>("acp_describe_agent_options", {
+      agentType: selectedAgentType.value,
+      workingDir: selectedProjectPath.value || null,
+    })
+    if (token !== createAgentProbeToken) return
+
+    const configOptions = Array.isArray(snapshot?.config_options)
+      ? snapshot.config_options
+      : []
+    const modes = snapshot?.modes ?? null
+
+    createAgentConfig.value = {
+      status: "ready",
+      modes,
+      configOptions,
+      selectedModeId: modes?.current_mode_id ?? null,
+      selectedValues: buildDefaultSelectedValues(configOptions),
+      message:
+        !modes && configOptions.length === 0
+          ? "该智能体将使用远端默认配置"
+          : "",
+    }
+  } catch (error) {
+    if (token !== createAgentProbeToken) return
+    resetCreateAgentConfig("读取失败，将使用远端默认配置")
+    createAgentConfig.value.status = "failed"
+  }
+}
+
+function selectCreateMode(modeId: string) {
+  createAgentConfig.value.selectedModeId = modeId
+}
+
+function selectCreateConfigValue(configId: string, valueId: string) {
+  createAgentConfig.value = {
+    ...createAgentConfig.value,
+    selectedValues: {
+      ...createAgentConfig.value.selectedValues,
+      [configId]: valueId,
+    },
+  }
+}
+
+function openCreateConfigDialog() {
+  if (createAgentConfig.value.status === "loading") return
+  showCreateConfigDialog.value = true
 }
 
 const conversationActions = [
@@ -669,6 +1025,21 @@ async function loadConnectionGroup(conn: ConnectionItem): Promise<ConnectionGrou
   return buildConnectionGroup(conn, folders, tabs, localConversations)
 }
 
+function buildConnectionErrorGroup(
+  conn: ConnectionItem,
+  message: string
+): ConnectionGroup {
+  return {
+    key: connectionKey(conn),
+    name: conn.name,
+    mode: conn.mode,
+    url: conn.url,
+    projects: [],
+    cards: [],
+    loadError: message,
+  }
+}
+
 function buildConnectionGroup(
   conn: ConnectionItem,
   folders: Project[],
@@ -690,21 +1061,6 @@ function buildConnectionGroup(
       const conversation = tab.conversation_id ? convMap.get(tab.conversation_id) : undefined
       const project = folderMap.get(tab.folder_id)
       return {
-function buildConnectionErrorGroup(
-  conn: ConnectionItem,
-  message: string
-): ConnectionGroup {
-  return {
-    key: connectionKey(conn),
-    name: conn.name,
-    mode: conn.mode,
-    url: conn.url,
-    projects: [],
-    cards: [],
-    loadError: message,
-  }
-}
-
         tabId: tab.id,
         conversationId: tab.conversation_id || undefined,
         folderId: tab.folder_id,
@@ -735,6 +1091,7 @@ function buildConnectionErrorGroup(
     url: conn.url,
     projects: projectsWithConversations,
     cards,
+    loadError: null,
   }
 }
 
@@ -756,7 +1113,6 @@ async function loadLocalConversationSummaries(
   try {
     await ensureConversationSchema()
     const rows = await Promise.all(
-    loadError: null,
       folders.map((folder) => listConversationSummaries(instanceKey, folder.id))
     )
     return rows
@@ -1032,6 +1388,7 @@ function applySelectedConnection(connectionKeyValue: string) {
     selectedConnectionName.value = ""
     selectedProjectId.value = 0
     selectedProjectName.value = ""
+    createAgentOptions.value = DEFAULT_CREATE_AGENT_OPTIONS
     return
   }
   const group = connectionGroups.value.find((item) => item.key === connectionKeyValue)
@@ -1040,6 +1397,9 @@ function applySelectedConnection(connectionKeyValue: string) {
   selectedConnectionName.value = group.name
   selectedProjectId.value = 0
   selectedProjectName.value = ""
+  if (showCreateDialog.value) {
+    void loadCreateAgents()
+  }
 }
 
 function syncAuthToConnection(conn: ConnectionItem) {
@@ -1128,6 +1488,7 @@ function closeHistoryPanel() {
 }
 
 async function ensureHistoryProjectsLoaded(group: ConnectionGroup) {
+  if (group.loadError) return
   if (group.projects.some((project) => Array.isArray(project.conversations))) {
     return
   }
@@ -1149,7 +1510,6 @@ async function ensureHistoryProjectsLoaded(group: ConnectionGroup) {
       const folders = group.projects.map((project) => ({
         id: project.id,
         name: project.name,
-  if (group.loadError) return
         path: project.path,
       }))
 
@@ -1224,8 +1584,9 @@ function createConversation(projectId?: number) {
 
   newConversationTitle.value = ""
   newTaskContent.value = ""
+  resetCreateAgentConfig("")
+  createAgentOptions.value = DEFAULT_CREATE_AGENT_OPTIONS
   selectedAgentType.value = "claude_code"
-  selectedAgentName.value = "Claude Code"
   showCreateDialog.value = true
 }
 
@@ -1240,13 +1601,43 @@ function onProjectConfirm(e: any) {
   selectedProjectId.value = sel.value
   selectedProjectName.value = sel.text
   showProjectPicker.value = false
+  if (showCreateDialog.value) {
+    void loadCreateAgentConfig()
+  }
 }
 
-function onAgentConfirm(e: any) {
-  const sel = e.value[0]
-  selectedAgentType.value = sel.value
-  selectedAgentName.value = sel.text
-  showAgentPicker.value = false
+function showGroupError(group: ConnectionGroup) {
+  if (!group.loadError) return
+  uni.showModal({
+    title: `${group.name} 连接异常`,
+    content: group.loadError,
+    showCancel: false,
+    confirmText: "知道了",
+  })
+}
+
+function selectAgent(agentType: string) {
+  selectedAgentType.value = agentType
+}
+
+async function applyCreateAgentConfig(
+  gateway: Awaited<ReturnType<typeof createConnectionGateway>>,
+  connectionId: string
+) {
+  for (const option of createAgentConfig.value.configOptions) {
+    const selectedValueId = createAgentConfig.value.selectedValues[option.id]
+    if (!selectedValueId) continue
+    await gateway.call("acp_set_config_option", {
+      connectionId,
+      configId: option.id,
+      valueId: selectedValueId,
+    })
+  }
+}
+
+function resolveConnectedSessionId(connection: ConnectionInfo | null | undefined) {
+  if (!connection || typeof connection !== "object") return ""
+  return String(connection.sessionId || "").trim()
 }
 
 async function confirmCreate() {
@@ -1264,21 +1655,33 @@ async function confirmCreate() {
   try {
     const targetConn = getConnectedConnections().find(
       (item) => connectionKey(item) === selectedConnectionKey.value
-
-function showGroupError(group: ConnectionGroup) {
-  if (!group.loadError) return
-  uni.showModal({
-    title: `${group.name} 连接异常`,
-    content: group.loadError,
-    showCancel: false,
-    confirmText: "知道了",
-  })
     )
     if (!targetConn) {
       throw new Error("连接不存在或已断开")
     }
     const gateway = await createConnectionGateway(targetConn)
     syncAuthToConnection(targetConn)
+    const foldersRaw = await gateway.call<unknown>("list_all_folder_details")
+    const selectedProject = normalizeList(foldersRaw).find(
+      (project) => Number((project as Project | null | undefined)?.id || 0) === selectedProjectId.value
+    ) as Project | undefined
+    if (!selectedProject) {
+      throw new Error("项目不存在或列表已过期，请刷新后重试")
+    }
+
+    const connectionInfo = await gateway.call<ConnectionInfo>("acp_connect", {
+      agentType: selectedAgentType.value,
+      workingDir: selectedProject.path || undefined,
+      preferredModeId: createAgentConfig.value.selectedModeId || undefined,
+    })
+    const connectionId = typeof connectionInfo === "string"
+      ? connectionInfo
+      : String(connectionInfo?.id || "").trim()
+    if (!connectionId) {
+      throw new Error("智能体连接失败：返回数据异常")
+    }
+
+    await applyCreateAgentConfig(gateway, connectionId)
 
     const createResult = await gateway.call<any>("create_conversation", {
       folderId: selectedProjectId.value,
@@ -1292,9 +1695,6 @@ function showGroupError(group: ConnectionGroup) {
 
     const taskContent = newTaskContent.value.trim()
     if (taskContent) {
-      const connectionId = await gateway.call<string>("acp_connect", {
-        agentType: selectedAgentType.value,
-      })
       await gateway.call("acp_prompt", {
         connectionId,
         blocks: [{ type: "text", text: taskContent }],
@@ -1303,13 +1703,45 @@ function showGroupError(group: ConnectionGroup) {
       })
     }
 
+    runtime.bindCreatedConversationRuntime({
+      conversationId: newConversationId,
+      folderId: selectedProjectId.value,
+      agentType: selectedAgentType.value,
+      connectionId,
+      sessionId: resolveConnectedSessionId(connectionInfo),
+    })
+
+    let sidebarRefreshTriggered = false
+    await gateway.call("open_folder_by_id", {
+      folderId: selectedProjectId.value,
+    }).catch((error) => {
+      console.warn("open folder by id skipped:", error)
+    })
+    if (selectedProject.path) {
+      await gateway.call("open_folder_in_workspace", {
+        path: selectedProject.path,
+      }).then(() => {
+        sidebarRefreshTriggered = true
+      }).catch((error) => {
+        console.warn("open folder in workspace skipped:", error)
+      })
+    }
+
     uni.showToast({ title: "创建成功", icon: "success" })
     showCreateDialog.value = false
     newConversationTitle.value = ""
     newTaskContent.value = ""
+    resetCreateAgentConfig("")
     selectedAgentType.value = "claude_code"
-    selectedAgentName.value = "Claude Code"
+    createAgentOptions.value = DEFAULT_CREATE_AGENT_OPTIONS
     markConversationListDirty()
+    if (!sidebarRefreshTriggered) {
+      uni.showToast({
+        title: "会话已创建，codeg 刷新可能延迟",
+        icon: "none",
+        duration: 2500,
+      })
+    }
     await loadOverviewData({ force: true })
     openConversation(
       { id: newConversationId, folder_id: selectedProjectId.value },
@@ -1454,9 +1886,24 @@ function formatTime(time?: string): string {
   gap: 10rpx;
   margin-bottom: 10rpx;
   padding-left: 4rpx;
+}
+
+.group-section__title {
+  display: block;
   font-size: 28rpx;
   font-weight: 600;
   color: #1d1d1f;
+  flex: 0 1 auto;
+}
+
+.group-section__error {
+  width: 34rpx;
+  height: 34rpx;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999rpx;
+  background: rgba(250, 53, 52, 0.1);
 }
 
 .group-empty {
@@ -1504,24 +1951,9 @@ function formatTime(time?: string): string {
   height: 58rpx;
   display: block;
 }
-}
-
-.group-section__title {
-  display: block;
 
 .agent-logo--real {
   background-color: #eef1f5 !important;
-  flex: 0 1 auto;
-}
-
-.group-section__error {
-  width: 34rpx;
-  height: 34rpx;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 999rpx;
-  background: rgba(250, 53, 52, 0.1);
   border: 1rpx solid #e3e8ef;
 }
 
@@ -1978,6 +2410,148 @@ function formatTime(time?: string): string {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.form-readonly--config {
+  gap: 12rpx;
+}
+
+.form-readonly__stack {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+}
+
+.form-helper-inline {
+  font-size: 22rpx;
+  color: #a0a7b4;
+  line-height: 1.4;
+}
+
+.form-helper-text {
+  display: block;
+  margin-top: 12rpx;
+  padding: 0 8rpx;
+  font-size: 22rpx;
+  line-height: 1.4;
+  color: #a0a7b4;
+  word-break: break-all;
+}
+
+.agent-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16rpx;
+}
+
+.agent-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12rpx;
+  padding: 20rpx 12rpx 18rpx;
+  border-radius: 24rpx;
+  background: #f7f8fa;
+  border: 2rpx solid transparent;
+  transition: all 0.18s ease;
+}
+
+.agent-card--active {
+  background: #eef4ff;
+  border-color: #2979ff;
+  box-shadow: 0 8rpx 24rpx rgba(41, 121, 255, 0.12);
+}
+
+.agent-card__logo {
+  width: 76rpx;
+  height: 76rpx;
+  border-radius: 22rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.agent-card__logo--real {
+  background: #ffffff;
+}
+
+.agent-card__logo-img {
+  width: 48rpx;
+  height: 48rpx;
+}
+
+.agent-card__logo-text {
+  font-size: 24rpx;
+  font-weight: 700;
+  color: #1d1d1f;
+}
+
+.agent-card__label {
+  font-size: 22rpx;
+  line-height: 1.3;
+  text-align: center;
+  color: #303133;
+}
+
+.config-loading {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  padding: 12rpx 4rpx;
+}
+
+.config-loading__text,
+.config-hint__text,
+.config-section__desc {
+  font-size: 24rpx;
+  color: #7a8191;
+}
+
+.config-hint {
+  padding: 8rpx 4rpx;
+}
+
+.config-section {
+  margin-top: 20rpx;
+}
+
+.config-section__title {
+  display: block;
+  margin-bottom: 12rpx;
+  font-size: 24rpx;
+  color: #5f6470;
+}
+
+.config-section__desc {
+  display: block;
+  margin-bottom: 12rpx;
+  line-height: 1.4;
+}
+
+.config-chip-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
+}
+
+.config-chip {
+  padding: 14rpx 20rpx;
+  border-radius: 999rpx;
+  background: #f5f6f8;
+  border: 2rpx solid transparent;
+}
+
+.config-chip--active {
+  background: #eef4ff;
+  border-color: #2979ff;
+}
+
+.config-chip__title {
+  font-size: 24rpx;
+  color: #303133;
 }
 
 .safe-bottom {

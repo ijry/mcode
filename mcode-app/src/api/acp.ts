@@ -4,6 +4,8 @@ import type {
   EventEnvelope,
   UploadAttachmentResult,
   ConversationDetail,
+  AgentOptionsSnapshot,
+  AcpAgentInfo,
 } from "@/types/acp"
 import { useAuthStore } from "@/stores/auth"
 import { destroyRealtimeTransport, getOrCreateRealtimeTransport, getRealtimeTransport } from "@/services/realtime/transport-registry"
@@ -108,6 +110,26 @@ class AcpApiClient {
       configId,
       valueId,
     })
+  }
+
+  /**
+   * 读取智能体会话可选配置
+   */
+  async acpDescribeAgentOptions(
+    agentType: string,
+    workingDir?: string | null
+  ): Promise<AgentOptionsSnapshot> {
+    return await this.request("/acp_describe_agent_options", {
+      agentType,
+      workingDir: workingDir ?? null,
+    })
+  }
+
+  /**
+   * 读取远端智能体列表
+   */
+  async acpListAgents(): Promise<AcpAgentInfo[]> {
+    return await this.request("/acp_list_agents", {})
   }
 
   /**

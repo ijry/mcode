@@ -90,6 +90,58 @@ export interface ModeInfo {
   description?: string
 }
 
+export interface SessionModeInfo {
+  id: string
+  name: string
+  description?: string | null
+}
+
+export interface SessionModeStateInfo {
+  current_mode_id: string
+  available_modes: SessionModeInfo[]
+}
+
+export interface SessionConfigOptionValueInfo {
+  value: string
+  name: string
+  description?: string | null
+}
+
+export interface SessionConfigOptionGroupInfo {
+  group: string
+  name: string
+  options: SessionConfigOptionValueInfo[]
+}
+
+export interface SessionConfigOptionKindInfo {
+  type: "select"
+  current_value: string
+  options: SessionConfigOptionValueInfo[]
+  groups: SessionConfigOptionGroupInfo[]
+}
+
+export interface SessionConfigOptionInfo {
+  id: string
+  name: string
+  description?: string | null
+  category?: string | null
+  kind: SessionConfigOptionKindInfo
+}
+
+export interface AgentOptionsSnapshot {
+  modes: SessionModeStateInfo | null
+  config_options: SessionConfigOptionInfo[]
+}
+
+export interface AcpAgentInfo {
+  agent_type: string
+  name: string
+  description?: string | null
+  available?: boolean
+  enabled?: boolean
+  sort_order?: number | null
+}
+
 export interface EventEnvelope {
   type: "stream_batch" | "tool_call" | "tool_call_update" | "status_changed" | "turn_complete" | "usage_update" | "permission_request"
   connectionId: string

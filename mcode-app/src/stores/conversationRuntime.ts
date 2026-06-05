@@ -465,6 +465,29 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     sessions.value.delete(conversationId)
   }
 
+  function bindCreatedConversationRuntime(input: {
+    conversationId: number
+    folderId: number
+    agentType: string
+    connectionId: string
+    sessionId?: string
+  }) {
+    const instanceKey = auth.currentRemoteInstance().instanceKey
+    const managed = connectionSessionManager.adoptConversation({
+      conversationId: input.conversationId,
+      instanceKey,
+      connectionId: input.connectionId,
+      agentType: String(input.agentType || "").trim() || "claude_code",
+      sessionId: input.sessionId || null,
+      status: "connected",
+    })
+    const session = getOrCreateSession(input.conversationId)
+    session.connectionId = managed.connectionId
+    session.instanceKey = managed.instanceKey
+    session.status = "connected"
+    connections.value.set(managed.connectionId, managed.connection)
+  }
+
   return {
     sessions,
     connections,
@@ -481,6 +504,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     connect,
     disconnect,
     clearSession,
+    bindCreatedConversationRuntime,
   }
 })
 
