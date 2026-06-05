@@ -40,17 +40,20 @@ export async function persistConversationDetailSnapshot(
 ): Promise<PersistConversationDetailResult> {
   await ensureConversationSchema()
 
+  const shouldPersistTurns = input.persistTurns !== false
   const currentSummary = input.instanceKey
     ? await getConversationSummaryById(input.instanceKey, input.conversationId)
     : null
-  const normalizedTurns = normalizeTurns(input.detail?.turns)
+  const normalizedTurns = shouldPersistTurns
+    ? normalizeTurns(input.detail?.turns)
+    : []
   const summary = buildSummaryRecord(input, currentSummary, normalizedTurns)
 
   if (summary) {
     console.warn("[conversation-summary] persist detail snapshot", {
       conversationId: input.conversationId,
       instanceKey: input.instanceKey,
-      persistTurns: input.persistTurns !== false,
+      persistTurns: shouldPersistTurns,
       currentStatus: currentSummary?.status ?? null,
       detailStatus:
         input.detail?.status ??
@@ -62,7 +65,7 @@ export async function persistConversationDetailSnapshot(
     await upsertConversationSummary(summary)
   }
 
-  if (input.persistTurns !== false) {
+  if (shouldPersistTurns) {
     await insertCompletedTurns(
       normalizedTurns.map((turn) =>
         buildPersistedTurnRecord({
@@ -77,7 +80,7 @@ export async function persistConversationDetailSnapshot(
   }
 
   return {
-    persistedTurnCount: input.persistTurns === false ? 0 : normalizedTurns.length,
+    persistedTurnCount: shouldPersistTurns ? normalizedTurns.length : 0,
     summary,
   }
 }

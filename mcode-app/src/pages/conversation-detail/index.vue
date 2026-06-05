@@ -1026,7 +1026,9 @@ async function loadConversation() {
       finishInitialLoad(cachedViewState, persistedRuntime)
     }
 
-    await hydrateRemoteMetadata()
+    if (localTurns.length === 0 && !hasHotRuntime) {
+      await hydrateRemoteMetadata()
+    }
     const conn = await runtime.connect(
       conversationId.value,
       agentType,
@@ -1078,22 +1080,6 @@ async function loadConversation() {
         }
       }
       runtime.hydrateLiveSnapshot(conversationId.value, snapshot)
-    }
-    try {
-      const liveDetail = await auth.gateway().call<any>("get_folder_conversation", {
-        conversationId: conversationId.value,
-      })
-      detailDebugLog("catchup-remote-detail", summarizeDetailTurns(liveDetail))
-      await persistConversationDetailSnapshot({
-        instanceKey,
-        conversationId: conversationId.value,
-        detail: liveDetail,
-        fallbackFolderId: folderId.value,
-      })
-      await refreshSessionTurnsFromDb(runtimeSession, cachedViewState, initialTurnLimit)
-    } catch (error) {
-      detailDebugLog("catchup-persist-failed", { message: toErrorMessage(error) })
-      console.warn("remote conversation catch-up skipped", error)
     }
     await loadDetailAgentConfig()
     const availableCommands = Array.isArray(snapshot?.available_commands)

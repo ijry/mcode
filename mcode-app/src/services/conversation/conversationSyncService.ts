@@ -205,7 +205,7 @@ async function mirrorConversationSummary(conversationId: number, event: EventEnv
   }
 
   if (event.type === "turn_complete") {
-    await refreshSummaryFromCalibration(conversationId)
+    await markSummaryPendingReview(binding.instanceKey, binding.connectionId, conversationId)
   }
 }
 
@@ -249,20 +249,27 @@ async function updateSummaryStatus(
   })
 }
 
-async function refreshSummaryFromCalibration(conversationId: number) {
-  try {
-    const detail = await calibrateAfterTurnComplete(conversationId)
-    console.warn("[conversation-summary] turn_complete calibration", {
+async function markSummaryPendingReview(
+  instanceKey: string,
+  connectionId: string,
+  conversationId: number
+) {
+  const current = await readCurrentSummary(instanceKey, conversationId)
+  if (!current) {
+    console.warn("[conversation-summary] turn_complete status update skipped: missing current summary", {
       conversationId,
-      detailStatus:
-        detail?.status ??
-        detail?.summary?.status ??
-        null,
-      turnCount: Array.isArray(detail?.turns) ? detail.turns.length : null,
+      connectionId,
+      instanceKey,
     })
-  } catch (error) {
-    console.warn("refresh conversation summary from calibration skipped", error)
+    return
   }
+
+  await upsertConversationSummary({
+    ...current,
+    connectionId,
+    status: normalizeConversationSummaryStatus("pending_review"),
+    updatedAt: Date.now(),
+  })
 }
 
 async function readCurrentSummary(instanceKey: string, conversationId: number) {
