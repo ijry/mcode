@@ -217,8 +217,7 @@ import { buildWebSocketProtocols } from "@/services/gateway/wsProtocol"
 
 declare const plus: any
 
-const DEPLOYMENT_GUIDE_URL =
-  "https://github.com/xintaofei/codeg/releases/tag/v0.14.11"
+const DEPLOYMENT_GUIDE_URL = "https://github.com/xintaofei/codeg/releases"
 
 const auth = useAuthStore()
 const showAddPopup = ref(false)
