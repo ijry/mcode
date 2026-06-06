@@ -39,6 +39,10 @@
         </view>
       </view>
 
+      <view v-if="sharedLiveHint" class="shared-live-hint">
+        <text class="shared-live-hint__text">{{ sharedLiveHint }}</text>
+      </view>
+
       <view v-if="historyStatusText" class="history-status">
         <up-loading-icon v-if="loadingOlder" mode="circle" size="16" color="#909399"></up-loading-icon>
         <text class="history-status__text">{{ historyStatusText }}</text>
@@ -150,7 +154,7 @@
               <text class="composer-config-row__value">{{ modelSummary }}</text>
             </view>
             <view
-              v-if="expandedConfigKey === 'model' && hasModelOptions"
+              v-if="expandedConfigKey === 'model' && detailAgentConfig.modes?.available_modes?.length"
               class="config-chip-grid"
             >
               <view
@@ -160,6 +164,22 @@
                 @click.stop="selectDetailMode(mode.id)"
               >
                 <text class="config-chip__title">{{ mode.name }}</text>
+              </view>
+            </view>
+            <view
+              v-else-if="expandedConfigKey === 'model' && modelOption"
+              class="config-chip-grid"
+            >
+              <view
+                v-for="value in modelOption.kind.options"
+                :key="value.value"
+                :class="[
+                  'config-chip',
+                  detailAgentConfig.selectedValues[modelOption.id] === value.value && 'config-chip--active',
+                ]"
+                @click.stop="selectDetailConfigValue(modelOption.id, value.value)"
+              >
+                <text class="config-chip__title">{{ value.name }}</text>
               </view>
             </view>
 
@@ -479,13 +499,17 @@ import { markConversationListDirty } from "@/services/conversation/conversationL
 import { persistConversationDetailSnapshot } from "@/services/conversation/conversationDetailPersistence"
 import { usePetStore } from "@/stores/pet"
 import {
+  buildAgentConfigContextKey,
   createEmptyDetailAgentConfigState,
   createReadyDetailAgentConfigState,
   findModeName,
-  findPermissionOption,
-  findReasoningOption,
   findSelectedOptionValueName,
   parseIncompleteTodos,
+  persistAgentConfigCache,
+  persistAgentConfigSelection,
+  projectDetailConfigOptions,
+  readFreshAgentConfigCache,
+  readPersistedAgentConfigSelection,
   type ComposerConfigKey,
   type ComposerTodoItem,
   type DetailAgentConfigState,
@@ -601,6 +625,7 @@ const expandedConfigKey = ref<ComposerConfigKey>("")
 const detailAgentConfig = ref<DetailAgentConfigState>(createEmptyDetailAgentConfigState())
 const availableTodos = ref<ComposerTodoItem[]>([])
 const currentAgentType = ref("claude_code")
+const detailProjectEntries = ref<DetailProjectEntry[]>([])
 const hasLoadedOnce = ref(false)
 const hasRestoredDraftState = ref(false)
 const HISTORY_LOADING_MIN_MS = 200
@@ -626,12 +651,29 @@ const session = computed(() => {
   if (!conversationId.value) return null
   return runtime.getOrCreateSession(conversationId.value)
 })
-
+const managedConversation = computed(() => {
+  if (!conversationId.value) return null
+  return runtime.getManagedConversation(conversationId.value)
+})
 const messageListStyle = computed(() => {
   if (messageListViewportHeight.value <= 0) return undefined
   return {
     height: `${messageListViewportHeight.value}px`,
   }
+})
+
+const detailConnectionKey = computed(() => {
+  const currentSession = session.value
+  const currentConnectionId = currentSession?.connectionId
+  if (currentConnectionId) {
+    const managed = connectionSessionManager.getByConnectionId(currentConnectionId)
+    const authBase = auth.mode === "direct" ? auth.directBaseUrl : auth.relayUrl
+    if (managed && authBase) {
+      return buildConnectionKey(auth.mode, authBase)
+    }
+  }
+  const base = auth.mode === "direct" ? auth.directBaseUrl : auth.relayUrl
+  return base ? buildConnectionKey(auth.mode, base) : auth.currentRemoteInstance().instanceKey
 })
 
 const historyStatusText = computed(() => {
@@ -645,18 +687,19 @@ const pendingPermissionCard = computed<PermissionRequest | null>(() => session.v
 const pendingPermissionDescription = computed(() => {
   return pendingPermissionCard.value?.description || "智能体请求继续当前操作"
 })
+const detailConfigProjection = computed(() =>
+  projectDetailConfigOptions(detailAgentConfig.value.configOptions)
+)
+const modelOption = computed(() => detailConfigProjection.value.modelOption)
+const reasoningOption = computed(() => detailConfigProjection.value.reasoningOption)
+const permissionOption = computed(() => detailConfigProjection.value.permissionOption)
 const hasModelOptions = computed(() =>
-  Boolean(detailAgentConfig.value.modes?.available_modes?.length)
-)
-const reasoningOption = computed(() =>
-  findReasoningOption(detailAgentConfig.value.configOptions)
-)
-const permissionOption = computed(() =>
-  findPermissionOption(detailAgentConfig.value.configOptions)
+  Boolean(detailAgentConfig.value.modes?.available_modes?.length || modelOption.value)
 )
 const modelSummary = computed(() => {
   if (detailAgentConfig.value.status === "loading") return "加载中"
   return findModeName(detailAgentConfig.value.modes, detailAgentConfig.value.selectedModeId)
+    || findSelectedOptionValueName(modelOption.value, detailAgentConfig.value.selectedValues)
     || detailAgentConfig.value.message
     || "远端未提供"
 })
@@ -672,12 +715,36 @@ const permissionSummary = computed(() => {
     || detailAgentConfig.value.message
     || "远端未提供"
 })
+const detailProjectPath = computed(() => {
+  const matched = detailProjectEntries.value.find((item) => Number(item?.id || 0) === folderId.value)
+  return String(matched?.path || "").trim()
+})
+const detailAgentConfigContextKey = computed(() => {
+  return buildAgentConfigContextKey(
+    detailConnectionKey.value,
+    currentAgentType.value,
+    detailProjectPath.value
+  )
+})
 
 const stats = computed(() => session.value?.stats || {
   inputTokens: 0,
   outputTokens: 0,
   totalTokens: 0,
   turnCount: 0,
+})
+
+const isViewerMode = computed(() => managedConversation.value?.role === "viewer")
+const isSharedLive = computed(() => managedConversation.value?.sharedLive === true)
+const canSendSharedLive = computed(() =>
+  conversationId.value ? runtime.canSend(conversationId.value) : true
+)
+const sharedLiveHint = computed(() => {
+  if (!isSharedLive.value) return ""
+  if (isViewerMode.value && !canSendSharedLive.value) {
+    return "当前正在旁观其他端的实时会话"
+  }
+  return "当前会话正在多端共享"
 })
 
 const canSend = computed(() => Boolean(inputText.value.trim() || attachments.value.length > 0))
@@ -823,6 +890,7 @@ onLoad((options: any) => {
     syncAuthByConnectionKey(connectionKey)
   }
   if (conversationId.value) {
+    void loadDetailProjectEntries()
     loadConversation()
   }
   hasLoadedOnce.value = true
@@ -830,6 +898,7 @@ onLoad((options: any) => {
 
 onShow(() => {
   if (!hasLoadedOnce.value || !conversationId.value || loading.value) return
+  void loadDetailProjectEntries()
   loadConversation()
 })
 
@@ -1263,6 +1332,15 @@ function safeParseArray(value?: string | null) {
   }
 }
 
+function normalizeList(input: unknown): any[] {
+  return Array.isArray(input) ? input : []
+}
+
+interface DetailProjectEntry {
+  id: number
+  path?: string
+}
+
 function buildConversationDraftSnapshotStorageKey() {
   if (!conversationId.value) return ""
   const instanceKey = auth.currentRemoteInstance().instanceKey || "anonymous"
@@ -1657,27 +1735,55 @@ function handleCommandSelect(command: any) {
   uni.showToast({ title: `已插入: ${command.name}`, icon: "success" })
 }
 
+async function loadDetailProjectEntries() {
+  if (!folderId.value) {
+    detailProjectEntries.value = []
+    return
+  }
+  try {
+    const foldersRaw = await auth.gateway().call<unknown>("list_open_folder_details")
+    detailProjectEntries.value = normalizeList(foldersRaw).map((item: any) => ({
+      id: Number(item?.id || 0),
+      path: String(item?.path || "").trim(),
+    }))
+  } catch (error) {
+    console.warn("load detail project entries failed", error)
+    detailProjectEntries.value = []
+  }
+}
+
 async function loadDetailAgentConfig() {
   if (!conversationId.value || !currentAgentType.value) {
     detailAgentConfig.value = createEmptyDetailAgentConfigState()
     return
   }
 
+  const contextKey = detailAgentConfigContextKey.value
+  const persistedSelection = readPersistedAgentConfigSelection(contextKey) || undefined
+  const cachedSnapshot = readFreshAgentConfigCache(contextKey)
+  if (cachedSnapshot) {
+    detailAgentConfig.value = createReadyDetailAgentConfigState(cachedSnapshot, persistedSelection)
+  }
+
   const token = ++detailAgentProbeToken
-  detailAgentConfig.value = {
-    ...createEmptyDetailAgentConfigState(),
-    status: "loading",
+  if (!cachedSnapshot) {
+    detailAgentConfig.value = {
+      ...createEmptyDetailAgentConfigState(),
+      status: "loading",
+    }
   }
 
   try {
-    const snapshot = await acpApi.acpDescribeAgentOptions(currentAgentType.value, undefined)
+    const snapshot = await acpApi.acpDescribeAgentOptions(currentAgentType.value, detailProjectPath.value || null)
     if (token !== detailAgentProbeToken) return
-    detailAgentConfig.value = createReadyDetailAgentConfigState(snapshot, {
+    persistAgentConfigCache(contextKey, snapshot)
+    detailAgentConfig.value = createReadyDetailAgentConfigState(snapshot, persistedSelection || {
       selectedModeId: detailAgentConfig.value.selectedModeId,
       selectedValues: detailAgentConfig.value.selectedValues,
     })
   } catch (error) {
     if (token !== detailAgentProbeToken) return
+    if (cachedSnapshot) return
     detailAgentConfig.value = {
       ...createEmptyDetailAgentConfigState("读取失败，将使用远端默认配置"),
       status: "failed",
@@ -1697,11 +1803,19 @@ async function selectDetailMode(modeId: string) {
   const conn = session.value?.connectionId
   if (!conn) {
     detailAgentConfig.value.selectedModeId = modeId
+    persistAgentConfigSelection(detailAgentConfigContextKey.value, {
+      selectedModeId: detailAgentConfig.value.selectedModeId,
+      selectedValues: detailAgentConfig.value.selectedValues,
+    })
     return
   }
   try {
     await acpApi.acpSetMode(conn, modeId)
     detailAgentConfig.value.selectedModeId = modeId
+    persistAgentConfigSelection(detailAgentConfigContextKey.value, {
+      selectedModeId: detailAgentConfig.value.selectedModeId,
+      selectedValues: detailAgentConfig.value.selectedValues,
+    })
   } catch (error) {
     uni.showToast({ title: `模型切换失败: ${toErrorMessage(error)}`, icon: "none" })
   }
@@ -1715,6 +1829,10 @@ async function selectDetailConfigValue(configId: string, valueId: string) {
       ...detailAgentConfig.value.selectedValues,
       [configId]: valueId,
     }
+    persistAgentConfigSelection(detailAgentConfigContextKey.value, {
+      selectedModeId: detailAgentConfig.value.selectedModeId,
+      selectedValues: detailAgentConfig.value.selectedValues,
+    })
     return
   }
   try {
@@ -1723,6 +1841,10 @@ async function selectDetailConfigValue(configId: string, valueId: string) {
       ...detailAgentConfig.value.selectedValues,
       [configId]: valueId,
     }
+    persistAgentConfigSelection(detailAgentConfigContextKey.value, {
+      selectedModeId: detailAgentConfig.value.selectedModeId,
+      selectedValues: detailAgentConfig.value.selectedValues,
+    })
   } catch (error) {
     uni.showToast({ title: `配置切换失败: ${toErrorMessage(error)}`, icon: "none" })
   }
@@ -1781,6 +1903,10 @@ function selectTodoForComposer(item: ComposerTodoItem) {
 
 async function sendMessage() {
   if (!canSend.value) return
+  if (!canSendSharedLive.value) {
+    showSharedLiveBlockedToast()
+    return
+  }
   if (uploadingCount.value > 0) {
     uni.showToast({ title: "文件上传中，请稍后发送", icon: "none" })
     return
@@ -1807,6 +1933,10 @@ async function sendMessage() {
 }
 
 async function sendContinueMessage() {
+  if (!canSendSharedLive.value) {
+    showSharedLiveBlockedToast()
+    return
+  }
   if (uploadingCount.value > 0) {
     uni.showToast({ title: "文件上传中，请稍后发送", icon: "none" })
     return
@@ -1834,6 +1964,10 @@ function createDraftFromComposer(): QueuedDraft | null {
 }
 
 async function sendDraft(draft: QueuedDraft): Promise<boolean> {
+  if (!canSendSharedLive.value) {
+    showSharedLiveBlockedToast()
+    return false
+  }
   sending.value = true
   draft.status = "sending"
   draft.error = undefined
@@ -1876,6 +2010,14 @@ async function sendDraft(draft: QueuedDraft): Promise<boolean> {
 
     const conn = session.value?.connectionId
     if (!conn) throw new Error("未连接到代理")
+    if (isViewerMode.value) {
+      const liveInfo = await acpApi
+        .acpFindConnectionForConversation(conversationId.value)
+        .catch(() => null)
+      if (liveInfo?.connection_id && liveInfo.connection_id !== conn) {
+        throw new Error("该会话已被其他端重新接管，请等待当前轮结束后再发送")
+      }
+    }
     await acpApi.acpPrompt(conn, blocks, folderId.value, conversationId.value)
     runtime.beginPlaceholderThinking(conversationId.value)
     usePetStore().addExp('user', 5)
@@ -1893,11 +2035,21 @@ async function sendDraft(draft: QueuedDraft): Promise<boolean> {
 }
 
 async function processDraftQueue() {
-  if (processingQueue.value || isBusyForSend.value || uploadingCount.value > 0) return
+  if (
+    processingQueue.value ||
+    isBusyForSend.value ||
+    uploadingCount.value > 0 ||
+    !canSendSharedLive.value
+  ) return
   if (draftQueue.value.length === 0) return
   processingQueue.value = true
   try {
-    while (draftQueue.value.length > 0 && !isBusyForSend.value && uploadingCount.value === 0) {
+    while (
+      draftQueue.value.length > 0 &&
+      !isBusyForSend.value &&
+      uploadingCount.value === 0 &&
+      canSendSharedLive.value
+    ) {
       const item = draftQueue.value[0]
       const ok = await sendDraft(item)
       if (ok) {
@@ -1915,6 +2067,10 @@ async function processDraftQueue() {
 async function sendQueuedDraft(id: string) {
   const index = draftQueue.value.findIndex((item) => item.id === id)
   if (index < 0) return
+  if (!canSendSharedLive.value) {
+    showSharedLiveBlockedToast()
+    return
+  }
   if (isBusyForSend.value || uploadingCount.value > 0) {
     uni.showToast({ title: "当前正在处理，请稍后", icon: "none" })
     return
@@ -1932,6 +2088,14 @@ function removeDraft(id: string) {
   if (index >= 0) {
     draftQueue.value.splice(index, 1)
   }
+}
+
+function showSharedLiveBlockedToast() {
+  uni.showToast({
+    title: "该会话正在其他端处理中，当前仅可旁观，待本轮结束后可发送",
+    icon: "none",
+    duration: 3000,
+  })
 }
 
 function applySlashCommand(item: SlashCommandItem) {

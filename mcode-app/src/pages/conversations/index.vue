@@ -456,6 +456,14 @@ import { createGateway } from "@/services/gateway"
 import { toErrorMessage } from "@/services/gateway/error"
 import { ensureConversationSchema } from "@/services/db/migrations"
 import {
+  buildAgentConfigContextKey,
+  createReadyDetailAgentConfigState,
+  persistAgentConfigCache,
+  persistAgentConfigSelection,
+  readFreshAgentConfigCache,
+  readPersistedAgentConfigSelection,
+} from "@/services/conversation/composerTools"
+import {
   consumeConversationListDirty,
   markConversationListDirty,
 } from "@/services/conversation/conversationListRefresh"
@@ -539,20 +547,9 @@ interface CachedCreateAgentListEntry {
   options: CreateAgentOption[]
 }
 
-interface CachedCreateAgentConfigEntry {
-  updatedAt: number
-  snapshot: AgentOptionsSnapshot
-}
-
 interface StoredCreateAgentSelectionEntry {
   updatedAt: number
   agentType: string
-}
-
-interface StoredCreateAgentConfigSelectionEntry {
-  updatedAt: number
-  selectedModeId: string | null
-  selectedValues: Record<string, string>
 }
 
 const createAgentOptions = ref<CreateAgentOption[]>([])
@@ -566,9 +563,7 @@ const createAgentConfig = ref<CreateAgentConfigState>({
 })
 const CREATE_AGENT_CACHE_TTL_MS = 24 * 60 * 60 * 1000
 const CREATE_AGENT_LIST_CACHE_STORAGE_KEY = "mcode_create_agent_list_cache_v1"
-const CREATE_AGENT_CONFIG_CACHE_STORAGE_KEY = "mcode_create_agent_config_cache_v1"
 const CREATE_AGENT_SELECTION_STORAGE_KEY = "mcode_create_agent_selection_v1"
-const CREATE_AGENT_CONFIG_SELECTION_STORAGE_KEY = "mcode_create_agent_config_selection_v1"
 
 type Project = ConversationOverviewProject
 type Conversation = ConversationOverviewConversation
@@ -796,44 +791,13 @@ function normalizeStorageRecord<T>(raw: unknown): Record<string, T> {
   return raw as Record<string, T>
 }
 
-function normalizeSelectionValues(input: unknown): Record<string, string> {
-  if (!input || typeof input !== "object" || Array.isArray(input)) {
-    return {}
-  }
-  const next: Record<string, string> = {}
-  for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
-    const normalizedKey = String(key || "").trim()
-    const normalizedValue = typeof value === "string" ? value.trim() : ""
-    if (normalizedKey && normalizedValue) {
-      next[normalizedKey] = normalizedValue
-    }
-  }
-  return next
-}
-
-function normalizeProjectPath(path?: string): string {
-  return String(path || "").trim()
-}
-
 function isFreshCache(updatedAt: number, ttlMs = CREATE_AGENT_CACHE_TTL_MS): boolean {
   return Number.isFinite(updatedAt) && updatedAt > 0 && Date.now() - updatedAt < ttlMs
 }
 
-function buildCreateAgentConfigContextKey(
-  connectionKeyValue: string,
-  agentType: string,
-  projectPath?: string
-): string {
-  return JSON.stringify([
-    String(connectionKeyValue || "").trim(),
-    normalizeAgentType(agentType),
-    normalizeProjectPath(projectPath),
-  ])
-}
-
 function currentCreateAgentConfigContextKey(): string {
   if (!selectedConnectionKey.value || !selectedAgentType.value) return ""
-  return buildCreateAgentConfigContextKey(
+  return buildAgentConfigContextKey(
     selectedConnectionKey.value,
     selectedAgentType.value,
     selectedProjectPath.value
@@ -850,16 +814,6 @@ function writeCreateAgentListCacheMap(next: Record<string, CachedCreateAgentList
   uni.setStorageSync(CREATE_AGENT_LIST_CACHE_STORAGE_KEY, next)
 }
 
-function readCreateAgentConfigCacheMap() {
-  return normalizeStorageRecord<CachedCreateAgentConfigEntry>(
-    uni.getStorageSync(CREATE_AGENT_CONFIG_CACHE_STORAGE_KEY)
-  )
-}
-
-function writeCreateAgentConfigCacheMap(next: Record<string, CachedCreateAgentConfigEntry>) {
-  uni.setStorageSync(CREATE_AGENT_CONFIG_CACHE_STORAGE_KEY, next)
-}
-
 function readCreateAgentSelectionMap() {
   return normalizeStorageRecord<StoredCreateAgentSelectionEntry>(
     uni.getStorageSync(CREATE_AGENT_SELECTION_STORAGE_KEY)
@@ -868,18 +822,6 @@ function readCreateAgentSelectionMap() {
 
 function writeCreateAgentSelectionMap(next: Record<string, StoredCreateAgentSelectionEntry>) {
   uni.setStorageSync(CREATE_AGENT_SELECTION_STORAGE_KEY, next)
-}
-
-function readCreateAgentConfigSelectionMap() {
-  return normalizeStorageRecord<StoredCreateAgentConfigSelectionEntry>(
-    uni.getStorageSync(CREATE_AGENT_CONFIG_SELECTION_STORAGE_KEY)
-  )
-}
-
-function writeCreateAgentConfigSelectionMap(
-  next: Record<string, StoredCreateAgentConfigSelectionEntry>
-) {
-  uni.setStorageSync(CREATE_AGENT_CONFIG_SELECTION_STORAGE_KEY, next)
 }
 
 function readFreshCreateAgentListCache(connectionKeyValue: string): CreateAgentOption[] | null {
@@ -905,29 +847,6 @@ function persistCreateAgentListCache(connectionKeyValue: string, options: Create
   writeCreateAgentListCacheMap(cacheMap)
 }
 
-function readFreshCreateAgentConfigCache(contextKey: string): AgentOptionsSnapshot | null {
-  if (!contextKey) return null
-  const cacheMap = readCreateAgentConfigCacheMap()
-  const hit = cacheMap[contextKey]
-  if (!hit) return null
-  if (!isFreshCache(Number(hit.updatedAt || 0))) {
-    delete cacheMap[contextKey]
-    writeCreateAgentConfigCacheMap(cacheMap)
-    return null
-  }
-  return hit.snapshot && typeof hit.snapshot === "object" ? hit.snapshot : null
-}
-
-function persistCreateAgentConfigCache(contextKey: string, snapshot: AgentOptionsSnapshot) {
-  if (!contextKey) return
-  const cacheMap = readCreateAgentConfigCacheMap()
-  cacheMap[contextKey] = {
-    updatedAt: Date.now(),
-    snapshot,
-  }
-  writeCreateAgentConfigCacheMap(cacheMap)
-}
-
 function readPersistedSelectedAgentType(connectionKeyValue: string): string {
   if (!connectionKeyValue) return ""
   const selectionMap = readCreateAgentSelectionMap()
@@ -945,115 +864,21 @@ function persistSelectedAgentType(connectionKeyValue: string, agentType: string)
   writeCreateAgentSelectionMap(selectionMap)
 }
 
-function readPersistedCreateAgentConfigSelection(
-  contextKey: string
-): StoredCreateAgentConfigSelectionEntry | null {
-  if (!contextKey) return null
-  const selectionMap = readCreateAgentConfigSelectionMap()
-  const hit = selectionMap[contextKey]
-  if (!hit || typeof hit !== "object") return null
-  return {
-    updatedAt: Number(hit.updatedAt || 0),
-    selectedModeId:
-      typeof hit.selectedModeId === "string" && hit.selectedModeId.trim()
-        ? hit.selectedModeId.trim()
-        : null,
-    selectedValues: normalizeSelectionValues(hit.selectedValues),
-  }
-}
-
-function persistCreateAgentConfigSelection(
-  contextKey: string,
-  input: { selectedModeId: string | null; selectedValues: Record<string, string> }
-) {
-  if (!contextKey) return
-  const selectionMap = readCreateAgentConfigSelectionMap()
-  selectionMap[contextKey] = {
-    updatedAt: Date.now(),
-    selectedModeId:
-      typeof input.selectedModeId === "string" && input.selectedModeId.trim()
-        ? input.selectedModeId.trim()
-        : null,
-    selectedValues: normalizeSelectionValues(input.selectedValues),
-  }
-  writeCreateAgentConfigSelectionMap(selectionMap)
-}
-
 function persistCurrentCreateAgentConfigSelection() {
   const contextKey = currentCreateAgentConfigContextKey()
   if (!contextKey) return
-  persistCreateAgentConfigSelection(contextKey, {
+  persistAgentConfigSelection(contextKey, {
     selectedModeId: createAgentConfig.value.selectedModeId,
     selectedValues: createAgentConfig.value.selectedValues,
   })
 }
 
-function buildDefaultSelectedValues(options: SessionConfigOptionInfo[]) {
-  const selected: Record<string, string> = {}
-  for (const option of options) {
-    const current = typeof option.kind?.current_value === "string" && option.kind.current_value
-      ? option.kind.current_value
-      : option.kind?.options?.[0]?.value
-    if (current) selected[option.id] = current
-  }
-  return selected
-}
-
-function resolveSelectedModeId(
-  modes: SessionModeStateInfo | null,
-  persistedModeId?: string | null
-): string | null {
-  if (!modes || !Array.isArray(modes.available_modes) || modes.available_modes.length === 0) {
-    return null
-  }
-  if (
-    persistedModeId &&
-    modes.available_modes.some((mode) => String(mode.id || "").trim() === persistedModeId)
-  ) {
-    return persistedModeId
-  }
-  if (
-    typeof modes.current_mode_id === "string" &&
-    modes.available_modes.some((mode) => String(mode.id || "").trim() === modes.current_mode_id)
-  ) {
-    return modes.current_mode_id
-  }
-  const fallback = modes.available_modes[0]
-  return fallback ? String(fallback.id || "").trim() || null : null
-}
-
-function projectSelectedValues(
-  options: SessionConfigOptionInfo[],
-  persistedSelectedValues?: Record<string, string>
-): Record<string, string> {
-  const selected = buildDefaultSelectedValues(options)
-  if (!persistedSelectedValues) return selected
-  for (const option of options) {
-    const persistedValue = persistedSelectedValues[option.id]
-    if (!persistedValue) continue
-    if (option.kind.options.some((item) => item.value === persistedValue)) {
-      selected[option.id] = persistedValue
-    }
-  }
-  return selected
-}
-
 function applyCreateAgentSnapshot(snapshot: AgentOptionsSnapshot, contextKey: string) {
-  const configOptions = Array.isArray(snapshot?.config_options) ? snapshot.config_options : []
-  const modes = snapshot?.modes ?? null
-  const persistedSelection = readPersistedCreateAgentConfigSelection(contextKey)
-
-  createAgentConfig.value = {
-    status: "ready",
-    modes,
-    configOptions,
-    selectedModeId: resolveSelectedModeId(modes, persistedSelection?.selectedModeId),
-    selectedValues: projectSelectedValues(configOptions, persistedSelection?.selectedValues),
-    message:
-      !modes && configOptions.length === 0
-        ? "该智能体将使用远端默认配置"
-        : "",
-  }
+  const persistedSelection = readPersistedAgentConfigSelection(contextKey)
+  createAgentConfig.value = createReadyDetailAgentConfigState(
+    snapshot,
+    persistedSelection || undefined
+  )
 }
 
 function normalizeCreateAgentOptions(raw: unknown): CreateAgentOption[] {
@@ -1145,12 +970,12 @@ async function loadCreateAgentConfig() {
   }
 
   const token = ++createAgentProbeToken
-  const contextKey = buildCreateAgentConfigContextKey(
+  const contextKey = buildAgentConfigContextKey(
     selectedConnectionKey.value,
     selectedAgentType.value,
     selectedProjectPath.value
   )
-  const cachedSnapshot = readFreshCreateAgentConfigCache(contextKey)
+  const cachedSnapshot = readFreshAgentConfigCache(contextKey)
   if (cachedSnapshot) {
     applyCreateAgentSnapshot(cachedSnapshot, contextKey)
     return
@@ -1172,7 +997,7 @@ async function loadCreateAgentConfig() {
       workingDir: selectedProjectPath.value || null,
     })
     if (token !== createAgentProbeToken) return
-    persistCreateAgentConfigCache(contextKey, snapshot)
+    persistAgentConfigCache(contextKey, snapshot)
     applyCreateAgentSnapshot(snapshot, contextKey)
   } catch (error) {
     if (token !== createAgentProbeToken) return
