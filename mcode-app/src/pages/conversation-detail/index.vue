@@ -368,7 +368,7 @@
         @click="showPlanDrawer = true"
       >
         <up-icon name="list" size="18" color="#ffffff"></up-icon>
-        <text class="plan-fab__text">计划 {{ inProgressTaskCount }}/{{ planTasks.length }}</text>
+        <text class="plan-fab__text">计划 {{ completedTaskCount }}/{{ planTasks.length }}</text>
       </view>
     </view>
 
@@ -376,7 +376,7 @@
       <view class="plan-drawer">
         <view class="plan-drawer__hd">
           <text class="plan-drawer__title">计划任务</text>
-          <text class="plan-drawer__count">{{ inProgressTaskCount }}/{{ planTasks.length }}</text>
+          <text class="plan-drawer__count">{{ completedTaskCount }}/{{ planTasks.length }}</text>
         </view>
 
         <view class="plan-filters">
@@ -765,17 +765,30 @@ const planTasks = computed<PlanTask[]>(() => {
   }
 
   for (const msg of messages.value) {
-    for (const part of getTurnContentParts(msg)) {
-      if (part.type !== "tool_call" || !part.tool_call) continue
-      mergeTaskFromToolCall(taskMap, part.tool_call, nextOrder)
-    }
+    getTurnContentParts(msg).forEach((part, partIndex) => {
+      if (part.type === "plan" && part.plan) {
+        mergeTaskFromPlanPart(taskMap, part.plan, nextOrder, `${msg.id}-${partIndex}`)
+        return
+      }
+      if (part.type === "tool_call" && part.tool_call) {
+        mergeTaskFromToolCall(taskMap, part.tool_call, nextOrder)
+      }
+    })
+  }
+
+  if (taskMap.size === 0) {
+    ;(session.value?.liveMessage?.content || []).forEach((part, partIndex) => {
+      if (part.type === "plan" && part.plan) {
+        mergeTaskFromPlanPart(taskMap, part.plan, nextOrder, `live-${partIndex}`)
+      }
+    })
   }
 
   return Array.from(taskMap.values()).sort((a, b) => a.order - b.order)
 })
 
-const inProgressTaskCount = computed(
-  () => planTasks.value.filter((task) => task.status === "in_progress").length
+const completedTaskCount = computed(
+  () => planTasks.value.filter((task) => task.status === "completed").length
 )
 
 const filteredPlanTasks = computed(() => {
@@ -2308,6 +2321,24 @@ function mergeTaskFromToolCall(
   }
 }
 
+function mergeTaskFromPlanPart(
+  taskMap: Map<string, PlanTask>,
+  plan: ContentPart["plan"],
+  nextOrder: () => number,
+  keyPrefix: string
+) {
+  const steps = Array.isArray(plan?.steps) ? plan.steps : []
+  steps.forEach((step, index) => {
+    const subject = firstString(step?.description) || `任务 ${index + 1}`
+    const normalizedKey = normalizePlanStepKey(subject)
+    const id = normalizedKey ? `plan-${normalizedKey}` : `plan-${keyPrefix}-${index}`
+    upsertTask(taskMap, id, nextOrder, {
+      subject,
+      status: step?.completed ? "completed" : "pending",
+    })
+  })
+}
+
 function upsertTask(
   taskMap: Map<string, PlanTask>,
   id: string,
@@ -2333,6 +2364,13 @@ function upsertTask(
 
 function normalizeToolName(name?: string): string {
   return String(name || "").trim().toLowerCase().replace(/[\s_-]/g, "")
+}
+
+function normalizePlanStepKey(value: string): string {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ")
 }
 
 function normalizeTaskStatus(value: unknown): PlanTaskStatus {
