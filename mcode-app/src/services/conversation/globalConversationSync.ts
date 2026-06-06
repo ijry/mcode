@@ -60,6 +60,13 @@ async function handleConversationChanged(instanceKey: string, payload: unknown) 
     const summary = event.summary
     const conversationId = Number(summary.id || 0)
     if (!conversationId) return
+    const current = await getConversationSummaryById(instanceKey, conversationId)
+    const resolvedFolderId = await resolveConversationFolderId({
+      instanceKey,
+      conversationId,
+      incomingFolderId: firstNumber(summary.folder_id),
+      currentFolderId: current?.folderId,
+    })
     await upsertConversationSummary(
       mapConversationToSummaryRecord(instanceKey, {
         id: conversationId,
@@ -67,7 +74,7 @@ async function handleConversationChanged(instanceKey: string, payload: unknown) 
         agent_type: summary.agent_type,
         updated_at: summary.updated_at,
         last_message_at: summary.last_message_at,
-        folder_id: Number(summary.folder_id || 0),
+        folder_id: resolvedFolderId,
         status: summary.status,
         external_id: summary.external_id || undefined,
         externalId: summary.external_id || undefined,
@@ -96,6 +103,50 @@ async function handleConversationChanged(instanceKey: string, payload: unknown) 
     status: event.status,
   })
   notifyOverviewInvalidated(instanceKey)
+}
+
+async function resolveConversationFolderId(input: {
+  instanceKey: string
+  conversationId: number
+  incomingFolderId?: number
+  currentFolderId?: number
+}) {
+  const incomingFolderId = firstNumber(input.incomingFolderId)
+  if (incomingFolderId > 0) {
+    return incomingFolderId
+  }
+
+  const currentFolderId = firstNumber(input.currentFolderId)
+  if (currentFolderId > 0) {
+    return currentFolderId
+  }
+
+  try {
+    const detail = (await acpApi.getFolderConversation(input.conversationId)) as unknown as
+      | Record<string, unknown>
+      | null
+    const detailSummary =
+      detail?.summary && typeof detail.summary === "object"
+        ? (detail.summary as Record<string, unknown>)
+        : null
+    const detailFolderId = firstNumber(
+      detail?.folderId,
+      detail?.["folder_id"],
+      detailSummary?.folderId,
+      detailSummary?.["folder_id"]
+    )
+    if (detailFolderId > 0) {
+      return detailFolderId
+    }
+  } catch (error) {
+    console.warn("[conversation-sync] resolve folder id skipped", {
+      instanceKey: input.instanceKey,
+      conversationId: input.conversationId,
+      error,
+    })
+  }
+
+  return 0
 }
 
 function normalizeConversationChanged(payload: unknown): GlobalConversationChangeEvent | null {
