@@ -6,7 +6,9 @@
 </template>
 
 <script setup lang="ts">
-import PetFloat from './components/pet/PetFloat.vue'
+import { defineAsyncComponent } from 'vue'
+
+const PetFloat = defineAsyncComponent(() => import('./components/pet/PetFloat.vue'))
 </script>
 
 <style scoped>
