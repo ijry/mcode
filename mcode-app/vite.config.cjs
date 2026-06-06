@@ -3,9 +3,11 @@ const uni = require("@dcloudio/vite-plugin-uni").default
 
 module.exports = defineConfig(async () => {
   const UnoCss = await import('unocss/vite').then(i => i.default)
+  const UniUpRoot = await import('uview-plus/libs/root/index.js').then(i => i.default)
   return {
     plugins: [
       uni(),
+      UniUpRoot(),
       UnoCss(),
     ],
     css: {
