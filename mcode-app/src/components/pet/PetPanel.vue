@@ -3,6 +3,7 @@
     :show="show"
     mode="bottom"
     :round="28"
+    bgColor="transparent"
     @close="emit('update:show', false)"
   >
     <view class="pet-panel">
@@ -238,10 +239,16 @@ function slotIcon(slot: string): string {
 
 <style lang="scss" scoped>
 .pet-panel {
+  margin: 0 32rpx;
   padding: 24rpx 32rpx 48rpx;
   max-height: 70vh;
   display: flex;
   flex-direction: column;
+  box-sizing: border-box;
+  border-radius: 28rpx;
+  overflow: hidden;
+  background: #ffffff;
+  box-shadow: 0 18rpx 56rpx rgba(15, 23, 42, 0.12);
 
   &__header {
     display: flex;
@@ -472,6 +479,7 @@ function slotIcon(slot: string): string {
 @media (prefers-color-scheme: dark) {
   .pet-panel {
     background: #1f1f1f;
+    box-shadow: 0 18rpx 56rpx rgba(0, 0, 0, 0.32);
 
     &__name { color: #e5e5e5; }
     &__exp-track { background: #333; }

@@ -4,6 +4,7 @@
     v-model:show="showSetup"
     mode="center"
     :round="20"
+    bgColor="transparent"
     :close-on-click-overlay="false"
   >
     <view class="pet-setup">
@@ -248,8 +249,13 @@ onUnmounted(() => {
 }
 
 .pet-setup {
+  width: calc(100vw - 64rpx);
+  max-width: 686rpx;
+  box-sizing: border-box;
   padding: 40rpx 32rpx;
-  min-width: 580rpx;
+  border-radius: 20rpx;
+  background: #ffffff;
+  box-shadow: 0 16rpx 48rpx rgba(15, 23, 42, 0.12);
 
   &__title {
     font-size: 36rpx;
