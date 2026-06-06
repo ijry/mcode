@@ -246,6 +246,51 @@ export async function upsertConversationSummary(input: ConversationSummaryRecord
   )
 }
 
+export async function patchConversationSummaryStatus(input: {
+  instanceKey: string
+  conversationId: number
+  status: string
+  updatedAt?: number
+}) {
+  const current = await getConversationSummaryById(input.instanceKey, input.conversationId)
+  if (!current) return false
+
+  const nextUpdatedAt = normalizeTimestamp(input.updatedAt, Date.now())
+  const nextStatus = mergeConversationSummaryStatus({
+    currentStatus: current.status,
+    currentUpdatedAt: current.updatedAt,
+    incomingStatus: input.status,
+    incomingUpdatedAt: nextUpdatedAt,
+  })
+
+  await sqliteDriver.execute(
+    `
+      UPDATE conversations
+      SET status = ?, updated_at = ?
+      WHERE instance_key = ? AND id = ? AND deleted_at IS NULL
+    `,
+    [nextStatus, nextUpdatedAt, input.instanceKey, input.conversationId]
+  )
+
+  return true
+}
+
+export async function markConversationSummaryDeleted(input: {
+  instanceKey: string
+  conversationId: number
+  deletedAt?: number
+}) {
+  const deletedAt = normalizeTimestamp(input.deletedAt, Date.now())
+  await sqliteDriver.execute(
+    `
+      UPDATE conversations
+      SET deleted_at = ?, updated_at = ?
+      WHERE instance_key = ? AND id = ?
+    `,
+    [deletedAt, deletedAt, input.instanceKey, input.conversationId]
+  )
+}
+
 function mergeConversationSummaryRecord(
   currentInput: ConversationSummaryRecord,
   incomingInput: ConversationSummaryRecord

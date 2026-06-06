@@ -448,7 +448,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, nextTick, getCurrentInstance, watch } from "vue"
-import { onPullDownRefresh, onReady, onShow } from "@dcloudio/uni-app"
+import { onPullDownRefresh, onReady, onShow, onUnload } from "@dcloudio/uni-app"
 import { useAuthStore } from "@/stores/auth"
 import { useConversationRuntimeStore } from "@/stores/conversationRuntime"
 import { acpApi } from "@/api/acp"
@@ -459,6 +459,10 @@ import {
   consumeConversationListDirty,
   markConversationListDirty,
 } from "@/services/conversation/conversationListRefresh"
+import {
+  ensureGlobalConversationSync,
+  subscribeConversationOverviewInvalidation,
+} from "@/services/conversation/globalConversationSync"
 import {
   buildConnectionConversationSnapshot,
   mapConversationSummaryRecordToConversation,
@@ -513,6 +517,7 @@ const overviewRefreshPromiseMap = new Map<string, Promise<void>>()
 const loadingCreateAgents = ref(false)
 let createAgentProbeToken = 0
 let createAgentListToken = 0
+let disposeOverviewInvalidation: (() => void) | null = null
 
 interface CreateAgentOption {
   label: string
@@ -1213,7 +1218,18 @@ function onTabChange(idx: number) {
 }
 
 onMounted(() => {
+  if (!disposeOverviewInvalidation) {
+    disposeOverviewInvalidation = subscribeConversationOverviewInvalidation(() => {
+      markConversationListDirty()
+      void loadOverviewData({ force: true })
+    })
+  }
   syncCateTabHeight()
+})
+
+onUnload(() => {
+  disposeOverviewInvalidation?.()
+  disposeOverviewInvalidation = null
 })
 
 onPullDownRefresh(() => {
@@ -1322,6 +1338,9 @@ function currentAuthConnectionKey(): string {
 async function loadConnectionGroup(conn: ConnectionItem): Promise<ConnectionGroup> {
   const gateway = await createConnectionGateway(conn)
   const descriptor = gateway.getRemoteInstanceDescriptor()
+  await ensureGlobalConversationSync(descriptor.instanceKey).catch((error) => {
+    console.warn("ensure global conversation sync skipped:", error)
+  })
   const foldersRaw = await gateway.call<unknown>("list_open_folder_details")
   const folders = normalizeList(foldersRaw) as Project[]
   const tabsRaw = await gateway.call<unknown>("list_opened_tabs")
@@ -1423,6 +1442,10 @@ async function loadRemoteConnectionSnapshot(
 
 async function refreshConnectionGroupFromRemote(conn: ConnectionItem, current: ConnectionGroup) {
   const gateway = await createConnectionGateway(conn)
+  const descriptor = gateway.getRemoteInstanceDescriptor()
+  await ensureGlobalConversationSync(descriptor.instanceKey).catch((error) => {
+    console.warn("ensure global conversation sync skipped:", error)
+  })
   const foldersRaw = await gateway.call<unknown>("list_open_folder_details")
   const folders = normalizeList(foldersRaw) as Project[]
   const tabsRaw = await gateway.call<unknown>("list_opened_tabs")
@@ -2176,7 +2199,7 @@ async function handleActionSelect(e: any) {
         if (res.confirm && res.content) {
           try {
             const gateway = auth.gateway()
-            await gateway.call("update_conversation", {
+            await gateway.call("update_conversation_title", {
               conversationId: currentConversation.value!.id,
               title: res.content,
             })

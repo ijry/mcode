@@ -18,6 +18,7 @@ import type { RealtimeTransport, RealtimeTransportHost, RemoteInstanceDescriptor
 class AcpApiClient {
   private baseUrl: string
   private eventListeners: Map<string, Set<(event: EventEnvelope) => void>>
+  private globalListeners: Map<string, Set<(payload: unknown) => void>>
   private eventSource: any = null
   private pollingStarted = false
   private ensureBridgePromises = new Map<string, Promise<any>>()
@@ -31,6 +32,7 @@ class AcpApiClient {
   constructor(baseUrl: string = "") {
     this.baseUrl = baseUrl
     this.eventListeners = new Map()
+    this.globalListeners = new Map()
   }
 
   /**
@@ -275,6 +277,31 @@ class AcpApiClient {
     }
   }
 
+  subscribeGlobalEvent(
+    channel: string,
+    callback: (payload: unknown) => void,
+    instanceKey?: string
+  ) {
+    if (!this.globalListeners.has(channel)) {
+      this.globalListeners.set(channel, new Set())
+    }
+    this.globalListeners.get(channel)!.add(callback)
+
+    if (!this.eventSource) {
+      void this.connectEventSource(instanceKey)
+    }
+
+    return () => {
+      const listeners = this.globalListeners.get(channel)
+      if (listeners) {
+        listeners.delete(callback)
+        if (listeners.size === 0) {
+          this.globalListeners.delete(channel)
+        }
+      }
+    }
+  }
+
   /**
    * 建立 EventSource 连接
    */
@@ -394,6 +421,11 @@ class AcpApiClient {
         transport.handleServerFrame(raw)
         return
       }
+      const globalFrame = this.extractGlobalFrame(raw)
+      if (globalFrame) {
+        this.dispatchGlobalEvent(globalFrame.channel, globalFrame.payload)
+        return
+      }
       const event = this.extractLegacyEvent(raw)
       if (event) {
         this.dispatchEvent(event)
@@ -481,6 +513,29 @@ class AcpApiClient {
       return this.normalizeEventEnvelope(record.payload as Record<string, unknown>)
     }
     return this.normalizeEventEnvelope(record)
+  }
+
+  private extractGlobalFrame(raw: unknown) {
+    if (!raw || typeof raw !== "object") return null
+    const record = raw as Record<string, unknown>
+    const channel = typeof record.channel === "string" ? record.channel.trim() : ""
+    if (!channel || channel === "acp://event") return null
+    return {
+      channel,
+      payload: "payload" in record ? record.payload : raw,
+    }
+  }
+
+  private dispatchGlobalEvent(channel: string, payload: unknown) {
+    const listeners = this.globalListeners.get(channel)
+    if (!listeners) return
+    listeners.forEach((callback) => {
+      try {
+        callback(payload)
+      } catch (error) {
+        console.error("全局事件处理失败:", error)
+      }
+    })
   }
 
   private isAttachFrame(raw: unknown) {

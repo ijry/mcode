@@ -149,6 +149,24 @@ export interface EventEnvelope {
   data: any
 }
 
+export interface GlobalConversationSummaryPayload {
+  id: number
+  folder_id?: number
+  title?: string
+  agent_type?: string
+  external_id?: string | null
+  connection_id?: string | null
+  status?: string
+  updated_at?: string
+  last_message_at?: string
+  deleted_at?: string | null
+}
+
+export type GlobalConversationChangeEvent =
+  | { kind: "upsert"; summary: GlobalConversationSummaryPayload }
+  | { kind: "deleted"; id: number }
+  | { kind: "status"; id: number; status: string }
+
 export interface StreamBatchEvent {
   delta: string
   contentType: "text" | "thinking" | "plan"
