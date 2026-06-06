@@ -529,6 +529,13 @@ interface QueuedDraft {
   error?: string
 }
 
+interface ConversationDraftSnapshot {
+  composerText: string
+  draftQueue: QueuedDraft[]
+  attachments: UploadedAttachment[]
+  queueExpanded: boolean
+}
+
 interface SlashCommandItem {
   key: string
   name: string
@@ -595,6 +602,7 @@ const detailAgentConfig = ref<DetailAgentConfigState>(createEmptyDetailAgentConf
 const availableTodos = ref<ComposerTodoItem[]>([])
 const currentAgentType = ref("claude_code")
 const hasLoadedOnce = ref(false)
+const hasRestoredDraftState = ref(false)
 const HISTORY_LOADING_MIN_MS = 200
 const permissionSubmitting = ref(false)
 const pendingPermissionSubmittingOptionId = ref("")
@@ -901,11 +909,25 @@ watch(
   }
 )
 
+watch(
+  () => [
+    inputText.value,
+    queueExpanded.value,
+    JSON.stringify(attachments.value),
+    JSON.stringify(draftQueue.value),
+  ] as const,
+  () => {
+    if (!hasRestoredDraftState.value) return
+    persistConversationDraftSnapshot()
+  }
+)
+
 async function loadConversation() {
   loading.value = true
   scrollIntoView.value = ""
   isRestoringScroll.value = false
   restoredInitialScroll.value = false
+  hasRestoredDraftState.value = false
   const cachedViewState = cacheStore.restore(conversationId.value)
   let persistedRuntime: ConversationRuntimeRecord | null = null
   let initialLoadFinished = false
@@ -1189,11 +1211,22 @@ function restoreDraftState(
   cachedViewState: ReturnType<typeof cacheStore.restore>,
   persistedRuntime: ConversationRuntimeRecord | null
 ) {
-  const sourceComposer = cachedViewState?.composerText ?? persistedRuntime?.composerText ?? ""
-  const sourceDraftQueue = cachedViewState?.draftQueue ?? safeParseArray(persistedRuntime?.draftQueueJson)
-  const sourceAttachments = cachedViewState?.attachments ?? safeParseArray(persistedRuntime?.attachmentsJson)
-  const restoredDraftQueue = Array.isArray(sourceDraftQueue) ? (sourceDraftQueue as QueuedDraft[]) : []
-  const restoredAttachments = Array.isArray(sourceAttachments) ? (sourceAttachments as UploadedAttachment[]) : []
+  const localSnapshot = readConversationDraftSnapshot()
+  const sourceComposer =
+    cachedViewState?.composerText
+    ?? localSnapshot?.composerText
+    ?? persistedRuntime?.composerText
+    ?? ""
+  const sourceDraftQueue =
+    cachedViewState?.draftQueue
+    ?? localSnapshot?.draftQueue
+    ?? safeParseArray(persistedRuntime?.draftQueueJson)
+  const sourceAttachments =
+    cachedViewState?.attachments
+    ?? localSnapshot?.attachments
+    ?? safeParseArray(persistedRuntime?.attachmentsJson)
+  const restoredDraftQueue = normalizeDraftQueue(sourceDraftQueue)
+  const restoredAttachments = normalizeAttachments(sourceAttachments)
 
   inputText.value = typeof sourceComposer === "string" ? sourceComposer : ""
   draftQueue.value = restoredDraftQueue
@@ -1201,7 +1234,10 @@ function restoreDraftState(
   queueExpanded.value =
     typeof cachedViewState?.queueExpanded === "boolean"
       ? cachedViewState.queueExpanded
+      : typeof localSnapshot?.queueExpanded === "boolean"
+        ? localSnapshot.queueExpanded
       : restoredDraftQueue.length > 0
+  hasRestoredDraftState.value = true
 }
 
 function safeParseArray(value?: string | null) {
@@ -1214,8 +1250,115 @@ function safeParseArray(value?: string | null) {
   }
 }
 
+function buildConversationDraftSnapshotStorageKey() {
+  if (!conversationId.value) return ""
+  const instanceKey = auth.currentRemoteInstance().instanceKey || "anonymous"
+  return `mcode_conversation_draft_snapshot:${instanceKey}:${conversationId.value}`
+}
+
+function readConversationDraftSnapshot(): ConversationDraftSnapshot | null {
+  const key = buildConversationDraftSnapshotStorageKey()
+  if (!key) return null
+  try {
+    const raw = uni.getStorageSync(key)
+    if (!raw) return null
+    const parsed = typeof raw === "string" ? JSON.parse(raw) : raw
+    if (!parsed || typeof parsed !== "object") return null
+    return {
+      composerText: typeof parsed.composerText === "string" ? parsed.composerText : "",
+      draftQueue: normalizeDraftQueue((parsed as Record<string, unknown>).draftQueue),
+      attachments: normalizeAttachments((parsed as Record<string, unknown>).attachments),
+      queueExpanded: Boolean(parsed.queueExpanded),
+    }
+  } catch (error) {
+    console.warn("restore conversation draft snapshot skipped", error)
+    return null
+  }
+}
+
+function persistConversationDraftSnapshot() {
+  const key = buildConversationDraftSnapshotStorageKey()
+  if (!key) return
+  if (shouldClearConversationDraftSnapshot()) {
+    uni.removeStorageSync(key)
+    return
+  }
+  const snapshot: ConversationDraftSnapshot = {
+    composerText: inputText.value,
+    draftQueue: cloneDraftQueue(draftQueue.value),
+    attachments: cloneAttachments(attachments.value),
+    queueExpanded: queueExpanded.value,
+  }
+  try {
+    uni.setStorageSync(key, JSON.stringify(snapshot))
+  } catch (error) {
+    console.warn("persist conversation draft snapshot skipped", error)
+  }
+}
+
+function shouldClearConversationDraftSnapshot() {
+  return inputText.value.length === 0 && attachments.value.length === 0 && draftQueue.value.length === 0
+}
+
+function normalizeAttachments(source: unknown): UploadedAttachment[] {
+  if (!Array.isArray(source)) return []
+  return source
+    .map((item, index) => normalizeAttachment(item, index))
+    .filter(Boolean) as UploadedAttachment[]
+}
+
+function normalizeAttachment(source: unknown, index: number): UploadedAttachment | null {
+  if (!source || typeof source !== "object") return null
+  const record = source as Record<string, unknown>
+  const kind = record.kind === "image" ? "image" : record.kind === "file" ? "file" : null
+  const url = typeof record.url === "string" ? record.url : ""
+  if (!kind || !url) return null
+  return {
+    id: typeof record.id === "string" && record.id ? record.id : createLocalId(`att-restored-${index}`),
+    url,
+    name: typeof record.name === "string" ? record.name : "",
+    size: Number(record.size || 0),
+    type: typeof record.type === "string" ? record.type : "application/octet-stream",
+    kind,
+  }
+}
+
+function normalizeDraftQueue(source: unknown): QueuedDraft[] {
+  if (!Array.isArray(source)) return []
+  return source
+    .map((item, index) => normalizeDraft(item, index))
+    .filter(Boolean) as QueuedDraft[]
+}
+
+function normalizeDraft(source: unknown, index: number): QueuedDraft | null {
+  if (!source || typeof source !== "object") return null
+  const record = source as Record<string, unknown>
+  const rawStatus = record.status === "failed" ? "failed" : record.status === "sending" ? "sending" : "pending"
+  const status: QueuedDraft["status"] = rawStatus === "sending" ? "pending" : rawStatus
+  return {
+    id: typeof record.id === "string" && record.id ? record.id : createLocalId(`draft-restored-${index}`),
+    text: typeof record.text === "string" ? record.text : "",
+    attachments: normalizeAttachments(record.attachments),
+    createdAt: Number(record.createdAt || Date.now()),
+    status,
+    error: status === "failed" && typeof record.error === "string" ? record.error : undefined,
+  }
+}
+
+function cloneAttachments(source: UploadedAttachment[]) {
+  return source.map((item) => ({ ...item }))
+}
+
+function cloneDraftQueue(source: QueuedDraft[]) {
+  return source.map((item) => ({
+    ...item,
+    attachments: cloneAttachments(item.attachments),
+  }))
+}
+
 function persistDetailRuntimeState() {
   if (!conversationId.value) return
+  persistConversationDraftSnapshot()
   cacheStore.persistViewState({
     conversationId: conversationId.value,
     loadedTurnCount: messages.value.length,
@@ -1226,8 +1369,8 @@ function persistDetailRuntimeState() {
     nearBottom: shouldAutoFollowBottom.value,
     anchorMessageId: anchorMessageId.value || undefined,
     composerText: inputText.value,
-    draftQueue: draftQueue.value.map((item) => ({ ...item })),
-    attachments: attachments.value.map((item) => ({ ...item })),
+    draftQueue: cloneDraftQueue(draftQueue.value),
+    attachments: cloneAttachments(attachments.value),
     queueExpanded: queueExpanded.value,
   })
   const currentSession = session.value
