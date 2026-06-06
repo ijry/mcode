@@ -3,13 +3,15 @@
     <!-- 添加待办 -->
     <view class="add-bar">
       <view class="add-input-wrap">
-        <u-input
+        <up-textarea
           v-model="newTodoText"
+          class="add-input-textarea"
           placeholder="输入待办事项..."
-          border="none"
-          :custom-style="{ fontSize: '30rpx' }"
-          @confirm="addTodo"
-        ></u-input>
+          autoHeight
+          border="surround"
+          :maxlength="-1"
+          :count="false"
+        ></up-textarea>
       </view>
       <u-button
         class="add-btn"
@@ -48,7 +50,7 @@
             autoHeight
             :focus="true"
             :maxlength="-1"
-            count="false"
+            :count="false"
             border="surround"
             @blur="finishEdit(item)"
             @confirm="finishEditOnConfirm(item, $event)"
@@ -720,6 +722,10 @@ async function confirmSend() {
   background-color: #f5f6f8;
   border-radius: 16rpx;
   padding: 8rpx 20rpx;
+}
+
+.add-input-textarea {
+  width: 100%;
 }
 
 .add-btn {
