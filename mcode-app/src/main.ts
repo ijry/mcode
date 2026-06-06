@@ -7,6 +7,16 @@ import "uno.css"
 
 installLegacyCompat()
 
+declare global {
+  interface Array<T> {
+    at(index: number): T | undefined
+  }
+
+  interface String {
+    at(index: number): string | undefined
+  }
+}
+
 export function createApp() {
   const app = createSSRApp(App)
   app.use(pinia)

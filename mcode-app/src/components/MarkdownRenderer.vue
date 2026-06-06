@@ -3,38 +3,81 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed } from "vue"
-import { marked } from "marked"
-import hljs from "highlight.js"
+import { computed } from "vue"
 
 const props = defineProps<{
   content: string
 }>()
 
-// 配置 marked
-marked.setOptions({
-  highlight: function (code, lang) {
-    if (lang && hljs.getLanguage(lang)) {
-      try {
-        return hljs.highlight(code, { language: lang }).value
-      } catch (err) {
-        console.error("代码高亮失败:", err)
-      }
-    }
-    return hljs.highlightAuto(code).value
-  },
-  breaks: true,
-  gfm: true,
-})
-
 const renderedHtml = computed(() => {
   try {
-    return marked.parse(props.content || "")
+    return renderMarkdown(props.content || "")
   } catch (error) {
     console.error("Markdown 渲染失败:", error)
-    return props.content
+    return escapeHtml(props.content || "")
   }
 })
+
+function renderMarkdown(input: string) {
+  const escaped = escapeHtml(input).replace(/\r\n/g, "\n")
+  const blocks = escaped.split(/\n{2,}/).map((block) => block.trim()).filter(Boolean)
+
+  return blocks.map((block) => {
+    if (/^#{1,6}\s/.test(block)) {
+      const match = block.match(/^(#{1,6})\s+(.*)$/)
+      const level = Math.min(match?.[1]?.length || 1, 6)
+      return `<h${level}>${renderInline(match?.[2] || "")}</h${level}>`
+    }
+    if (/^>\s?/.test(block)) {
+      const content = block
+        .split("\n")
+        .map((line) => line.replace(/^>\s?/, ""))
+        .join("<br>")
+      return `<blockquote>${renderInline(content)}</blockquote>`
+    }
+    if (/^(-|\*|\+)\s+/m.test(block)) {
+      const items = block
+        .split("\n")
+        .filter((line) => /^(-|\*|\+)\s+/.test(line))
+        .map((line) => `<li>${renderInline(line.replace(/^(-|\*|\+)\s+/, ""))}</li>`)
+        .join("")
+      return `<ul>${items}</ul>`
+    }
+    if (/^\d+\.\s+/m.test(block)) {
+      const items = block
+        .split("\n")
+        .filter((line) => /^\d+\.\s+/.test(line))
+        .map((line) => `<li>${renderInline(line.replace(/^\d+\.\s+/, ""))}</li>`)
+        .join("")
+      return `<ol>${items}</ol>`
+    }
+    if (/^```/.test(block) && /```$/.test(block)) {
+      const lines = block.split("\n")
+      const firstLine = lines.shift() || ""
+      const language = firstLine.replace(/^```/, "").trim() || "plaintext"
+      const code = lines.slice(0, -1).join("\n")
+      return `<pre><code class="language-${language}">${code}</code></pre>`
+    }
+    return `<p>${renderInline(block).replace(/\n/g, "<br>")}</p>`
+  }).join("")
+}
+
+function renderInline(input: string) {
+  return input
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*([^*]+)\*/g, "<em>$1</em>")
+}
+
+function escapeHtml(input: string) {
+  return input
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+}
 </script>
 
 <style scoped lang="scss">

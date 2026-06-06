@@ -16,8 +16,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from "vue"
-import hljs from "highlight.js"
+import { computed } from "vue"
 
 const props = defineProps<{
   code: string
@@ -25,16 +24,7 @@ const props = defineProps<{
 }>()
 
 const highlightedCode = computed(() => {
-  const lang = props.language || "plaintext"
-  try {
-    if (hljs.getLanguage(lang)) {
-      return hljs.highlight(props.code, { language: lang }).value
-    }
-    return hljs.highlightAuto(props.code).value
-  } catch (error) {
-    console.error("代码高亮失败:", error)
-    return props.code
-  }
+  return escapeHtml(props.code || "")
 })
 
 const language = computed(() => {
@@ -51,6 +41,15 @@ function copyCode() {
       uni.showToast({ title: "复制失败", icon: "none" })
     },
   })
+}
+
+function escapeHtml(input: string) {
+  return input
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;")
 }
 </script>
 
