@@ -40,15 +40,19 @@
         <!-- 文字 / 编辑输入框 -->
         <view class="todo-text-wrap" @click="startEdit(item)">
           <text v-if="editingId !== item.id" class="todo-text">{{ item.text }}</text>
-          <u-input
+          <up-textarea
             v-else
             v-model="editingText"
-            border="none"
+            class="todo-edit-textarea"
+            placeholder="输入待办事项..."
+            autoHeight
             :focus="true"
-            :custom-style="{ fontSize: '30rpx' }"
+            :maxlength="-1"
+            count="false"
+            border="surround"
             @blur="finishEdit(item)"
-            @confirm="finishEdit(item)"
-          ></u-input>
+            @confirm="finishEditOnConfirm(item, $event)"
+          ></up-textarea>
         </view>
 
         <!-- 操作按钮 -->
@@ -177,6 +181,7 @@ import { createGateway } from "@/services/gateway"
 import { toErrorMessage } from "@/services/gateway/error"
 import type { RelaySessionInfo } from "@/services/gateway"
 import type { ConnectionInfo } from "@/types/acp"
+import { usePetStore } from "@/stores/pet"
 
 /* ===== 类型 ===== */
 interface TodoItem {
@@ -310,8 +315,14 @@ function addTodo() {
 function toggleTodo(id: string) {
   const item = todos.value.find((t) => t.id === id)
   if (item) {
+    const wasIncomplete = !item.completed
     item.completed = !item.completed
     saveTodos()
+    if (wasIncomplete && item.completed) {
+      const petStore = usePetStore()
+      petStore.addExp('user', 15)
+      petStore.recordStat('totalTodosCompleted')
+    }
   }
 }
 
@@ -332,6 +343,14 @@ function finishEdit(item: TodoItem) {
   }
   editingId.value = null
   editingText.value = ""
+}
+
+function finishEditOnConfirm(item: TodoItem, event?: { detail?: { value?: string } }) {
+  const value = event?.detail?.value
+  if (typeof value === "string") {
+    editingText.value = value
+  }
+  finishEdit(item)
 }
 
 function deleteTodo(id: string) {
@@ -750,6 +769,10 @@ async function confirmSend() {
 .todo-text-wrap {
   flex: 1;
   min-width: 0;
+}
+
+.todo-edit-textarea {
+  width: 100%;
 }
 
 .todo-text {

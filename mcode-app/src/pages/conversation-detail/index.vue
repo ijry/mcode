@@ -477,6 +477,7 @@ import {
 import { connectionSessionManager } from "@/services/conversation/connectionSessionManager"
 import { markConversationListDirty } from "@/services/conversation/conversationListRefresh"
 import { persistConversationDetailSnapshot } from "@/services/conversation/conversationDetailPersistence"
+import { usePetStore } from "@/stores/pet"
 import {
   createEmptyDetailAgentConfigState,
   createReadyDetailAgentConfigState,
@@ -1309,29 +1310,15 @@ function getOldestCursorFromPersistedTurns(turns: PersistedTurnWithParts[]) {
 function measureMessageListHeight() {
   const query = uni.createSelectorQuery()
   query
-    .select(".toolbar")
-    .boundingClientRect()
-    .select(".history-status")
-    .boundingClientRect()
-    .select(".input-wrap")
+    .select(".message-list")
     .boundingClientRect()
     .exec((rects: any[]) => {
-      const toolbarRect = rects?.[0]
-      const historyStatusRect = rects?.[1]
-      const inputRect = rects?.[2]
-      const toolbarBottom = Number(toolbarRect?.bottom || toolbarRect?.height || 0)
-      const historyStatusBottom = Number(historyStatusRect?.bottom || 0)
-      const inputTop = Number(inputRect?.top || 0)
-      const headerBottom = historyStatusBottom || toolbarBottom
-      const height = Math.max(0, inputTop - headerBottom)
+      const listRect = rects?.[0]
+      const height = Math.max(0, Number(listRect?.height || 0))
       if (height > 0) {
         messageListViewportHeight.value = height
         messageListHeight.value = height
         detailDebugLog("message-list-height", {
-          toolbarBottom,
-          historyStatusBottom,
-          inputTop,
-          headerBottom,
           height,
         })
       }
@@ -1725,6 +1712,7 @@ async function sendDraft(draft: QueuedDraft): Promise<boolean> {
     if (!conn) throw new Error("未连接到代理")
     await acpApi.acpPrompt(conn, blocks, folderId.value, conversationId.value)
     runtime.beginPlaceholderThinking(conversationId.value)
+    usePetStore().addExp('user', 5)
     return true
   } catch (error) {
     runtime.clearLiveMessage(conversationId.value)
@@ -2081,6 +2069,7 @@ async function respondToPermission(optionId: string) {
   try {
     await acpApi.acpRespondPermission(conn, pending.id, optionId)
     runtime.clearPendingPermission(conversationId.value, pending.id)
+    usePetStore().addExp('user', 8)
     uni.showToast({ title: "已提交授权", icon: "success" })
   } catch (error) {
     uni.showToast({
@@ -2597,7 +2586,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 }
 
 .message-list {
-  flex: none;
+  flex: 1;
   min-height: 0;
   padding: 0;
   box-sizing: border-box;
@@ -2652,10 +2641,8 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 }
 
 .input-wrap {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  position: relative;
+  flex-shrink: 0;
   z-index: 30;
   background-color: #ffffff;
   border-top: 1rpx solid #f0f0f0;
