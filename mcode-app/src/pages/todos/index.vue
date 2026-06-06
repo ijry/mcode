@@ -726,6 +726,25 @@ async function confirmSend() {
 
 .add-input-textarea {
   width: 100%;
+
+  :deep(.u-textarea) {
+    padding: 0;
+    background: transparent;
+    border: none !important;
+  }
+
+  :deep(.u-textarea--no-radius) {
+    background: transparent !important;
+  }
+
+  :deep(.u-textarea__field),
+  :deep(.uni-textarea-textarea),
+  :deep(textarea) {
+    min-height: 42rpx;
+    line-height: 42rpx;
+    font-size: 30rpx;
+    background: transparent !important;
+  }
 }
 
 .add-btn {
