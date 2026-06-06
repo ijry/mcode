@@ -92,10 +92,12 @@
             </view>
             <view v-for="(step, idx) in part.plan?.steps" :key="idx" class="plan-step">
               <up-icon
-                :name="step.completed ? 'checkmark-circle-fill' : 'circle'"
+                v-if="step.completed"
+                name="checkmark-circle-fill"
                 size="15"
-                :color="step.completed ? '#19be6b' : '#c0c4cc'"
+                color="#19be6b"
               ></up-icon>
+              <view v-else class="plan-step__dot"></view>
               <text :class="['plan-step__text', step.completed && 'plan-step__text--done']">
                 {{ step.description }}
               </text>
@@ -402,6 +404,16 @@ function normalizeAgentType(raw?: string) {
   margin-bottom: 10rpx;
 
   &:last-child { margin-bottom: 0; }
+}
+
+.plan-step__dot {
+  width: 24rpx;
+  height: 24rpx;
+  margin-top: 4rpx;
+  border-radius: 50%;
+  border: 2rpx solid #c0c4cc;
+  box-sizing: border-box;
+  flex-shrink: 0;
 }
 
 .plan-step__text {
