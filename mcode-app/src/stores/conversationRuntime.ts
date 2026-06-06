@@ -4,6 +4,7 @@ import type {
   MessageTurn,
   LiveMessage,
   ConnectionInfo,
+  ConversationConnectionInfo,
   EventEnvelope,
   SessionStats,
   ContentPart,
@@ -162,6 +163,18 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
   function clearLiveMessage(conversationId: number) {
     const session = getOrCreateSession(conversationId)
     session.liveMessage = null
+  }
+
+  function syncManagedSendPermission(conversationId: number) {
+    const session = sessions.value.get(conversationId)
+    const managed = connectionSessionManager.getByConversationId(conversationId)
+    if (!session || !managed) return
+
+    const allowSend = !(
+      managed.role === "viewer" &&
+      isSharedInProgressStatus(session.status)
+    )
+    connectionSessionManager.setConversationSendAllowed(conversationId, allowSend)
   }
 
   /**
@@ -368,15 +381,18 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         if (event.data.status !== "waiting_permission") {
           session.pendingPermission = null
         }
+        syncManagedSendPermission(session.conversationId)
         break
 
       case "permission_request":
         session.status = "waiting_permission"
         session.pendingPermission = normalizePermissionRequest(event.data)
+        syncManagedSendPermission(session.conversationId)
         break
 
       case "permission_resolved":
         clearPendingPermission(session.conversationId, firstString(event.data?.requestId))
+        syncManagedSendPermission(session.conversationId)
         break
 
       case "turn_complete":
@@ -408,6 +424,30 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     try {
       const instanceKey = auth.currentRemoteInstance().instanceKey
       let managed = connectionSessionManager.getByConversationId(conversationId)
+      let discovered: ConversationConnectionInfo | null = null
+
+      if (!managed) {
+        try {
+          discovered = await acpApi.acpFindConnectionForConversation(conversationId)
+        } catch (error) {
+          console.warn("acp_find_connection_for_conversation failed", error)
+        }
+      }
+
+      if (!managed && discovered?.connection_id) {
+        managed = connectionSessionManager.adoptConversation({
+          conversationId,
+          instanceKey,
+          connectionId: discovered.connection_id,
+          agentType,
+          sessionId: sessionId || null,
+          status: "connected",
+          role: "viewer",
+          sharedLive: true,
+          detachOnly: true,
+          allowSend: false,
+        })
+      }
 
       if (!managed) {
         let snapshot: any = null
@@ -423,6 +463,10 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
             agentType,
             sessionId: firstString(snapshot?.external_id, snapshot?.externalId) || null,
             status: normalizeConnectionInfoStatus(snapshot?.status),
+            role: "viewer",
+            sharedLive: true,
+            detachOnly: true,
+            allowSend: false,
           })
         }
       }
@@ -441,6 +485,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       session.instanceKey = managed.instanceKey
       connections.value.set(managed.connectionId, managed.connection)
       session.status = "connected"
+      syncManagedSendPermission(conversationId)
 
       bindConversationEventHandler(conversationId, handleEvent)
       await attachConversationRealtime({
@@ -512,12 +557,27 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       agentType: String(input.agentType || "").trim() || "claude_code",
       sessionId: input.sessionId || null,
       status: "connected",
+      role: "owner",
+      sharedLive: true,
+      detachOnly: true,
+      allowSend: true,
     })
     const session = getOrCreateSession(input.conversationId)
     session.connectionId = managed.connectionId
     session.instanceKey = managed.instanceKey
     session.status = "connected"
     connections.value.set(managed.connectionId, managed.connection)
+    syncManagedSendPermission(input.conversationId)
+  }
+
+  function canSend(conversationId: number) {
+    const managed = connectionSessionManager.getByConversationId(conversationId)
+    if (!managed) return true
+    return managed.allowSend
+  }
+
+  function getManagedConversation(conversationId: number) {
+    return connectionSessionManager.getByConversationId(conversationId)
   }
 
   return {
@@ -538,6 +598,8 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     clearSession,
     clearPendingPermission,
     bindCreatedConversationRuntime,
+    canSend,
+    getManagedConversation,
   }
 })
 
@@ -569,6 +631,14 @@ function buildAssistantTurn(
     timestamp,
     status: "completed",
   }
+}
+
+function isSharedInProgressStatus(status: RuntimeSession["status"]) {
+  return (
+    status === "thinking" ||
+    status === "running_tool" ||
+    status === "waiting_permission"
+  )
 }
 
 async function persistCompletedTurns(

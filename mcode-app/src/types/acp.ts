@@ -167,6 +167,11 @@ export type GlobalConversationChangeEvent =
   | { kind: "deleted"; id: number }
   | { kind: "status"; id: number; status: string }
 
+export interface ConversationConnectionInfo {
+  connection_id: string
+  event_seq: number
+}
+
 export interface StreamBatchEvent {
   delta: string
   contentType: "text" | "thinking" | "plan"

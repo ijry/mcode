@@ -9,6 +9,10 @@ export interface ManagedConversationConnection {
   connection: ConnectionInfo
   externalId?: string | null
   status: "idle" | "connecting" | "connected" | "error"
+  role: "owner" | "viewer"
+  sharedLive: boolean
+  detachOnly: boolean
+  allowSend: boolean
   lastTouchedAt: number
 }
 
@@ -28,6 +32,10 @@ export const connectionSessionManager = {
     agentType: string
     sessionId?: string | null
     status?: ConnectionInfo["status"]
+    role?: "owner" | "viewer"
+    sharedLive?: boolean
+    detachOnly?: boolean
+    allowSend?: boolean
   }) {
     const instanceKey = input.instanceKey || getCurrentInstanceKey()
     const managed: ManagedConversationConnection = {
@@ -42,6 +50,10 @@ export const connectionSessionManager = {
       },
       externalId: input.sessionId || null,
       status: "connected",
+      role: input.role || "owner",
+      sharedLive: input.sharedLive ?? false,
+      detachOnly: input.detachOnly ?? false,
+      allowSend: input.allowSend ?? true,
       lastTouchedAt: Date.now(),
     }
     byConversationId.set(input.conversationId, managed)
@@ -76,6 +88,10 @@ export const connectionSessionManager = {
       connection,
       externalId: connection.sessionId || null,
       status: "connected",
+      role: "owner",
+      sharedLive: true,
+      detachOnly: true,
+      allowSend: true,
       lastTouchedAt: Date.now(),
     }
 
@@ -104,10 +120,32 @@ export const connectionSessionManager = {
     managed.lastTouchedAt = Date.now()
   },
 
+  setConversationSendAllowed(conversationId: number, allowSend: boolean) {
+    const managed = byConversationId.get(conversationId)
+    if (!managed) return
+    managed.allowSend = allowSend
+    managed.lastTouchedAt = Date.now()
+  },
+
+  setConversationRole(
+    conversationId: number,
+    role: "owner" | "viewer",
+    sharedLive = role === "viewer"
+  ) {
+    const managed = byConversationId.get(conversationId)
+    if (!managed) return
+    managed.role = role
+    managed.sharedLive = sharedLive
+    managed.detachOnly = true
+    managed.lastTouchedAt = Date.now()
+  },
+
   async disconnectConversation(conversationId: number) {
     const managed = byConversationId.get(conversationId)
     if (!managed) return
-    await acpApi.acpDisconnect(managed.connectionId)
+    if (!managed.detachOnly) {
+      await acpApi.acpDisconnect(managed.connectionId)
+    }
     byConversationId.delete(conversationId)
     byConnectionId.delete(managed.connectionId)
   },

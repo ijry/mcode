@@ -1,6 +1,7 @@
 import type {
   PromptInputBlock,
   ConnectionInfo,
+  ConversationConnectionInfo,
   EventEnvelope,
   UploadAttachmentResult,
   ConversationDetail,
@@ -181,6 +182,15 @@ class AcpApiClient {
    */
   async acpGetSessionSnapshotByConversation(conversationId: number): Promise<any> {
     return await this.request("/acp_get_session_snapshot_by_conversation", {
+      conversationId,
+      conversation_id: conversationId,
+    })
+  }
+
+  async acpFindConnectionForConversation(
+    conversationId: number
+  ): Promise<ConversationConnectionInfo | null> {
+    return await this.request("/acp_find_connection_for_conversation", {
       conversationId,
       conversation_id: conversationId,
     })
