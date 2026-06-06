@@ -20,6 +20,8 @@ interface ConversationRealtimeBinding {
   connectionId: string
   lastAppliedSeq?: number | null
   unsubscribe?: () => void
+  attachMode: "stream" | "legacy"
+  closed?: boolean
 }
 
 const bindings = new Map<number, ConversationRealtimeBinding>()
@@ -67,62 +69,107 @@ export async function attachConversationRealtime(input: {
 
   await acpApi.ensureRealtimeBridge(input.instanceKey).catch(() => {})
 
+  const binding: ConversationRealtimeBinding = {
+    conversationId: input.conversationId,
+    instanceKey: input.instanceKey,
+    connectionId: input.connectionId,
+    lastAppliedSeq: input.sinceSeq ?? null,
+    attachMode: "legacy",
+    closed: false,
+  }
+  bindings.set(input.conversationId, binding)
+
+  const reattach = () => {
+    const activeBinding = bindings.get(input.conversationId)
+    if (
+      !activeBinding ||
+      activeBinding.closed ||
+      activeBinding.connectionId !== input.connectionId ||
+      activeBinding.instanceKey !== input.instanceKey
+    ) {
+      return
+    }
+    const transport = acpApi.getRealtimeTransport(input.instanceKey)
+    const newSubscription = transport?.attach(
+      input.connectionId,
+      {
+        sinceSeq:
+          activeBinding.lastAppliedSeq == null ? undefined : activeBinding.lastAppliedSeq,
+      },
+      streamHandlers
+    )
+    if (!newSubscription) {
+      return
+    }
+    activeBinding.attachMode = "stream"
+    activeBinding.unsubscribe = () => {
+      activeBinding.closed = true
+      newSubscription.detach()
+    }
+  }
+
+  const streamHandlers = {
+    onSnapshot: (_snapshot: unknown, eventSeq: number) => {
+      const activeBinding = bindings.get(input.conversationId)
+      if (activeBinding) {
+        activeBinding.lastAppliedSeq = eventSeq
+      }
+    },
+    onReplay: (events: unknown[], highWaterSeq: number) => {
+      const activeBinding = bindings.get(input.conversationId)
+      if (activeBinding) {
+        activeBinding.lastAppliedSeq = highWaterSeq
+      }
+      events.forEach((event) => routeNormalizedRealtimeEvent(input.conversationId, event))
+    },
+    onEvent: (event: unknown) => {
+      const normalized = acpApi.normalizeRealtimeEvent(event)
+      const activeBinding = bindings.get(input.conversationId)
+      if (
+        activeBinding &&
+        normalized &&
+        typeof normalized.seq === "number" &&
+        Number.isFinite(normalized.seq)
+      ) {
+        activeBinding.lastAppliedSeq = normalized.seq
+      }
+      routeNormalizedRealtimeEvent(input.conversationId, event)
+    },
+    onDetached: (reason: string, detail: { lastAppliedSeq?: number | null }) => {
+      const activeBinding = bindings.get(input.conversationId)
+      const lastAppliedSeq =
+        detail.lastAppliedSeq ?? activeBinding?.lastAppliedSeq ?? input.sinceSeq ?? null
+      if (activeBinding) {
+        activeBinding.lastAppliedSeq = lastAppliedSeq
+      }
+      console.warn("[conversation-realtime] detached", {
+        conversationId: input.conversationId,
+        connectionId: input.connectionId,
+        instanceKey: input.instanceKey,
+        reason,
+        lastAppliedSeq,
+      })
+      if (reason === "lagged" || reason === "server_shutdown") {
+        reattach()
+      }
+    },
+  }
+
   let unsubscribe: (() => void) | undefined
   if (acpApi.canUseAttachTransport(input.instanceKey)) {
     const transport = acpApi.getRealtimeTransport(input.instanceKey)
-    const subscription = transport?.attach(
-      input.connectionId,
-      { sinceSeq: input.sinceSeq },
-      {
-        onSnapshot: (_snapshot, eventSeq) => {
-          const activeBinding = bindings.get(input.conversationId)
-          if (activeBinding) {
-            activeBinding.lastAppliedSeq = eventSeq
-          }
-        },
-        onReplay: (events, highWaterSeq) => {
-          const activeBinding = bindings.get(input.conversationId)
-          if (activeBinding) {
-            activeBinding.lastAppliedSeq = highWaterSeq
-          }
-          events.forEach((event) => routeNormalizedRealtimeEvent(input.conversationId, event))
-        },
-        onEvent: (event) => {
-          const normalized = acpApi.normalizeRealtimeEvent(event)
-          const activeBinding = bindings.get(input.conversationId)
-          if (
-            activeBinding &&
-            normalized &&
-            typeof normalized.seq === "number" &&
-            Number.isFinite(normalized.seq)
-          ) {
-            activeBinding.lastAppliedSeq = normalized.seq
-          }
-          routeNormalizedRealtimeEvent(input.conversationId, event)
-        },
-        onDetached: (reason, detail) => {
-          const activeBinding = bindings.get(input.conversationId)
-          const lastAppliedSeq =
-            detail.lastAppliedSeq ?? activeBinding?.lastAppliedSeq ?? input.sinceSeq ?? null
-          if (activeBinding) {
-            activeBinding.lastAppliedSeq = lastAppliedSeq
-          }
-          console.warn("[conversation-realtime] detached", {
-            conversationId: input.conversationId,
-            connectionId: input.connectionId,
-            instanceKey: input.instanceKey,
-            reason,
-            lastAppliedSeq,
-          })
-        },
-      }
-    )
+    const subscription = transport?.attach(input.connectionId, { sinceSeq: input.sinceSeq }, streamHandlers)
     if (subscription) {
-      unsubscribe = () => subscription.detach()
+      binding.attachMode = "stream"
+      unsubscribe = () => {
+        binding.closed = true
+        subscription.detach()
+      }
     }
   }
 
   if (!unsubscribe) {
+    binding.attachMode = "legacy"
     unsubscribe = acpApi.subscribeEvents(
       input.connectionId,
       (event) => routeRealtimeEvent(input.conversationId, event),
@@ -130,20 +177,14 @@ export async function attachConversationRealtime(input: {
     )
   }
 
-  const binding: ConversationRealtimeBinding = {
-    conversationId: input.conversationId,
-    instanceKey: input.instanceKey,
-    connectionId: input.connectionId,
-    lastAppliedSeq: input.sinceSeq ?? null,
-    unsubscribe,
-  }
-  bindings.set(input.conversationId, binding)
+  binding.unsubscribe = unsubscribe
   return binding
 }
 
 export function detachConversationRealtime(conversationId: number) {
   const binding = bindings.get(conversationId)
   if (!binding) return
+  binding.closed = true
   binding.unsubscribe?.()
   bindings.delete(conversationId)
 }
