@@ -453,6 +453,7 @@ import { useAuthStore } from "@/stores/auth"
 import { useConversationRuntimeStore } from "@/stores/conversationRuntime"
 import { acpApi } from "@/api/acp"
 import { createGateway } from "@/services/gateway"
+import { getDirectToken } from "@/services/gateway/directTokenStore"
 import { toErrorMessage } from "@/services/gateway/error"
 import { ensureConversationSchema } from "@/services/db/migrations"
 import {
@@ -485,6 +486,7 @@ import {
   listConversationSummaries,
   upsertConversationSummary,
 } from "@/services/db/repositories/conversationRepository"
+import { getRegisteredRemoteInstanceDescriptor } from "@/services/realtime/remoteInstanceRegistry"
 import type { RelaySessionInfo } from "@/services/gateway"
 import type {
   AgentOptionsSnapshot,
@@ -522,6 +524,8 @@ let overviewLoadPromise: Promise<void> | null = null
 let lastOverviewLoadedAt = 0
 const historyLoadPromiseMap = new Map<string, Promise<void>>()
 const overviewRefreshPromiseMap = new Map<string, Promise<void>>()
+const connectionFolderSnapshotMap = new Map<string, Project[]>()
+const connectionTabSnapshotMap = new Map<string, OpenedTabItem[]>()
 const loadingCreateAgents = ref(false)
 let createAgentProbeToken = 0
 let createAgentListToken = 0
@@ -1044,9 +1048,9 @@ function onTabChange(idx: number) {
 
 onMounted(() => {
   if (!disposeOverviewInvalidation) {
-    disposeOverviewInvalidation = subscribeConversationOverviewInvalidation(() => {
+    disposeOverviewInvalidation = subscribeConversationOverviewInvalidation((instanceKey) => {
       markConversationListDirty()
-      void loadOverviewData({ force: true })
+      void refreshConnectionGroupFromLocalCache(instanceKey)
     })
   }
   syncCateTabHeight()
@@ -1170,6 +1174,7 @@ async function loadConnectionGroup(conn: ConnectionItem): Promise<ConnectionGrou
   const folders = normalizeList(foldersRaw) as Project[]
   const tabsRaw = await gateway.call<unknown>("list_opened_tabs")
   const tabs = normalizeList(tabsRaw) as OpenedTabItem[]
+  rememberConnectionRemoteState(connectionKey(conn), folders, tabs)
   const localConversations = (await loadLocalConversationSummaries(
     descriptor.instanceKey,
     folders
@@ -1275,8 +1280,47 @@ async function refreshConnectionGroupFromRemote(conn: ConnectionItem, current: C
   const folders = normalizeList(foldersRaw) as Project[]
   const tabsRaw = await gateway.call<unknown>("list_opened_tabs")
   const tabs = normalizeList(tabsRaw) as OpenedTabItem[]
+  rememberConnectionRemoteState(connectionKey(conn), folders, tabs)
   const nextGroup = await loadRemoteConnectionSnapshot(conn, folders, tabs)
   replaceConnectionGroup(nextGroup)
+}
+
+async function refreshConnectionGroupFromLocalCache(instanceKey: string) {
+  const descriptor = getRegisteredRemoteInstanceDescriptor(instanceKey)
+  if (!descriptor) {
+    await loadOverviewData({ force: true })
+    return
+  }
+
+  const connKey = connectionKey({
+    mode: descriptor.mode,
+    url: descriptor.baseUrl,
+  })
+  const conn = getConnectedConnections().find((item) => connectionKey(item) === connKey)
+  if (!conn) return
+
+  const folders = connectionFolderSnapshotMap.get(connKey)
+  const tabs = connectionTabSnapshotMap.get(connKey)
+  if (!folders || !tabs) {
+    await loadOverviewData({ force: true })
+    return
+  }
+
+  const localConversations = (await loadLocalConversationSummaries(instanceKey, folders)) || []
+  replaceConnectionGroup(
+    buildConnectionGroupSnapshot({
+      conn,
+      folders,
+      tabs,
+      conversations: localConversations,
+    })
+  )
+  void scheduleOverviewConversationRefreshForConnection({
+    conn,
+    instanceKey,
+    folders,
+    tabs,
+  })
 }
 
 async function scheduleOverviewConversationRefresh(input: {
@@ -1312,6 +1356,22 @@ async function scheduleOverviewConversationRefresh(input: {
 
   overviewRefreshPromiseMap.set(key, task)
   await task
+}
+
+async function scheduleOverviewConversationRefreshForConnection(input: {
+  conn: ConnectionItem
+  instanceKey: string
+  folders: Project[]
+  tabs: OpenedTabItem[]
+}) {
+  const gateway = await createConnectionGateway(input.conn)
+  await scheduleOverviewConversationRefresh({
+    conn: input.conn,
+    gateway,
+    instanceKey: input.instanceKey,
+    folders: input.folders,
+    tabs: input.tabs,
+  })
 }
 
 async function persistConversationSummaries(
@@ -1354,6 +1414,15 @@ function buildConnectionGroupSnapshot(input: {
       conversations: input.conversations,
     })
   )
+}
+
+function rememberConnectionRemoteState(
+  key: string,
+  folders: Project[],
+  tabs: OpenedTabItem[]
+) {
+  connectionFolderSnapshotMap.set(key, folders)
+  connectionTabSnapshotMap.set(key, tabs)
 }
 
 function replaceConnectionGroup(nextGroup: ConnectionGroup) {
@@ -1644,7 +1713,7 @@ function applySelectedConnection(connectionKeyValue: string) {
 
 function syncAuthToConnection(conn: ConnectionItem) {
   if (conn.mode === "direct") {
-    const token = conn.directToken || String(uni.getStorageSync("mcode_direct_token") || "")
+    const token = conn.directToken || getDirectToken(conn.url)
     if (!token) return
     auth.setDirectMode(conn.url, token)
     return
@@ -1944,6 +2013,7 @@ async function confirmCreate() {
       folderId: selectedProjectId.value,
       agentType: selectedAgentType.value,
       connectionId,
+      instanceKey: gateway.getRemoteInstanceDescriptor().instanceKey,
       sessionId: resolveConnectedSessionId(connectionInfo),
     })
 

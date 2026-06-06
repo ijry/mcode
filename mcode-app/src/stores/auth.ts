@@ -1,7 +1,9 @@
 import { defineStore } from "pinia"
 
 import { createGateway } from "@/services/gateway"
+import { getDirectToken, setDirectToken } from "@/services/gateway/directTokenStore"
 import type { GatewayMode, RelaySessionInfo } from "@/services/gateway"
+import { registerRemoteInstanceDescriptor } from "@/services/realtime/remoteInstanceRegistry"
 import { buildRemoteInstanceKey } from "@/services/realtime/instance-key"
 
 export const useAuthStore = defineStore("auth", {
@@ -20,14 +22,13 @@ export const useAuthStore = defineStore("auth", {
     setDirectMode(directBaseUrl: string, token: string) {
       this.mode = "direct"
       this.directBaseUrl = directBaseUrl
-      uni.setStorageSync("mcode_direct_token", token)
+      setDirectToken(directBaseUrl, token)
     },
     clearAuth() {
       this.mode = "relay"
       this.relayUrl = ""
       this.directBaseUrl = ""
       this.relaySession = null
-      uni.removeStorageSync("mcode_direct_token")
     },
     gateway() {
       return createGateway({
@@ -40,13 +41,14 @@ export const useAuthStore = defineStore("auth", {
     currentRemoteInstance() {
       const gateway = this.gateway()
       const descriptor = gateway.getRemoteInstanceDescriptor()
+      registerRemoteInstanceDescriptor(descriptor)
       if (descriptor.instanceKey) return descriptor
 
       const baseUrl = this.mode === "direct" ? this.directBaseUrl : this.relayUrl
       const principal =
         this.mode === "relay"
           ? this.relaySession?.targetId || this.relaySession?.refreshToken || "relay:anonymous"
-          : (uni.getStorageSync("mcode_direct_token") || "").slice(0, 16) || "direct:anonymous"
+          : getDirectToken(baseUrl).slice(0, 16) || "direct:anonymous"
 
       return {
         ...descriptor,

@@ -422,15 +422,19 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     agentType: string,
     workingDir?: string,
     sessionId?: string,
-    sinceSeq?: number
+    sinceSeq?: number,
+    instanceKey?: string
   ) {
     const session = getOrCreateSession(conversationId)
     session.status = "connecting"
     connectionSessionManager.touchConversation(conversationId)
 
     try {
-      const instanceKey = auth.currentRemoteInstance().instanceKey
       let managed = connectionSessionManager.getByConversationId(conversationId)
+      const targetInstanceKey =
+        instanceKey ||
+        managed?.instanceKey ||
+        auth.currentRemoteInstance().instanceKey
       let discovered: ConversationConnectionInfo | null = null
 
       if (!managed) {
@@ -444,7 +448,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       if (!managed && discovered?.connection_id) {
         managed = connectionSessionManager.adoptConversation({
           conversationId,
-          instanceKey,
+          instanceKey: targetInstanceKey,
           connectionId: discovered.connection_id,
           agentType,
           sessionId: sessionId || null,
@@ -465,7 +469,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         if (snapshotConnectionId) {
           managed = connectionSessionManager.adoptConversation({
             conversationId,
-            instanceKey,
+            instanceKey: targetInstanceKey,
             connectionId: snapshotConnectionId,
             agentType,
             sessionId: firstString(snapshot?.external_id, snapshot?.externalId) || null,
@@ -484,7 +488,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
           agentType,
           workingDir,
           sessionId,
-          instanceKey,
+          instanceKey: targetInstanceKey,
         })
       }
 
@@ -554,12 +558,12 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     folderId: number
     agentType: string
     connectionId: string
+    instanceKey: string
     sessionId?: string
   }) {
-    const instanceKey = auth.currentRemoteInstance().instanceKey
     const managed = connectionSessionManager.adoptConversation({
       conversationId: input.conversationId,
-      instanceKey,
+      instanceKey: input.instanceKey,
       connectionId: input.connectionId,
       agentType: String(input.agentType || "").trim() || "claude_code",
       sessionId: input.sessionId || null,

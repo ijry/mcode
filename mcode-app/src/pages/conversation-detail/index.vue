@@ -479,6 +479,8 @@ import { useAuthStore } from "@/stores/auth"
 import { useConversationCacheStore } from "@/stores/conversationCache"
 import { useConversationRuntimeStore } from "@/stores/conversationRuntime"
 import { acpApi } from "@/api/acp"
+import { createGateway } from "@/services/gateway"
+import { getDirectToken } from "@/services/gateway/directTokenStore"
 import { toErrorMessage } from "@/services/gateway/error"
 import { ensureConversationSchema } from "@/services/db/migrations"
 import {
@@ -497,6 +499,11 @@ import {
 import { connectionSessionManager } from "@/services/conversation/connectionSessionManager"
 import { markConversationListDirty } from "@/services/conversation/conversationListRefresh"
 import { persistConversationDetailSnapshot } from "@/services/conversation/conversationDetailPersistence"
+import { buildRemoteInstanceKey } from "@/services/realtime/instance-key"
+import {
+  getRegisteredRemoteInstanceDescriptor,
+  registerRemoteInstanceDescriptor,
+} from "@/services/realtime/remoteInstanceRegistry"
 import { usePetStore } from "@/stores/pet"
 import {
   buildAgentConfigContextKey,
@@ -521,6 +528,8 @@ import type {
   MessageTurn,
   PermissionRequest,
 } from "@/types/acp"
+import type { RelaySessionInfo } from "@/services/gateway"
+import type { RemoteInstanceDescriptor } from "@/services/realtime/types"
 import MessageBubble from "@/components/MessageBubble.vue"
 import ExpertMenu from "@/components/ExpertMenu.vue"
 
@@ -597,6 +606,7 @@ const processingQueue = ref(false)
 const sequence = ref(0)
 const conversationId = ref<number>(0)
 const folderId = ref<number>(0)
+const routeConnectionKey = ref("")
 const inputText = ref("")
 const scrollIntoView = ref("")
 const scrollTop = ref(0)
@@ -627,12 +637,12 @@ const availableTodos = ref<ComposerTodoItem[]>([])
 const currentAgentType = ref("claude_code")
 const detailProjectEntries = ref<DetailProjectEntry[]>([])
 const hasLoadedOnce = ref(false)
+const needsResumeRefresh = ref(false)
 const hasRestoredDraftState = ref(false)
 const HISTORY_LOADING_MIN_MS = 200
 const permissionSubmitting = ref(false)
 const pendingPermissionSubmittingOptionId = ref("")
 let detailAgentProbeToken = 0
-const needsResumeRefresh = ref(false)
 
 function detailDebugLog(stage: string, payload?: Record<string, unknown>) {
   if (!conversationId.value) return
@@ -664,17 +674,23 @@ const messageListStyle = computed(() => {
 })
 
 const detailConnectionKey = computed(() => {
+  if (routeConnectionKey.value) {
+    return routeConnectionKey.value
+  }
   const currentSession = session.value
   const currentConnectionId = currentSession?.connectionId
   if (currentConnectionId) {
     const managed = connectionSessionManager.getByConnectionId(currentConnectionId)
-    const authBase = auth.mode === "direct" ? auth.directBaseUrl : auth.relayUrl
-    if (managed && authBase) {
-      return buildConnectionKey(auth.mode, authBase)
+    const descriptor = managed
+      ? getRegisteredRemoteInstanceDescriptor(managed.instanceKey)
+      : null
+    if (descriptor?.baseUrl) {
+      return buildConnectionKey(descriptor.mode, descriptor.baseUrl)
     }
+    if (managed?.instanceKey) return managed.instanceKey
   }
   const base = auth.mode === "direct" ? auth.directBaseUrl : auth.relayUrl
-  return base ? buildConnectionKey(auth.mode, base) : auth.currentRemoteInstance().instanceKey
+  return base ? buildConnectionKey(auth.mode, base) : resolveDetailInstanceKey()
 })
 
 const historyStatusText = computed(() => {
@@ -888,6 +904,7 @@ onLoad((options: any) => {
   const connectionKey = typeof options.connectionKey === "string"
     ? decodeURIComponent(options.connectionKey)
     : ""
+  routeConnectionKey.value = connectionKey
   if (connectionKey) {
     syncAuthByConnectionKey(connectionKey)
   }
@@ -902,6 +919,9 @@ onShow(() => {
   if (!hasLoadedOnce.value || !conversationId.value || loading.value) return
   if (!needsResumeRefresh.value) return
   needsResumeRefresh.value = false
+  if (routeConnectionKey.value) {
+    syncAuthByConnectionKey(routeConnectionKey.value)
+  }
   void loadDetailProjectEntries()
   loadConversation()
 })
@@ -1010,6 +1030,9 @@ watch(
 )
 
 async function loadConversation() {
+  if (routeConnectionKey.value) {
+    syncAuthByConnectionKey(routeConnectionKey.value)
+  }
   loading.value = true
   scrollIntoView.value = ""
   isRestoringScroll.value = false
@@ -1033,7 +1056,7 @@ async function loadConversation() {
   }
   try {
     const runtimeSession = runtime.getOrCreateSession(conversationId.value)
-    const instanceKey = auth.currentRemoteInstance().instanceKey
+    const instanceKey = resolveDetailInstanceKey()
     const initialTurnLimit = resolveInitialTurnLimit(
       cachedViewState,
       runtimeSession.localTurns.length
@@ -1067,7 +1090,7 @@ async function loadConversation() {
     const hydrateRemoteMetadata = async () => {
       if (managed || resumeSessionId || remoteDetail) return
       try {
-        const gateway = auth.gateway()
+        const gateway = await getDetailGateway()
         remoteDetail = await gateway.call<any>("get_folder_conversation", {
           conversationId: conversationId.value,
         })
@@ -1109,7 +1132,8 @@ async function loadConversation() {
       finishInitialLoad(cachedViewState, persistedRuntime)
     } else {
       await hydrateRemoteMetadata()
-      const result = remoteDetail || await auth.gateway().call<any>("get_folder_conversation", {
+      const gateway = await getDetailGateway()
+      const result = remoteDetail || await gateway.call<any>("get_folder_conversation", {
         conversationId: conversationId.value,
       })
       const summary = (result?.summary && typeof result.summary === "object")
@@ -1144,7 +1168,8 @@ async function loadConversation() {
       agentType,
       undefined,
       resumeSessionId,
-      persistedRuntime?.lastAppliedSeq ?? runtimeSession.lastAppliedSeq ?? undefined
+      persistedRuntime?.lastAppliedSeq ?? runtimeSession.lastAppliedSeq ?? undefined,
+      instanceKey
     )
 
     let snapshot: any = null
@@ -1348,7 +1373,7 @@ interface DetailProjectEntry {
 
 function buildConversationDraftSnapshotStorageKey() {
   if (!conversationId.value) return ""
-  const instanceKey = auth.currentRemoteInstance().instanceKey || "anonymous"
+  const instanceKey = resolveDetailInstanceKey() || "anonymous"
   return `mcode_conversation_draft_snapshot:${instanceKey}:${conversationId.value}`
 }
 
@@ -1472,7 +1497,7 @@ function persistDetailRuntimeState() {
   const currentSession = session.value
   void saveDraftState({
     conversationId: conversationId.value,
-    instanceKey: auth.currentRemoteInstance().instanceKey,
+    instanceKey: resolveDetailInstanceKey(),
     connectionId: currentSession?.connectionId ?? null,
     composerText: inputText.value,
     draftQueueJson: JSON.stringify(draftQueue.value),
@@ -1746,7 +1771,8 @@ async function loadDetailProjectEntries() {
     return
   }
   try {
-    const foldersRaw = await auth.gateway().call<unknown>("list_open_folder_details")
+    const gateway = await getDetailGateway()
+    const foldersRaw = await gateway.call<unknown>("list_open_folder_details")
     detailProjectEntries.value = normalizeList(foldersRaw).map((item: any) => ({
       id: Number(item?.id || 0),
       path: String(item?.path || "").trim(),
@@ -2278,20 +2304,20 @@ async function uploadSingleFile(file: PickedLocalFile, queueId: string): Promise
 }
 
 function resolveUploadTarget(): { url: string; header: Record<string, string> } {
-  const rawBase = auth.mode === "direct" ? auth.directBaseUrl : auth.relayUrl
-  const base = String(rawBase || "").replace(/\/$/, "")
+  const descriptor = resolveDetailDescriptor()
+  const base = String(descriptor.baseUrl || "").replace(/\/$/, "")
   if (!base) {
     throw new Error("连接地址为空")
   }
 
   const header: Record<string, string> = {}
-  if (auth.mode === "direct") {
-    const token = String(uni.getStorageSync("mcode_direct_token") || "")
+  if (descriptor.mode === "direct") {
+    const token = firstString(descriptor.authToken, getDirectToken(descriptor.baseUrl))
     if (token) header.authorization = `Bearer ${token}`
     return { url: `${base}/api/upload_attachment`, header }
   }
 
-  const relayToken = auth.relaySession?.accessToken
+  const relayToken = firstString(descriptor.authToken, auth.relaySession?.accessToken)
   if (relayToken) {
     header.authorization = `Bearer ${relayToken}`
   }
@@ -2299,14 +2325,11 @@ function resolveUploadTarget(): { url: string; header: Record<string, string> } 
 }
 
 function syncAuthByConnectionKey(connKey: string) {
-  const saved = (Array.isArray(uni.getStorageSync("mcode_connections"))
-    ? uni.getStorageSync("mcode_connections")
-    : []) as StoredConnectionItem[]
-  const matched = saved.find((item) => buildConnectionKey(item.mode, item.url) === connKey)
+  const matched = findStoredConnectionByKey(connKey)
   if (!matched) return
 
   if (matched.mode === "direct") {
-    const token = matched.directToken || String(uni.getStorageSync("mcode_direct_token") || "")
+    const token = matched.directToken || getDirectToken(matched.url)
     if (token) auth.setDirectMode(matched.url, token)
     return
   }
@@ -2323,6 +2346,105 @@ function syncAuthByConnectionKey(connKey: string) {
 
 function buildConnectionKey(mode: "direct" | "relay", url: string): string {
   return `${mode}::${String(url || "").trim().replace(/\/+$/, "")}`
+}
+
+function findStoredConnectionByKey(connKey: string) {
+  const saved = (Array.isArray(uni.getStorageSync("mcode_connections"))
+    ? uni.getStorageSync("mcode_connections")
+    : []) as StoredConnectionItem[]
+  return saved.find((item) => buildConnectionKey(item.mode, item.url) === connKey) || null
+}
+
+function resolveDetailDescriptor(): RemoteInstanceDescriptor {
+  const managed = managedConversation.value
+  if (managed?.instanceKey) {
+    const registered = getRegisteredRemoteInstanceDescriptor(managed.instanceKey)
+    if (registered) {
+      return registered
+    }
+  }
+
+  const stored = findStoredConnectionByKey(routeConnectionKey.value || detailConnectionKey.value)
+  const fromStored = stored ? buildDescriptorFromStoredConnection(stored) : null
+  if (fromStored) {
+    registerRemoteInstanceDescriptor(fromStored)
+    return fromStored
+  }
+
+  return auth.currentRemoteInstance()
+}
+
+function resolveDetailInstanceKey() {
+  return resolveDetailDescriptor().instanceKey || "anonymous"
+}
+
+function buildDescriptorFromStoredConnection(
+  conn: StoredConnectionItem
+): RemoteInstanceDescriptor | null {
+  const baseUrl = String(conn.url || "").trim().replace(/\/+$/, "")
+  if (!baseUrl) return null
+
+  if (conn.mode === "direct") {
+    const token = firstString(conn.directToken, getDirectToken(conn.url))
+    const principal = token ? `direct:${token.slice(0, 16)}` : "direct:anonymous"
+    return {
+      instanceKey: buildRemoteInstanceKey({
+        mode: "direct",
+        baseUrl,
+        principal,
+      }),
+      mode: "direct",
+      baseUrl,
+      principal,
+      authToken: token || undefined,
+    }
+  }
+
+  const accessToken = firstString(conn.relaySession?.accessToken)
+  const refreshToken = firstString(conn.relaySession?.refreshToken) || undefined
+  const targetId = firstString(conn.relaySession?.targetId)
+  const principal = targetId || refreshToken || accessToken || "relay:anonymous"
+  return {
+    instanceKey: buildRemoteInstanceKey({
+      mode: "relay",
+      baseUrl,
+      principal,
+    }),
+    mode: "relay",
+    baseUrl,
+    principal,
+    authToken: accessToken || undefined,
+    refreshToken,
+  }
+}
+
+async function getDetailGateway() {
+  const descriptor = resolveDetailDescriptor()
+  if (descriptor.mode === "direct") {
+    const gateway = createGateway({
+      mode: "direct",
+      directBaseUrl: descriptor.baseUrl,
+    })
+    const token = firstString(descriptor.authToken, getDirectToken(descriptor.baseUrl))
+    if (token) {
+      await gateway.pair({
+        directBaseUrl: descriptor.baseUrl,
+        token,
+      })
+    }
+    return gateway
+  }
+
+  const session: RelaySessionInfo = {
+    accessToken: descriptor.authToken || "",
+    refreshToken: descriptor.refreshToken,
+    targetId: descriptor.principal,
+  }
+  return createGateway({
+    mode: "relay",
+    relayUrl: descriptor.baseUrl,
+    session,
+  })
 }
 
 function removeAttachment(index: number) {

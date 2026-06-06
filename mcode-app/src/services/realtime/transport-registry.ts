@@ -12,7 +12,12 @@ export function getOrCreateRealtimeTransport(
   host?: RealtimeTransportHost
 ) {
   const existing = registry.get(descriptor.instanceKey)
-  if (existing) return existing
+  if (existing) {
+    if (host) {
+      existing.rebindHost(host)
+    }
+    return existing
+  }
   const created = new InstanceEventStream(descriptor, host)
   registry.set(descriptor.instanceKey, created)
   return created

@@ -68,5 +68,6 @@ export interface RealtimeTransport {
     handlers: AttachHandlers
   ): EventStreamSubscription
   handleServerFrame(frame: unknown): void
+  rebindHost(host: RealtimeTransportHost): void
   destroy(): void
 }

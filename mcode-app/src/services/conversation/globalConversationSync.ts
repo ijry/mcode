@@ -1,4 +1,5 @@
 import { acpApi } from "@/api/acp"
+import { createGateway } from "@/services/gateway"
 import { ensureConversationSchema } from "@/services/db/migrations"
 import {
   getConversationSummaryById,
@@ -7,6 +8,8 @@ import {
   upsertConversationSummary,
 } from "@/services/db/repositories/conversationRepository"
 import { mapConversationToSummaryRecord } from "@/services/conversation/conversationOverviewSnapshot"
+import { getRegisteredRemoteInstanceDescriptor } from "@/services/realtime/remoteInstanceRegistry"
+import type { RelaySessionInfo } from "@/services/gateway"
 import type {
   GlobalConversationChangeEvent,
   GlobalConversationSummaryPayload,
@@ -122,9 +125,11 @@ async function resolveConversationFolderId(input: {
   }
 
   try {
-    const detail = (await acpApi.getFolderConversation(input.conversationId)) as unknown as
-      | Record<string, unknown>
-      | null
+    const gateway = createGatewayForInstance(input.instanceKey)
+    if (!gateway) return 0
+    const detail = (await gateway.call("get_folder_conversation", {
+      conversationId: input.conversationId,
+    })) as Record<string, unknown> | null
     const detailSummary =
       detail?.summary && typeof detail.summary === "object"
         ? (detail.summary as Record<string, unknown>)
@@ -147,6 +152,29 @@ async function resolveConversationFolderId(input: {
   }
 
   return 0
+}
+
+function createGatewayForInstance(instanceKey: string) {
+  const descriptor = getRegisteredRemoteInstanceDescriptor(instanceKey)
+  if (!descriptor) return null
+
+  if (descriptor.mode === "direct") {
+    return createGateway({
+      mode: "direct",
+      directBaseUrl: descriptor.baseUrl,
+    })
+  }
+
+  const session: RelaySessionInfo = {
+    accessToken: descriptor.authToken || "",
+    refreshToken: descriptor.refreshToken,
+    targetId: descriptor.principal,
+  }
+  return createGateway({
+    mode: "relay",
+    relayUrl: descriptor.baseUrl,
+    session,
+  })
 }
 
 function normalizeConversationChanged(payload: unknown): GlobalConversationChangeEvent | null {

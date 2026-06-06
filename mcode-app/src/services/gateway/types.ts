@@ -29,6 +29,8 @@ export interface EventChannelConnection {
   isOpen(): boolean
   send(frame: object): boolean
   onReady(callback: () => void): () => void
+  onClose(callback: () => void): () => void
+  onError(callback: () => void): () => void
   close(): void
 }
 

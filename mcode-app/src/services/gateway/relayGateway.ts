@@ -96,6 +96,8 @@ export class RelayGateway implements CodegGateway {
       )
       let opened = false
       const readyCallbacks = new Set<() => void>()
+      const closeCallbacks = new Set<() => void>()
+      const errorCallbacks = new Set<() => void>()
       ws.addEventListener("open", () => {
         opened = true
         readyCallbacks.forEach((callback) => {
@@ -108,9 +110,23 @@ export class RelayGateway implements CodegGateway {
       })
       ws.addEventListener("close", () => {
         opened = false
+        closeCallbacks.forEach((callback) => {
+          try {
+            callback()
+          } catch (error) {
+            console.error("relay websocket close callback failed", error)
+          }
+        })
       })
       ws.addEventListener("error", () => {
         opened = false
+        errorCallbacks.forEach((callback) => {
+          try {
+            callback()
+          } catch (error) {
+            console.error("relay websocket error callback failed", error)
+          }
+        })
       })
       ws.addEventListener("message", (event) => {
         onEvent(decodeSocketPayload(event.data))
@@ -130,8 +146,18 @@ export class RelayGateway implements CodegGateway {
           readyCallbacks.add(callback)
           return () => readyCallbacks.delete(callback)
         },
+        onClose: (callback: () => void) => {
+          closeCallbacks.add(callback)
+          return () => closeCallbacks.delete(callback)
+        },
+        onError: (callback: () => void) => {
+          errorCallbacks.add(callback)
+          return () => errorCallbacks.delete(callback)
+        },
         close: () => {
           readyCallbacks.clear()
+          closeCallbacks.clear()
+          errorCallbacks.clear()
           ws.close()
         },
       }
@@ -144,6 +170,8 @@ export class RelayGateway implements CodegGateway {
     })
     let opened = false
     const readyCallbacks = new Set<() => void>()
+    const closeCallbacks = new Set<() => void>()
+    const errorCallbacks = new Set<() => void>()
     socketTask.onOpen(() => {
       opened = true
       readyCallbacks.forEach((callback) => {
@@ -156,9 +184,23 @@ export class RelayGateway implements CodegGateway {
     })
     socketTask.onClose(() => {
       opened = false
+      closeCallbacks.forEach((callback) => {
+        try {
+          callback()
+        } catch (error) {
+          console.error("relay socket close callback failed", error)
+        }
+      })
     })
     socketTask.onError(() => {
       opened = false
+      errorCallbacks.forEach((callback) => {
+        try {
+          callback()
+        } catch (error) {
+          console.error("relay socket error callback failed", error)
+        }
+      })
     })
     socketTask.onMessage((msg: { data: unknown }) => {
       onEvent(decodeSocketPayload(msg.data))
@@ -179,8 +221,18 @@ export class RelayGateway implements CodegGateway {
         readyCallbacks.add(callback)
         return () => readyCallbacks.delete(callback)
       },
+      onClose: (callback: () => void) => {
+        closeCallbacks.add(callback)
+        return () => closeCallbacks.delete(callback)
+      },
+      onError: (callback: () => void) => {
+        errorCallbacks.add(callback)
+        return () => errorCallbacks.delete(callback)
+      },
       close: () => {
         readyCallbacks.clear()
+        closeCallbacks.clear()
+        errorCallbacks.clear()
         socketTask.close({})
       },
     }

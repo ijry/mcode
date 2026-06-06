@@ -1,15 +1,12 @@
 import type { CodegGateway, EventChannelConnection } from "./types"
 import { toErrorMessage, toResponseErrorMessage } from "./error"
+import { getDirectToken, normalizeDirectBaseUrl, setDirectToken } from "./directTokenStore"
 import { buildRemoteInstanceKey } from "@/services/realtime/instance-key"
 import { decodeSocketPayload } from "./socketPayload"
 import { buildWebSocketProtocols } from "./wsProtocol"
 
 function getBaseUrl(baseUrl: string): string {
-  return baseUrl.replace(/\/$/, "")
-}
-
-function getToken(): string {
-  return uni.getStorageSync("mcode_direct_token") || ""
+  return normalizeDirectBaseUrl(baseUrl)
 }
 
 function isH5WebSocketRuntime() {
@@ -22,7 +19,13 @@ function isH5WebSocketRuntime() {
 export class DirectGateway implements CodegGateway {
   readonly mode = "direct" as const
 
-  constructor(private baseUrl: string) {}
+  constructor(private baseUrl: string) {
+    this.baseUrl = getBaseUrl(baseUrl)
+  }
+
+  private getToken() {
+    return getDirectToken(this.baseUrl)
+  }
 
   async pair(params: {
     relayUrl?: string
@@ -32,10 +35,10 @@ export class DirectGateway implements CodegGateway {
     token?: string
   }): Promise<null> {
     if (params.directBaseUrl) {
-      this.baseUrl = params.directBaseUrl
+      this.baseUrl = getBaseUrl(params.directBaseUrl)
     }
-    if (params.token) {
-      uni.setStorageSync("mcode_direct_token", params.token)
+    if (typeof params.token === "string") {
+      setDirectToken(this.baseUrl, params.token)
     }
     return null
   }
@@ -48,7 +51,7 @@ export class DirectGateway implements CodegGateway {
         data: payload ?? {},
         header: {
           "content-type": "application/json",
-          authorization: `Bearer ${getToken()}`,
+          authorization: `Bearer ${this.getToken()}`,
         },
       })
       const statusCode = Number((res as any).statusCode || 0)
@@ -74,10 +77,12 @@ export class DirectGateway implements CodegGateway {
     if (isH5WebSocketRuntime()) {
       const ws = new WebSocket(
         `${getBaseUrl(this.baseUrl).replace(/^http/, "ws")}/ws/events`,
-        buildWebSocketProtocols(getToken())
+        buildWebSocketProtocols(this.getToken())
       )
       let opened = false
       const readyCallbacks = new Set<() => void>()
+      const closeCallbacks = new Set<() => void>()
+      const errorCallbacks = new Set<() => void>()
       ws.addEventListener("open", () => {
         opened = true
         readyCallbacks.forEach((callback) => {
@@ -90,9 +95,23 @@ export class DirectGateway implements CodegGateway {
       })
       ws.addEventListener("close", () => {
         opened = false
+        closeCallbacks.forEach((callback) => {
+          try {
+            callback()
+          } catch (error) {
+            console.error("direct websocket close callback failed", error)
+          }
+        })
       })
       ws.addEventListener("error", () => {
         opened = false
+        errorCallbacks.forEach((callback) => {
+          try {
+            callback()
+          } catch (error) {
+            console.error("direct websocket error callback failed", error)
+          }
+        })
       })
       ws.addEventListener("message", (event) => {
         onEvent(decodeSocketPayload(event.data))
@@ -112,8 +131,18 @@ export class DirectGateway implements CodegGateway {
           readyCallbacks.add(callback)
           return () => readyCallbacks.delete(callback)
         },
+        onClose: (callback: () => void) => {
+          closeCallbacks.add(callback)
+          return () => closeCallbacks.delete(callback)
+        },
+        onError: (callback: () => void) => {
+          errorCallbacks.add(callback)
+          return () => errorCallbacks.delete(callback)
+        },
         close: () => {
           readyCallbacks.clear()
+          closeCallbacks.clear()
+          errorCallbacks.clear()
           ws.close()
         },
       }
@@ -121,11 +150,13 @@ export class DirectGateway implements CodegGateway {
 
     const socketTask: any = uni.connectSocket({
       url: `${getBaseUrl(this.baseUrl).replace(/^http/, "ws")}/ws/events`,
-      protocols: buildWebSocketProtocols(getToken()),
+      protocols: buildWebSocketProtocols(this.getToken()),
       complete: () => {},
     })
     let opened = false
     const readyCallbacks = new Set<() => void>()
+    const closeCallbacks = new Set<() => void>()
+    const errorCallbacks = new Set<() => void>()
     socketTask.onOpen(() => {
       opened = true
       readyCallbacks.forEach((callback) => {
@@ -138,9 +169,23 @@ export class DirectGateway implements CodegGateway {
     })
     socketTask.onClose(() => {
       opened = false
+      closeCallbacks.forEach((callback) => {
+        try {
+          callback()
+        } catch (error) {
+          console.error("direct socket close callback failed", error)
+        }
+      })
     })
     socketTask.onError(() => {
       opened = false
+      errorCallbacks.forEach((callback) => {
+        try {
+          callback()
+        } catch (error) {
+          console.error("direct socket error callback failed", error)
+        }
+      })
     })
     socketTask.onMessage((msg: { data: unknown }) => {
       onEvent(decodeSocketPayload(msg.data))
@@ -161,8 +206,18 @@ export class DirectGateway implements CodegGateway {
         readyCallbacks.add(callback)
         return () => readyCallbacks.delete(callback)
       },
+      onClose: (callback: () => void) => {
+        closeCallbacks.add(callback)
+        return () => closeCallbacks.delete(callback)
+      },
+      onError: (callback: () => void) => {
+        errorCallbacks.add(callback)
+        return () => errorCallbacks.delete(callback)
+      },
       close: () => {
         readyCallbacks.clear()
+        closeCallbacks.clear()
+        errorCallbacks.clear()
         socketTask.close({})
       },
     }
@@ -174,7 +229,7 @@ export class DirectGateway implements CodegGateway {
 
   getRemoteInstanceDescriptor() {
     const baseUrl = getBaseUrl(this.baseUrl)
-    const token = getToken()
+    const token = this.getToken()
     const principal = token ? `direct:${token.slice(0, 16)}` : "direct:anonymous"
     return {
       instanceKey: buildRemoteInstanceKey({

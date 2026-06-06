@@ -28,13 +28,15 @@ export class InstanceEventStream implements RealtimeTransport {
   readonly descriptor: RemoteInstanceDescriptor
 
   private readonly subscriptions = new Map<string, ActiveSubscription>()
-  private readonly unbindReady: () => void
+  private host: RealtimeTransportHost
+  private unbindReady: () => void
 
   constructor(
     descriptor: RemoteInstanceDescriptor,
-    private readonly host: RealtimeTransportHost = closedHost
+    host: RealtimeTransportHost = closedHost
   ) {
     this.descriptor = descriptor
+    this.host = host
     this.unbindReady = this.host.onReady(() => this.reattachAll())
   }
 
@@ -100,7 +102,17 @@ export class InstanceEventStream implements RealtimeTransport {
 
   destroy() {
     this.unbindReady()
+    this.host = closedHost
     this.subscriptions.clear()
+  }
+
+  rebindHost(host: RealtimeTransportHost) {
+    this.unbindReady()
+    this.host = host
+    this.unbindReady = this.host.onReady(() => this.reattachAll())
+    if (this.host.isOpen()) {
+      this.reattachAll()
+    }
   }
 
   private detach(subscriptionId: string) {

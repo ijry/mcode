@@ -9,8 +9,24 @@ import type {
   AcpAgentInfo,
 } from "@/types/acp"
 import { useAuthStore } from "@/stores/auth"
+import { createGateway } from "@/services/gateway"
 import { destroyRealtimeTransport, getOrCreateRealtimeTransport, getRealtimeTransport } from "@/services/realtime/transport-registry"
+import { getRegisteredRemoteInstanceDescriptor } from "@/services/realtime/remoteInstanceRegistry"
 import type { RealtimeTransport, RealtimeTransportHost, RemoteInstanceDescriptor } from "@/services/realtime/types"
+import type { EventChannelConnection, RelaySessionInfo } from "@/services/gateway/types"
+
+type BridgeState = {
+  descriptor: RemoteInstanceDescriptor
+  connection: EventChannelConnection | null
+  transport: RealtimeTransport
+  reconnectTimer: ReturnType<typeof setTimeout> | null
+  reconnectAttempt: number
+  closedManually: boolean
+  attachCapable: boolean
+  detachReady: (() => void) | null
+  detachClose: (() => void) | null
+  detachError: (() => void) | null
+}
 
 /**
  * ACP API 客户端
@@ -19,16 +35,11 @@ import type { RealtimeTransport, RealtimeTransportHost, RemoteInstanceDescriptor
 class AcpApiClient {
   private baseUrl: string
   private eventListeners: Map<string, Set<(event: EventEnvelope) => void>>
-  private globalListeners: Map<string, Set<(payload: unknown) => void>>
-  private eventSource: any = null
+  private globalListeners: Map<string, Map<string, Set<(payload: unknown) => void>>>
   private pollingStarted = false
-  private ensureBridgePromises = new Map<string, Promise<any>>()
-  private realtimeBridges = new Map<string, {
-    descriptor: RemoteInstanceDescriptor
-    transport: RealtimeTransport
-    detach: () => void
-    attachCapable: boolean
-  }>()
+  private pollingInstanceKey: string | null = null
+  private ensureBridgePromises = new Map<string, Promise<BridgeState>>()
+  private bridgeStates = new Map<string, BridgeState>()
 
   constructor(baseUrl: string = "") {
     this.baseUrl = baseUrl
@@ -265,23 +276,21 @@ class AcpApiClient {
     callback: (event: EventEnvelope) => void,
     instanceKey?: string
   ) {
-    if (!this.eventListeners.has(connectionId)) {
-      this.eventListeners.set(connectionId, new Set())
+    const targetKey = this.resolveDescriptor(instanceKey).instanceKey
+    const listenerKey = this.getEventListenerKey(targetKey, connectionId)
+    if (!this.eventListeners.has(listenerKey)) {
+      this.eventListeners.set(listenerKey, new Set())
     }
-    this.eventListeners.get(connectionId)!.add(callback)
+    this.eventListeners.get(listenerKey)!.add(callback)
 
-    // 如果还没有建立 EventSource 连接，则建立
-    if (!this.eventSource) {
-      void this.connectEventSource(instanceKey)
-    }
+    void this.connectEventSource(targetKey)
 
-    // 返回取消订阅函数
     return () => {
-      const listeners = this.eventListeners.get(connectionId)
+      const listeners = this.eventListeners.get(listenerKey)
       if (listeners) {
         listeners.delete(callback)
         if (listeners.size === 0) {
-          this.eventListeners.delete(connectionId)
+          this.eventListeners.delete(listenerKey)
         }
       }
     }
@@ -292,53 +301,53 @@ class AcpApiClient {
     callback: (payload: unknown) => void,
     instanceKey?: string
   ) {
-    if (!this.globalListeners.has(channel)) {
-      this.globalListeners.set(channel, new Set())
+    const targetKey = this.resolveDescriptor(instanceKey).instanceKey
+    if (!this.globalListeners.has(targetKey)) {
+      this.globalListeners.set(targetKey, new Map())
     }
-    this.globalListeners.get(channel)!.add(callback)
+    const scopedListeners = this.globalListeners.get(targetKey)!
+    if (!scopedListeners.has(channel)) {
+      scopedListeners.set(channel, new Set())
+    }
+    scopedListeners.get(channel)!.add(callback)
 
-    if (!this.eventSource) {
-      void this.connectEventSource(instanceKey)
-    }
+    void this.connectEventSource(targetKey)
 
     return () => {
-      const listeners = this.globalListeners.get(channel)
+      const listeners = scopedListeners.get(channel)
       if (listeners) {
         listeners.delete(callback)
         if (listeners.size === 0) {
-          this.globalListeners.delete(channel)
+          scopedListeners.delete(channel)
         }
+      }
+      if (scopedListeners.size === 0) {
+        this.globalListeners.delete(targetKey)
       }
     }
   }
 
-  /**
-   * 建立 EventSource 连接
-   */
   private async connectEventSource(instanceKey?: string) {
     try {
       await this.ensureRealtimeBridge(instanceKey)
-      this.eventSource = { type: "bridge" }
     } catch (error) {
       console.warn("建立实时桥接失败，回退到轮询:", error)
-      this.startPolling()
-      this.eventSource = { type: "polling" }
+      this.startPolling(instanceKey)
     }
   }
 
-  /**
-   * 开始轮询事件
-   */
-  private startPolling() {
+  private startPolling(instanceKey?: string) {
     if (this.pollingStarted) return
     this.pollingStarted = true
+    this.pollingInstanceKey = instanceKey || this.getCurrentDescriptor().instanceKey
     const poll = async () => {
       let shouldContinue = true
       try {
         const events = await this.request("/acp_poll_events", {})
         if (Array.isArray(events)) {
+          const targetKey = this.pollingInstanceKey || this.getCurrentDescriptor().instanceKey
           events.forEach((event: EventEnvelope) => {
-            this.dispatchEvent(event)
+            this.dispatchEvent(event, targetKey)
           })
         }
       } catch (error) {
@@ -350,11 +359,10 @@ class AcpApiClient {
         ) {
           shouldContinue = false
           this.pollingStarted = false
-          this.eventSource = null
+          this.pollingInstanceKey = null
         }
       }
 
-      // 继续轮询
       if (shouldContinue) {
         setTimeout(poll, 1000)
       }
@@ -366,10 +374,13 @@ class AcpApiClient {
   /**
    * 分发事件到监听器
    */
-  private dispatchEvent(event: EventEnvelope) {
+  private dispatchEvent(event: EventEnvelope, instanceKey?: string) {
     const normalized = this.normalizeEventEnvelope(event)
     if (!normalized) return
-    const listeners = this.eventListeners.get(normalized.connectionId)
+    const targetKey = instanceKey || this.getCurrentDescriptor().instanceKey
+    const listeners = this.eventListeners.get(
+      this.getEventListenerKey(targetKey, normalized.connectionId)
+    )
     if (listeners) {
       listeners.forEach((callback) => callback(normalized))
     }
@@ -380,27 +391,32 @@ class AcpApiClient {
   }
 
   canUseAttachTransport(instanceKey?: string) {
-    const key = instanceKey || this.getCurrentDescriptor().instanceKey
-    return this.realtimeBridges.get(key)?.attachCapable === true
+    const key = this.resolveDescriptor(instanceKey).instanceKey
+    return this.bridgeStates.get(key)?.attachCapable === true
   }
 
   getRealtimeTransport(instanceKey?: string) {
-    const key = instanceKey || this.getCurrentDescriptor().instanceKey
-    return this.realtimeBridges.get(key)?.transport ?? getRealtimeTransport(key)
+    const key = this.resolveDescriptor(instanceKey).instanceKey
+    return this.bridgeStates.get(key)?.transport ?? getRealtimeTransport(key)
   }
 
   async ensureRealtimeBridge(instanceKey?: string) {
-    const descriptor = this.getCurrentDescriptor()
-    const targetKey = instanceKey || descriptor.instanceKey
-    if (this.realtimeBridges.has(targetKey)) {
-      return this.realtimeBridges.get(targetKey)!
+    const descriptor = this.resolveDescriptor(instanceKey)
+    const targetKey = descriptor.instanceKey
+    const activeBridge = this.bridgeStates.get(targetKey)
+    if (activeBridge?.connection?.isOpen()) {
+      return activeBridge
     }
 
-    // 防止并发调用导致 uni.connectSocket 重复创建（Android 会报 "same name already open"）
+    if (activeBridge?.reconnectTimer) {
+      clearTimeout(activeBridge.reconnectTimer)
+      activeBridge.reconnectTimer = null
+    }
+
     const existing = this.ensureBridgePromises.get(targetKey)
     if (existing) return existing
 
-    const promise = this.createRealtimeBridge(targetKey, descriptor)
+    const promise = this.createRealtimeBridge(descriptor, activeBridge ?? null)
     this.ensureBridgePromises.set(targetKey, promise)
     try {
       return await promise
@@ -409,9 +425,12 @@ class AcpApiClient {
     }
   }
 
-  private async createRealtimeBridge(targetKey: string, descriptor: RemoteInstanceDescriptor) {
-    const auth = useAuthStore()
-    const gateway = auth.gateway()
+  private async createRealtimeBridge(
+    descriptor: RemoteInstanceDescriptor,
+    existingState: BridgeState | null
+  ) {
+    const targetKey = descriptor.instanceKey
+    const gateway = this.createGatewayForDescriptor(descriptor)
     let eventConnection: Awaited<ReturnType<typeof gateway.connectEvents>> | null = null
     const readyCallbacks = new Set<() => void>()
     const host: RealtimeTransportHost = {
@@ -425,6 +444,31 @@ class AcpApiClient {
       },
     }
     const transport = getOrCreateRealtimeTransport(descriptor, host)
+    const bridge: BridgeState = existingState ?? {
+      descriptor,
+      connection: null,
+      transport,
+      reconnectTimer: null,
+      reconnectAttempt: 0,
+      closedManually: false,
+      attachCapable: true,
+      detachReady: null,
+      detachClose: null,
+      detachError: null,
+    }
+
+    bridge.descriptor = descriptor
+    bridge.transport = transport
+    bridge.closedManually = false
+    bridge.attachCapable = true
+    bridge.connection = null
+    bridge.detachReady?.()
+    bridge.detachClose?.()
+    bridge.detachError?.()
+    bridge.detachReady = null
+    bridge.detachClose = null
+    bridge.detachError = null
+    this.bridgeStates.set(targetKey, bridge)
 
     eventConnection = await gateway.connectEvents((raw) => {
       if (this.isAttachFrame(raw)) {
@@ -433,15 +477,17 @@ class AcpApiClient {
       }
       const globalFrame = this.extractGlobalFrame(raw)
       if (globalFrame) {
-        this.dispatchGlobalEvent(globalFrame.channel, globalFrame.payload)
+        this.dispatchGlobalEvent(targetKey, globalFrame.channel, globalFrame.payload)
         return
       }
       const event = this.extractLegacyEvent(raw)
       if (event) {
-        this.dispatchEvent(event)
+        this.dispatchEvent(event, targetKey)
       }
     })
-    eventConnection.onReady(() => {
+    bridge.connection = eventConnection
+    bridge.detachReady = eventConnection.onReady(() => {
+      bridge.reconnectAttempt = 0
       readyCallbacks.forEach((callback) => {
         try {
           callback()
@@ -450,7 +496,15 @@ class AcpApiClient {
         }
       })
     })
+    bridge.detachClose = eventConnection.onClose(() => {
+      bridge.connection = null
+      this.handleBridgeDisconnect(targetKey, "close")
+    })
+    bridge.detachError = eventConnection.onError(() => {
+      this.handleBridgeDisconnect(targetKey, "error")
+    })
     if (eventConnection.isOpen()) {
+      bridge.reconnectAttempt = 0
       readyCallbacks.forEach((callback) => {
         try {
           callback()
@@ -460,19 +514,6 @@ class AcpApiClient {
       })
     }
 
-    const detach = () => {
-      eventConnection.close()
-      destroyRealtimeTransport(targetKey)
-      this.realtimeBridges.delete(targetKey)
-    }
-
-    const bridge = {
-      descriptor,
-      transport,
-      detach,
-      attachCapable: true,
-    }
-    this.realtimeBridges.set(targetKey, bridge)
     return bridge
   }
 
@@ -489,6 +530,79 @@ class AcpApiClient {
   private getCurrentDescriptor() {
     const auth = useAuthStore()
     return auth.currentRemoteInstance()
+  }
+
+  private resolveDescriptor(instanceKey?: string) {
+    if (!instanceKey) return this.getCurrentDescriptor()
+
+    const registered = getRegisteredRemoteInstanceDescriptor(instanceKey)
+    if (registered) return registered
+
+    const current = this.getCurrentDescriptor()
+    if (current.instanceKey === instanceKey) {
+      return current
+    }
+
+    throw new Error(`No remote descriptor registered for instanceKey: ${instanceKey}`)
+  }
+
+  private createGatewayForDescriptor(descriptor: RemoteInstanceDescriptor) {
+    if (descriptor.mode === "direct") {
+      return createGateway({
+        mode: "direct",
+        directBaseUrl: descriptor.baseUrl,
+      })
+    }
+
+    const session: RelaySessionInfo = {
+      accessToken: descriptor.authToken || "",
+      refreshToken: descriptor.refreshToken,
+      targetId: descriptor.principal,
+    }
+    return createGateway({
+      mode: "relay",
+      relayUrl: descriptor.baseUrl,
+      session,
+    })
+  }
+
+  private getEventListenerKey(instanceKey: string, connectionId: string) {
+    return `${instanceKey}::${connectionId}`
+  }
+
+  private handleBridgeDisconnect(instanceKey: string, reason: "close" | "error") {
+    const bridge = this.bridgeStates.get(instanceKey)
+    if (!bridge || bridge.closedManually) return
+    bridge.detachReady?.()
+    bridge.detachClose?.()
+    bridge.detachError?.()
+    bridge.detachReady = null
+    bridge.detachClose = null
+    bridge.detachError = null
+    bridge.connection = null
+    this.scheduleReconnect(instanceKey, reason)
+  }
+
+  private scheduleReconnect(instanceKey: string, reason: "close" | "error") {
+    const bridge = this.bridgeStates.get(instanceKey)
+    if (!bridge || bridge.closedManually || bridge.reconnectTimer) return
+
+    const delay = Math.min(30_000, 1000 * 2 ** bridge.reconnectAttempt)
+    bridge.reconnectAttempt += 1
+    bridge.reconnectTimer = setTimeout(() => {
+      const active = this.bridgeStates.get(instanceKey)
+      if (!active) return
+      active.reconnectTimer = null
+      if (active.closedManually) return
+      void this.ensureRealtimeBridge(instanceKey).catch((error) => {
+        console.warn("实时桥接重连失败:", {
+          instanceKey,
+          reason,
+          error,
+        })
+        this.scheduleReconnect(instanceKey, reason)
+      })
+    }, delay)
   }
 
   private normalizeEventEnvelope(event: EventEnvelope | Record<string, unknown> | null | undefined) {
@@ -536,8 +650,8 @@ class AcpApiClient {
     }
   }
 
-  private dispatchGlobalEvent(channel: string, payload: unknown) {
-    const listeners = this.globalListeners.get(channel)
+  private dispatchGlobalEvent(instanceKey: string, channel: string, payload: unknown) {
+    const listeners = this.globalListeners.get(instanceKey)?.get(channel)
     if (!listeners) return
     listeners.forEach((callback) => {
       try {

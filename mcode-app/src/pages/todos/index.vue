@@ -180,6 +180,7 @@ import { ref, computed, onMounted } from "vue"
 import { onShow } from "@dcloudio/uni-app"
 import { useAuthStore } from "@/stores/auth"
 import { createGateway } from "@/services/gateway"
+import { getDirectToken } from "@/services/gateway/directTokenStore"
 import { toErrorMessage } from "@/services/gateway/error"
 import type { RelaySessionInfo } from "@/services/gateway"
 import type { ConnectionInfo } from "@/types/acp"
@@ -479,7 +480,7 @@ async function createConnectionGateway(conn: ConnectionItem) {
 
 function syncAuthToConnection(conn: ConnectionItem) {
   if (conn.mode === "direct") {
-    const token = conn.directToken || String(uni.getStorageSync("mcode_direct_token") || "")
+    const token = conn.directToken || getDirectToken(conn.url)
     if (!token) return
     auth.setDirectMode(conn.url, token)
     return
