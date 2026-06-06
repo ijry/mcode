@@ -1,14 +1,21 @@
 <template>
   <view class="up-root-wrap">
     <UpRootView />
-    <PetFloat />
+    <component :is="petComp" v-if="petReady" />
   </view>
 </template>
 
 <script setup lang="ts">
-import { defineAsyncComponent } from 'vue'
+import { shallowRef, onMounted } from 'vue'
 
-const PetFloat = defineAsyncComponent(() => import('./components/pet/PetFloat.vue'))
+const petComp = shallowRef<any>(null)
+const petReady = shallowRef(false)
+
+onMounted(async () => {
+  const mod = await import('./components/pet/PetFloat.vue')
+  petComp.value = mod.default
+  petReady.value = true
+})
 </script>
 
 <style scoped>
