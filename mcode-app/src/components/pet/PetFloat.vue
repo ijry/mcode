@@ -124,7 +124,7 @@ const posX = ref(petStore.position.x >= 0 ? petStore.position.x : screenWidth - 
 const posY = ref(petStore.position.y >= 0 ? petStore.position.y : screenHeight - TABBAR_HEIGHT - BALL_SIZE - 20)
 
 const floatStyle = computed(() => ({
-  position: 'fixed',
+  position: 'fixed' as const,
   left: `${posX.value}px`,
   top: `${posY.value}px`,
   width: `${BALL_SIZE}px`,
