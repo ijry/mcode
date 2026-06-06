@@ -337,8 +337,8 @@
             ></up-textarea>
           </view>
 
-          <view class="input-action" @click="insertSlash">
-            <up-icon name="edit-pen" size="17" color="#606266"></up-icon>
+          <view class="input-action" @click="sendContinueMessage">
+            <up-icon name="arrow-right" size="17" color="#606266"></up-icon>
           </view>
 
           <view
@@ -1791,6 +1791,16 @@ async function sendMessage() {
   } else {
     void processDraftQueue()
   }
+}
+
+async function sendContinueMessage() {
+  if (uploadingCount.value > 0) {
+    uni.showToast({ title: "文件上传中，请稍后发送", icon: "none" })
+    return
+  }
+  inputText.value = "继续"
+  attachments.value = []
+  await sendMessage()
 }
 
 function createDraftFromComposer(): QueuedDraft | null {
@@ -3338,9 +3348,13 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 
 .plan-drawer {
   background-color: #ffffff;
-  max-height: 68vh;
+  height: min(68vh, calc(100vh - 160rpx));
+  max-height: min(68vh, calc(100vh - 160rpx));
   display: flex;
   flex-direction: column;
+  box-sizing: border-box;
+  overflow: hidden;
+  padding-top: 20rpx;
 }
 
 .plan-drawer__hd {
@@ -3349,6 +3363,8 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   justify-content: space-between;
   padding: 30rpx 30rpx 18rpx;
   border-bottom: 1rpx solid #f3f4f6;
+  box-sizing: border-box;
+  flex-shrink: 0;
 }
 
 .plan-drawer__title {
@@ -3365,8 +3381,12 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 .plan-filters {
   display: flex;
   gap: 10rpx;
-  padding: 4rpx 24rpx 12rpx;
+  padding: 16rpx 30rpx 14rpx;
   overflow-x: auto;
+  box-sizing: border-box;
+  flex-shrink: 0;
+  white-space: nowrap;
+  width: 100%;
 }
 
 .plan-filter {
@@ -3400,7 +3420,11 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 
 .plan-drawer__list {
   flex: 1;
-  padding: 18rpx 24rpx 0;
+  min-height: 0;
+  width: 100%;
+  padding: 18rpx 30rpx 0;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
 .plan-empty {
@@ -3415,10 +3439,13 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   background: #f7f8fa;
   border-radius: 16rpx;
   margin-bottom: 12rpx;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .plan-task__left {
   padding-top: 8rpx;
+  flex-shrink: 0;
 }
 
 .plan-task__dot {
@@ -3443,6 +3470,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   font-size: 28rpx;
   color: #1f2329;
   line-height: 1.45;
+  word-break: break-word;
 }
 
 .plan-task__desc {
@@ -3451,6 +3479,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   font-size: 23rpx;
   color: #8a919f;
   line-height: 1.4;
+  word-break: break-word;
 }
 
 .plan-task__badge {
@@ -3460,6 +3489,8 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   border-radius: 999rpx;
   line-height: 1;
   margin-top: 3rpx;
+  margin-left: 8rpx;
+  white-space: nowrap;
 
   &--pending {
     color: #6b7280;
