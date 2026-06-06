@@ -17,6 +17,7 @@ import { connectionSessionManager } from "@/services/conversation/connectionSess
 import {
   attachConversationRealtime,
   bindConversationEventHandler,
+  calibrateAfterTurnComplete,
   calibrateAfterReplayGap,
   detachConversationRealtime,
   unbindConversationEventHandler,
@@ -289,6 +290,12 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       } catch (error) {
         console.warn("turn_complete remote backfill skipped", error)
       }
+    }
+
+    try {
+      await calibrateAfterTurnComplete(conversationId)
+    } catch (error) {
+      console.warn("turn_complete summary calibrate skipped", error)
     }
 
     session.status = "idle"
