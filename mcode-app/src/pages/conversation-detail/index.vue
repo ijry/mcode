@@ -632,6 +632,7 @@ const HISTORY_LOADING_MIN_MS = 200
 const permissionSubmitting = ref(false)
 const pendingPermissionSubmittingOptionId = ref("")
 let detailAgentProbeToken = 0
+const needsResumeRefresh = ref(false)
 
 function detailDebugLog(stage: string, payload?: Record<string, unknown>) {
   if (!conversationId.value) return
@@ -883,6 +884,7 @@ const planFilterItems = computed<
 onLoad((options: any) => {
   conversationId.value = Number(options.id || 0)
   folderId.value = Number(options.folderId || 0)
+  needsResumeRefresh.value = false
   const connectionKey = typeof options.connectionKey === "string"
     ? decodeURIComponent(options.connectionKey)
     : ""
@@ -898,12 +900,15 @@ onLoad((options: any) => {
 
 onShow(() => {
   if (!hasLoadedOnce.value || !conversationId.value || loading.value) return
+  if (!needsResumeRefresh.value) return
+  needsResumeRefresh.value = false
   void loadDetailProjectEntries()
   loadConversation()
 })
 
 onHide(() => {
   persistDetailRuntimeState()
+  needsResumeRefresh.value = true
   if (conversationId.value) {
     markConversationListDirty()
   }
