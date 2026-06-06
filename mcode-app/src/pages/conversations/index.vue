@@ -529,6 +529,27 @@ interface CreateAgentConfigState {
   message: string
 }
 
+interface CachedCreateAgentListEntry {
+  updatedAt: number
+  options: CreateAgentOption[]
+}
+
+interface CachedCreateAgentConfigEntry {
+  updatedAt: number
+  snapshot: AgentOptionsSnapshot
+}
+
+interface StoredCreateAgentSelectionEntry {
+  updatedAt: number
+  agentType: string
+}
+
+interface StoredCreateAgentConfigSelectionEntry {
+  updatedAt: number
+  selectedModeId: string | null
+  selectedValues: Record<string, string>
+}
+
 const createAgentOptions = ref<CreateAgentOption[]>([])
 const createAgentConfig = ref<CreateAgentConfigState>({
   status: "idle",
@@ -538,6 +559,11 @@ const createAgentConfig = ref<CreateAgentConfigState>({
   selectedValues: {},
   message: "",
 })
+const CREATE_AGENT_CACHE_TTL_MS = 24 * 60 * 60 * 1000
+const CREATE_AGENT_LIST_CACHE_STORAGE_KEY = "mcode_create_agent_list_cache_v1"
+const CREATE_AGENT_CONFIG_CACHE_STORAGE_KEY = "mcode_create_agent_config_cache_v1"
+const CREATE_AGENT_SELECTION_STORAGE_KEY = "mcode_create_agent_selection_v1"
+const CREATE_AGENT_CONFIG_SELECTION_STORAGE_KEY = "mcode_create_agent_config_selection_v1"
 
 type Project = ConversationOverviewProject
 type Conversation = ConversationOverviewConversation
@@ -646,15 +672,29 @@ const canCreateInHistory = computed(() => {
 })
 
 watch(
-  () => [showCreateDialog.value, selectedConnectionKey.value, selectedAgentType.value] as const,
+  () => [showCreateDialog.value, selectedConnectionKey.value] as const,
   ([open]) => {
     if (!open) {
       createAgentProbeToken += 1
+      createAgentListToken += 1
       showCreateConfigDialog.value = false
       resetCreateAgentConfig("")
       return
     }
     void loadCreateAgents()
+  }
+)
+
+watch(
+  () =>
+    [
+      showCreateDialog.value,
+      selectedConnectionKey.value,
+      selectedAgentType.value,
+      selectedProjectPath.value,
+    ] as const,
+  ([open]) => {
+    if (!open) return
     void loadCreateAgentConfig()
   }
 )
@@ -744,6 +784,205 @@ function resetCreateAgentConfig(message = "") {
   }
 }
 
+function normalizeStorageRecord<T>(raw: unknown): Record<string, T> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return {}
+  }
+  return raw as Record<string, T>
+}
+
+function normalizeSelectionValues(input: unknown): Record<string, string> {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return {}
+  }
+  const next: Record<string, string> = {}
+  for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
+    const normalizedKey = String(key || "").trim()
+    const normalizedValue = typeof value === "string" ? value.trim() : ""
+    if (normalizedKey && normalizedValue) {
+      next[normalizedKey] = normalizedValue
+    }
+  }
+  return next
+}
+
+function normalizeProjectPath(path?: string): string {
+  return String(path || "").trim()
+}
+
+function isFreshCache(updatedAt: number, ttlMs = CREATE_AGENT_CACHE_TTL_MS): boolean {
+  return Number.isFinite(updatedAt) && updatedAt > 0 && Date.now() - updatedAt < ttlMs
+}
+
+function buildCreateAgentConfigContextKey(
+  connectionKeyValue: string,
+  agentType: string,
+  projectPath?: string
+): string {
+  return JSON.stringify([
+    String(connectionKeyValue || "").trim(),
+    normalizeAgentType(agentType),
+    normalizeProjectPath(projectPath),
+  ])
+}
+
+function currentCreateAgentConfigContextKey(): string {
+  if (!selectedConnectionKey.value || !selectedAgentType.value) return ""
+  return buildCreateAgentConfigContextKey(
+    selectedConnectionKey.value,
+    selectedAgentType.value,
+    selectedProjectPath.value
+  )
+}
+
+function readCreateAgentListCacheMap() {
+  return normalizeStorageRecord<CachedCreateAgentListEntry>(
+    uni.getStorageSync(CREATE_AGENT_LIST_CACHE_STORAGE_KEY)
+  )
+}
+
+function writeCreateAgentListCacheMap(next: Record<string, CachedCreateAgentListEntry>) {
+  uni.setStorageSync(CREATE_AGENT_LIST_CACHE_STORAGE_KEY, next)
+}
+
+function readCreateAgentConfigCacheMap() {
+  return normalizeStorageRecord<CachedCreateAgentConfigEntry>(
+    uni.getStorageSync(CREATE_AGENT_CONFIG_CACHE_STORAGE_KEY)
+  )
+}
+
+function writeCreateAgentConfigCacheMap(next: Record<string, CachedCreateAgentConfigEntry>) {
+  uni.setStorageSync(CREATE_AGENT_CONFIG_CACHE_STORAGE_KEY, next)
+}
+
+function readCreateAgentSelectionMap() {
+  return normalizeStorageRecord<StoredCreateAgentSelectionEntry>(
+    uni.getStorageSync(CREATE_AGENT_SELECTION_STORAGE_KEY)
+  )
+}
+
+function writeCreateAgentSelectionMap(next: Record<string, StoredCreateAgentSelectionEntry>) {
+  uni.setStorageSync(CREATE_AGENT_SELECTION_STORAGE_KEY, next)
+}
+
+function readCreateAgentConfigSelectionMap() {
+  return normalizeStorageRecord<StoredCreateAgentConfigSelectionEntry>(
+    uni.getStorageSync(CREATE_AGENT_CONFIG_SELECTION_STORAGE_KEY)
+  )
+}
+
+function writeCreateAgentConfigSelectionMap(
+  next: Record<string, StoredCreateAgentConfigSelectionEntry>
+) {
+  uni.setStorageSync(CREATE_AGENT_CONFIG_SELECTION_STORAGE_KEY, next)
+}
+
+function readFreshCreateAgentListCache(connectionKeyValue: string): CreateAgentOption[] | null {
+  if (!connectionKeyValue) return null
+  const cacheMap = readCreateAgentListCacheMap()
+  const hit = cacheMap[connectionKeyValue]
+  if (!hit) return null
+  if (!isFreshCache(Number(hit.updatedAt || 0))) {
+    delete cacheMap[connectionKeyValue]
+    writeCreateAgentListCacheMap(cacheMap)
+    return null
+  }
+  return Array.isArray(hit.options) ? hit.options : null
+}
+
+function persistCreateAgentListCache(connectionKeyValue: string, options: CreateAgentOption[]) {
+  if (!connectionKeyValue) return
+  const cacheMap = readCreateAgentListCacheMap()
+  cacheMap[connectionKeyValue] = {
+    updatedAt: Date.now(),
+    options,
+  }
+  writeCreateAgentListCacheMap(cacheMap)
+}
+
+function readFreshCreateAgentConfigCache(contextKey: string): AgentOptionsSnapshot | null {
+  if (!contextKey) return null
+  const cacheMap = readCreateAgentConfigCacheMap()
+  const hit = cacheMap[contextKey]
+  if (!hit) return null
+  if (!isFreshCache(Number(hit.updatedAt || 0))) {
+    delete cacheMap[contextKey]
+    writeCreateAgentConfigCacheMap(cacheMap)
+    return null
+  }
+  return hit.snapshot && typeof hit.snapshot === "object" ? hit.snapshot : null
+}
+
+function persistCreateAgentConfigCache(contextKey: string, snapshot: AgentOptionsSnapshot) {
+  if (!contextKey) return
+  const cacheMap = readCreateAgentConfigCacheMap()
+  cacheMap[contextKey] = {
+    updatedAt: Date.now(),
+    snapshot,
+  }
+  writeCreateAgentConfigCacheMap(cacheMap)
+}
+
+function readPersistedSelectedAgentType(connectionKeyValue: string): string {
+  if (!connectionKeyValue) return ""
+  const selectionMap = readCreateAgentSelectionMap()
+  const hit = selectionMap[connectionKeyValue]
+  return hit?.agentType ? normalizeAgentType(hit.agentType) : ""
+}
+
+function persistSelectedAgentType(connectionKeyValue: string, agentType: string) {
+  if (!connectionKeyValue || !agentType) return
+  const selectionMap = readCreateAgentSelectionMap()
+  selectionMap[connectionKeyValue] = {
+    updatedAt: Date.now(),
+    agentType: normalizeAgentType(agentType),
+  }
+  writeCreateAgentSelectionMap(selectionMap)
+}
+
+function readPersistedCreateAgentConfigSelection(
+  contextKey: string
+): StoredCreateAgentConfigSelectionEntry | null {
+  if (!contextKey) return null
+  const selectionMap = readCreateAgentConfigSelectionMap()
+  const hit = selectionMap[contextKey]
+  if (!hit || typeof hit !== "object") return null
+  return {
+    updatedAt: Number(hit.updatedAt || 0),
+    selectedModeId:
+      typeof hit.selectedModeId === "string" && hit.selectedModeId.trim()
+        ? hit.selectedModeId.trim()
+        : null,
+    selectedValues: normalizeSelectionValues(hit.selectedValues),
+  }
+}
+
+function persistCreateAgentConfigSelection(
+  contextKey: string,
+  input: { selectedModeId: string | null; selectedValues: Record<string, string> }
+) {
+  if (!contextKey) return
+  const selectionMap = readCreateAgentConfigSelectionMap()
+  selectionMap[contextKey] = {
+    updatedAt: Date.now(),
+    selectedModeId:
+      typeof input.selectedModeId === "string" && input.selectedModeId.trim()
+        ? input.selectedModeId.trim()
+        : null,
+    selectedValues: normalizeSelectionValues(input.selectedValues),
+  }
+  writeCreateAgentConfigSelectionMap(selectionMap)
+}
+
+function persistCurrentCreateAgentConfigSelection() {
+  const contextKey = currentCreateAgentConfigContextKey()
+  if (!contextKey) return
+  persistCreateAgentConfigSelection(contextKey, {
+    selectedModeId: createAgentConfig.value.selectedModeId,
+    selectedValues: createAgentConfig.value.selectedValues,
+  })
+}
+
 function buildDefaultSelectedValues(options: SessionConfigOptionInfo[]) {
   const selected: Record<string, string> = {}
   for (const option of options) {
@@ -753,6 +992,63 @@ function buildDefaultSelectedValues(options: SessionConfigOptionInfo[]) {
     if (current) selected[option.id] = current
   }
   return selected
+}
+
+function resolveSelectedModeId(
+  modes: SessionModeStateInfo | null,
+  persistedModeId?: string | null
+): string | null {
+  if (!modes || !Array.isArray(modes.available_modes) || modes.available_modes.length === 0) {
+    return null
+  }
+  if (
+    persistedModeId &&
+    modes.available_modes.some((mode) => String(mode.id || "").trim() === persistedModeId)
+  ) {
+    return persistedModeId
+  }
+  if (
+    typeof modes.current_mode_id === "string" &&
+    modes.available_modes.some((mode) => String(mode.id || "").trim() === modes.current_mode_id)
+  ) {
+    return modes.current_mode_id
+  }
+  const fallback = modes.available_modes[0]
+  return fallback ? String(fallback.id || "").trim() || null : null
+}
+
+function projectSelectedValues(
+  options: SessionConfigOptionInfo[],
+  persistedSelectedValues?: Record<string, string>
+): Record<string, string> {
+  const selected = buildDefaultSelectedValues(options)
+  if (!persistedSelectedValues) return selected
+  for (const option of options) {
+    const persistedValue = persistedSelectedValues[option.id]
+    if (!persistedValue) continue
+    if (option.kind.options.some((item) => item.value === persistedValue)) {
+      selected[option.id] = persistedValue
+    }
+  }
+  return selected
+}
+
+function applyCreateAgentSnapshot(snapshot: AgentOptionsSnapshot, contextKey: string) {
+  const configOptions = Array.isArray(snapshot?.config_options) ? snapshot.config_options : []
+  const modes = snapshot?.modes ?? null
+  const persistedSelection = readPersistedCreateAgentConfigSelection(contextKey)
+
+  createAgentConfig.value = {
+    status: "ready",
+    modes,
+    configOptions,
+    selectedModeId: resolveSelectedModeId(modes, persistedSelection?.selectedModeId),
+    selectedValues: projectSelectedValues(configOptions, persistedSelection?.selectedValues),
+    message:
+      !modes && configOptions.length === 0
+        ? "该智能体将使用远端默认配置"
+        : "",
+  }
 }
 
 function normalizeCreateAgentOptions(raw: unknown): CreateAgentOption[] {
@@ -791,14 +1087,32 @@ async function loadCreateAgents() {
   const token = ++createAgentListToken
   loadingCreateAgents.value = true
   try {
+    const cachedOptions = readFreshCreateAgentListCache(selectedConnectionKey.value)
+    if (cachedOptions && cachedOptions.length > 0) {
+      if (token !== createAgentListToken) return
+      createAgentOptions.value = cachedOptions
+      if (!cachedOptions.some((item) => item.value === selectedAgentType.value)) {
+        const fallback = cachedOptions[0]
+        if (fallback) {
+          selectedAgentType.value = fallback.value
+          persistSelectedAgentType(selectedConnectionKey.value, fallback.value)
+        }
+      }
+      return
+    }
+
     const gateway = await createConnectionGateway(targetConn)
     const remoteAgents = await gateway.call<unknown>("acp_list_agents", {})
     if (token !== createAgentListToken) return
     const nextOptions = normalizeCreateAgentOptions(remoteAgents)
     createAgentOptions.value = nextOptions
+    persistCreateAgentListCache(selectedConnectionKey.value, nextOptions)
     if (!nextOptions.some((item) => item.value === selectedAgentType.value)) {
       const fallback = nextOptions[0]
-      if (fallback) selectedAgentType.value = fallback.value
+      if (fallback) {
+        selectedAgentType.value = fallback.value
+        persistSelectedAgentType(selectedConnectionKey.value, fallback.value)
+      }
     }
   } catch (error) {
     if (token !== createAgentListToken) return
@@ -826,6 +1140,17 @@ async function loadCreateAgentConfig() {
   }
 
   const token = ++createAgentProbeToken
+  const contextKey = buildCreateAgentConfigContextKey(
+    selectedConnectionKey.value,
+    selectedAgentType.value,
+    selectedProjectPath.value
+  )
+  const cachedSnapshot = readFreshCreateAgentConfigCache(contextKey)
+  if (cachedSnapshot) {
+    applyCreateAgentSnapshot(cachedSnapshot, contextKey)
+    return
+  }
+
   createAgentConfig.value = {
     status: "loading",
     modes: null,
@@ -842,23 +1167,8 @@ async function loadCreateAgentConfig() {
       workingDir: selectedProjectPath.value || null,
     })
     if (token !== createAgentProbeToken) return
-
-    const configOptions = Array.isArray(snapshot?.config_options)
-      ? snapshot.config_options
-      : []
-    const modes = snapshot?.modes ?? null
-
-    createAgentConfig.value = {
-      status: "ready",
-      modes,
-      configOptions,
-      selectedModeId: modes?.current_mode_id ?? null,
-      selectedValues: buildDefaultSelectedValues(configOptions),
-      message:
-        !modes && configOptions.length === 0
-          ? "该智能体将使用远端默认配置"
-          : "",
-    }
+    persistCreateAgentConfigCache(contextKey, snapshot)
+    applyCreateAgentSnapshot(snapshot, contextKey)
   } catch (error) {
     if (token !== createAgentProbeToken) return
     resetCreateAgentConfig("读取失败，将使用远端默认配置")
@@ -868,6 +1178,7 @@ async function loadCreateAgentConfig() {
 
 function selectCreateMode(modeId: string) {
   createAgentConfig.value.selectedModeId = modeId
+  persistCurrentCreateAgentConfigSelection()
 }
 
 function selectCreateConfigValue(configId: string, valueId: string) {
@@ -878,6 +1189,7 @@ function selectCreateConfigValue(configId: string, valueId: string) {
       [configId]: valueId,
     },
   }
+  persistCurrentCreateAgentConfigSelection()
 }
 
 function openCreateConfigDialog() {
@@ -1463,6 +1775,7 @@ function applySelectedConnection(connectionKeyValue: string) {
     selectedProjectId.value = 0
     selectedProjectName.value = ""
     createAgentOptions.value = DEFAULT_CREATE_AGENT_OPTIONS
+    selectedAgentType.value = "claude_code"
     return
   }
   const group = connectionGroups.value.find((item) => item.key === connectionKeyValue)
@@ -1471,9 +1784,14 @@ function applySelectedConnection(connectionKeyValue: string) {
   selectedConnectionName.value = group.name
   selectedProjectId.value = 0
   selectedProjectName.value = ""
-  if (showCreateDialog.value) {
-    void loadCreateAgents()
+  const cachedOptions = readFreshCreateAgentListCache(group.key)
+  if (cachedOptions && cachedOptions.length > 0) {
+    createAgentOptions.value = cachedOptions
+  } else {
+    createAgentOptions.value = DEFAULT_CREATE_AGENT_OPTIONS
   }
+  const persistedAgentType = readPersistedSelectedAgentType(group.key)
+  selectedAgentType.value = persistedAgentType || "claude_code"
 }
 
 function syncAuthToConnection(conn: ConnectionItem) {
@@ -1640,8 +1958,13 @@ function createConversation(projectId?: number) {
   newConversationTitle.value = ""
   newTaskContent.value = ""
   resetCreateAgentConfig("")
-  createAgentOptions.value = DEFAULT_CREATE_AGENT_OPTIONS
-  selectedAgentType.value = "claude_code"
+  const cachedOptions = readFreshCreateAgentListCache(selectedConnectionKey.value)
+  createAgentOptions.value = cachedOptions && cachedOptions.length > 0
+    ? cachedOptions
+    : DEFAULT_CREATE_AGENT_OPTIONS
+  if (!createAgentOptions.value.some((item) => item.value === selectedAgentType.value)) {
+    selectedAgentType.value = createAgentOptions.value[0]?.value || "claude_code"
+  }
   showCreateDialog.value = true
 }
 
@@ -1656,9 +1979,6 @@ function onProjectConfirm(e: any) {
   selectedProjectId.value = sel.value
   selectedProjectName.value = sel.text
   showProjectPicker.value = false
-  if (showCreateDialog.value) {
-    void loadCreateAgentConfig()
-  }
 }
 
 function showGroupError(group: ConnectionGroup) {
@@ -1672,7 +1992,8 @@ function showGroupError(group: ConnectionGroup) {
 }
 
 function selectAgent(agentType: string) {
-  selectedAgentType.value = agentType
+  selectedAgentType.value = normalizeAgentType(agentType)
+  persistSelectedAgentType(selectedConnectionKey.value, selectedAgentType.value)
 }
 
 async function applyCreateAgentConfig(
@@ -1708,6 +2029,8 @@ async function confirmCreate() {
 
   creating.value = true
   try {
+    persistSelectedAgentType(selectedConnectionKey.value, selectedAgentType.value)
+    persistCurrentCreateAgentConfigSelection()
     const targetConn = getConnectedConnections().find(
       (item) => connectionKey(item) === selectedConnectionKey.value
     )
