@@ -1,6 +1,6 @@
 <template>
   <up-popup v-model:show="show" mode="bottom" :round="24" @close="dismiss">
-    <view class="ios-a2hs-sheet">
+    <view class="ios-a2hs-sheet" :style="upThemeCardStyle">
       <view class="ios-a2hs-sheet__grab"></view>
       <text class="ios-a2hs-sheet__title">添加到桌面，全屏打开</text>
       <text class="ios-a2hs-sheet__desc">在 Safari 中点击底部分享按钮</text>
@@ -97,7 +97,6 @@ function isH5Runtime() {
   flex-direction: column;
   gap: 20rpx;
   padding: 24rpx 32rpx calc(env(safe-area-inset-bottom) + 32rpx);
-  background: #ffffff;
 }
 
 .ios-a2hs-sheet__grab {
@@ -105,20 +104,20 @@ function isH5Runtime() {
   height: 8rpx;
   margin: 0 auto 8rpx;
   border-radius: 999rpx;
-  background: #dcdfe6;
+  background: var(--mcode-border-color);
 }
 
 .ios-a2hs-sheet__title {
   font-size: 34rpx;
   font-weight: 600;
-  color: #303133;
+  color: var(--mcode-text-primary);
   text-align: center;
 }
 
 .ios-a2hs-sheet__desc {
   font-size: 28rpx;
   line-height: 1.6;
-  color: #606266;
+  color: var(--mcode-text-secondary);
   text-align: center;
 }
 </style>

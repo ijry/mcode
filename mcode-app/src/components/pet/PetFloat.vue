@@ -239,7 +239,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.9);
+  background: color-mix(in srgb, var(--mcode-card-bg) 90%, transparent);
   box-shadow: 0 4rpx 20rpx rgba(0, 0, 0, 0.15);
   transition: box-shadow 0.2s ease;
 
@@ -254,13 +254,13 @@ onUnmounted(() => {
   box-sizing: border-box;
   padding: 40rpx 32rpx;
   border-radius: 20rpx;
-  background: #ffffff;
+  background: var(--mcode-card-bg);
   box-shadow: 0 16rpx 48rpx rgba(15, 23, 42, 0.12);
 
   &__title {
     font-size: 36rpx;
     font-weight: 600;
-    color: #333;
+    color: var(--mcode-text-primary);
     text-align: center;
     display: block;
     margin-bottom: 32rpx;
@@ -290,20 +290,20 @@ onUnmounted(() => {
 
     &--active {
       border-color: #2979ff;
-      background: rgba(41, 121, 255, 0.06);
+      background: color-mix(in srgb, var(--mcode-primary) 10%, var(--mcode-card-bg) 90%);
     }
   }
 
   &__species-name {
     font-size: 26rpx;
     font-weight: 500;
-    color: #333;
+    color: var(--mcode-text-primary);
     margin-top: 8rpx;
   }
 
   &__species-desc {
     font-size: 20rpx;
-    color: #909399;
+    color: var(--mcode-text-tertiary);
     margin-top: 4rpx;
   }
 
@@ -312,27 +312,4 @@ onUnmounted(() => {
   }
 }
 
-@media (prefers-color-scheme: dark) {
-  .pet-float {
-    background: rgba(50, 50, 50, 0.9);
-    box-shadow: 0 4rpx 20rpx rgba(0, 0, 0, 0.4);
-  }
-
-  .pet-setup {
-    background: #1f1f1f;
-
-    &__title {
-      color: #e5e5e5;
-    }
-
-    &__species-item--active {
-      border-color: #2979ff;
-      background: rgba(41, 121, 255, 0.15);
-    }
-
-    &__species-name {
-      color: #e5e5e5;
-    }
-  }
-}
 </style>

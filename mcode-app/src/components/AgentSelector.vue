@@ -3,7 +3,7 @@
     <view class="sel-trigger" @click="showPicker = true">
       <view class="sel-dot" :style="{ backgroundColor: currentAgent.color }"></view>
       <text class="sel-name">{{ currentAgent.name }}</text>
-      <up-icon name="arrow-down-fill" size="11" color="#c0c4cc"></up-icon>
+      <up-icon name="arrow-down-fill" size="11" :color="upThemeVar('--up-light-color', '#c0c4cc')"></up-icon>
     </view>
 
     <up-popup v-model:show="showPicker" mode="bottom" :round="20">
@@ -12,7 +12,7 @@
         <view class="picker-hd">
           <text class="picker-hd__title">选择智能体</text>
           <view class="picker-close" @click="showPicker = false">
-            <up-icon name="close" size="20" color="#909399"></up-icon>
+            <up-icon name="close" size="20" :color="upThemeVar('--up-tips-color', '#909193')"></up-icon>
           </view>
         </view>
 
@@ -32,7 +32,7 @@
               <text class="agent-info__desc">{{ agent.description }}</text>
             </view>
             <view v-if="agent.type === modelValue" class="check-mark">
-              <up-icon name="checkmark" size="16" color="#2979ff"></up-icon>
+              <up-icon name="checkmark" size="16" :color="upThemeVar('--up-primary', '#2979ff')"></up-icon>
             </view>
           </view>
         </scroll-view>
@@ -95,11 +95,11 @@ function selectAgent(agent: Agent) {
   align-items: center;
   gap: 10rpx;
   padding: 14rpx 20rpx;
-  background-color: #f5f6f8;
+  background-color: var(--mcode-card-soft-bg);
   border-radius: 20rpx;
   transition: background-color 0.15s;
 
-  &:active { background-color: #ebebeb; }
+  &:active { background-color: var(--mcode-card-muted-bg); }
 }
 
 .sel-dot {
@@ -112,12 +112,12 @@ function selectAgent(agent: Agent) {
 .sel-name {
   font-size: 26rpx;
   font-weight: 500;
-  color: #303133;
+  color: var(--mcode-text-primary);
 }
 
 /* ===== 弹层 ===== */
 .picker-wrap {
-  background-color: #ffffff;
+  background-color: var(--mcode-card-bg);
   padding: 0 0 0;
 }
 
@@ -131,7 +131,7 @@ function selectAgent(agent: Agent) {
 .picker-hd__title {
   font-size: 34rpx;
   font-weight: 600;
-  color: #1d1d1f;
+  color: var(--mcode-text-primary);
 }
 
 .picker-close {
@@ -140,7 +140,7 @@ function selectAgent(agent: Agent) {
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: #f5f5f5;
+  background-color: var(--mcode-card-soft-bg);
   border-radius: 50%;
 }
 
@@ -159,10 +159,10 @@ function selectAgent(agent: Agent) {
   margin-bottom: 10rpx;
   transition: background-color 0.15s;
 
-  &:active { background-color: #f0f0f0; }
+  &:active { background-color: var(--mcode-card-muted-bg); }
 
   &--active {
-    background-color: #e8f0fe;
+    background-color: color-mix(in srgb, var(--mcode-primary) 10%, var(--mcode-card-bg) 90%);
   }
 }
 
@@ -187,12 +187,12 @@ function selectAgent(agent: Agent) {
 .agent-info__name {
   font-size: 30rpx;
   font-weight: 500;
-  color: #1d1d1f;
+  color: var(--mcode-text-primary);
 }
 
 .agent-info__desc {
   font-size: 24rpx;
-  color: #86909c;
+  color: var(--mcode-text-tertiary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

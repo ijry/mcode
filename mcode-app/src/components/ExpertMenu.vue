@@ -2,7 +2,7 @@
   <view class="expert-menu">
     <!-- 触发按钮 -->
     <view class="menu-trigger" @click="showMenu = true">
-      <up-icon name="list-dot" size="18" color="#ff9900"></up-icon>
+      <up-icon name="list-dot" size="18" :color="upThemeVar('--up-warning', '#ff9900')"></up-icon>
       <text class="trigger-label">命令</text>
     </view>
 
@@ -12,7 +12,7 @@
         <view class="menu-hd">
           <text class="menu-hd__title">专家命令</text>
           <view class="menu-close" @click="showMenu = false">
-            <up-icon name="close" size="20" color="#909399"></up-icon>
+            <up-icon name="close" size="20" :color="upThemeVar('--up-tips-color', '#909193')"></up-icon>
           </view>
         </view>
 
@@ -154,22 +154,22 @@ function selectCommand(cmd: Command) {
   align-items: center;
   gap: 8rpx;
   padding: 14rpx 20rpx;
-  background-color: #fff8ec;
+  background-color: color-mix(in srgb, var(--mcode-warning) 14%, var(--mcode-card-bg) 86%);
   border-radius: 20rpx;
   transition: background-color 0.15s;
 
-  &:active { background-color: #ffefd0; }
+  &:active { background-color: color-mix(in srgb, var(--mcode-warning) 22%, var(--mcode-card-bg) 78%); }
 }
 
 .trigger-label {
   font-size: 26rpx;
   font-weight: 500;
-  color: #ff9900;
+  color: var(--mcode-warning);
 }
 
 /* ===== 弹层容器 ===== */
 .menu-wrap {
-  background-color: #ffffff;
+  background-color: var(--mcode-card-bg);
   display: flex;
   flex-direction: column;
   max-height: 85vh;
@@ -186,7 +186,7 @@ function selectCommand(cmd: Command) {
 .menu-hd__title {
   font-size: 34rpx;
   font-weight: 600;
-  color: #1d1d1f;
+  color: var(--mcode-text-primary);
 }
 
 .menu-close {
@@ -195,7 +195,7 @@ function selectCommand(cmd: Command) {
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: #f5f5f5;
+  background-color: var(--mcode-card-soft-bg);
   border-radius: 50%;
 }
 
@@ -219,7 +219,7 @@ function selectCommand(cmd: Command) {
   display: block;
   font-size: 24rpx;
   font-weight: 600;
-  color: #86909c;
+  color: var(--mcode-text-tertiary);
   text-transform: uppercase;
   letter-spacing: 1rpx;
   margin-bottom: 16rpx;
@@ -238,16 +238,16 @@ function selectCommand(cmd: Command) {
   align-items: center;
   gap: 20rpx;
   padding: 20rpx 16rpx;
-  background-color: #f8f9fa;
+  background-color: var(--mcode-card-soft-bg);
   border-radius: 16rpx;
   transition: background-color 0.15s;
 
   &:active {
-    background-color: #ededf0;
+    background-color: var(--mcode-card-muted-bg);
   }
 
   &--active {
-    background-color: #e8f0fe;
+    background-color: color-mix(in srgb, var(--mcode-primary) 10%, var(--mcode-card-bg) 90%);
   }
 }
 
@@ -272,12 +272,12 @@ function selectCommand(cmd: Command) {
 .cmd-info__name {
   font-size: 30rpx;
   font-weight: 500;
-  color: #1d1d1f;
+  color: var(--mcode-text-primary);
 }
 
 .cmd-info__desc {
   font-size: 24rpx;
-  color: #86909c;
+  color: var(--mcode-text-tertiary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

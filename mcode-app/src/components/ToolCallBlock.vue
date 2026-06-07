@@ -17,7 +17,7 @@
         <up-icon
           :name="expanded ? 'arrow-up' : 'arrow-down'"
           size="13"
-          color="#c0c4cc"
+          :color="upThemeVar('--up-light-color', '#c0c4cc')"
         ></up-icon>
       </view>
     </view>
@@ -27,7 +27,7 @@
       <!-- 输入参数 -->
       <view v-if="toolCall.input" class="tool-section">
         <view class="section-label">
-          <up-icon name="arrow-right-double" size="12" color="#909399"></up-icon>
+          <up-icon name="arrow-right-double" size="12" :color="upThemeVar('--up-tips-color', '#909193')"></up-icon>
           <text>输入参数</text>
         </view>
         <scroll-view scroll-x class="code-scroll">
@@ -78,7 +78,7 @@ const iconColor = computed(() => {
     completed: "#19be6b",
     error: "#fa3534",
   }
-  return map[props.toolCall.status || ""] || "#909399"
+  return map[props.toolCall.status || ""] || "#909193"
 })
 
 const statusText = computed(() => {
@@ -116,8 +116,8 @@ function formatJson(obj: any): string {
 .tool-block {
   border-radius: 12rpx;
   overflow: hidden;
-  background-color: #f8f9fa;
-  border: 1rpx solid #e8e8e8;
+  background-color: var(--mcode-card-soft-bg);
+  border: 1rpx solid var(--mcode-border-color);
 }
 
 /* ===== 头部 ===== */
@@ -128,7 +128,7 @@ function formatJson(obj: any): string {
   padding: 1px 4px;
   transition: background-color 0.15s;
 
-  &:active { background-color: #f0f0f0; }
+  &:active { background-color: var(--mcode-card-muted-bg); }
 }
 
 .tool-hd__left {
@@ -160,7 +160,7 @@ function formatJson(obj: any): string {
   &--running  { background-color: #2979ff; animation: pulse 1s infinite; }
   &--completed { background-color: #19be6b; }
   &--error    { background-color: #fa3534; }
-  &--pending  { background-color: #c0c4cc; }
+  &--pending  { background-color: var(--mcode-border-color); }
 }
 
 @keyframes pulse {
@@ -171,7 +171,7 @@ function formatJson(obj: any): string {
 .tool-name {
   font-size: 24rpx;
   font-family: "Courier New", monospace;
-  color: #303133;
+  color: var(--mcode-text-primary);
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -197,7 +197,7 @@ function formatJson(obj: any): string {
   align-items: center;
   gap: 6rpx;
   font-size: 22rpx;
-  color: #909399;
+  color: var(--mcode-text-tertiary);
   font-weight: 500;
 
   &__text--success { color: #19be6b; }
@@ -214,9 +214,9 @@ function formatJson(obj: any): string {
   padding: 16rpx 20rpx;
   border-radius: 10rpx;
 
-  &--dark    { background-color: #1e2029; }
-  &--success { background-color: #f0fff4; border-left: 4rpx solid #19be6b; }
-  &--error   { background-color: #fff1f0; border-left: 4rpx solid #fa3534; }
+  &--dark    { background-color: var(--mcode-code-bg); }
+  &--success { background-color: color-mix(in srgb, var(--mcode-success) 12%, var(--mcode-card-bg) 88%); border-left: 4rpx solid var(--mcode-success); }
+  &--error   { background-color: color-mix(in srgb, var(--mcode-error) 12%, var(--mcode-card-bg) 88%); border-left: 4rpx solid var(--mcode-error); }
 }
 
 .code-text {
@@ -224,8 +224,8 @@ function formatJson(obj: any): string {
   font-family: "Courier New", monospace;
   line-height: 1;
   white-space: pre;
-  color: #abb2bf;
+  color: var(--mcode-code-text);
 
-  &--dark { color: #303133; white-space: pre-wrap; word-break: break-all; }
+  &--dark { color: var(--mcode-text-primary); white-space: pre-wrap; word-break: break-all; }
 }
 </style>

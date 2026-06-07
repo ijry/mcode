@@ -1,5 +1,5 @@
 <template>
-  <view class="page">
+  <view class="page" :style="[upThemeVars, upThemePageStyle]">
     <view v-if="false" class="hero-banner">
       <image
         class="hero-banner__img"
@@ -8,7 +8,7 @@
       />
     </view>
 
-    <view class="header">
+    <view class="header" :style="upThemeCardStyle">
       <text class="header-slogan">随时随地 AI Coding</text>
       <view class="add-conn-btn" @click="openAddPopup()">
         <u-icon name="plus" size="18" color="#2979ff"></u-icon>
@@ -31,16 +31,21 @@
         v-for="(conn, index) in connections"
         :key="index"
         class="connection-item"
+        :style="upThemeCardStyle"
         @click="activateConnection(conn)"
       >
         <view
           class="connection-icon"
-          :style="{ backgroundColor: (isConnectionConnected(conn) ? '#19be6b' : '#909399') + '18' }"
+          :style="{
+            backgroundColor: isConnectionConnected(conn)
+              ? '#19be6b18'
+              : upThemeVar('--up-light-color', '#c0c4cc') + '22',
+          }"
         >
           <u-icon
             :name="conn.mode === 'direct' ? 'wifi' : 'cloud'"
             size="24"
-            :color="isConnectionConnected(conn) ? '#19be6b' : '#909399'"
+            :color="isConnectionConnected(conn) ? '#19be6b' : upThemeVar('--up-tips-color', '#909193')"
           ></u-icon>
         </view>
 
@@ -57,7 +62,7 @@
         </view>
 
         <view class="row-menu-btn" @click.stop="showConnectionMenu(conn, index)">
-          <u-icon name="more-dot-fill" color="#c0c4cc" size="18"></u-icon>
+          <u-icon name="more-dot-fill" :color="upThemeVar('--up-light-color', '#c0c4cc')" size="18"></u-icon>
         </view>
       </view>
     </view>
@@ -77,7 +82,7 @@
     ></u-action-sheet>
 
     <u-popup :show="showAddPopup" mode="bottom" :round="10" @close="closeAddPopup">
-      <view class="popup-content">
+      <view class="popup-content" :style="upThemeCardStyle">
         <view class="popup-header">
           <text class="popup-title">{{ popupTitle }}</text>
           <u-icon name="close" size="24" @click="closeAddPopup()"></u-icon>
@@ -970,12 +975,12 @@ function persistConnectedMap() {
 <style scoped lang="scss">
 .page {
   min-height: 100vh;
-  background-color: #ffffff;
+  background-color: var(--mcode-page-bg);
 }
 
 .hero-banner {
   padding: 20rpx 24rpx 10rpx;
-  background-color: #ffffff;
+  background-color: var(--mcode-page-bg);
 }
 
 .hero-banner__img {
@@ -986,29 +991,29 @@ function persistConnectedMap() {
 
 .header {
   padding: 10rpx 24rpx 20rpx;
-  background-color: #ffffff;
-  border-bottom: 1rpx solid #e4e7ed;
+  background-color: var(--mcode-page-bg);
+  border-bottom: 1rpx solid var(--mcode-border-color);
 }
 
 .add-conn-btn {
   height: 76rpx;
-  border: 2rpx dashed #8fb8ff;
+  border: 2rpx dashed color-mix(in srgb, var(--mcode-primary) 44%, var(--mcode-card-bg) 56%);
   border-radius: 14rpx;
-  background-color: #f8fbff;
+  background-color: color-mix(in srgb, var(--mcode-primary) 8%, var(--mcode-card-bg) 92%);
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 10rpx;
 
   &:active {
-    background-color: #edf4ff;
-    border-color: #7aa9ff;
+    background-color: color-mix(in srgb, var(--mcode-primary) 14%, var(--mcode-card-bg) 86%);
+    border-color: color-mix(in srgb, var(--mcode-primary) 58%, var(--mcode-card-bg) 42%);
   }
 }
 
 .add-conn-btn__text {
   font-size: 28rpx;
-  color: #2979ff;
+  color: var(--mcode-primary);
   font-weight: 500;
 }
 
@@ -1018,7 +1023,7 @@ function persistConnectedMap() {
   padding-left: 4rpx;
   font-size: 24rpx;
   line-height: 1.6;
-  color: #5c6b77;
+  color: var(--mcode-text-secondary);
   letter-spacing: 1rpx;
 }
 
@@ -1033,15 +1038,15 @@ function persistConnectedMap() {
 .app-intro-box {
   margin: 420rpx 108rpx 44rpx;
   padding: 18rpx 20rpx;
-  border: 2rpx dashed #f3f5f8;
+  border: 2rpx dashed var(--mcode-border-color);
   border-radius: 14rpx;
-  background-color: #fefefe;
+  background-color: var(--mcode-card-bg);
 }
 
 .app-intro-text {
   font-size: 24rpx;
   line-height: 1.7;
-  color: #b0b7c3;
+  color: var(--mcode-text-tertiary);
 }
 
 .connection-item {
@@ -1049,12 +1054,12 @@ function persistConnectedMap() {
   align-items: center;
   gap: 20rpx;
   padding: 20rpx 16rpx;
-  background-color: #f8f9fa;
+  background-color: var(--mcode-card-soft-bg);
   border-radius: 16rpx;
   margin-bottom: 10rpx;
   transition: background-color 0.15s;
 
-  &:active { background-color: #f0f0f0; }
+  &:active { background-color: var(--mcode-card-muted-bg); }
 }
 
 .connection-icon {
@@ -1078,7 +1083,7 @@ function persistConnectedMap() {
 .connection-info__name {
   font-size: 30rpx;
   font-weight: 500;
-  color: #1d1d1f;
+  color: var(--mcode-text-primary);
 }
 
 .connection-info__title {
@@ -1089,7 +1094,7 @@ function persistConnectedMap() {
 
 .connection-info__desc {
   font-size: 24rpx;
-  color: #86909c;
+  color: var(--mcode-text-tertiary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1099,7 +1104,7 @@ function persistConnectedMap() {
   width: 14rpx;
   height: 14rpx;
   border-radius: 50%;
-  background-color: #c0c4cc;
+  background-color: var(--mcode-border-color);
   flex-shrink: 0;
 }
 
@@ -1122,7 +1127,7 @@ function persistConnectedMap() {
 
 .popup-content {
   padding: 40rpx 30rpx;
-  background-color: #ffffff;
+  background-color: var(--mcode-card-bg);
   border-radius: 20rpx 20rpx 0 0;
   max-height: 80vh;
 }
@@ -1137,21 +1142,21 @@ function persistConnectedMap() {
 .popup-title {
   font-size: 36rpx;
   font-weight: 600;
-  color: #303133;
+  color: var(--mcode-text-primary);
 }
 
 .tutorial-entry {
   margin-bottom: 24rpx;
   padding: 22rpx 24rpx;
   border-radius: 16rpx;
-  background-color: #f4f8ff;
+  background-color: color-mix(in srgb, var(--mcode-primary) 8%, var(--mcode-card-bg) 92%);
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16rpx;
 
   &:active {
-    background-color: #ebf2ff;
+    background-color: color-mix(in srgb, var(--mcode-primary) 14%, var(--mcode-card-bg) 86%);
   }
 }
 
@@ -1165,19 +1170,19 @@ function persistConnectedMap() {
 .tutorial-entry__title {
   font-size: 28rpx;
   font-weight: 600;
-  color: #2979ff;
+  color: var(--mcode-primary);
 }
 
 .tutorial-entry__desc {
   font-size: 24rpx;
-  color: #5c6b77;
+  color: var(--mcode-text-secondary);
 }
 
 .tutorial-popup {
   width: 640rpx;
   max-width: calc(100vw - 64rpx);
   padding: 36rpx 30rpx;
-  background-color: #ffffff;
+  background-color: var(--mcode-card-bg);
   border-radius: 24rpx;
 }
 
@@ -1197,7 +1202,7 @@ function persistConnectedMap() {
   width: 40rpx;
   height: 40rpx;
   border-radius: 999rpx;
-  background-color: #2979ff;
+  background-color: var(--mcode-primary);
   color: #ffffff;
   font-size: 24rpx;
   font-weight: 600;
@@ -1217,19 +1222,19 @@ function persistConnectedMap() {
 .tutorial-step__title {
   font-size: 28rpx;
   line-height: 1.6;
-  color: #303133;
+  color: var(--mcode-text-primary);
 }
 
 .tutorial-step__desc {
   font-size: 24rpx;
   line-height: 1.6;
-  color: #606266;
+  color: var(--mcode-text-secondary);
 }
 
 .tutorial-step__link {
   font-size: 24rpx;
   line-height: 1.6;
-  color: #2979ff;
+  color: var(--mcode-primary);
   word-break: break-all;
 }
 
@@ -1248,6 +1253,6 @@ function persistConnectedMap() {
 
 .tip-text {
   font-size: 28rpx;
-  color: #909399;
+  color: var(--mcode-text-tertiary);
 }
 </style>

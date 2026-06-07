@@ -20,7 +20,13 @@ declare global {
 export function createApp() {
   const app = createSSRApp(App)
   app.use(pinia)
-  app.use(uviewPlus)
+  app.use(uviewPlus, () => ({
+    options: {
+      config: {
+        nativeThemeSync: true,
+      },
+    },
+  }))
   return { app, pinia }
 }
 

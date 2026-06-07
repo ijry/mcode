@@ -1,5 +1,5 @@
 <template>
-  <view class="page">
+  <view class="page" :style="[upThemeVars, upThemePageStyle]">
     <view v-if="loading" class="loading-container">
       <up-loading-page :loading="loading" loading-text="加载中..."></up-loading-page>
     </view>
@@ -9,7 +9,7 @@
     </view>
 
     <view v-else class="detail-container">
-      <view class="toolbar">
+      <view class="toolbar" :style="upThemeCardStyle">
         <view class="toolbar-left">
           <view class="runtime-dot" :class="`runtime-dot--${runtimeStatusClass}`"></view>
           <text class="runtime-label">{{ runtimeStatusLabel }}</text>
@@ -25,9 +25,9 @@
               v-if="loading"
               mode="circle"
               size="18"
-              color="#606266"
+              :color="upThemeVar('--up-content-color', '#606266')"
             ></up-loading-icon>
-            <up-icon v-else name="reload" size="20" color="#606266"></up-icon>
+            <up-icon v-else name="reload" size="20" :color="upThemeVar('--up-content-color', '#606266')"></up-icon>
           </view>
           <view
             v-if="runtimeStatus === 'thinking' || runtimeStatus === 'running_tool'"
@@ -44,7 +44,7 @@
       </view>
 
       <view v-if="historyStatusText" class="history-status">
-        <up-loading-icon v-if="loadingOlder" mode="circle" size="16" color="#909399"></up-loading-icon>
+        <up-loading-icon v-if="loadingOlder" mode="circle" size="16" :color="upThemeVar('--up-tips-color', '#909193')"></up-loading-icon>
         <text class="history-status__text">{{ historyStatusText }}</text>
       </view>
 
@@ -79,7 +79,7 @@
           </view>
 
           <view v-if="stats.totalTokens > 0" class="stats-bar">
-            <up-icon name="file-text" size="14" color="#c0c4cc"></up-icon>
+            <up-icon name="file-text" size="14" :color="upThemeVar('--up-light-color', '#c0c4cc')"></up-icon>
             <text class="stats-text">
               {{ stats.inputTokens }} / {{ stats.outputTokens }} / {{ stats.totalTokens }} tokens
             </text>
@@ -89,7 +89,7 @@
         </view>
       </scroll-view>
 
-      <view class="input-wrap">
+    <view class="input-wrap" :style="upThemeCardStyle">
         <view v-if="pendingPermissionCard" class="permission-card">
           <view class="permission-card__header">
             <view class="permission-card__badge"></view>
@@ -127,7 +127,7 @@
           <text v-else class="permission-card__empty">当前授权请求没有可用选项</text>
         </view>
 
-        <view v-if="showComposerTools" class="composer-tools">
+        <view v-if="showComposerTools" class="composer-tools" :style="upThemeCardStyle">
           <view class="composer-tools__section">
             <text class="composer-tools__title">快捷操作</text>
             <view class="composer-tools__actions">
@@ -260,7 +260,7 @@
               <up-icon
                 :name="item.kind === 'image' ? 'photo' : 'file-text'"
                 size="14"
-                color="#7a8191"
+                :color="upThemeVar('--up-tips-color', '#909193')"
               ></up-icon>
               <text class="upload-queue__name u-line-1">{{ item.name }}</text>
             </view>
@@ -287,7 +287,7 @@
               class="attachment-image"
             />
             <view v-else class="attachment-file">
-              <up-icon name="file-text" size="16" color="#5f6470"></up-icon>
+              <up-icon name="file-text" size="16" :color="upThemeVar('--up-content-color', '#606266')"></up-icon>
               <text class="attachment-file__name u-line-1">{{ att.name }}</text>
             </view>
             <view class="attachment-remove" @click="removeAttachment(index)">
@@ -308,7 +308,7 @@
           <up-icon
             :name="queueExpanded ? 'arrow-up' : 'arrow-down'"
             size="12"
-            color="#90a1c0"
+            :color="upThemeVar('--up-light-color', '#c0c4cc')"
           ></up-icon>
         </view>
 
@@ -338,7 +338,7 @@
 
         <view class="input-row">
           <view class="input-action" @click="toggleComposerTools">
-            <up-icon :name="showComposerTools ? 'close' : 'plus'" size="18" color="#606266"></up-icon>
+            <up-icon :name="showComposerTools ? 'close' : 'plus'" size="18" :color="upThemeVar('--up-content-color', '#606266')"></up-icon>
           </view>
 
           <view class="input-box">
@@ -358,7 +358,7 @@
           </view>
 
           <view class="input-action" @click="sendContinueMessage">
-            <up-icon name="arrow-right" size="17" color="#606266"></up-icon>
+            <up-icon name="arrow-right" size="17" :color="upThemeVar('--up-content-color', '#606266')"></up-icon>
           </view>
 
           <view
@@ -393,7 +393,7 @@
     </view>
 
     <up-popup v-model:show="showPlanDrawer" mode="bottom" :round="20">
-      <view class="plan-drawer">
+      <view class="plan-drawer" :style="upThemeCardStyle">
         <view class="plan-drawer__hd">
           <text class="plan-drawer__title">计划任务</text>
           <text class="plan-drawer__count">{{ completedTaskCount }}/{{ planTasks.length }}</text>
@@ -3071,7 +3071,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  background-color: #f2f3f5;
+  background-color: var(--mcode-page-bg);
   overflow: hidden;
 }
 
@@ -3099,8 +3099,8 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   align-items: center;
   justify-content: space-between;
   padding: 16rpx 24rpx;
-  background-color: #ffffff;
-  border-bottom: 1rpx solid #f0f0f0;
+  background-color: var(--mcode-card-bg);
+  border-bottom: 1rpx solid var(--mcode-border-color);
   box-sizing: border-box;
 }
 
@@ -3114,7 +3114,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   width: 14rpx;
   height: 14rpx;
   border-radius: 50%;
-  background-color: #c0c4cc;
+  background-color: var(--mcode-border-color);
 
   &--online {
     background-color: #19be6b;
@@ -3142,7 +3142,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 
 .runtime-label {
   font-size: 24rpx;
-  color: #6b7280;
+  color: var(--mcode-text-secondary);
 }
 
 .toolbar-right {
@@ -3158,10 +3158,10 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   align-items: center;
   justify-content: center;
   border-radius: 16rpx;
-  background-color: #f5f6f8;
+  background-color: var(--mcode-card-soft-bg);
 
   &:active {
-    background-color: #e8e8e8;
+    background-color: var(--mcode-card-muted-bg);
   }
 
   &--disabled {
@@ -3169,7 +3169,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   }
 
   &--danger {
-    background-color: #fff1f0;
+    background-color: color-mix(in srgb, var(--mcode-error) 12%, var(--mcode-card-bg) 88%);
   }
 }
 
@@ -3203,12 +3203,12 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   gap: 10rpx;
   flex-shrink: 0;
   padding: 12rpx 24rpx;
-  background-color: #f2f3f5;
+  background-color: var(--mcode-page-bg);
 }
 
 .history-status__text {
   font-size: 22rpx;
-  color: #909399;
+  color: var(--mcode-text-tertiary);
 }
 
 .stats-bar {
@@ -3221,7 +3221,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 
 .stats-text {
   font-size: 22rpx;
-  color: #c0c4cc;
+  color: var(--mcode-text-tertiary);
 }
 
 .list-bottom {
@@ -3232,9 +3232,9 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   position: relative;
   flex-shrink: 0;
   z-index: 30;
-  background-color: #ffffff;
-  border-top: 1rpx solid #f0f0f0;
-  padding: 14rpx 16rpx;
+  background-color: var(--mcode-card-bg);
+  border-top: 1rpx solid var(--mcode-border-color);
+  padding: 14rpx 0;
   padding-bottom: calc(14rpx + env(safe-area-inset-bottom));
   box-sizing: border-box;
 }
@@ -3246,8 +3246,8 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   margin-bottom: 16rpx;
   padding: 22rpx 24rpx;
   border-radius: 22rpx;
-  background: linear-gradient(180deg, #fffaf0 0%, #ffffff 100%);
-  border: 1rpx solid rgba(250, 173, 20, 0.28);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--mcode-warning) 12%, var(--mcode-card-bg) 88%) 0%, var(--mcode-card-bg) 100%);
+  border: 1rpx solid color-mix(in srgb, var(--mcode-warning) 28%, transparent);
   box-shadow: 0 10rpx 28rpx rgba(250, 173, 20, 0.08);
 }
 
@@ -3268,13 +3268,13 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 .permission-card__title {
   font-size: 26rpx;
   font-weight: 600;
-  color: #7c4a03;
+  color: color-mix(in srgb, var(--mcode-warning) 62%, var(--mcode-text-primary) 38%);
 }
 
 .permission-card__desc {
   font-size: 24rpx;
   line-height: 1.6;
-  color: #5c5f66;
+  color: var(--mcode-text-secondary);
 }
 
 .permission-card__actions {
@@ -3295,8 +3295,8 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   padding: 0 24rpx;
   border: none;
   border-radius: 18rpx;
-  background: #fff7e6;
-  color: #8a5200;
+  background: color-mix(in srgb, var(--mcode-warning) 16%, var(--mcode-card-bg) 84%);
+  color: color-mix(in srgb, var(--mcode-warning) 64%, var(--mcode-text-primary) 36%);
   font-size: 24rpx;
   font-weight: 600;
   line-height: 72rpx;
@@ -3313,25 +3313,25 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 }
 
 .permission-card__action--loading {
-  background: #ffe7ba;
+  background: color-mix(in srgb, var(--mcode-warning) 28%, var(--mcode-card-bg) 72%);
 }
 
 .permission-card__option-desc {
   font-size: 22rpx;
   line-height: 1.5;
-  color: #8c8c8c;
+  color: var(--mcode-text-tertiary);
 }
 
 .permission-card__empty {
   font-size: 22rpx;
-  color: #8c8c8c;
+  color: var(--mcode-text-tertiary);
 }
 
 .slash-panel {
   margin-bottom: 12rpx;
-  border: 1rpx solid #e9edf3;
+  border: 1rpx solid var(--mcode-border-color);
   border-radius: 16rpx;
-  background-color: #fbfcff;
+  background-color: var(--mcode-card-bg);
   overflow: hidden;
 }
 
@@ -3339,8 +3339,8 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   margin-bottom: 12rpx;
   padding: 22rpx 20rpx;
   border-radius: 20rpx;
-  background: #ffffff;
-  border: 1rpx solid #eef1f6;
+  background: var(--mcode-card-bg);
+  border: 1rpx solid var(--mcode-border-color);
   box-shadow: 0 10rpx 28rpx rgba(15, 23, 42, 0.05);
   display: flex;
   flex-direction: column;
@@ -3356,7 +3356,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 .composer-tools__title {
   font-size: 22rpx;
   font-weight: 600;
-  color: #5f6470;
+  color: var(--mcode-text-secondary);
 }
 
 .composer-tools__actions,
@@ -3371,9 +3371,9 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   min-width: 160rpx;
   padding: 16rpx 18rpx;
   border-radius: 16rpx;
-  background: #f6f8fc;
-  border: 1rpx solid #e8edf5;
-  color: #303133;
+  background: var(--mcode-card-soft-bg);
+  border: 1rpx solid var(--mcode-border-color);
+  color: var(--mcode-text-primary);
   font-size: 23rpx;
   line-height: 1.4;
   box-sizing: border-box;
@@ -3381,7 +3381,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 
 .composer-tools__action-text {
   font-size: 23rpx;
-  color: #303133;
+  color: var(--mcode-text-primary);
 }
 
 .composer-config-row {
@@ -3391,8 +3391,8 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   gap: 12rpx;
   padding: 16rpx 18rpx;
   border-radius: 16rpx;
-  background: #f8f9fc;
-  border: 1rpx solid #eef2f7;
+  background: var(--mcode-card-soft-bg);
+  border: 1rpx solid var(--mcode-border-color);
 }
 
 .composer-config-row--disabled {
@@ -3401,12 +3401,12 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 
 .composer-config-row__label {
   font-size: 23rpx;
-  color: #303133;
+  color: var(--mcode-text-primary);
 }
 
 .composer-config-row__value {
   font-size: 22rpx;
-  color: #909399;
+  color: var(--mcode-text-tertiary);
 }
 
 .config-chip-grid {
@@ -3418,18 +3418,18 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 .config-chip {
   padding: 14rpx 20rpx;
   border-radius: 999rpx;
-  background: #f5f6f8;
+  background: var(--mcode-card-soft-bg);
   border: 2rpx solid transparent;
 }
 
 .config-chip--active {
-  background: #eef4ff;
-  border-color: #2979ff;
+  background: color-mix(in srgb, var(--mcode-primary) 10%, var(--mcode-card-bg) 90%);
+  border-color: var(--mcode-primary);
 }
 
 .config-chip__title {
   font-size: 24rpx;
-  color: #303133;
+  color: var(--mcode-text-primary);
 }
 
 .slash-item {
@@ -3438,7 +3438,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   align-items: center;
   justify-content: space-between;
   gap: 12rpx;
-  border-bottom: 1rpx solid #edf1f7;
+  border-bottom: 1rpx solid var(--mcode-border-color);
 
   &:last-child {
     border-bottom: none;
@@ -3454,13 +3454,13 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 
 .slash-item__key {
   font-size: 21rpx;
-  color: #2979ff;
+  color: var(--mcode-primary);
   font-family: "Courier New", monospace;
 }
 
 .slash-item__desc {
   font-size: 21rpx;
-  color: #9298a6;
+  color: var(--mcode-text-tertiary);
   flex: 1;
   min-width: 0;
   text-align: right;
@@ -3470,7 +3470,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   margin-bottom: 10rpx;
   padding: 10rpx 14rpx;
   border-radius: 14rpx;
-  background: #f7f9fc;
+  background: var(--mcode-card-soft-bg);
   display: flex;
   flex-direction: column;
   gap: 8rpx;
@@ -3493,12 +3493,12 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 
 .upload-queue__name {
   font-size: 22rpx;
-  color: #5f6470;
+  color: var(--mcode-text-secondary);
 }
 
 .upload-queue__status {
   font-size: 21rpx;
-  color: #909399;
+  color: var(--mcode-text-tertiary);
 
   &--success {
     color: #19be6b;
@@ -3532,8 +3532,8 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   width: 184rpx;
   height: 112rpx;
   border-radius: 12rpx;
-  background: #f4f6fa;
-  border: 1rpx solid #e7ebf2;
+  background: var(--mcode-card-soft-bg);
+  border: 1rpx solid var(--mcode-border-color);
   display: flex;
   align-items: center;
   gap: 8rpx;
@@ -3543,7 +3543,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 
 .attachment-file__name {
   font-size: 22rpx;
-  color: #4a4f5a;
+  color: var(--mcode-text-secondary);
   flex: 1;
   min-width: 0;
 }
@@ -3565,8 +3565,8 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   margin-bottom: 10rpx;
   padding: 10rpx 14rpx;
   border-radius: 14rpx;
-  background: #f3f7ff;
-  border: 1rpx solid #dde8ff;
+  background: color-mix(in srgb, var(--mcode-primary) 8%, var(--mcode-card-bg) 92%);
+  border: 1rpx solid color-mix(in srgb, var(--mcode-primary) 22%, var(--mcode-card-bg) 78%);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -3580,7 +3580,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 
 .queue-bar__text {
   font-size: 23rpx;
-  color: #2979ff;
+  color: var(--mcode-primary);
 }
 
 .queue-panel {
@@ -3593,8 +3593,8 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 .queue-item {
   padding: 12rpx;
   border-radius: 14rpx;
-  background: #f8f9fc;
-  border: 1rpx solid #edf1f6;
+  background: var(--mcode-card-soft-bg);
+  border: 1rpx solid var(--mcode-border-color);
   display: flex;
   align-items: flex-start;
   gap: 12rpx;
@@ -3608,7 +3608,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 .queue-item__text {
   display: block;
   font-size: 23rpx;
-  color: #373c47;
+  color: var(--mcode-text-primary);
   line-height: 1.4;
 }
 
@@ -3622,14 +3622,14 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 .queue-item__status {
   font-size: 20rpx;
 
-  &--pending { color: #8a919f; }
+  &--pending { color: var(--mcode-text-tertiary); }
   &--sending { color: #2979ff; }
   &--failed { color: #fa3534; }
 }
 
 .queue-item__time {
   font-size: 20rpx;
-  color: #b4bbc7;
+  color: var(--mcode-text-tertiary);
 }
 
 .queue-item__actions {
@@ -3641,14 +3641,14 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 
 .queue-op {
   font-size: 20rpx;
-  color: #8a919f;
+  color: var(--mcode-text-tertiary);
   padding: 6rpx 10rpx;
   border-radius: 999rpx;
-  background-color: #edf0f5;
+  background-color: var(--mcode-card-soft-bg);
 
   &--primary {
-    color: #2979ff;
-    background-color: #e8f0ff;
+    color: var(--mcode-primary);
+    background-color: color-mix(in srgb, var(--mcode-primary) 10%, var(--mcode-card-bg) 90%);
   }
 }
 
@@ -3662,7 +3662,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   width: 64rpx;
   height: 64rpx;
   border-radius: 16rpx;
-  background-color: #f3f5f8;
+  background-color: var(--mcode-card-soft-bg);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3671,7 +3671,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 
 .input-box {
   flex: 1;
-  background-color: #f5f6f8;
+  background-color: var(--mcode-card-soft-bg);
   border-radius: 24rpx;
   padding: 10rpx 20rpx;
   min-height: 64rpx;
@@ -3713,7 +3713,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   width: 72rpx;
   height: 72rpx;
   border-radius: 50%;
-  background-color: #d0d0d0;
+  background-color: var(--mcode-border-color);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3782,7 +3782,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 }
 
 .plan-drawer {
-  background-color: #ffffff;
+  background-color: var(--mcode-card-bg);
   height: min(68vh, calc(100vh - 160rpx));
   max-height: min(68vh, calc(100vh - 160rpx));
   display: flex;
@@ -3797,20 +3797,20 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   align-items: center;
   justify-content: space-between;
   padding: 30rpx 30rpx 18rpx;
-  border-bottom: 1rpx solid #f3f4f6;
+  border-bottom: 1rpx solid var(--mcode-border-color);
   box-sizing: border-box;
   flex-shrink: 0;
 }
 
 .plan-drawer__title {
   font-size: 32rpx;
-  color: #1d1d1f;
+  color: var(--mcode-text-primary);
   font-weight: 600;
 }
 
 .plan-drawer__count {
   font-size: 24rpx;
-  color: #86909c;
+  color: var(--mcode-text-tertiary);
 }
 
 .plan-filters {
@@ -3827,8 +3827,8 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 .plan-filter {
   flex-shrink: 0;
   font-size: 22rpx;
-  color: #6b7280;
-  background-color: #f1f3f5;
+  color: var(--mcode-text-secondary);
+  background-color: var(--mcode-card-soft-bg);
   border-radius: 999rpx;
   padding: 10rpx 14rpx;
   line-height: 1;
@@ -3838,8 +3838,8 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 }
 
 .plan-filter--active {
-  color: #1e56d9;
-  background-color: #e8f0ff;
+  color: var(--mcode-primary);
+  background-color: color-mix(in srgb, var(--mcode-primary) 10%, var(--mcode-card-bg) 90%);
 }
 
 .plan-filter__count {
@@ -3871,7 +3871,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   align-items: flex-start;
   gap: 14rpx;
   padding: 20rpx 16rpx;
-  background: #f7f8fa;
+  background: var(--mcode-card-soft-bg);
   border-radius: 16rpx;
   margin-bottom: 12rpx;
   width: 100%;
@@ -3887,9 +3887,9 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   width: 14rpx;
   height: 14rpx;
   border-radius: 50%;
-  background-color: #c0c4cc;
+  background-color: var(--mcode-border-color);
 
-  &--pending { background-color: #c0c4cc; }
+  &--pending { background-color: var(--mcode-border-color); }
   &--in_progress { background-color: #2979ff; }
   &--completed { background-color: #19be6b; }
   &--failed { background-color: #fa3534; }
@@ -3903,7 +3903,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 .plan-task__subject {
   display: block;
   font-size: 28rpx;
-  color: #1f2329;
+  color: var(--mcode-text-primary);
   line-height: 1.45;
   word-break: break-word;
 }
@@ -3912,7 +3912,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   display: block;
   margin-top: 8rpx;
   font-size: 23rpx;
-  color: #8a919f;
+  color: var(--mcode-text-tertiary);
   line-height: 1.4;
   word-break: break-word;
 }
@@ -3928,20 +3928,20 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   white-space: nowrap;
 
   &--pending {
-    color: #6b7280;
-    background-color: #edf0f3;
+    color: var(--mcode-text-secondary);
+    background-color: var(--mcode-card-soft-bg);
   }
   &--in_progress {
-    color: #1e56d9;
-    background-color: #e8f0ff;
+    color: var(--mcode-primary);
+    background-color: color-mix(in srgb, var(--mcode-primary) 10%, var(--mcode-card-bg) 90%);
   }
   &--completed {
-    color: #0f8a4c;
-    background-color: #e8f8ef;
+    color: var(--mcode-success);
+    background-color: color-mix(in srgb, var(--mcode-success) 12%, var(--mcode-card-bg) 88%);
   }
   &--failed {
-    color: #cf1322;
-    background-color: #fff1f0;
+    color: var(--mcode-error);
+    background-color: color-mix(in srgb, var(--mcode-error) 12%, var(--mcode-card-bg) 88%);
   }
 }
 
@@ -3965,7 +3965,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 .todo-picker__title {
   font-size: 28rpx;
   font-weight: 600;
-  color: #1f2329;
+  color: var(--mcode-text-primary);
 }
 
 .todo-picker__empty {
@@ -3975,19 +3975,19 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 
 .todo-picker__empty-text {
   font-size: 24rpx;
-  color: #a0a7b4;
+  color: var(--mcode-text-tertiary);
 }
 
 .todo-picker__item {
   padding: 20rpx 18rpx;
   border-radius: 18rpx;
-  background: #f7f9fc;
-  border: 1rpx solid #ebeff5;
+  background: var(--mcode-card-soft-bg);
+  border: 1rpx solid var(--mcode-border-color);
 }
 
 .todo-picker__text {
   font-size: 24rpx;
   line-height: 1.5;
-  color: #303133;
+  color: var(--mcode-text-primary);
 }
 </style>

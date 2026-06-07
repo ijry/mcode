@@ -41,7 +41,7 @@
           <!-- 思考 -->
           <view v-else-if="part.type === 'thinking'" class="part-thinking">
             <view class="thinking-hd">
-              <up-icon name="bulb" size="15" color="#f0a020"></up-icon>
+              <up-icon name="bulb" size="15" :color="upThemeVar('--up-warning', '#f9ae3d')"></up-icon>
               <text class="thinking-hd__label">深度思考</text>
             </view>
             <text class="thinking-hd__text">{{ part.thinking }}</text>
@@ -87,7 +87,7 @@
           <!-- 计划 -->
           <view v-else-if="part.type === 'plan'" class="part-plan">
             <view class="plan-hd">
-              <up-icon name="list" size="15" color="#2979ff"></up-icon>
+              <up-icon name="list" size="15" :color="upThemeVar('--up-primary', '#2979ff')"></up-icon>
               <text class="plan-hd__label">执行计划</text>
             </view>
             <view v-for="(step, idx) in part.plan?.steps" :key="idx" class="plan-step">
@@ -122,14 +122,14 @@
       <!-- 操作栏 -->
       <view :class="['bubble-actions', `bubble-actions--${message.role}`]">
         <view class="action-btn" @click="copyMessage">
-          <up-icon name="copy" size="14" color="#c0c4cc"></up-icon>
+          <up-icon name="copy" size="14" :color="upThemeVar('--up-light-color', '#c0c4cc')"></up-icon>
         </view>
         <view
           v-if="message.role === 'assistant' && showRegenerate"
           class="action-btn"
           @click="$emit('regenerate')"
         >
-          <up-icon name="reload" size="14" color="#c0c4cc"></up-icon>
+          <up-icon name="reload" size="14" :color="upThemeVar('--up-light-color', '#c0c4cc')"></up-icon>
         </view>
       </view>
     </view>
@@ -222,7 +222,7 @@ function normalizeAgentType(raw?: string) {
   width: 72rpx;
   height: 72rpx;
   border-radius: 18rpx;
-  background-color: #eef1f5;
+  background-color: var(--mcode-card-soft-bg);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -261,7 +261,7 @@ function normalizeAgentType(raw?: string) {
   }
 
   &--assistant {
-    background-color: #ffffff;
+    background-color: var(--mcode-card-bg);
     border-top-left-radius: 6rpx;
     box-shadow: 0 2rpx 16rpx rgba(0, 0, 0, 0.06);
   }
@@ -275,7 +275,7 @@ function normalizeAgentType(raw?: string) {
 .part-text {
   font-size: 13px;
   line-height: 1.2;
-  color: #303133;
+  color: var(--mcode-text-primary);
 
   :deep(.up-markdown) {
     padding: 1px 2px !important;
@@ -320,16 +320,16 @@ function normalizeAgentType(raw?: string) {
 /* ===== 思考块 ===== */
 .part-thinking {
   padding: 16rpx 20rpx;
-  background-color: #fffbf0;
+  background-color: color-mix(in srgb, var(--mcode-warning) 12%, var(--mcode-card-bg) 88%);
   border-radius: 12rpx;
-  border-left: 4rpx solid #f0a020;
+  border-left: 4rpx solid var(--mcode-warning);
 }
 
 .part-tool-result {
   padding: 16rpx 20rpx;
-  background-color: #f7f8fa;
+  background-color: var(--mcode-card-soft-bg);
   border-radius: 12rpx;
-  border-left: 4rpx solid #19be6b;
+  border-left: 4rpx solid var(--mcode-success);
 }
 
 .tool-result-hd {
@@ -342,16 +342,16 @@ function normalizeAgentType(raw?: string) {
 .tool-result-hd__label {
   font-size: 24rpx;
   font-weight: 600;
-  color: #19be6b;
+  color: var(--mcode-success);
 }
 
 .tool-result-hd__label--error {
-  color: #fa3534;
+  color: var(--mcode-error);
 }
 
 .tool-result__text {
   font-size: 24rpx;
-  color: #606266;
+  color: var(--mcode-text-secondary);
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
@@ -367,21 +367,21 @@ function normalizeAgentType(raw?: string) {
 .thinking-hd__label {
   font-size: 24rpx;
   font-weight: 600;
-  color: #f0a020;
+  color: var(--mcode-warning);
 }
 
 .thinking-hd__text {
   font-size: 24rpx;
-  color: #86909c;
+  color: var(--mcode-text-tertiary);
   line-height: 1.6;
 }
 
 /* ===== 计划块 ===== */
 .part-plan {
   padding: 16rpx 20rpx;
-  background-color: #f0f7ff;
+  background-color: color-mix(in srgb, var(--mcode-primary) 10%, var(--mcode-card-bg) 90%);
   border-radius: 12rpx;
-  border-left: 4rpx solid #2979ff;
+  border-left: 4rpx solid var(--mcode-primary);
 }
 
 .plan-hd {
@@ -394,7 +394,7 @@ function normalizeAgentType(raw?: string) {
 .plan-hd__label {
   font-size: 24rpx;
   font-weight: 600;
-  color: #2979ff;
+  color: var(--mcode-primary);
 }
 
 .plan-step {
@@ -411,7 +411,7 @@ function normalizeAgentType(raw?: string) {
   height: 24rpx;
   margin-top: 4rpx;
   border-radius: 50%;
-  border: 2rpx solid #c0c4cc;
+  border: 2rpx solid var(--mcode-border-color);
   box-sizing: border-box;
   flex-shrink: 0;
 }
@@ -419,11 +419,11 @@ function normalizeAgentType(raw?: string) {
 .plan-step__text {
   flex: 1;
   font-size: 24rpx;
-  color: #606266;
+  color: var(--mcode-text-secondary);
   line-height: 1.5;
 
   &--done {
-    color: #c0c4cc;
+    color: var(--mcode-text-tertiary);
     text-decoration: line-through;
   }
 }
@@ -446,7 +446,7 @@ function normalizeAgentType(raw?: string) {
 .dot {
   width: 10rpx;
   height: 10rpx;
-  background-color: #c0c4cc;
+  background-color: var(--mcode-border-color);
   border-radius: 50%;
   animation: blink 1.2s infinite ease-in-out;
 
@@ -467,13 +467,13 @@ function normalizeAgentType(raw?: string) {
   gap: 8rpx;
   margin-top: 12rpx;
   padding: 12rpx 16rpx;
-  background-color: #fff1f0;
+  background-color: color-mix(in srgb, var(--mcode-error) 12%, var(--mcode-card-bg) 88%);
   border-radius: 8rpx;
 }
 
 .bubble-error__text {
   font-size: 24rpx;
-  color: #fa3534;
+  color: var(--mcode-error);
 }
 
 /* ===== 操作栏 ===== */
@@ -495,9 +495,9 @@ function normalizeAgentType(raw?: string) {
   align-items: center;
   justify-content: center;
   border-radius: 10rpx;
-  background-color: #f5f6f8;
+  background-color: var(--mcode-card-soft-bg);
   transition: background-color 0.15s;
 
-  &:active { background-color: #e8e8e8; }
+  &:active { background-color: var(--mcode-card-muted-bg); }
 }
 </style>

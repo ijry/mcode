@@ -84,7 +84,7 @@ function escapeHtml(input: string) {
 .markdown-content {
   font-size: 28rpx;
   line-height: 1.6;
-  color: #303133;
+  color: var(--mcode-text-primary);
   word-wrap: break-word;
 
   :deep(h1),
@@ -116,7 +116,7 @@ function escapeHtml(input: string) {
 
   :deep(code) {
     padding: 4rpx 8rpx;
-    background-color: #f5f7fa;
+    background-color: var(--mcode-card-soft-bg);
     border-radius: 6rpx;
     font-family: "Courier New", Courier, monospace;
     font-size: 26rpx;
@@ -142,9 +142,9 @@ function escapeHtml(input: string) {
   :deep(blockquote) {
     margin: 20rpx 0;
     padding: 20rpx 24rpx;
-    border-left: 8rpx solid #dcdfe6;
-    background-color: #f5f7fa;
-    color: #606266;
+    border-left: 8rpx solid var(--mcode-border-color);
+    background-color: var(--mcode-card-soft-bg);
+    color: var(--mcode-text-secondary);
   }
 
   :deep(ul),
@@ -176,25 +176,25 @@ function escapeHtml(input: string) {
     width: 100%;
     margin: 20rpx 0;
     border-collapse: collapse;
-    border: 1rpx solid #dcdfe6;
+    border: 1rpx solid var(--mcode-border-color);
   }
 
   :deep(th),
   :deep(td) {
     padding: 16rpx 20rpx;
-    border: 1rpx solid #dcdfe6;
+    border: 1rpx solid var(--mcode-border-color);
     text-align: left;
   }
 
   :deep(th) {
-    background-color: #f5f7fa;
+    background-color: var(--mcode-card-soft-bg);
     font-weight: 600;
   }
 
   :deep(hr) {
     margin: 30rpx 0;
     border: none;
-    border-top: 1rpx solid #dcdfe6;
+    border-top: 1rpx solid var(--mcode-border-color);
   }
 }
 </style>

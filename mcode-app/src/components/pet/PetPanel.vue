@@ -247,7 +247,7 @@ function slotIcon(slot: string): string {
   box-sizing: border-box;
   border-radius: 28rpx;
   overflow: hidden;
-  background: #ffffff;
+  background: var(--mcode-card-bg);
   box-shadow: 0 18rpx 56rpx rgba(15, 23, 42, 0.12);
 
   &__header {
@@ -266,12 +266,12 @@ function slotIcon(slot: string): string {
   &__name {
     font-size: 36rpx;
     font-weight: 600;
-    color: #333;
+    color: var(--mcode-text-primary);
   }
 
   &__level {
     font-size: 28rpx;
-    color: #2979ff;
+    color: var(--mcode-primary);
     font-weight: 500;
   }
 
@@ -302,7 +302,7 @@ function slotIcon(slot: string): string {
 
   &__exp-track {
     height: 12rpx;
-    background: #f0f0f0;
+    background: var(--mcode-card-soft-bg);
     border-radius: 6rpx;
     overflow: hidden;
   }
@@ -316,7 +316,7 @@ function slotIcon(slot: string): string {
 
   &__exp-label {
     font-size: 22rpx;
-    color: #909399;
+    color: var(--mcode-text-tertiary);
     text-align: right;
     display: block;
     margin-top: 4rpx;
@@ -326,7 +326,7 @@ function slotIcon(slot: string): string {
     display: flex;
     gap: 0;
     margin-bottom: 16rpx;
-    border-bottom: 2rpx solid #f0f0f0;
+    border-bottom: 2rpx solid var(--mcode-border-color);
   }
 
   &__tab {
@@ -334,13 +334,13 @@ function slotIcon(slot: string): string {
     text-align: center;
     padding: 16rpx 0;
     font-size: 28rpx;
-    color: #909399;
+    color: var(--mcode-text-tertiary);
     border-bottom: 4rpx solid transparent;
     transition: all 0.2s;
 
     &--active {
-      color: #2979ff;
-      border-bottom-color: #2979ff;
+      color: var(--mcode-primary);
+      border-bottom-color: var(--mcode-primary);
       font-weight: 500;
     }
   }
@@ -360,7 +360,7 @@ function slotIcon(slot: string): string {
   &__handle-bar {
     width: 80rpx;
     height: 8rpx;
-    background: #ddd;
+    background: var(--mcode-border-color);
     border-radius: 4rpx;
   }
 }
@@ -370,17 +370,17 @@ function slotIcon(slot: string): string {
     display: flex;
     justify-content: space-between;
     padding: 16rpx 0;
-    border-bottom: 1rpx solid #f5f5f5;
+    border-bottom: 1rpx solid var(--mcode-border-color);
   }
 
   &__label {
     font-size: 28rpx;
-    color: #666;
+    color: var(--mcode-text-secondary);
   }
 
   &__value {
     font-size: 28rpx;
-    color: #333;
+    color: var(--mcode-text-primary);
     font-weight: 500;
   }
 }
@@ -388,7 +388,7 @@ function slotIcon(slot: string): string {
 .tab-skins {
   &__section-title {
     font-size: 26rpx;
-    color: #909399;
+    color: var(--mcode-text-tertiary);
     margin-bottom: 12rpx;
     font-weight: 500;
   }
@@ -405,13 +405,13 @@ function slotIcon(slot: string): string {
     align-items: center;
     padding: 16rpx;
     border-radius: 12rpx;
-    border: 2rpx solid #f0f0f0;
+    border: 2rpx solid var(--mcode-border-color);
     min-width: 140rpx;
     position: relative;
 
     &--active {
-      border-color: #2979ff;
-      background: rgba(41, 121, 255, 0.06);
+      border-color: var(--mcode-primary);
+      background: color-mix(in srgb, var(--mcode-primary) 10%, var(--mcode-card-bg) 90%);
     }
 
     &--locked {
@@ -433,7 +433,7 @@ function slotIcon(slot: string): string {
 
   &__name {
     font-size: 22rpx;
-    color: #333;
+    color: var(--mcode-text-primary);
   }
 }
 
@@ -443,7 +443,7 @@ function slotIcon(slot: string): string {
     align-items: center;
     gap: 16rpx;
     padding: 16rpx 0;
-    border-bottom: 1rpx solid #f5f5f5;
+    border-bottom: 1rpx solid var(--mcode-border-color);
     opacity: 0.5;
 
     &--unlocked {
@@ -463,44 +463,17 @@ function slotIcon(slot: string): string {
 
   &__name {
     font-size: 28rpx;
-    color: #333;
+    color: var(--mcode-text-primary);
     font-weight: 500;
     display: block;
   }
 
   &__desc {
     font-size: 22rpx;
-    color: #909399;
+    color: var(--mcode-text-tertiary);
     display: block;
     margin-top: 4rpx;
   }
 }
 
-@media (prefers-color-scheme: dark) {
-  .pet-panel {
-    background: #1f1f1f;
-    box-shadow: 0 18rpx 56rpx rgba(0, 0, 0, 0.32);
-
-    &__name { color: #e5e5e5; }
-    &__exp-track { background: #333; }
-    &__tabs { border-bottom-color: #333; }
-    &__handle-bar { background: #555; }
-  }
-
-  .tab-status {
-    &__row { border-bottom-color: #333; }
-    &__label { color: #aaa; }
-    &__value { color: #e5e5e5; }
-  }
-
-  .tab-skins {
-    &__item { border-color: #333; }
-    &__name { color: #e5e5e5; }
-  }
-
-  .tab-achievements {
-    &__item { border-bottom-color: #333; }
-    &__name { color: #e5e5e5; }
-  }
-}
 </style>

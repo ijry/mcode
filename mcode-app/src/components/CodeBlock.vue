@@ -58,7 +58,7 @@ function escapeHtml(input: string) {
   margin: 20rpx 0;
   border-radius: 12rpx;
   overflow: hidden;
-  background-color: #282c34;
+  background-color: var(--mcode-code-bg);
 }
 
 .code-header {
@@ -66,8 +66,8 @@ function escapeHtml(input: string) {
   justify-content: space-between;
   align-items: center;
   padding: 16rpx 24rpx;
-  background-color: #21252b;
-  border-bottom: 1rpx solid #181a1f;
+  background-color: var(--mcode-code-header-bg);
+  border-bottom: 1rpx solid color-mix(in srgb, var(--mcode-code-header-bg) 74%, #000000 26%);
 }
 
 .language {

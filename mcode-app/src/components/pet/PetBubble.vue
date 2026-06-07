@@ -30,7 +30,7 @@ defineProps<{
   left: 50%;
   transform: translateX(-50%);
   margin-bottom: 12rpx;
-  background: #fff;
+  background: var(--mcode-card-bg);
   border-radius: 16rpx;
   padding: 10rpx 20rpx;
   box-shadow: 0 4rpx 16rpx rgba(0, 0, 0, 0.12);
@@ -40,7 +40,7 @@ defineProps<{
 
   &__text {
     font-size: 24rpx;
-    color: #333;
+    color: var(--mcode-text-primary);
     line-height: 1.4;
   }
 
@@ -53,7 +53,7 @@ defineProps<{
     height: 0;
     border-left: 10rpx solid transparent;
     border-right: 10rpx solid transparent;
-    border-top: 10rpx solid #fff;
+    border-top: 10rpx solid var(--mcode-card-bg);
   }
 
   &--flash {
@@ -66,18 +66,4 @@ defineProps<{
   50% { opacity: 0.5; }
 }
 
-@media (prefers-color-scheme: dark) {
-  .pet-bubble {
-    background: #333;
-    box-shadow: 0 4rpx 16rpx rgba(0, 0, 0, 0.3);
-
-    &__text {
-      color: #e5e5e5;
-    }
-
-    &__arrow {
-      border-top-color: #333;
-    }
-  }
-}
 </style>

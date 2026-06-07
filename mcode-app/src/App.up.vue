@@ -1,5 +1,8 @@
 <template>
-  <view class="up-root-wrap">
+  <view
+    class="up-root-wrap"
+    :style="[upThemeVars, upThemePageStyle, { color: upThemeVar('--up-main-color', '#303133') }]"
+  >
     <UpRootView />
     <component :is="petComp" v-if="petReady" />
   </view>

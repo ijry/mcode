@@ -1,5 +1,5 @@
 <template>
-  <view class="page conversations-page">
+  <view class="page conversations-page" :style="[upThemeVars, upThemePageStyle]">
 
     <!-- 无连接 -->
     <view v-if="!hasActiveConnection" class="empty-fullpage">
@@ -21,7 +21,7 @@
     >
 
       <!-- 顶部搜索 -->
-      <view class="search-bar">
+      <view class="search-bar" :style="upThemeCardStyle">
         <view class="search-bar__inner">
           <up-search
             v-model="searchKeyword"
@@ -70,12 +70,13 @@
               </text>
             </view>
 
-            <view
-              v-for="card in group.cards"
-              :key="`${group.key}-${card.tabId}`"
-              class="live-card"
-              @click="openLiveSession(card, group.key)"
-            >
+              <view
+                v-for="card in group.cards"
+                :key="`${group.key}-${card.tabId}`"
+                class="live-card"
+                :style="upThemeCardStyle"
+                @click="openLiveSession(card, group.key)"
+              >
               <view
                 :class="[
                   'agent-logo',
@@ -111,7 +112,7 @@
               </view>
             </view>
 
-            <view class="live-card history-card" @click="openHistoryPanel(group)">
+            <view class="live-card history-card" :style="upThemeCardStyle" @click="openHistoryPanel(group)">
               <view class="conv-card__icon history-card__icon">
                 <up-icon name="clock" size="18" color="#2979ff"></up-icon>
               </view>
@@ -119,7 +120,7 @@
                 <text class="history-entry__text u-line-1">历史会话</text>
                 <text class="history-entry__desc u-line-1">可查看已结束或已完成会话并重新激活</text>
               </view>
-              <up-icon name="arrow-right" size="14" color="#c0c4cc"></up-icon>
+              <up-icon name="arrow-right" size="14" :color="upThemeVar('--up-light-color', '#c0c4cc')"></up-icon>
             </view>
           </view>
         </view>
@@ -127,7 +128,7 @@
 
       <!-- 历史模式：展示原 up-cate-tab -->
       <view v-else class="cate-wrap">
-        <view class="history-mode-bar">
+        <view class="history-mode-bar" :style="upThemeCardStyle">
           <view class="history-mode-back" @click="closeHistoryPanel">
             <up-icon name="arrow-left" size="14" color="#2979ff"></up-icon>
             <text class="history-mode-back__text">返回分组</text>
@@ -199,6 +200,7 @@
               v-for="conv in getConversationList(slotProps?.item)"
               :key="conv.id"
               class="conv-card"
+              :style="upThemeCardStyle"
               @click="openConversation(conv, historyGroupKey)"
             >
               <view class="conv-card__icon">
@@ -218,9 +220,9 @@
               </view>
               <view class="conv-card__actions">
                 <view class="conv-card__menu" @click.stop="showConversationMenu(conv)">
-                  <up-icon name="more-dot-fill" size="16" color="#909399"></up-icon>
+                  <up-icon name="more-dot-fill" size="16" :color="upThemeVar('--up-tips-color', '#909193')"></up-icon>
                 </view>
-                <up-icon name="arrow-right" size="12" color="#c0c4cc"></up-icon>
+                <up-icon name="arrow-right" size="12" :color="upThemeVar('--up-light-color', '#c0c4cc')"></up-icon>
               </view>
             </view>
           </view>
@@ -232,11 +234,11 @@
 
     <!-- 创建会话底部弹层 -->
     <up-popup v-model:show="showCreateDialog" mode="bottom" :round="28">
-      <view class="create-sheet">
+      <view class="create-sheet" :style="upThemeCardStyle">
         <view class="create-sheet__hd">
           <text class="create-sheet__title">新建会话</text>
           <view class="create-sheet__close" @click="showCreateDialog = false">
-            <up-icon name="close" size="20" color="#909399"></up-icon>
+            <up-icon name="close" size="20" :color="upThemeVar('--up-tips-color', '#909193')"></up-icon>
           </view>
         </view>
 
@@ -244,7 +246,7 @@
           <text class="form-label">连接</text>
           <view class="form-readonly" @click="showConnectionPicker = true">
             <text class="form-readonly__text">{{ selectedConnectionName || '请选择连接' }}</text>
-            <up-icon name="arrow-down" size="14" color="#c0c4cc"></up-icon>
+            <up-icon name="arrow-down" size="14" :color="upThemeVar('--up-light-color', '#c0c4cc')"></up-icon>
           </view>
         </view>
 
@@ -252,7 +254,7 @@
           <text class="form-label">项目</text>
           <view class="form-readonly" @click="showProjectPicker = true">
             <text class="form-readonly__text">{{ selectedProjectName || '请选择' }}</text>
-            <up-icon name="arrow-down" size="14" color="#c0c4cc"></up-icon>
+            <up-icon name="arrow-down" size="14" :color="upThemeVar('--up-light-color', '#c0c4cc')"></up-icon>
           </view>
           <text v-if="selectedProjectPath" class="form-helper-text">{{ selectedProjectPath }}</text>
         </view>
@@ -318,7 +320,7 @@
                 {{ createAgentConfig.message }}
               </text>
             </view>
-            <up-icon name="arrow-right" size="14" color="#c0c4cc"></up-icon>
+            <up-icon name="arrow-right" size="14" :color="upThemeVar('--up-light-color', '#c0c4cc')"></up-icon>
           </view>
         </view>
 
@@ -357,11 +359,11 @@
     </up-popup>
 
     <up-popup v-model:show="showCreateConfigDialog" mode="bottom" :round="28">
-      <view class="create-sheet">
+      <view class="create-sheet" :style="upThemeCardStyle">
         <view class="create-sheet__hd">
           <text class="create-sheet__title">智能体配置</text>
           <view class="create-sheet__close" @click="showCreateConfigDialog = false">
-            <up-icon name="close" size="20" color="#909399"></up-icon>
+            <up-icon name="close" size="20" :color="upThemeVar('--up-tips-color', '#909193')"></up-icon>
           </view>
         </view>
 
@@ -2135,7 +2137,7 @@ function formatTime(time?: string): string {
 .page {
   min-height: 100vh;
   padding: 0 !important;
-  background-color: #f2f3f5;
+  background-color: var(--mcode-page-bg);
   display: flex;
   flex-direction: column;
 }
@@ -2198,7 +2200,7 @@ function formatTime(time?: string): string {
   display: block;
   font-size: 28rpx;
   font-weight: 600;
-  color: #1d1d1f;
+  color: var(--mcode-text-primary);
   flex: 0 1 auto;
 }
 
@@ -2218,7 +2220,7 @@ function formatTime(time?: string): string {
 
 .group-empty__text {
   font-size: 24rpx;
-  color: #a0a3ad;
+  color: var(--mcode-text-tertiary);
 }
 
 .live-card {
@@ -2228,8 +2230,8 @@ function formatTime(time?: string): string {
   gap: 14rpx;
   padding: 16rpx;
   border-radius: 22rpx;
-  background-color: #ffffff;
-  border: 1rpx solid #ebeef5;
+  background-color: var(--mcode-card-bg);
+  border: 1rpx solid var(--mcode-border-color);
   box-shadow: none;
   margin-bottom: 22rpx;
 }
@@ -2242,14 +2244,14 @@ function formatTime(time?: string): string {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  background-color: #eef1f5;
-  border: 1rpx solid #e3e8ef;
+  background-color: var(--mcode-card-soft-bg);
+  border: 1rpx solid var(--mcode-border-color);
 }
 
 .agent-logo__text {
   font-size: 18rpx;
   font-weight: 700;
-  color: #5f6470;
+  color: var(--mcode-text-secondary);
 }
 
 .agent-logo__img {
@@ -2259,8 +2261,8 @@ function formatTime(time?: string): string {
 }
 
 .agent-logo--real {
-  background-color: #eef1f5 !important;
-  border: 1rpx solid #e3e8ef;
+  background-color: var(--mcode-card-soft-bg) !important;
+  border: 1rpx solid var(--mcode-border-color);
 }
 
 .agent-logo--claude_code,
@@ -2269,8 +2271,8 @@ function formatTime(time?: string): string {
 .agent-logo--gemini,
 .agent-logo--open_claw,
 .agent-logo--cline {
-  background-color: #eef1f5;
-  border: 1rpx solid #e3e8ef;
+  background-color: var(--mcode-card-soft-bg);
+  border: 1rpx solid var(--mcode-border-color);
 }
 
 .live-card__body {
@@ -2281,7 +2283,7 @@ function formatTime(time?: string): string {
 .live-card__project-title {
   font-size: 27rpx;
   font-weight: 600;
-  color: #1d1d1f;
+  color: var(--mcode-text-primary);
 }
 
 .live-card__meta {
@@ -2295,12 +2297,12 @@ function formatTime(time?: string): string {
   flex: 1;
   min-width: 0;
   font-size: 22rpx;
-  color: #5f6470;
+  color: var(--mcode-text-secondary);
 }
 
 .live-card__time {
   font-size: 21rpx;
-  color: #a7adb8;
+  color: var(--mcode-text-tertiary);
   flex-shrink: 0;
 }
 
@@ -2318,31 +2320,31 @@ function formatTime(time?: string): string {
   z-index: 2;
   padding: 2rpx 10rpx;
   border-radius: 999rpx;
-  background-color: #eceff4;
+  background-color: var(--mcode-card-soft-bg);
 }
 
 .status-chip__text {
   font-size: 18rpx;
-  color: #7b7f88;
+  color: var(--mcode-text-secondary);
 }
 
 .status-chip--running {
-  background-color: #e8fff1;
+  background-color: color-mix(in srgb, var(--mcode-success) 12%, var(--mcode-card-bg) 88%);
 }
 .status-chip--running .status-chip__text {
   color: #19be6b;
 }
 .status-chip--completed {
-  background-color: #eef5ff;
+  background-color: color-mix(in srgb, var(--mcode-primary) 10%, var(--mcode-card-bg) 90%);
 }
 .status-chip--completed .status-chip__text {
   color: #2979ff;
 }
 .status-chip--stopped .status-chip__text {
-  color: #909399;
+  color: var(--mcode-text-tertiary);
 }
 .status-chip--error {
-  background-color: #fff1f0;
+  background-color: color-mix(in srgb, var(--mcode-error) 12%, var(--mcode-card-bg) 88%);
 }
 .status-chip--error .status-chip__text {
   color: #f56c6c;
@@ -2389,12 +2391,12 @@ function formatTime(time?: string): string {
 
 .history-entry__text {
   font-size: 26rpx;
-  color: #1d1d1f;
+  color: var(--mcode-text-primary);
 }
 
 .history-entry__desc {
   font-size: 22rpx;
-  color: #909399;
+  color: var(--mcode-text-tertiary);
   line-height: 1.4;
 }
 
@@ -2415,7 +2417,7 @@ function formatTime(time?: string): string {
 
 .inline-loading__text {
   font-size: 24rpx;
-  color: #909399;
+  color: var(--mcode-text-tertiary);
 }
 
 .history-mode-bar {
@@ -2424,8 +2426,8 @@ function formatTime(time?: string): string {
   justify-content: space-between;
   gap: 12rpx;
   padding: 12rpx 12rpx;
-  border-bottom: 1rpx solid #ebeef5;
-  background-color: #ffffff;
+  border-bottom: 1rpx solid var(--mcode-border-color);
+  background-color: var(--mcode-card-bg);
 }
 
 .history-mode-back {
@@ -2437,7 +2439,7 @@ function formatTime(time?: string): string {
 
 .history-mode-back__text {
   font-size: 24rpx;
-  color: #2979ff;
+  color: var(--mcode-primary);
 }
 
 .history-mode-title {
@@ -2445,14 +2447,14 @@ function formatTime(time?: string): string {
   min-width: 0;
   text-align: right;
   font-size: 24rpx;
-  color: #606266;
+  color: var(--mcode-text-secondary);
 }
 
 /* ===== 搜索栏 ===== */
 .search-bar {
   padding: 16rpx 12rpx;
-  background-color: #ffffff;
-  border-bottom: 1rpx solid #f0f0f0;
+  background-color: var(--mcode-card-bg);
+  border-bottom: 1rpx solid var(--mcode-border-color);
   flex-shrink: 0;
 }
 
@@ -2466,8 +2468,8 @@ function formatTime(time?: string): string {
   width: 56rpx;
   height: 56rpx;
   border-radius: 50%;
-  border: 1rpx solid #dbe7ff;
-  background-color: #eef4ff;
+  border: 1rpx solid color-mix(in srgb, var(--mcode-primary) 22%, var(--mcode-card-bg) 78%);
+  background-color: color-mix(in srgb, var(--mcode-primary) 10%, var(--mcode-card-bg) 90%);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2512,8 +2514,8 @@ function formatTime(time?: string): string {
 .tab-item__badge {
   flex-shrink: 0;
   font-size: 20rpx;
-  color: #2979ff;
-  background-color: #e8f0fe;
+  color: var(--mcode-primary);
+  background-color: color-mix(in srgb, var(--mcode-primary) 10%, var(--mcode-card-bg) 90%);
   border-radius: 20rpx;
   padding: 2rpx 10rpx;
   line-height: 1.2;
@@ -2525,13 +2527,13 @@ function formatTime(time?: string): string {
   align-items: center;
   justify-content: space-between;
   padding: 20rpx 12rpx 16rpx;
-  border-bottom: 1rpx solid #f0f0f0;
+  border-bottom: 1rpx solid var(--mcode-border-color);
 }
 
 .right-top-bar__title {
   font-size: 30rpx;
   font-weight: 600;
-  color: #1d1d1f;
+  color: var(--mcode-text-primary);
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2543,19 +2545,19 @@ function formatTime(time?: string): string {
   align-items: center;
   gap: 4rpx;
   padding: 6rpx 12rpx;
-  background-color: #e8f0fe;
+  background-color: color-mix(in srgb, var(--mcode-primary) 10%, var(--mcode-card-bg) 90%);
   border-radius: 24rpx;
   flex-shrink: 0;
   max-width: 112rpx;
   min-width: 0;
   overflow: hidden;
 
-  &:active { background-color: #d0e2fd; }
+  &:active { background-color: color-mix(in srgb, var(--mcode-primary) 18%, var(--mcode-card-bg) 82%); }
 }
 
 .add-btn__label {
   font-size: 20rpx;
-  color: #2979ff;
+  color: var(--mcode-primary);
   font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
@@ -2564,7 +2566,7 @@ function formatTime(time?: string): string {
 
 .history-mode-tip {
   font-size: 22rpx;
-  color: #a0a3ad;
+  color: var(--mcode-text-tertiary);
 }
 
 /* ===== 会话列表 ===== */
@@ -2580,7 +2582,7 @@ function formatTime(time?: string): string {
   align-items: center;
   gap: 12rpx;
   padding: 14rpx 12rpx;
-  background-color: #ffffff;
+  background-color: var(--mcode-card-bg);
   border-radius: 18rpx;
   box-shadow: 0 1rpx 8rpx rgba(0, 0, 0, 0.04);
   transition: transform 0.15s;
@@ -2591,7 +2593,7 @@ function formatTime(time?: string): string {
 .conv-card__icon {
   width: 52rpx;
   height: 52rpx;
-  background-color: #e8f0fe;
+  background-color: color-mix(in srgb, var(--mcode-primary) 10%, var(--mcode-card-bg) 90%);
   border-radius: 14rpx;
   display: flex;
   align-items: center;
@@ -2610,7 +2612,7 @@ function formatTime(time?: string): string {
 .conv-card__title {
   font-size: 24rpx;
   font-weight: 500;
-  color: #1d1d1f;
+  color: var(--mcode-text-primary);
   line-height: 1.3;
 }
 
@@ -2630,7 +2632,7 @@ function formatTime(time?: string): string {
 
 .conv-card__time {
   font-size: 20rpx;
-  color: #c0c4cc;
+  color: var(--mcode-text-tertiary);
   line-height: 1.2;
 }
 
@@ -2661,7 +2663,7 @@ function formatTime(time?: string): string {
 /* ===== 创建弹层 ===== */
 .create-sheet {
   padding: 36rpx 20rpx 0;
-  background-color: #ffffff;
+  background-color: var(--mcode-card-bg);
   border-radius: 28rpx 28rpx 0 0;
 }
 
@@ -2675,7 +2677,7 @@ function formatTime(time?: string): string {
 .create-sheet__title {
   font-size: 34rpx;
   font-weight: 600;
-  color: #1d1d1f;
+  color: var(--mcode-text-primary);
 }
 
 .create-sheet__close {
@@ -2684,7 +2686,7 @@ function formatTime(time?: string): string {
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: #f5f5f5;
+  background-color: var(--mcode-card-soft-bg);
   border-radius: 50%;
 }
 
@@ -2695,7 +2697,7 @@ function formatTime(time?: string): string {
 .form-label {
   display: block;
   font-size: 26rpx;
-  color: #86909c;
+  color: var(--mcode-text-tertiary);
   margin-bottom: 12rpx;
 }
 
@@ -2704,13 +2706,13 @@ function formatTime(time?: string): string {
   align-items: center;
   justify-content: space-between;
   padding: 20rpx 24rpx;
-  background-color: #f5f6f8;
+  background-color: var(--mcode-card-soft-bg);
   border-radius: 56rpx;
 }
 
 .form-readonly__text {
   font-size: 28rpx;
-  color: #303133;
+  color: var(--mcode-text-primary);
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -2732,7 +2734,7 @@ function formatTime(time?: string): string {
 
 .form-helper-inline {
   font-size: 22rpx;
-  color: #a0a7b4;
+  color: var(--mcode-text-tertiary);
   line-height: 1.4;
 }
 
@@ -2742,7 +2744,7 @@ function formatTime(time?: string): string {
   padding: 0 8rpx;
   font-size: 22rpx;
   line-height: 1.4;
-  color: #a0a7b4;
+  color: var(--mcode-text-tertiary);
   word-break: break-all;
 }
 
@@ -2769,14 +2771,14 @@ function formatTime(time?: string): string {
   flex-shrink: 0;
   padding: 20rpx 12rpx 18rpx;
   border-radius: 24rpx;
-  background: #f7f8fa;
+  background: var(--mcode-card-soft-bg);
   border: 2rpx solid transparent;
   transition: all 0.18s ease;
 }
 
 .agent-card--active {
-  background: #eef4ff;
-  border-color: #2979ff;
+  background: color-mix(in srgb, var(--mcode-primary) 10%, var(--mcode-card-bg) 90%);
+  border-color: var(--mcode-primary);
   box-shadow: 0 8rpx 24rpx rgba(41, 121, 255, 0.12);
 }
 
@@ -2790,7 +2792,7 @@ function formatTime(time?: string): string {
 }
 
 .agent-card__logo--real {
-  background: #ffffff;
+  background: var(--mcode-card-bg);
 }
 
 .agent-card__logo-img {
@@ -2801,14 +2803,14 @@ function formatTime(time?: string): string {
 .agent-card__logo-text {
   font-size: 24rpx;
   font-weight: 700;
-  color: #1d1d1f;
+  color: var(--mcode-text-primary);
 }
 
 .agent-card__label {
   font-size: 22rpx;
   line-height: 1.3;
   text-align: center;
-  color: #303133;
+  color: var(--mcode-text-primary);
 }
 
 .config-loading {
@@ -2822,7 +2824,7 @@ function formatTime(time?: string): string {
 .config-hint__text,
 .config-section__desc {
   font-size: 24rpx;
-  color: #7a8191;
+  color: var(--mcode-text-secondary);
 }
 
 .config-hint {
@@ -2837,7 +2839,7 @@ function formatTime(time?: string): string {
   display: block;
   margin-bottom: 12rpx;
   font-size: 24rpx;
-  color: #5f6470;
+  color: var(--mcode-text-secondary);
 }
 
 .config-section__desc {
@@ -2855,18 +2857,18 @@ function formatTime(time?: string): string {
 .config-chip {
   padding: 14rpx 20rpx;
   border-radius: 999rpx;
-  background: #f5f6f8;
+  background: var(--mcode-card-soft-bg);
   border: 2rpx solid transparent;
 }
 
 .config-chip--active {
-  background: #eef4ff;
-  border-color: #2979ff;
+  background: color-mix(in srgb, var(--mcode-primary) 10%, var(--mcode-card-bg) 90%);
+  border-color: var(--mcode-primary);
 }
 
 .config-chip__title {
   font-size: 24rpx;
-  color: #303133;
+  color: var(--mcode-text-primary);
 }
 
 .safe-bottom {

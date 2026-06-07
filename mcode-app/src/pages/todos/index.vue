@@ -1,7 +1,7 @@
 <template>
-  <view class="page">
+  <view class="page" :style="[upThemeVars, upThemePageStyle]">
     <!-- 添加待办 -->
-    <view class="add-bar">
+    <view class="add-bar" :style="upThemeCardStyle">
       <view class="add-input-wrap">
         <up-textarea
           v-model="newTodoText"
@@ -25,7 +25,7 @@
     </view>
 
     <!-- 待办列表 -->
-    <view class="todo-list" v-if="todos.length > 0">
+    <view class="todo-list" v-if="todos.length > 0" :style="upThemeCardStyle">
       <view
         v-for="item in todos"
         :key="item.id"
@@ -63,7 +63,7 @@
             <u-icon name="chat" size="20" color="#2979ff"></u-icon>
           </view>
           <view class="todo-action-btn" @click.stop="openTodoMenu(item)">
-            <u-icon name="more-dot-fill" size="18" color="#c0c4cc"></u-icon>
+            <u-icon name="more-dot-fill" size="18" :color="upThemeVar('--up-light-color', '#c0c4cc')"></u-icon>
           </view>
         </view>
       </view>
@@ -71,18 +71,18 @@
 
     <!-- 空状态 -->
     <view class="empty-state" v-else>
-      <u-icon name="checkbox-mark" size="100" color="#c8ccd0"></u-icon>
+      <u-icon name="checkbox-mark" size="100" :color="upThemeVar('--up-disabled-color', '#c8c9cc')"></u-icon>
       <text class="empty-text">暂无待办事项</text>
       <text class="empty-hint">在上方输入框添加待办</text>
     </view>
 
     <!-- 发送到新会话底部弹层 -->
     <up-popup v-model:show="showSendDialog" mode="bottom" :round="28">
-      <view class="create-sheet">
+      <view class="create-sheet" :style="upThemeCardStyle">
         <view class="create-sheet__hd">
           <text class="create-sheet__title">发送到新会话</text>
           <view class="create-sheet__close" @click="showSendDialog = false">
-            <up-icon name="close" size="20" color="#909399"></up-icon>
+            <up-icon name="close" size="20" :color="upThemeVar('--up-tips-color', '#909193')"></up-icon>
           </view>
         </view>
 
@@ -98,7 +98,7 @@
           <text class="form-label">连接</text>
           <view class="form-readonly" @click="showConnectionPicker = true">
             <text class="form-readonly__text">{{ selectedConnectionName || '请选择连接' }}</text>
-            <up-icon name="arrow-down" size="14" color="#c0c4cc"></up-icon>
+            <up-icon name="arrow-down" size="14" :color="upThemeVar('--up-light-color', '#c0c4cc')"></up-icon>
           </view>
         </view>
 
@@ -106,7 +106,7 @@
           <text class="form-label">项目</text>
           <view class="form-readonly" @click="showProjectPicker = true">
             <text class="form-readonly__text">{{ selectedProjectName || '请选择' }}</text>
-            <up-icon name="arrow-down" size="14" color="#c0c4cc"></up-icon>
+            <up-icon name="arrow-down" size="14" :color="upThemeVar('--up-light-color', '#c0c4cc')"></up-icon>
           </view>
         </view>
 
@@ -114,7 +114,7 @@
           <text class="form-label">模型</text>
           <view class="form-readonly" @click="showAgentPicker = true">
             <text class="form-readonly__text">{{ selectedAgentName }}</text>
-            <up-icon name="arrow-down" size="14" color="#c0c4cc"></up-icon>
+            <up-icon name="arrow-down" size="14" :color="upThemeVar('--up-light-color', '#c0c4cc')"></up-icon>
           </view>
         </view>
 
@@ -704,7 +704,7 @@ async function confirmSend() {
 <style scoped lang="scss">
 .page {
   min-height: 100vh;
-  background-color: #f8f8f8;
+  background-color: var(--mcode-page-bg);
   padding-bottom: calc(40rpx + env(safe-area-inset-bottom));
 }
 
@@ -713,14 +713,14 @@ async function confirmSend() {
   align-items: center;
   gap: 20rpx;
   padding: 20rpx 24rpx;
-  background-color: #fff;
-  border-bottom: 1rpx solid #f0f0f0;
+  background-color: var(--mcode-card-bg);
+  border-bottom: 1rpx solid var(--mcode-border-color);
 }
 
 .add-input-wrap {
   flex: 1;
   min-width: 0;
-  background-color: #f5f6f8;
+  background-color: var(--mcode-card-soft-bg);
   border-radius: 16rpx;
   padding: 8rpx 20rpx;
 }
@@ -755,7 +755,7 @@ async function confirmSend() {
 
 .todo-list {
   margin: 20rpx 8rpx;
-  background-color: #fff;
+  background-color: var(--mcode-card-bg);
   border-radius: 26rpx;
   overflow: hidden;
 }
@@ -764,7 +764,7 @@ async function confirmSend() {
   display: flex;
   align-items: center;
   padding: 28rpx 24rpx;
-  border-bottom: 1rpx solid #f5f5f5;
+  border-bottom: 1rpx solid var(--mcode-border-color);
   gap: 20rpx;
 
   &:last-child {
@@ -780,7 +780,7 @@ async function confirmSend() {
   width: 44rpx;
   height: 44rpx;
   border-radius: 50%;
-  border: 3rpx solid #dcdfe6;
+  border: 3rpx solid var(--mcode-border-color);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -803,12 +803,12 @@ async function confirmSend() {
 
 .todo-text {
   font-size: 30rpx;
-  color: #303133;
+  color: var(--mcode-text-primary);
   line-height: 1.5;
 }
 
 .completed .todo-text {
-  color: #c0c4cc;
+  color: var(--mcode-text-tertiary);
   text-decoration: line-through;
 }
 
@@ -828,7 +828,7 @@ async function confirmSend() {
   border-radius: 50%;
 
   &:active {
-    background-color: #f5f6f8;
+    background-color: var(--mcode-card-soft-bg);
   }
 }
 
@@ -848,19 +848,19 @@ async function confirmSend() {
 
 .empty-text {
   font-size: 30rpx;
-  color: #909399;
+  color: var(--mcode-text-tertiary);
   margin-top: 20rpx;
 }
 
 .empty-hint {
   font-size: 26rpx;
-  color: #c0c4cc;
+  color: var(--mcode-text-tertiary);
 }
 
 /* ===== 发送弹层 ===== */
 .create-sheet {
   padding: 36rpx 20rpx 0;
-  background-color: #ffffff;
+  background-color: var(--mcode-card-bg);
   border-radius: 28rpx 28rpx 0 0;
 }
 
@@ -874,7 +874,7 @@ async function confirmSend() {
 .create-sheet__title {
   font-size: 34rpx;
   font-weight: 600;
-  color: #1d1d1f;
+  color: var(--mcode-text-primary);
 }
 
 .create-sheet__close {
@@ -883,7 +883,7 @@ async function confirmSend() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: #f5f5f5;
+  background-color: var(--mcode-card-soft-bg);
   border-radius: 50%;
 }
 
@@ -894,7 +894,7 @@ async function confirmSend() {
 .form-label {
   display: block;
   font-size: 26rpx;
-  color: #86909c;
+  color: var(--mcode-text-tertiary);
   margin-bottom: 12rpx;
 }
 
@@ -903,13 +903,13 @@ async function confirmSend() {
   align-items: center;
   justify-content: space-between;
   padding: 20rpx 24rpx;
-  background-color: #f5f6f8;
+  background-color: var(--mcode-card-soft-bg);
   border-radius: 56rpx;
 }
 
 .form-readonly__text {
   font-size: 28rpx;
-  color: #303133;
+  color: var(--mcode-text-primary);
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -919,14 +919,14 @@ async function confirmSend() {
 
 .send-preview {
   padding: 20rpx 24rpx;
-  background-color: #f0f6ff;
+  background-color: color-mix(in srgb, var(--mcode-primary) 8%, var(--mcode-card-bg) 92%);
   border-radius: 16rpx;
-  border: 1rpx solid #d4e4ff;
+  border: 1rpx solid color-mix(in srgb, var(--mcode-primary) 22%, var(--mcode-card-bg) 78%);
 }
 
 .send-preview__text {
   font-size: 28rpx;
-  color: #2979ff;
+  color: var(--mcode-primary);
   line-height: 1.5;
   word-break: break-all;
 }

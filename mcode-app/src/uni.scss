@@ -3,9 +3,26 @@ $u-content-color: #333333;
 $u-tips-color: #666666;
 $u-border-color: #e5e7eb;
 
+:root,
 page {
-  background: #f7f7f8;
-  color: #111111;
+  --mcode-page-bg: var(--up-page-bg-color, var(--up-bg-color, #f3f4f6));
+  --mcode-card-bg: var(--up-card-bg-color, #ffffff);
+  --mcode-card-muted-bg: color-mix(in srgb, var(--mcode-card-bg) 82%, var(--mcode-page-bg) 18%);
+  --mcode-card-soft-bg: color-mix(in srgb, var(--mcode-card-bg) 68%, var(--mcode-page-bg) 32%);
+  --mcode-text-primary: var(--up-main-color, #303133);
+  --mcode-text-secondary: color-mix(in srgb, var(--up-content-color, #606266) 82%, var(--up-main-color, #303133) 18%);
+  --mcode-text-tertiary: color-mix(in srgb, var(--up-tips-color, #909193) 72%, var(--up-main-color, #303133) 28%);
+  --mcode-border-color: var(--up-border-color, #dadbde);
+  --mcode-primary: var(--up-primary, #2979ff);
+  --mcode-success: var(--up-success, #19be6b);
+  --mcode-warning: var(--up-warning, #f9ae3d);
+  --mcode-error: var(--up-error, #fa3534);
+  --mcode-code-bg: color-mix(in srgb, #101318 88%, var(--mcode-page-bg) 12%);
+  --mcode-code-header-bg: color-mix(in srgb, #161b22 82%, var(--mcode-page-bg) 18%);
+  --mcode-code-text: #d7dde8;
+
+  background: var(--mcode-page-bg);
+  color: var(--mcode-text-primary);
 }
 
 .page {
@@ -15,8 +32,8 @@ page {
 }
 
 .section {
-  background: #ffffff;
-  border: 1px solid $u-border-color;
+  background: var(--mcode-card-bg);
+  border: 1px solid var(--mcode-border-color);
   border-radius: 8rpx;
   padding: 24rpx;
   margin-bottom: 24rpx;
@@ -35,7 +52,7 @@ page {
 }
 
 .muted {
-  color: $u-tips-color;
+  color: var(--mcode-text-tertiary);
   font-size: 24rpx;
 }
 
@@ -43,4 +60,5 @@ page {
   font-size: 32rpx;
   font-weight: 600;
   line-height: 1.3;
+  color: var(--mcode-text-primary);
 }
