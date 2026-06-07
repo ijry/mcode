@@ -562,6 +562,11 @@ interface QueuedDraft {
   error?: string
 }
 
+interface SendAttemptResult {
+  started: boolean
+  error?: string
+}
+
 interface ConversationDraftSnapshot {
   composerText: string
   draftQueue: QueuedDraft[]
@@ -599,6 +604,7 @@ const auth = useAuthStore()
 const cacheStore = useConversationCacheStore()
 const runtime = useConversationRuntimeStore()
 const INITIAL_TURN_BATCH = 50
+const PROMPT_START_TIMEOUT_MS = 4000
 
 const loading = ref(false)
 const sending = ref(false)
@@ -2008,13 +2014,12 @@ async function sendDraft(draft: QueuedDraft): Promise<boolean> {
   try {
     const imageAtts = draft.attachments.filter((item) => item.kind === "image")
     const fileAtts = draft.attachments.filter((item) => item.kind === "file")
-    runtime.addOptimisticUserMessage(
+    const optimisticTurnId = runtime.addOptimisticUserMessage(
       conversationId.value,
       buildOptimisticText(draft.text, fileAtts),
       imageAtts
     )
     scheduleViewportSync(true)
-
     const blocks: PromptInputBlock[] = []
     if (draft.text) {
       blocks.push({ type: "text", text: draft.text })
@@ -2050,10 +2055,24 @@ async function sendDraft(draft: QueuedDraft): Promise<boolean> {
       }
     }
     await acpApi.acpPrompt(conn, blocks, folderId.value, conversationId.value)
+    const started = await waitForPromptStart(draft)
+    if (!started.started) {
+      runtime.removeOptimisticUserMessage(conversationId.value, optimisticTurnId)
+      runtime.clearLiveMessage(conversationId.value)
+      draft.status = "failed"
+      draft.error = started.error || "请求已发出，但智能体未开始处理"
+      uni.showToast({ title: `发送失败: ${draft.error}`, icon: "none", duration: 3000 })
+      return false
+    }
     runtime.beginPlaceholderThinking(conversationId.value)
     usePetStore().addExp('user', 5)
     return true
   } catch (error) {
+    const optimisticTurns = session.value?.optimisticTurns || []
+    const latestOptimisticTurn = optimisticTurns[optimisticTurns.length - 1]
+    if (latestOptimisticTurn?.id) {
+      runtime.removeOptimisticUserMessage(conversationId.value, latestOptimisticTurn.id)
+    }
     runtime.clearLiveMessage(conversationId.value)
     const message = toErrorMessage(error)
     draft.status = "failed"
@@ -2062,6 +2081,93 @@ async function sendDraft(draft: QueuedDraft): Promise<boolean> {
     return false
   } finally {
     sending.value = false
+  }
+}
+
+function hasPromptActuallyStarted() {
+  const currentSession = session.value
+  if (!currentSession) return false
+  if (currentSession.liveMessage && currentSession.liveMessage.content.length > 0) return true
+  return (
+    currentSession.status === "thinking" ||
+    currentSession.status === "running_tool" ||
+    currentSession.status === "waiting_permission"
+  )
+}
+
+async function waitForPromptStart(draft: QueuedDraft): Promise<SendAttemptResult> {
+  if (hasPromptActuallyStarted()) {
+    return { started: true }
+  }
+
+  return await new Promise<SendAttemptResult>((resolve) => {
+    let settled = false
+    let stopWatch: (() => void) | null = null
+    let timer: ReturnType<typeof setTimeout> | null = null
+
+    const finish = (result: SendAttemptResult) => {
+      if (settled) return
+      settled = true
+      stopWatch?.()
+      if (timer) clearTimeout(timer)
+      resolve(result)
+    }
+
+    stopWatch = watch(
+      () => {
+        const currentSession = session.value
+        return [
+          currentSession?.status || "",
+          currentSession?.liveMessage ? JSON.stringify(currentSession.liveMessage.content || []) : "",
+        ] as const
+      },
+      () => {
+        if (hasPromptActuallyStarted()) {
+          finish({ started: true })
+          return
+        }
+        if (draft.status === "failed") {
+          finish({ started: false, error: draft.error || "发送失败" })
+        }
+      },
+      { flush: "sync" }
+    )
+
+    timer = setTimeout(() => {
+      if (hasPromptActuallyStarted()) {
+        finish({ started: true })
+        return
+      }
+      void confirmPromptStartFromSnapshot()
+        .then((startedBySnapshot) => {
+          if (startedBySnapshot || hasPromptActuallyStarted()) {
+            finish({ started: true })
+            return
+          }
+          finish({
+            started: false,
+            error: "请求已入队，但会话没有进入运行状态",
+          })
+        })
+        .catch(() => {
+          finish({
+            started: false,
+            error: "请求已入队，但会话没有进入运行状态",
+          })
+        })
+    }, PROMPT_START_TIMEOUT_MS)
+  })
+}
+
+async function confirmPromptStartFromSnapshot() {
+  if (!conversationId.value) return false
+  try {
+    const snapshot = await acpApi.acpGetSessionSnapshotByConversation(conversationId.value)
+    if (!snapshot || typeof snapshot !== "object") return false
+    runtime.hydrateLiveSnapshot(conversationId.value, snapshot)
+    return hasPromptActuallyStarted()
+  } catch {
+    return false
   }
 }
 

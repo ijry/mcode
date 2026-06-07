@@ -102,8 +102,9 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     attachments?: any[]
   ) {
     const session = getOrCreateSession(conversationId)
+    const turnId = `optimistic-${Date.now()}`
     const turn: MessageTurn = {
-      id: `optimistic-${Date.now()}`,
+      id: turnId,
       role: "user",
       content: [
         {
@@ -129,6 +130,15 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     }
 
     session.optimisticTurns.push(turn)
+    return turnId
+  }
+
+  function removeOptimisticUserMessage(conversationId: number, turnId: string) {
+    const session = getOrCreateSession(conversationId)
+    const index = session.optimisticTurns.findIndex((turn) => turn.id === turnId)
+    if (index >= 0) {
+      session.optimisticTurns.splice(index, 1)
+    }
   }
 
   function createLiveMessage(content: ContentPart[] = [], isStreaming = true): LiveMessage {
@@ -384,6 +394,15 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       }
 
       case "status_changed":
+        if (event.data.scope === "conversation") {
+          if (event.data.status === "error") {
+            session.status = "error"
+          } else if (event.data.status === "idle" && !session.liveMessage && !session.pendingPermission) {
+            session.status = session.connectionId ? "connected" : "idle"
+          }
+          syncManagedSendPermission(session.conversationId)
+          break
+        }
         session.status = event.data.status
         if (event.data.status !== "waiting_permission") {
           session.pendingPermission = null
@@ -597,6 +616,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     getOrCreateSession,
     getMessages,
     addOptimisticUserMessage,
+    removeOptimisticUserMessage,
     beginPlaceholderThinking,
     clearLiveMessage,
     setLiveMessage,
