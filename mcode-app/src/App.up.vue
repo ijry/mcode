@@ -24,5 +24,7 @@ onMounted(async () => {
 <style scoped>
 .up-root-wrap {
   min-height: 100vh;
+  background: var(--mcode-page-bg);
+  color: var(--mcode-text-primary);
 }
 </style>
