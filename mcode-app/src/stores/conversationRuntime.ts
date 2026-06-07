@@ -62,6 +62,8 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         apiRetry: null,
         pendingPermission: null,
         lastAppliedSeq: null,
+        externalTurnBackfillInFlight: false,
+        externalTurnBackfillLastAttemptAt: 0,
         stats: {
           inputTokens: 0,
           outputTokens: 0,
@@ -265,6 +267,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     if (usage && typeof usage === "object") {
       session.stats.totalTokens = firstNumber(usage.used) || session.stats.totalTokens
     }
+    maybeBackfillExternalUserTurn(session, "snapshot")
   }
 
   /**
@@ -272,6 +275,9 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
    */
   async function completeTurn(conversationId: number, eventData?: any) {
     const session = getOrCreateSession(conversationId)
+    session.externalTurnBackfillInFlight = false
+    session.externalTurnBackfillLastAttemptAt = 0
+    const hadOptimisticTurns = session.optimisticTurns.length > 0
     const completedTurns = session.optimisticTurns.map(cloneMessageTurn)
     const assistantTurn = session.liveMessage
       && !session.liveMessage.isPlaceholderThinking
@@ -288,6 +294,13 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       if (persisted) {
         session.optimisticTurns = []
         session.liveMessage = null
+        if (!hadOptimisticTurns && assistantTurn) {
+          try {
+            await calibrateAfterReplayGap(conversationId)
+          } catch (error) {
+            console.warn("turn_complete external-user backfill skipped", error)
+          }
+        }
         session.localTurns = await reloadLocalTurns(session)
       } else {
         session.localTurns.push(...session.optimisticTurns)
@@ -342,6 +355,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
           event.data.delta,
           event.data.contentType
         )
+        maybeBackfillExternalUserTurn(session, "stream_batch")
         break
 
       case "tool_call": {
@@ -368,6 +382,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
             },
           ],
         }
+        maybeBackfillExternalUserTurn(session, "tool_call")
         break
       }
 
@@ -400,6 +415,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
           ...session.liveMessage,
           content: nextContent,
         }
+        maybeBackfillExternalUserTurn(session, "tool_call_update")
         break
       }
 
@@ -428,6 +444,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         if (event.data.status !== "waiting_permission") {
           session.pendingPermission = null
         }
+        maybeBackfillExternalUserTurn(session, "status_changed")
         syncManagedSendPermission(session.conversationId)
         break
 
@@ -435,6 +452,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         session.status = "waiting_permission"
         session.inputErrorMessage = null
         session.pendingPermission = normalizePermissionRequest(event.data)
+        maybeBackfillExternalUserTurn(session, "permission_request")
         syncManagedSendPermission(session.conversationId)
         break
 
@@ -706,6 +724,8 @@ interface RuntimeSession {
   apiRetry: ApiRetryEvent | null
   pendingPermission: PermissionRequest | null
   lastAppliedSeq: number | null
+  externalTurnBackfillInFlight: boolean
+  externalTurnBackfillLastAttemptAt: number
   stats: SessionStats
 }
 
@@ -763,6 +783,38 @@ async function reloadLocalTurns(session: RuntimeSession) {
   const limit = Math.max(session.localTurns.length, 10)
   const turns = await getNewestTurns(session.conversationId, limit)
   return turns.slice().reverse().map(mapPersistedTurnToMessage)
+}
+
+function maybeBackfillExternalUserTurn(
+  session: RuntimeSession,
+  reason: "snapshot" | "status_changed" | "stream_batch" | "tool_call" | "tool_call_update" | "permission_request"
+) {
+  if (session.optimisticTurns.length > 0) return
+
+  const hasInFlightRemoteTurn =
+    session.liveMessage != null ||
+    session.pendingPermission != null ||
+    session.status === "thinking" ||
+    session.status === "running_tool" ||
+    session.status === "waiting_permission"
+  if (!hasInFlightRemoteTurn) return
+
+  const now = Date.now()
+  if (session.externalTurnBackfillInFlight) return
+  if (now - session.externalTurnBackfillLastAttemptAt < 1500) return
+
+  session.externalTurnBackfillInFlight = true
+  session.externalTurnBackfillLastAttemptAt = now
+  void (async () => {
+    try {
+      await calibrateAfterReplayGap(session.conversationId)
+      session.localTurns = await reloadLocalTurns(session)
+    } catch (error) {
+      console.warn(`external-user backfill skipped (${reason})`, error)
+    } finally {
+      session.externalTurnBackfillInFlight = false
+    }
+  })()
 }
 
 function mapPersistedTurnToMessage(turn: PersistedTurnWithParts): MessageTurn {
