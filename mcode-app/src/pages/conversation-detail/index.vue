@@ -164,27 +164,14 @@
           <view class="composer-tools__section">
             <text class="composer-tools__title">会话配置</text>
             <view
-              :class="['composer-config-row', !hasModelOptions && 'composer-config-row--disabled']"
+              :class="['composer-config-row', !modelOption && 'composer-config-row--disabled']"
               @click="toggleConfigRow('model')"
             >
               <text class="composer-config-row__label">模型</text>
               <text class="composer-config-row__value">{{ modelSummary }}</text>
             </view>
             <view
-              v-if="expandedConfigKey === 'model' && detailAgentConfig.modes?.available_modes?.length"
-              class="config-chip-grid"
-            >
-              <view
-                v-for="mode in detailAgentConfig.modes?.available_modes || []"
-                :key="mode.id"
-                :class="['config-chip', detailAgentConfig.selectedModeId === mode.id && 'config-chip--active']"
-                @click.stop="selectDetailMode(mode.id)"
-              >
-                <text class="config-chip__title">{{ mode.name }}</text>
-              </view>
-            </view>
-            <view
-              v-else-if="expandedConfigKey === 'model' && modelOption"
+              v-if="expandedConfigKey === 'model' && modelOption"
               class="config-chip-grid"
             >
               <view
@@ -225,14 +212,27 @@
             </view>
 
             <view
-              :class="['composer-config-row', !permissionOption && 'composer-config-row--disabled']"
+              :class="['composer-config-row', !hasPermissionOptions && 'composer-config-row--disabled']"
               @click="toggleConfigRow('permission')"
             >
               <text class="composer-config-row__label">授权类型</text>
               <text class="composer-config-row__value">{{ permissionSummary }}</text>
             </view>
             <view
-              v-if="expandedConfigKey === 'permission' && permissionOption"
+              v-if="expandedConfigKey === 'permission' && detailAgentConfig.modes?.available_modes?.length"
+              class="config-chip-grid"
+            >
+              <view
+                v-for="mode in detailAgentConfig.modes?.available_modes || []"
+                :key="mode.id"
+                :class="['config-chip', detailAgentConfig.selectedModeId === mode.id && 'config-chip--active']"
+                @click.stop="selectDetailMode(mode.id)"
+              >
+                <text class="config-chip__title">{{ mode.name }}</text>
+              </view>
+            </view>
+            <view
+              v-else-if="expandedConfigKey === 'permission' && permissionOption"
               class="config-chip-grid"
             >
               <view
@@ -549,6 +549,7 @@ import {
   type DetailAgentConfigState,
 } from "@/services/conversation/composerTools"
 import type {
+  AgentOptionsSnapshot,
   PromptInputBlock,
   ToolCall,
   ContentPart,
@@ -748,13 +749,13 @@ const detailConfigProjection = computed(() =>
 const modelOption = computed(() => detailConfigProjection.value.modelOption)
 const reasoningOption = computed(() => detailConfigProjection.value.reasoningOption)
 const permissionOption = computed(() => detailConfigProjection.value.permissionOption)
-const hasModelOptions = computed(() =>
-  Boolean(detailAgentConfig.value.modes?.available_modes?.length || modelOption.value)
+const hasModelOptions = computed(() => Boolean(modelOption.value))
+const hasPermissionOptions = computed(() =>
+  Boolean(detailAgentConfig.value.modes?.available_modes?.length || permissionOption.value)
 )
 const modelSummary = computed(() => {
   if (detailAgentConfig.value.status === "loading") return "加载中"
-  return findModeName(detailAgentConfig.value.modes, detailAgentConfig.value.selectedModeId)
-    || findSelectedOptionValueName(modelOption.value, detailAgentConfig.value.selectedValues)
+  return findSelectedOptionValueName(modelOption.value, detailAgentConfig.value.selectedValues)
     || detailAgentConfig.value.message
     || "远端未提供"
 })
@@ -766,7 +767,8 @@ const reasoningSummary = computed(() => {
 })
 const permissionSummary = computed(() => {
   if (detailAgentConfig.value.status === "loading") return "加载中"
-  return findSelectedOptionValueName(permissionOption.value, detailAgentConfig.value.selectedValues)
+  return findModeName(detailAgentConfig.value.modes, detailAgentConfig.value.selectedModeId)
+    || findSelectedOptionValueName(permissionOption.value, detailAgentConfig.value.selectedValues)
     || detailAgentConfig.value.message
     || "远端未提供"
 })
@@ -1863,7 +1865,11 @@ async function loadDetailAgentConfig() {
   }
 
   try {
-    const snapshot = await acpApi.acpDescribeAgentOptions(currentAgentType.value, detailProjectPath.value || null)
+    const gateway = await getDetailGateway()
+    const snapshot = await gateway.call<AgentOptionsSnapshot>("acp_describe_agent_options", {
+      agentType: currentAgentType.value,
+      workingDir: detailProjectPath.value || null,
+    })
     if (token !== detailAgentProbeToken) return
     persistAgentConfigCache(contextKey, snapshot)
     detailAgentConfig.value = createReadyDetailAgentConfigState(snapshot, persistedSelection || {
@@ -1883,7 +1889,7 @@ async function loadDetailAgentConfig() {
 function toggleConfigRow(key: ComposerConfigKey) {
   if (key === "model" && !hasModelOptions.value) return
   if (key === "reasoning" && !reasoningOption.value) return
-  if (key === "permission" && !permissionOption.value) return
+  if (key === "permission" && !hasPermissionOptions.value) return
   expandedConfigKey.value = expandedConfigKey.value === key ? "" : key
 }
 
