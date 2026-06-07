@@ -56,6 +56,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         connectionId: null,
         instanceKey: "",
         status: "idle",
+        errorMessage: null,
         pendingPermission: null,
         lastAppliedSeq: null,
         stats: {
@@ -253,6 +254,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     }
     session.pendingPermission = normalizePendingPermission(snapshot?.pending_permission)
     session.status = deriveRuntimeStatus(snapshot, normalizedLiveMessage ?? session.liveMessage)
+    session.errorMessage = deriveRuntimeError(snapshot, normalizedLiveMessage ?? session.liveMessage)
     session.lastAppliedSeq = firstNumber(snapshot?.event_seq, snapshot?.eventSeq) ?? session.lastAppliedSeq
 
     const usage = snapshot.usage
@@ -328,6 +330,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
 
     switch (event.type) {
       case "stream_batch":
+        session.errorMessage = null
         session.pendingPermission = null
         appendLiveContent(
           session.conversationId,
@@ -338,6 +341,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
 
       case "tool_call": {
         session.status = "running_tool"
+        session.errorMessage = null
         session.pendingPermission = null
         const currentLiveMessage = session.liveMessage?.isPlaceholderThinking
           ? clearPlaceholderLiveMessage(session) ?? createLiveMessage()
@@ -365,8 +369,10 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         session.pendingPermission = null
         if (event.data.status === "error") {
           session.status = "error"
+          session.errorMessage = firstString(event.data.error, event.data.output) || "工具调用失败"
         } else {
           session.status = "running_tool"
+          session.errorMessage = null
         }
         if (!session.liveMessage) break
 
@@ -397,13 +403,18 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         if (event.data.scope === "conversation") {
           if (event.data.status === "error") {
             session.status = "error"
+            session.errorMessage = firstString(event.data.message) || session.errorMessage || "会话运行失败"
           } else if (event.data.status === "idle" && !session.liveMessage && !session.pendingPermission) {
             session.status = session.connectionId ? "connected" : "idle"
+            session.errorMessage = null
           }
           syncManagedSendPermission(session.conversationId)
           break
         }
         session.status = event.data.status
+        session.errorMessage = event.data.status === "error"
+          ? firstString(event.data.message) || session.errorMessage || "连接异常"
+          : null
         if (event.data.status !== "waiting_permission") {
           session.pendingPermission = null
         }
@@ -412,6 +423,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
 
       case "permission_request":
         session.status = "waiting_permission"
+        session.errorMessage = null
         session.pendingPermission = normalizePermissionRequest(event.data)
         syncManagedSendPermission(session.conversationId)
         break
@@ -511,11 +523,12 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         })
       }
 
-      session.connectionId = managed.connectionId
-      session.instanceKey = managed.instanceKey
-      connections.value.set(managed.connectionId, managed.connection)
-      session.status = "connected"
-      syncManagedSendPermission(conversationId)
+    session.connectionId = managed.connectionId
+    session.instanceKey = managed.instanceKey
+    connections.value.set(managed.connectionId, managed.connection)
+    session.status = "connected"
+    session.errorMessage = null
+    syncManagedSendPermission(conversationId)
 
       bindConversationEventHandler(conversationId, handleEvent)
       await attachConversationRealtime({
@@ -528,6 +541,9 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       return managed.connection
     } catch (error) {
       session.status = "error"
+      session.errorMessage = error instanceof Error && error.message.trim()
+        ? error.message.trim()
+        : "连接失败"
       throw error
     }
   }
@@ -544,6 +560,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       connections.value.delete(session.connectionId)
       session.connectionId = null
       session.status = "idle"
+      session.errorMessage = null
       session.pendingPermission = null
     }
   }
@@ -596,8 +613,21 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     session.connectionId = managed.connectionId
     session.instanceKey = managed.instanceKey
     session.status = "connected"
+    session.errorMessage = null
+    session.lastAppliedSeq = 0
     connections.value.set(managed.connectionId, managed.connection)
     syncManagedSendPermission(input.conversationId)
+  }
+
+  function setSessionError(conversationId: number, message: string | null) {
+    const session = getOrCreateSession(conversationId)
+    const normalized = firstString(message)
+    session.errorMessage = normalized || null
+    if (normalized) {
+      session.status = "error"
+    } else if (session.status === "error") {
+      session.status = session.connectionId ? "connected" : "idle"
+    }
   }
 
   function canSend(conversationId: number) {
@@ -629,6 +659,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     clearSession,
     clearPendingPermission,
     bindCreatedConversationRuntime,
+    setSessionError,
     canSend,
     getManagedConversation,
   }
@@ -642,6 +673,7 @@ interface RuntimeSession {
   connectionId: string | null
   instanceKey: string
   status: "idle" | "connecting" | "connected" | "thinking" | "running_tool" | "waiting_permission" | "error"
+  errorMessage: string | null
   pendingPermission: PermissionRequest | null
   lastAppliedSeq: number | null
   stats: SessionStats
@@ -871,6 +903,34 @@ function deriveRuntimeStatus(snapshot: any, liveMessage: LiveMessage | null) {
   if (status === "connected") return "connected"
   if (status === "prompting") return "thinking"
   return "idle"
+}
+
+function deriveRuntimeError(snapshot: any, liveMessage: LiveMessage | null): string | null {
+  const status = firstString(snapshot?.status)
+  if (status === "error") {
+    return (
+      firstString(snapshot?.error, snapshot?.message, snapshot?.detail) ||
+      extractLiveMessageError(liveMessage) ||
+      "会话运行失败"
+    )
+  }
+  return extractLiveMessageError(liveMessage)
+}
+
+function extractLiveMessageError(liveMessage: LiveMessage | null): string | null {
+  if (!liveMessage?.content?.length) return null
+  for (let index = liveMessage.content.length - 1; index >= 0; index -= 1) {
+    const part = liveMessage.content[index]
+    if (part.type === "tool_call") {
+      const message = firstString(part.tool_call?.error)
+      if (message) return message
+    }
+    if (part.type === "text" && index === liveMessage.content.length - 1) {
+      const text = firstString(part.text)
+      if (text && /^error[:：]/i.test(text)) return text
+    }
+  }
+  return null
 }
 
 function normalizePendingPermission(raw: any): PermissionRequest | null {

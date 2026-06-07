@@ -144,6 +144,14 @@
           <text v-else class="permission-card__empty">当前授权请求没有可用选项</text>
         </view>
 
+        <view v-if="runtimeErrorText" class="runtime-error-card">
+          <view class="runtime-error-card__header">
+            <up-icon name="close-circle-fill" size="15" color="#fa3534"></up-icon>
+            <text class="runtime-error-card__title">运行失败</text>
+          </view>
+          <text class="runtime-error-card__text">{{ runtimeErrorText }}</text>
+        </view>
+
         <view v-if="showComposerTools" class="composer-tools" :style="upThemeCardStyle">
           <view class="composer-tools__section">
             <text class="composer-tools__title">快捷操作</text>
@@ -791,6 +799,7 @@ const sharedLiveHint = computed(() => {
   }
   return "当前会话正在多端共享"
 })
+const runtimeErrorText = computed(() => firstString(session.value?.errorMessage) || "")
 
 const canSend = computed(() => Boolean(inputText.value.trim() || attachments.value.length > 0))
 
@@ -2083,9 +2092,11 @@ async function sendDraft(draft: QueuedDraft): Promise<boolean> {
       runtime.clearLiveMessage(conversationId.value)
       draft.status = "failed"
       draft.error = started.error || "请求已发出，但智能体未开始处理"
+      runtime.setSessionError(conversationId.value, draft.error)
       uni.showToast({ title: `发送失败: ${draft.error}`, icon: "none", duration: 3000 })
       return false
     }
+    runtime.setSessionError(conversationId.value, null)
     runtime.beginPlaceholderThinking(conversationId.value)
     usePetStore().addExp('user', 5)
     return true
@@ -2099,6 +2110,7 @@ async function sendDraft(draft: QueuedDraft): Promise<boolean> {
     const message = toErrorMessage(error)
     draft.status = "failed"
     draft.error = message
+    runtime.setSessionError(conversationId.value, message)
     uni.showToast({ title: `发送失败: ${message}`, icon: "none", duration: 3000 })
     return false
   } finally {
@@ -3464,6 +3476,40 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 .permission-card__empty {
   font-size: 22rpx;
   color: var(--mcode-text-tertiary);
+  word-break: break-all;
+}
+
+.runtime-error-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+  width: 100%;
+  min-width: 0;
+  margin-bottom: 12rpx;
+  padding: 18rpx 20rpx;
+  border-radius: 18rpx;
+  background: color-mix(in srgb, var(--mcode-error) 8%, var(--mcode-card-bg) 92%);
+  border: 1rpx solid color-mix(in srgb, var(--mcode-error) 22%, transparent);
+  box-sizing: border-box;
+}
+
+.runtime-error-card__header {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+}
+
+.runtime-error-card__title {
+  font-size: 24rpx;
+  font-weight: 600;
+  color: var(--mcode-error);
+}
+
+.runtime-error-card__text {
+  display: block;
+  font-size: 22rpx;
+  line-height: 1.5;
+  color: color-mix(in srgb, var(--mcode-error) 72%, var(--mcode-text-primary) 28%);
   word-break: break-all;
 }
 
