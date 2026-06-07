@@ -5,6 +5,7 @@
       `pet-sprite--${emotion}`,
       `pet-sprite--${size}`,
       interaction === 'none' ? '' : `pet-sprite--interaction-${interaction}`,
+      motion ? `pet-sprite--motion-${motion}` : '',
     ]"
     :style="spriteStyle"
   >
@@ -27,10 +28,12 @@ const props = withDefaults(defineProps<{
   skinId?: string
   size?: 'small' | 'normal' | 'large'
   interaction?: 'none' | 'tap' | 'excited'
+  motion?: string | null
 }>(), {
   skinId: 'default',
   size: 'normal',
   interaction: 'none',
+  motion: null,
 })
 
 const AVAILABLE_FOX_EMOTIONS: EmotionState[] = [
@@ -207,6 +210,49 @@ const spriteStyle = computed(() => ({
   &--interaction-excited {
     animation: pet-tap-burst 0.42s ease-out;
   }
+
+  // ── Motion animation classes ──
+  // These override the emotion animation while a motion is active
+
+  &--motion-look-around {
+    animation: motion-look-around 3s ease-in-out;
+  }
+
+  &--motion-tail-swish {
+    animation: motion-tail-swish 2s ease-in-out;
+  }
+
+  &--motion-stretch-yawn {
+    animation: motion-stretch-yawn 3.5s ease-in-out;
+  }
+
+  &--motion-sleep-curl {
+    animation: motion-sleep-curl 6s ease-in-out infinite;
+  }
+
+  &--motion-sleep-zzz {
+    animation: motion-sleep-zzz 5s ease-in-out;
+  }
+
+  &--motion-snack-nibble {
+    animation: motion-snack-nibble 3.5s ease-in-out;
+  }
+
+  &--motion-snack-happy-chew {
+    animation: motion-snack-happy-chew 3s ease-in-out;
+  }
+
+  &--motion-play-hop {
+    animation: motion-play-hop 2.5s ease-in-out;
+  }
+
+  &--motion-play-ball {
+    animation: motion-play-ball 4s ease-in-out;
+  }
+
+  &--motion-self-proud {
+    animation: motion-self-proud 3s ease-in-out;
+  }
 }
 
 @keyframes pet-sway {
@@ -266,5 +312,103 @@ const spriteStyle = computed(() => ({
   35% { transform: scale(1.18) rotate(-8deg) translateY(-8rpx); }
   70% { transform: scale(1.08) rotate(8deg); }
   100% { transform: scale(1) rotate(0deg); }
+}
+
+// ── Motion keyframes ──
+
+@keyframes motion-look-around {
+  0% { transform: translateX(0) rotate(0deg); }
+  15% { transform: translateX(6rpx) rotate(5deg); }
+  30% { transform: translateX(12rpx) rotate(10deg); }
+  45% { transform: translateX(6rpx) rotate(5deg); }
+  55% { transform: translateX(0) rotate(0deg); }
+  70% { transform: translateX(-6rpx) rotate(-5deg); }
+  85% { transform: translateX(-12rpx) rotate(-10deg); }
+  100% { transform: translateX(0) rotate(0deg); }
+}
+
+@keyframes motion-tail-swish {
+  0% { transform: rotate(0deg) scaleX(1); }
+  20% { transform: rotate(8deg) scaleX(0.95); }
+  40% { transform: rotate(-8deg) scaleX(0.95); }
+  60% { transform: rotate(6deg) scaleX(0.97); }
+  80% { transform: rotate(-6deg) scaleX(0.97); }
+  100% { transform: rotate(0deg) scaleX(1); }
+}
+
+@keyframes motion-stretch-yawn {
+  0% { transform: scaleY(1) translateY(0); }
+  10% { transform: scaleY(0.95) translateY(2rpx); }
+  30% { transform: scaleY(1.08) translateY(-4rpx); }
+  50% { transform: scaleY(1.12) translateY(-6rpx); }
+  70% { transform: scaleY(1.08) translateY(-4rpx); }
+  85% { transform: scaleY(0.96) translateY(2rpx); }
+  100% { transform: scaleY(1) translateY(0); }
+}
+
+@keyframes motion-sleep-curl {
+  0% { transform: scale(1) translateY(0); }
+  20% { transform: scale(0.85) translateY(4rpx); }
+  40% { transform: scale(0.8) translateY(6rpx); }
+  60% { transform: scale(0.8) translateY(6rpx); }
+  80% { transform: scale(0.85) translateY(4rpx); }
+  100% { transform: scale(1) translateY(0); }
+}
+
+@keyframes motion-sleep-zzz {
+  0% { transform: scale(1) translateY(0); opacity: 1; }
+  20% { transform: scale(0.95) translateY(2rpx); opacity: 0.9; }
+  80% { transform: scale(0.95) translateY(2rpx); opacity: 0.9; }
+  100% { transform: scale(1) translateY(0); opacity: 1; }
+}
+
+@keyframes motion-snack-nibble {
+  0% { transform: translateY(0) scale(1); }
+  15% { transform: translateY(-2rpx) scale(1.02); }
+  30% { transform: translateY(0) scale(0.98); }
+  45% { transform: translateY(-2rpx) scale(1.02); }
+  60% { transform: translateY(0) scale(0.98); }
+  75% { transform: translateY(-2rpx) scale(1.02); }
+  100% { transform: translateY(0) scale(1); }
+}
+
+@keyframes motion-snack-happy-chew {
+  0% { transform: translateY(0) rotate(0deg) scale(1); }
+  20% { transform: translateY(-3rpx) rotate(5deg) scale(1.04); }
+  40% { transform: translateY(-1rpx) rotate(-3deg) scale(1.02); }
+  60% { transform: translateY(-3rpx) rotate(4deg) scale(1.04); }
+  80% { transform: translateY(-1rpx) rotate(-2deg) scale(1.02); }
+  100% { transform: translateY(0) rotate(0deg) scale(1); }
+}
+
+@keyframes motion-play-hop {
+  0% { transform: translateY(0) scale(1, 1); }
+  10% { transform: translateY(0) scale(1.1, 0.9); }
+  25% { transform: translateY(-16rpx) scale(0.95, 1.05); }
+  40% { transform: translateY(0) scale(1.1, 0.9); }
+  55% { transform: translateY(-12rpx) scale(0.95, 1.05); }
+  70% { transform: translateY(0) scale(1.05, 0.95); }
+  85% { transform: translateY(-6rpx) scale(0.98, 1.02); }
+  100% { transform: translateY(0) scale(1, 1); }
+}
+
+@keyframes motion-play-ball {
+  0% { transform: translateX(0) scale(1); }
+  10% { transform: translateX(0) scale(1.1, 0.9); }
+  25% { transform: translateX(20rpx) translateY(-8rpx) scale(0.95, 1.05); }
+  40% { transform: translateX(0) translateY(0) scale(1.05, 0.95); }
+  55% { transform: translateX(-20rpx) translateY(-6rpx) scale(0.95, 1.05); }
+  70% { transform: translateX(0) translateY(0) scale(1.05, 0.95); }
+  85% { transform: translateX(10rpx) translateY(-3rpx) scale(0.98, 1.02); }
+  100% { transform: translateX(0) scale(1); }
+}
+
+@keyframes motion-self-proud {
+  0% { transform: scale(1) translateY(0); }
+  20% { transform: scale(1.08) translateY(-4rpx); }
+  40% { transform: scale(1.12) translateY(-6rpx); }
+  60% { transform: scale(1.08) translateY(-4rpx); }
+  80% { transform: scale(1.02) translateY(-1rpx); }
+  100% { transform: scale(1) translateY(0); }
 }
 </style>

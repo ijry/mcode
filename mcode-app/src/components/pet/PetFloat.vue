@@ -62,8 +62,10 @@
       :emotion="currentEmotion"
       :skin-id="petStore.skinId"
       :interaction="interactionState"
+      :motion="currentMotion?.bodyClass ?? null"
       size="small"
     />
+    <PetScene :decorations="currentDecorations" />
   </view>
 
   <!-- Long-press action sheet -->
@@ -98,12 +100,13 @@ import { stopPetSpeech } from '@/services/petVoice'
 import type { SpeciesId } from '@/types/pet'
 import PetSprite from './PetSprite.vue'
 import PetBubble from './PetBubble.vue'
+import PetScene from './PetScene.vue'
 
 const petStore = usePetStore()
 const speciesList = SPECIES_LIST
 
 // ── Engine ──
-const { currentEmotion, currentBubble } = initPetEngine()
+const { currentEmotion, currentBubble, currentMotion, currentDecorations } = initPetEngine()
 
 // ── Setup flow ──
 const showSetup = ref(false)

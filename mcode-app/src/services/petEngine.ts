@@ -4,12 +4,26 @@ import { useConversationRuntimeStore } from '@/stores/conversationRuntime'
 import { usePetStore } from '@/stores/pet'
 import { pickBubbleMessage } from '@/services/petConfig'
 import { speakPetText } from '@/services/petVoice'
+import {
+  initMotionEngine,
+  selectMotion,
+  playMotion,
+  requestMotion,
+  useMotionEngine,
+  destroyMotionEngine,
+} from '@/services/petMotionEngine'
 
 /** Current computed emotion state — reactive */
 const currentEmotion = ref<EmotionState>('idle')
 
 /** Current bubble message — reactive, null means no bubble */
 const currentBubble = ref<BubbleMessage | null>(null)
+
+/** Current motion state — reactive, from motion engine */
+const currentMotion = useMotionEngine().currentMotion
+
+/** Current scene decorations — reactive, from motion engine */
+const currentDecorations = useMotionEngine().currentDecorations
 
 /** Timers */
 let idleTimer: ReturnType<typeof setTimeout> | null = null
@@ -18,6 +32,7 @@ let happyTimer: ReturnType<typeof setTimeout> | null = null
 let bubbleTimer: ReturnType<typeof setTimeout> | null = null
 let permissionTimer: ReturnType<typeof setTimeout> | null = null
 let transientEmotionTimer: ReturnType<typeof setTimeout> | null = null
+let motionTimer: ReturnType<typeof setTimeout> | null = null
 
 /** Track last status to detect transitions */
 let lastStatus = ''
@@ -31,6 +46,7 @@ function clearAllTimers() {
   if (bubbleTimer) { clearTimeout(bubbleTimer); bubbleTimer = null }
   if (permissionTimer) { clearTimeout(permissionTimer); permissionTimer = null }
   if (transientEmotionTimer) { clearTimeout(transientEmotionTimer); transientEmotionTimer = null }
+  if (motionTimer) { clearTimeout(motionTimer); motionTimer = null }
 }
 
 function showBubble(trigger: string) {
@@ -174,6 +190,45 @@ function startIdleTimers() {
   }, 30 * 60 * 1000)
 }
 
+/**
+ * Schedule the next ambient motion check.
+ * Picks a random interval between 8-15 seconds.
+ */
+function scheduleAmbientMotion() {
+  if (motionTimer) {
+    clearTimeout(motionTimer)
+    motionTimer = null
+  }
+
+  const intervalMs = 8000 + Math.floor(Math.random() * 7000)
+
+  motionTimer = setTimeout(() => {
+    motionTimer = null
+
+    const emotion = currentEmotion.value
+    // Only run ambient motions in idle-compatible states
+    const ambientEmotions: EmotionState[] = ['idle', 'sleeping', 'happy', 'bored']
+    if (!ambientEmotions.includes(emotion)) {
+      scheduleAmbientMotion()
+      return
+    }
+
+    // Don't select if a motion is already playing
+    if (currentMotion.value) {
+      scheduleAmbientMotion()
+      return
+    }
+
+    const hour = new Date().getHours()
+    const selected = selectMotion(emotion, hour)
+    if (selected) {
+      playMotion(selected.id)
+    }
+
+    scheduleAmbientMotion()
+  }, intervalMs)
+}
+
 function showGreeting() {
   const hour = new Date().getHours()
   if (hour < 12) {
@@ -204,7 +259,7 @@ function setTransientEmotion(
   }, duration)
 }
 
-/** Trigger pet interaction (double-tap) */
+/** Trigger pet interaction (single-tap) */
 export function petInteract() {
   const petStore = usePetStore()
   const result = petStore.addExp('user', 2)
@@ -213,6 +268,9 @@ export function petInteract() {
   setTransientEmotion('happy', 2000, (previousEmotion, currentTemporaryEmotion) => (
     previousEmotion === currentTemporaryEmotion ? computeEmotion() : previousEmotion
   ))
+
+  // Trigger snack-nibble motion
+  requestMotion('snack-nibble', 'high')
 
   return result
 }
@@ -227,6 +285,9 @@ export function petInteractExcited() {
     previousEmotion === currentTemporaryEmotion ? computeEmotion() : previousEmotion
   ))
 
+  // Trigger play-hop motion
+  requestMotion('play-hop', 'high')
+
   return result
 }
 
@@ -234,6 +295,9 @@ export function petInteractExcited() {
 export function showLevelUpCelebration() {
   showBubble('level_up')
   setTransientEmotion('excited', 4000, () => computeEmotion())
+
+  // Trigger self-proud celebration motion
+  requestMotion('self-proud', 'high')
 }
 
 /**
@@ -241,10 +305,13 @@ export function showLevelUpCelebration() {
  * Call once from PetFloat.vue on mount.
  */
 export function initPetEngine() {
-  if (engineInitialized) return { currentEmotion, currentBubble }
+  if (engineInitialized) return { currentEmotion, currentBubble, currentMotion, currentDecorations }
   engineInitialized = true
 
   const runtimeStore = useConversationRuntimeStore()
+
+  // Initialize motion engine
+  initMotionEngine()
 
   stopRuntimeWatch = watch(
     () => {
@@ -271,17 +338,21 @@ export function initPetEngine() {
 
   startIdleTimers()
 
-  return { currentEmotion, currentBubble }
+  // Start ambient motion scheduling
+  scheduleAmbientMotion()
+
+  return { currentEmotion, currentBubble, currentMotion, currentDecorations }
 }
 
 /** Get reactive refs without re-initializing */
 export function usePetEngine() {
-  return { currentEmotion, currentBubble }
+  return { currentEmotion, currentBubble, currentMotion, currentDecorations }
 }
 
 /** Cleanup */
 export function destroyPetEngine() {
   clearAllTimers()
+  destroyMotionEngine()
   if (stopRuntimeWatch) {
     stopRuntimeWatch()
     stopRuntimeWatch = null
