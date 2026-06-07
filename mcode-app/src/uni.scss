@@ -27,13 +27,11 @@ page {
 
 .page {
   min-height: 100vh;
-  padding: 24rpx;
+  padding: 0rpx;
   box-sizing: border-box;
 }
 
 .section {
-  background: var(--mcode-card-bg);
-  border: 1px solid var(--mcode-border-color);
   border-radius: 8rpx;
   padding: 24rpx;
   margin-bottom: 24rpx;

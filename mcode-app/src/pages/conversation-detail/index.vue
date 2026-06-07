@@ -9,41 +9,69 @@
     </view>
 
     <view v-else class="detail-container">
-      <view class="toolbar" :style="upThemeCardStyle">
-        <view class="toolbar-left">
-          <view class="runtime-dot" :class="`runtime-dot--${runtimeStatusClass}`"></view>
-          <text class="runtime-label">{{ runtimeStatusLabel }}</text>
-        </view>
-        <view class="toolbar-right">
-          <ExpertMenu @select="handleCommandSelect" />
+      <up-navbar
+        :autoBack="true"
+        :fixed="true"
+        :placeholder="true"
+        :border="false"
+        left-icon="arrow-left"
+        height="45px"
+        :bgColor="upThemeVar('--mcode-card-bg', '#ffffff')"
+        :leftIconColor="upThemeVar('--up-content-color', '#303133')"
+      >
+        <template #center>
+          <view class="detail-navbar">
+            <view class="detail-navbar__title-row">
+              <image
+                v-if="agentLogoPath"
+                class="detail-navbar__logo"
+                :src="agentLogoPath"
+                mode="aspectFit"
+              />
+              <view v-else class="detail-navbar__logo detail-navbar__logo--fallback">
+                <text class="detail-navbar__logo-fallback">{{ conversationTitle.slice(0, 1) }}</text>
+              </view>
+              <text class="detail-navbar__title u-line-1">{{ conversationTitle }}</text>
+            </view>
+            <view class="detail-navbar__meta-row">
+              <view class="runtime-dot" :class="`runtime-dot--${runtimeStatusClass}`"></view>
+              <text class="detail-navbar__meta-text">{{ runtimeStatusLabel }}</text>
+            </view>
+          </view>
+        </template>
+        <template #right>
           <view
-            class="icon-btn"
-            :class="{ 'icon-btn--disabled': loading }"
-            @click="refreshConversation"
+            class="detail-navbar__refresh"
+            :class="{ 'detail-navbar__refresh--disabled': loading }"
+            @click.stop="refreshConversation"
           >
             <up-loading-icon
               v-if="loading"
               mode="circle"
-              size="18"
+              size="16"
               :color="upThemeVar('--up-content-color', '#606266')"
             ></up-loading-icon>
-            <up-icon v-else name="reload" size="20" :color="upThemeVar('--up-content-color', '#606266')"></up-icon>
+            <up-icon
+              v-else
+              name="reload"
+              size="18"
+              :color="upThemeVar('--up-content-color', '#606266')"
+            ></up-icon>
           </view>
-          <view
-            v-if="runtimeStatus === 'thinking' || runtimeStatus === 'running_tool'"
-            class="icon-btn icon-btn--danger"
-            @click="cancelGeneration"
-          >
-            <up-icon name="close-circle" size="20" color="#fa3534"></up-icon>
-          </view>
-        </view>
-      </view>
+        </template>
+      </up-navbar>
 
-      <view v-if="sharedLiveHint" class="shared-live-hint">
+      <view
+        v-if="sharedLiveHint"
+        :class="['shared-live-hint', planTasks.length > 0 && 'shared-live-hint--with-plan']"
+      >
         <text class="shared-live-hint__text">{{ sharedLiveHint }}</text>
       </view>
 
-      <view v-if="historyStatusText" class="history-status">
+      <view
+        v-if="historyStatusText"
+        :class="['history-status', planTasks.length > 0 && 'history-status--with-plan']"
+      >
         <up-loading-icon v-if="loadingOlder" mode="circle" size="16" :color="upThemeVar('--up-tips-color', '#909193')"></up-loading-icon>
         <text class="history-status__text">{{ historyStatusText }}</text>
       </view>
@@ -402,7 +430,6 @@
       <view
         v-if="showScrollToBottomFab"
         class="scroll-bottom-fab"
-        :class="{ 'scroll-bottom-fab--stacked': planTasks.length > 0 }"
         @click="handleScrollToBottomFab"
       >
         <up-icon name="arrow-down" size="18" color="#ffffff"></up-icon>
@@ -559,7 +586,6 @@ import type {
 import type { RelaySessionInfo } from "@/services/gateway"
 import type { RemoteInstanceDescriptor } from "@/services/realtime/types"
 import MessageBubble from "@/components/MessageBubble.vue"
-import ExpertMenu from "@/components/ExpertMenu.vue"
 
 interface UploadedAttachment {
   id: string
@@ -641,6 +667,7 @@ const sequence = ref(0)
 const conversationId = ref<number>(0)
 const folderId = ref<number>(0)
 const routeConnectionKey = ref("")
+const conversationTitle = ref("未命名会话")
 const inputText = ref("")
 const scrollIntoView = ref("")
 const scrollTop = ref(0)
@@ -850,6 +877,17 @@ const runtimeStatusClass = computed(() => {
   if (runtimeStatus.value === "error") return "error"
   if (runtimeStatus.value === "connected") return "online"
   return "idle"
+})
+
+const agentLogoPath = computed(() => {
+  const key = normalizeAgentType(currentAgentType.value)
+  if (key === "claude_code") return "/static/agent-logos/claude-code.svg"
+  if (key === "codex") return "/static/agent-logos/codex.svg"
+  if (key === "gemini") return "/static/agent-logos/gemini.svg"
+  if (key === "cline") return "/static/agent-logos/cline.svg"
+  if (key === "open_code") return "/static/agent-logos/open-code.svg"
+  if (key === "open_claw") return "/static/agent-logos/open-claw.svg"
+  return ""
 })
 
 const slashCommands = ref<SlashCommandItem[]>([])
@@ -1300,8 +1338,9 @@ async function loadConversation() {
 }
 
 function syncConversationTitle(title?: string | null) {
+  conversationTitle.value = firstString(title) || "未命名会话"
   uni.setNavigationBarTitle({
-    title: firstString(title) || "未命名会话",
+    title: conversationTitle.value,
   })
 }
 
@@ -1818,11 +1857,6 @@ function handleScrollToBottomFab() {
   hasUnreadBelow.value = false
   anchorMessageId.value = ""
   scrollToBottom(true)
-}
-
-function handleCommandSelect(command: any) {
-  inputText.value = `${command.prompt}\n\n`
-  uni.showToast({ title: `已插入: ${command.name}`, icon: "success" })
 }
 
 async function loadDetailProjectEntries() {
@@ -3200,7 +3234,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 <style scoped lang="scss">
 .page {
   height: 100vh;
-  min-height: 100vh;
+  padding: 0 !important;
   display: flex;
   flex-direction: column;
   background-color: var(--mcode-page-bg);
@@ -3223,28 +3257,70 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   overflow: hidden;
 }
 
-.toolbar {
-  position: relative;
-  z-index: 5;
+.detail-navbar {
+  width: 100%;
+  max-width: calc(100vw - 220rpx);
   flex-shrink: 0;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16rpx 24rpx;
-  background-color: var(--mcode-card-bg);
-  border-bottom: 1rpx solid var(--mcode-border-color);
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 4rpx;
   box-sizing: border-box;
 }
 
-.toolbar-left {
+.detail-navbar__title-row {
   display: flex;
   align-items: center;
   gap: 10rpx;
+  width: 100%;
+  min-width: 0;
+}
+
+.detail-navbar__logo {
+  width: 34rpx;
+  height: 34rpx;
+  flex-shrink: 0;
+}
+
+.detail-navbar__logo--fallback {
+  border-radius: 999rpx;
+  background: color-mix(in srgb, var(--mcode-primary) 12%, var(--mcode-card-bg) 88%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.detail-navbar__logo-fallback {
+  font-size: 18rpx;
+  font-weight: 700;
+  color: var(--mcode-primary);
+}
+
+.detail-navbar__title {
+  min-width: 0;
+  flex: 1;
+  font-size: 28rpx;
+  line-height: 1.35;
+  font-weight: 600;
+  color: var(--mcode-text-primary);
+}
+
+.detail-navbar__meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+}
+
+.detail-navbar__meta-text {
+  font-size: 20rpx;
+  line-height: 1.2;
+  color: var(--mcode-text-tertiary);
 }
 
 .runtime-dot {
-  width: 14rpx;
-  height: 14rpx;
+  width: 12rpx;
+  height: 12rpx;
   border-radius: 50%;
   background-color: var(--mcode-border-color);
 
@@ -3272,18 +3348,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   100% { transform: scale(1); opacity: 1; }
 }
 
-.runtime-label {
-  font-size: 24rpx;
-  color: var(--mcode-text-secondary);
-}
-
-.toolbar-right {
-  display: flex;
-  align-items: center;
-  gap: 12rpx;
-}
-
-.icon-btn {
+.detail-navbar__refresh {
   width: 64rpx;
   height: 64rpx;
   display: flex;
@@ -3291,18 +3356,15 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   justify-content: center;
   border-radius: 16rpx;
   background-color: var(--mcode-card-soft-bg);
+  box-sizing: border-box;
 
   &:active {
     background-color: var(--mcode-card-muted-bg);
   }
+}
 
-  &--disabled {
-    opacity: 0.6;
-  }
-
-  &--danger {
-    background-color: color-mix(in srgb, var(--mcode-error) 12%, var(--mcode-card-bg) 88%);
-  }
+.detail-navbar__refresh--disabled {
+  opacity: 0.6;
 }
 
 .message-list {
@@ -3337,6 +3399,10 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   background-color: var(--mcode-page-bg);
 }
 
+.shared-live-hint--with-plan {
+  padding-right: 220rpx;
+}
+
 .shared-live-hint__text {
   font-size: 22rpx;
   color: var(--mcode-text-tertiary);
@@ -3351,6 +3417,10 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   flex-shrink: 0;
   padding: 12rpx 24rpx;
   background-color: var(--mcode-page-bg);
+}
+
+.history-status--with-plan {
+  padding-right: 220rpx;
 }
 
 .history-status__text {
@@ -3951,7 +4021,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 .scroll-bottom-fab {
   position: fixed;
   right: 24rpx;
-  bottom: calc(136rpx + env(safe-area-inset-bottom));
+  bottom: 120px;
   z-index: 30;
   width: 72rpx;
   height: 72rpx;
@@ -3962,10 +4032,6 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   align-items: center;
   justify-content: center;
   overflow: visible;
-
-  &--stacked {
-    bottom: calc(224rpx + env(safe-area-inset-bottom));
-  }
 }
 
 .scroll-bottom-fab__dot {
@@ -3982,23 +4048,26 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 
 .plan-fab {
   position: fixed;
-  right: 24rpx;
-  bottom: calc(136rpx + env(safe-area-inset-bottom));
-  z-index: 30;
-  height: 72rpx;
-  padding: 0 22rpx;
-  border-radius: 36rpx;
+  right: 12rpx;
+  top: 60px;
+  z-index: 32;
+  min-height: 64rpx;
+  max-width: calc(100vw - 48rpx);
+  padding: 14rpx 20rpx;
+  border-radius: 32rpx;
   background: linear-gradient(135deg, #5f7bff, #6b8bff);
   box-shadow: 0 10rpx 24rpx rgba(41, 121, 255, 0.28);
   display: flex;
   align-items: center;
   gap: 10rpx;
+  box-sizing: border-box;
 }
 
 .plan-fab__text {
-  font-size: 24rpx;
+  font-size: 22rpx;
   color: #ffffff;
   font-weight: 500;
+  white-space: nowrap;
 }
 
 .plan-drawer {

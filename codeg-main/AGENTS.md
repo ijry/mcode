@@ -108,6 +108,8 @@ INSTA_UPDATE=auto cargo test --features test-utils     # 自动写新 .snap
 
 ## 关键约束
 
+- **默认工作范围**：除非用户特别指定，所有任务默认都指向 `mcode-app`
+- **小任务执行方式**：对于范围清晰、影响面小的小任务，默认直接开发，不必先走 superpower 流程；只有在用户特别指定或任务明显需要时再使用
 - **仅支持静态导出**：`next.config.ts` 设置 `output: "export"`，不支持动态路由（`[param]`），必须使用查询参数替代
 - **路径别名**：`@/*` 映射到 `./src/*`，导入写法为 `@/lib/utils`、`@/components/ui/button`
 - **服务器部署**：通过环境变量配置（`CODEG_PORT`、`CODEG_HOST`、`CODEG_TOKEN`、`CODEG_DATA_DIR`、`CODEG_STATIC_DIR`）

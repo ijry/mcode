@@ -24,6 +24,7 @@
     {
       "path": "pages/conversation-detail/index",
       "style": {
+        "navigationStyle": "custom",
         "navigationBarTitleText": "会话详情",
         "enablePullDownRefresh": false
       }

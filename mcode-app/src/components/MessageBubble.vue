@@ -238,7 +238,7 @@ function normalizeAgentType(raw?: string) {
 /* ===== 主体 ===== */
 .bubble-body {
   flex: 1;
-  max-width: 76%;
+  max-width: 620rpx;
   display: flex;
   flex-direction: column;
   gap: 8rpx;
