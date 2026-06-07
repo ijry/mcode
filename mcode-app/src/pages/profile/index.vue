@@ -51,6 +51,19 @@
     </view>
 
     <view class="section" :style="upThemeCardStyle">
+      <view class="section-title">宠物陪伴</view>
+      <view class="menu-list" :style="upThemeCardStyle">
+        <view class="menu-item" @click="openPetManager">
+          <view class="menu-left">
+            <u-icon name="heart" size="22" color="#ff6b6b"></u-icon>
+            <text class="menu-text">宠物管理</text>
+          </view>
+          <u-icon name="arrow-right" :color="upThemeVar('--up-light-color', '#c0c4cc')" size="18"></u-icon>
+        </view>
+      </view>
+    </view>
+
+    <view class="section" :style="upThemeCardStyle">
       <view class="section-title">关于</view>
       <view class="menu-list" :style="upThemeCardStyle">
         <view class="menu-item">
@@ -90,6 +103,11 @@
       @select="handleThemeSelect"
       @close="showThemeSheet = false"
     ></u-action-sheet>
+
+    <PetPanel
+      v-model:show="showPetPanel"
+      :emotion="currentEmotion"
+    />
   </view>
 </template>
 
@@ -97,16 +115,22 @@
 import { computed, ref, onMounted } from "vue"
 import { useAuthStore } from "@/stores/auth"
 import { applyThemePreference, getCurrentThemePreference, type ThemePreference } from "@/services/theme"
+import { usePetStore } from "@/stores/pet"
+import { usePetEngine } from "@/services/petEngine"
+import PetPanel from "@/components/pet/PetPanel.vue"
 
 const auth = useAuthStore()
+const petStore = usePetStore()
 const version = ref("1.0.0")
 const themePreference = ref<ThemePreference>("system")
 const showThemeSheet = ref(false)
+const showPetPanel = ref(false)
 const themeActions = [
   { name: "跟随系统", value: "system" },
   { name: "浅色", value: "light" },
   { name: "深色", value: "dark" },
 ]
+const { currentEmotion } = usePetEngine()
 
 interface UserInfo {
   name?: string
@@ -153,6 +177,18 @@ function goToConnections() {
   uni.switchTab({
     url: "/pages/connections/index",
   })
+}
+
+function openPetManager() {
+  if (!petStore.initialized) {
+    uni.showToast({
+      title: "请先选择宠物伙伴",
+      icon: "none",
+    })
+    return
+  }
+
+  showPetPanel.value = true
 }
 
 function clearCache() {

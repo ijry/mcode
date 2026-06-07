@@ -99,6 +99,8 @@ export interface PetState {
   position: PetPosition
   /** Whether speech bubbles are muted */
   bubbleMuted: boolean
+  /** Whether pet voice/TTS is enabled */
+  voiceEnabled: boolean
   /** Whether the pet is hidden */
   hidden: boolean
   /** Cumulative stats for unlock tracking */

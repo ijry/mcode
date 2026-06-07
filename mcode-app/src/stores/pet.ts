@@ -42,6 +42,7 @@ function defaultState(): PetState {
     createdAt: '',
     position: { x: -1, y: -1 },
     bubbleMuted: false,
+    voiceEnabled: true,
     hidden: false,
     stats: {
       totalConversations: 0,
@@ -281,6 +282,11 @@ export const usePetStore = defineStore('pet', {
     /** Toggle bubble mute */
     toggleMute() {
       this.bubbleMuted = !this.bubbleMuted
+    },
+
+    /** Set pet voice explicitly */
+    setVoiceEnabled(enabled: boolean) {
+      this.voiceEnabled = enabled
     },
 
     /** Toggle pet visibility */

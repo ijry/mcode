@@ -79,6 +79,14 @@
             <text class="tab-status__label">累计 Turns</text>
             <text class="tab-status__value">{{ petStore.stats.totalTurns }}</text>
           </view>
+          <view class="tab-status__row" @click="petStore.setVoiceEnabled(!petStore.voiceEnabled)">
+            <text class="tab-status__label">宠物语音</text>
+            <text class="tab-status__value">{{ petStore.voiceEnabled ? '已开启' : '已关闭' }}</text>
+          </view>
+          <view class="tab-status__row" @click="petStore.toggleMute()">
+            <text class="tab-status__label">气泡提醒</text>
+            <text class="tab-status__value">{{ petStore.bubbleMuted ? '已关闭' : '已开启' }}</text>
+          </view>
         </view>
 
         <!-- Skins tab -->

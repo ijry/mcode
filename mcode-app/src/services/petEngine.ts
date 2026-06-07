@@ -1,8 +1,9 @@
-import { watch, ref } from 'vue'
+import { watch, ref, type WatchStopHandle } from 'vue'
 import type { EmotionState, BubbleMessage } from '@/types/pet'
 import { useConversationRuntimeStore } from '@/stores/conversationRuntime'
 import { usePetStore } from '@/stores/pet'
-import { pickBubbleText, getBubbleTemplate } from '@/services/petConfig'
+import { pickBubbleMessage } from '@/services/petConfig'
+import { speakPetText } from '@/services/petVoice'
 
 /** Current computed emotion state — reactive */
 const currentEmotion = ref<EmotionState>('idle')
@@ -16,40 +17,45 @@ let sleepTimer: ReturnType<typeof setTimeout> | null = null
 let happyTimer: ReturnType<typeof setTimeout> | null = null
 let bubbleTimer: ReturnType<typeof setTimeout> | null = null
 let permissionTimer: ReturnType<typeof setTimeout> | null = null
+let transientEmotionTimer: ReturnType<typeof setTimeout> | null = null
 
 /** Track last status to detect transitions */
 let lastStatus = ''
 let engineInitialized = false
+let stopRuntimeWatch: WatchStopHandle | null = null
 
 function clearAllTimers() {
   if (idleTimer) { clearTimeout(idleTimer); idleTimer = null }
   if (sleepTimer) { clearTimeout(sleepTimer); sleepTimer = null }
   if (happyTimer) { clearTimeout(happyTimer); happyTimer = null }
+  if (bubbleTimer) { clearTimeout(bubbleTimer); bubbleTimer = null }
   if (permissionTimer) { clearTimeout(permissionTimer); permissionTimer = null }
+  if (transientEmotionTimer) { clearTimeout(transientEmotionTimer); transientEmotionTimer = null }
 }
 
 function showBubble(trigger: string) {
   const petStore = usePetStore()
-  if (petStore.bubbleMuted) return
-
-  const text = pickBubbleText(trigger)
-  if (!text) return
-
-  const template = getBubbleTemplate(trigger)
-  if (!template) return
+  const message = pickBubbleMessage(trigger)
+  if (!message) return null
 
   if (bubbleTimer) clearTimeout(bubbleTimer)
 
-  currentBubble.value = {
-    text,
-    duration: template.duration,
-    flash: template.flash,
+  currentBubble.value = petStore.bubbleMuted ? null : message
+
+  if (petStore.voiceEnabled) {
+    speakPetText(message.text)
   }
 
-  bubbleTimer = setTimeout(() => {
-    currentBubble.value = null
+  if (currentBubble.value) {
+    bubbleTimer = setTimeout(() => {
+      currentBubble.value = null
+      bubbleTimer = null
+    }, message.duration)
+  } else {
     bubbleTimer = null
-  }, template.duration)
+  }
+
+  return message
 }
 
 function computeEmotion(): EmotionState {
@@ -179,28 +185,55 @@ function showGreeting() {
   }
 }
 
+function setTransientEmotion(
+  nextEmotion: EmotionState,
+  duration: number,
+  resolveEmotion: (previousEmotion: EmotionState, currentTemporaryEmotion: EmotionState) => EmotionState,
+) {
+  const previousEmotion = currentEmotion.value
+  currentEmotion.value = nextEmotion
+
+  if (transientEmotionTimer) {
+    clearTimeout(transientEmotionTimer)
+    transientEmotionTimer = null
+  }
+
+  transientEmotionTimer = setTimeout(() => {
+    currentEmotion.value = resolveEmotion(previousEmotion, nextEmotion)
+    transientEmotionTimer = null
+  }, duration)
+}
+
 /** Trigger pet interaction (double-tap) */
 export function petInteract() {
   const petStore = usePetStore()
   const result = petStore.addExp('user', 2)
   showBubble('pet_interact')
 
-  const previousEmotion = currentEmotion.value
-  currentEmotion.value = 'happy'
-  setTimeout(() => {
-    currentEmotion.value = previousEmotion === 'happy' ? computeEmotion() : previousEmotion
-  }, 2000)
+  setTransientEmotion('happy', 2000, (previousEmotion, currentTemporaryEmotion) => (
+    previousEmotion === currentTemporaryEmotion ? computeEmotion() : previousEmotion
+  ))
+
+  return result
+}
+
+/** Trigger stronger pet interaction (double-tap) */
+export function petInteractExcited() {
+  const petStore = usePetStore()
+  const result = petStore.addExp('user', 3)
+  showBubble('pet_interact_excited')
+
+  setTransientEmotion('excited', 2400, (previousEmotion, currentTemporaryEmotion) => (
+    previousEmotion === currentTemporaryEmotion ? computeEmotion() : previousEmotion
+  ))
 
   return result
 }
 
 /** Trigger level-up celebration */
 export function showLevelUpCelebration() {
-  currentEmotion.value = 'excited'
   showBubble('level_up')
-  setTimeout(() => {
-    currentEmotion.value = computeEmotion()
-  }, 4000)
+  setTransientEmotion('excited', 4000, () => computeEmotion())
 }
 
 /**
@@ -213,7 +246,7 @@ export function initPetEngine() {
 
   const runtimeStore = useConversationRuntimeStore()
 
-  watch(
+  stopRuntimeWatch = watch(
     () => {
       let highest = ''
       for (const [, session] of runtimeStore.sessions) {
@@ -249,6 +282,9 @@ export function usePetEngine() {
 /** Cleanup */
 export function destroyPetEngine() {
   clearAllTimers()
-  if (bubbleTimer) { clearTimeout(bubbleTimer); bubbleTimer = null }
+  if (stopRuntimeWatch) {
+    stopRuntimeWatch()
+    stopRuntimeWatch = null
+  }
   engineInitialized = false
 }

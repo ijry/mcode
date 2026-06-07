@@ -61,15 +61,10 @@
       :species="petStore.species"
       :emotion="currentEmotion"
       :skin-id="petStore.skinId"
+      :interaction="interactionState"
       size="small"
     />
   </view>
-
-  <!-- Pet panel (bottom popup) -->
-  <PetPanel
-    v-model:show="showPanel"
-    :emotion="currentEmotion"
-  />
 
   <!-- Long-press action sheet -->
   <up-action-sheet
@@ -84,12 +79,25 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { usePetStore } from '@/stores/pet'
-import { initPetEngine, petInteract, showLevelUpCelebration } from '@/services/petEngine'
+import { playPetTapSound } from '@/services/petAudio'
 import { SPECIES_LIST } from '@/services/petConfig'
+import {
+  initPetEngine,
+  petInteract,
+  petInteractExcited,
+  showLevelUpCelebration,
+} from '@/services/petEngine'
+import {
+  PET_DOUBLE_TAP_WINDOW_MS,
+  PET_SINGLE_TAP_DELAY_MS,
+  PET_TAP_INTERACTION_DURATION_MS,
+  PET_EXCITED_INTERACTION_DURATION_MS,
+  shouldTreatAsDoubleTap,
+} from '@/services/petTapGesture'
+import { stopPetSpeech } from '@/services/petVoice'
 import type { SpeciesId } from '@/types/pet'
 import PetSprite from './PetSprite.vue'
 import PetBubble from './PetBubble.vue'
-import PetPanel from './PetPanel.vue'
 
 const petStore = usePetStore()
 const speciesList = SPECIES_LIST
@@ -139,6 +147,44 @@ let touchStartY = 0
 let touchStartTime = 0
 let hasMoved = false
 let longPressTimer: ReturnType<typeof setTimeout> | null = null
+let singleTapTimer: ReturnType<typeof setTimeout> | null = null
+let interactionTimer: ReturnType<typeof setTimeout> | null = null
+let lastTapTime = 0
+let longPressTriggered = false
+const interactionState = ref<'none' | 'tap' | 'excited'>('none')
+
+function applyInteractionState(nextState: 'tap' | 'excited', duration: number) {
+  if (interactionTimer) {
+    clearTimeout(interactionTimer)
+    interactionTimer = null
+  }
+
+  interactionState.value = nextState
+  interactionTimer = setTimeout(() => {
+    if (interactionState.value === nextState) {
+      interactionState.value = 'none'
+    }
+    interactionTimer = null
+  }, duration)
+}
+
+function triggerSingleInteraction() {
+  applyInteractionState('tap', PET_TAP_INTERACTION_DURATION_MS)
+  playPetTapSound()
+  const result = petInteract()
+  if (result.leveledUp) {
+    showLevelUpCelebration()
+  }
+}
+
+function triggerDoubleInteraction() {
+  applyInteractionState('excited', PET_EXCITED_INTERACTION_DURATION_MS)
+  playPetTapSound()
+  const result = petInteractExcited()
+  if (result.leveledUp) {
+    showLevelUpCelebration()
+  }
+}
 
 function onTouchStart(e: TouchEvent) {
   const touch = e.touches[0]
@@ -146,9 +192,11 @@ function onTouchStart(e: TouchEvent) {
   touchStartY = touch.clientY - posY.value
   touchStartTime = Date.now()
   hasMoved = false
+  longPressTriggered = false
 
   longPressTimer = setTimeout(() => {
     if (!hasMoved) {
+      longPressTriggered = true
       showActionSheet.value = true
     }
     longPressTimer = null
@@ -185,31 +233,27 @@ function onTouchEnd() {
     return
   }
 
-  const elapsed = Date.now() - touchStartTime
-
-  if (elapsed < 300 && lastTapTime > 0 && (touchStartTime - lastTapTime) < 300) {
-    const result = petInteract()
-    if (result.leveledUp) {
-      showLevelUpCelebration()
-    }
-    lastTapTime = 0
+  if (longPressTriggered) {
     return
   }
 
-  lastTapTime = touchStartTime
+  const now = Date.now()
 
-  setTimeout(() => {
-    if (lastTapTime === touchStartTime) {
-      showPanel.value = true
-      lastTapTime = 0
-    }
-  }, 300)
+  if (singleTapTimer && shouldTreatAsDoubleTap(lastTapTime, now, PET_DOUBLE_TAP_WINDOW_MS)) {
+    clearTimeout(singleTapTimer)
+    singleTapTimer = null
+    lastTapTime = 0
+    triggerDoubleInteraction()
+    return
+  }
+
+  lastTapTime = now
+  singleTapTimer = setTimeout(() => {
+    triggerSingleInteraction()
+    singleTapTimer = null
+    lastTapTime = 0
+  }, PET_SINGLE_TAP_DELAY_MS)
 }
-
-let lastTapTime = 0
-
-// ── Panel ──
-const showPanel = ref(false)
 
 // ── Action sheet (long press) ──
 const showActionSheet = ref(false)
@@ -217,6 +261,7 @@ const showActionSheet = ref(false)
 const actionSheetActions = computed(() => [
   { name: petStore.hidden ? '显示宠物' : '隐藏宠物' },
   { name: petStore.bubbleMuted ? '开启气泡' : '静音气泡' },
+  { name: petStore.voiceEnabled ? '关闭语音' : '开启语音' },
 ])
 
 function onActionSelect(action: { name: string }) {
@@ -225,11 +270,19 @@ function onActionSelect(action: { name: string }) {
     petStore.toggleHidden()
   } else if (action.name === '静音气泡' || action.name === '开启气泡') {
     petStore.toggleMute()
+  } else if (action.name === '关闭语音' || action.name === '开启语音') {
+    const nextEnabled = !petStore.voiceEnabled
+    petStore.setVoiceEnabled(nextEnabled)
+    if (!nextEnabled) {
+      stopPetSpeech()
+    }
   }
 }
 
 onUnmounted(() => {
   if (longPressTimer) clearTimeout(longPressTimer)
+  if (singleTapTimer) clearTimeout(singleTapTimer)
+  if (interactionTimer) clearTimeout(interactionTimer)
 })
 </script>
 

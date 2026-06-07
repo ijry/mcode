@@ -1,0 +1,5 @@
+{
+  "minSdkVersion": "21",
+  "targetSdkVersion": "30",
+  "dependencies": []
+}

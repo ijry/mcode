@@ -1,0 +1,43 @@
+{
+  "name": "uts-plugin-tts",
+  "version": "1.0.0",
+  "description": "跨平台TTS语音合成插件，支持iOS、Android和鸿蒙系统",
+  "main": "index.uts",
+  "keywords": [
+    "tts",
+    "text-to-speech",
+    "语音合成",
+    "uni-app",
+    "uts"
+  ],
+  "author": "",
+  "license": "MIT",
+  "uni_modules": {
+    "dependencies": [],
+    "encrypt": [],
+    "platforms": {
+      "cloud": {
+        "tcb": "y",
+        "aliyun": "y"
+      },
+      "client": {
+        "App": {
+          "app-android": "y",
+          "app-ios": "y",
+          "app-harmony": "y"
+        },
+        "H5-mobile": {
+          "Safari": "y",
+          "Android Browser": "y",
+          "微信浏览器(Android)": "y",
+          "QQ浏览器(Android)": "y"
+        },
+        "H5-pc": {
+          "Chrome": "y",
+          "Firefox": "y",
+          "Safari": "y"
+        }
+      }
+    }
+  }
+}

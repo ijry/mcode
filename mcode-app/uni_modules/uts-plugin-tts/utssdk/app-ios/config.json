@@ -1,0 +1,7 @@
+{
+  "deploymentTarget": "9.0",
+  "frameworks": [
+    "AVFoundation"
+  ],
+  "dependencies": []
+}

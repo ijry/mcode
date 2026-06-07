@@ -1,7 +1,11 @@
 <template>
   <view
     class="pet-sprite"
-    :class="[`pet-sprite--${emotion}`, `pet-sprite--${size}`]"
+    :class="[
+      `pet-sprite--${emotion}`,
+      `pet-sprite--${size}`,
+      interaction === 'none' ? '' : `pet-sprite--interaction-${interaction}`,
+    ]"
     :style="spriteStyle"
   >
     <image
@@ -22,9 +26,11 @@ const props = withDefaults(defineProps<{
   emotion: EmotionState
   skinId?: string
   size?: 'small' | 'normal' | 'large'
+  interaction?: 'none' | 'tap' | 'excited'
 }>(), {
   skinId: 'default',
   size: 'normal',
+  interaction: 'none',
 })
 
 const AVAILABLE_FOX_EMOTIONS: EmotionState[] = [
@@ -193,6 +199,14 @@ const spriteStyle = computed(() => ({
     animation: pet-sway 4s ease-in-out infinite;
     opacity: 0.8;
   }
+
+  &--interaction-tap {
+    animation: pet-tap-pop 0.28s ease-out;
+  }
+
+  &--interaction-excited {
+    animation: pet-tap-burst 0.42s ease-out;
+  }
 }
 
 @keyframes pet-sway {
@@ -239,5 +253,18 @@ const spriteStyle = computed(() => ({
   50% { transform: rotate(0deg) scale(1); }
   75% { transform: rotate(-10deg) scale(1.1); }
   100% { transform: rotate(0deg) scale(1); }
+}
+
+@keyframes pet-tap-pop {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.12) translateY(-4rpx); }
+  100% { transform: scale(1); }
+}
+
+@keyframes pet-tap-burst {
+  0% { transform: scale(1) rotate(0deg); }
+  35% { transform: scale(1.18) rotate(-8deg) translateY(-8rpx); }
+  70% { transform: scale(1.08) rotate(8deg); }
+  100% { transform: scale(1) rotate(0deg); }
 }
 </style>

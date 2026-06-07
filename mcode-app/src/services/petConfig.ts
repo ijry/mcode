@@ -4,6 +4,7 @@ import type {
   AccessoryDef,
   AchievementDef,
   SpeciesId,
+  BubbleMessage,
 } from '@/types/pet'
 
 // ── Species ──
@@ -226,20 +227,31 @@ export interface BubbleTemplate {
 }
 
 export const BUBBLE_TEMPLATES: BubbleTemplate[] = [
-  { trigger: 'turn_complete', texts: ['搞定啦!', '完成!', '好了~'], duration: 3000 },
-  { trigger: 'waiting_permission_long', texts: ['主人快来看看~', '需要你的审批!'], duration: 5000, flash: true },
-  { trigger: 'error', texts: ['呜...出错了', '似乎有问题...'], duration: 4000 },
-  { trigger: 'morning', texts: ['早上好!', '新的一天~'], duration: 3000 },
-  { trigger: 'afternoon', texts: ['下午好!', '继续加油!'], duration: 3000 },
-  { trigger: 'evening', texts: ['晚上好!', '辛苦啦~'], duration: 3000 },
-  { trigger: 'level_up', texts: ['我变强了!', '升级啦!'], duration: 4000 },
-  { trigger: 'pet_interact', texts: ['嘻嘻~', '好舒服~', '再摸摸!'], duration: 2000 },
+  { trigger: 'turn_complete', texts: ['这次做得不错。', '收工一个，继续下一个。', '这一轮很稳。'], duration: 3000 },
+  { trigger: 'waiting_permission_long', texts: ['主人快来看看。', '这里还等你点一下。', '我先帮你盯着，快来确认。'], duration: 5000, flash: true },
+  { trigger: 'error', texts: ['呜，刚刚出错了。', '这里有点不对劲。', '先别急，我们再看一眼。'], duration: 4000 },
+  { trigger: 'morning', texts: ['早上好，今天也把事情做漂亮点。', '该开工啦，我已经醒了。', '新的一天，先把第一件事做完。'], duration: 3200 },
+  { trigger: 'afternoon', texts: ['下午别走神，先把这一段收尾。', '再坚持一下，快做完了。', '我陪你把下午这段顶过去。'], duration: 3200 },
+  { trigger: 'evening', texts: ['已经很晚了，该休息啦。', '今天先到这里吧，别太拼。', '收一收尾，早点睡。'], duration: 3400 },
+  { trigger: 'level_up', texts: ['我变强了。', '升级啦，这波不亏。', '又长本事了。'], duration: 4000 },
+  { trigger: 'pet_interact', texts: ['别调皮啦，快工作吧。', '先专心一会儿，我陪你。', '摸一下就行啦，继续写代码。', '我在这儿，别分心。'], duration: 2400 },
+  { trigger: 'pet_interact_excited', texts: ['好嘛好嘛，我陪你冲一把。', '今天状态不错，继续推。', '这下精神了，开干。'], duration: 2600 },
 ]
 
 export function pickBubbleText(trigger: string): string | null {
-  const template = BUBBLE_TEMPLATES.find(t => t.trigger === trigger)
+  return pickBubbleMessage(trigger)?.text ?? null
+}
+
+export function pickBubbleMessage(trigger: string): BubbleMessage | null {
+  const template = getBubbleTemplate(trigger)
   if (!template) return null
-  return template.texts[Math.floor(Math.random() * template.texts.length)]
+
+  const text = template.texts[Math.floor(Math.random() * template.texts.length)]
+  return {
+    text,
+    duration: template.duration,
+    flash: template.flash,
+  }
 }
 
 export function getBubbleTemplate(trigger: string): BubbleTemplate | null {

@@ -1,0 +1,2 @@
+export { speak, stop, pause, resume, isSpeaking, getVoices, setVoice, isAvailable } from './utssdk/index.uts'
+export type { TTSOptions, TTSCallbacks, TTSVoice } from './utssdk/interface/index.uts'

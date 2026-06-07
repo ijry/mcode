@@ -1,0 +1,90 @@
+/**
+ * TTS语音合成插件接口定义
+ */
+
+/**
+ * TTS朗读选项
+ */
+export type TTSOptions = {
+  /** 要朗读的文本 */
+  text: string
+  /** 语速 (0.0 - 1.0)，默认0.5 */
+  rate?: number
+  /** 音调 (0.0 - 2.0)，默认1.0 */
+  pitch?: number
+  /** 音量 (0.0 - 1.0)，默认1.0 */
+  volume?: number
+  /** 语言代码，如 'zh-CN', 'en-US'，默认系统语言 */
+  language?: string
+}
+
+/**
+ * TTS回调函数
+ */
+export type TTSCallbacks = {
+  /** 开始朗读回调 */
+  onStart?: () => void
+  /** 朗读完成回调 */
+  onComplete?: () => void
+  /** 朗读错误回调 */
+  onError?: (error: string) => void
+  /** 朗读进度回调（部分平台支持） */
+  onProgress?: (progress: number) => void
+}
+
+/**
+ * TTS语音信息
+ */
+export type TTSVoice = {
+  /** 语音标识符 */
+  identifier: string
+  /** 语音名称 */
+  name: string
+  /** 语言代码 */
+  language: string
+  /** 语音质量（high/normal/low） */
+  quality: string
+}
+
+/**
+ * 朗读文本
+ * @param options 朗读选项
+ * @param callbacks 回调函数
+ */
+export function speak(options: TTSOptions, callbacks?: TTSCallbacks): void
+
+/**
+ * 停止朗读
+ */
+export function stop(): void
+
+/**
+ * 暂停朗读
+ */
+export function pause(): void
+
+/**
+ * 继续朗读
+ */
+export function resume(): void
+
+/**
+ * 检查TTS是否正在朗读
+ */
+export function isSpeaking(): boolean
+
+/**
+ * 获取可用的语音列表
+ */
+export function getVoices(): TTSVoice[]
+
+/**
+ * 设置语音
+ * @param identifier 语音标识符
+ */
+export function setVoice(identifier: string): void
+
+/**
+ * 检查TTS是否可用
+ */
+export function isAvailable(): boolean
