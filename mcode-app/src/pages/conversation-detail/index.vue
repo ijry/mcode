@@ -172,112 +172,6 @@
           <text v-else class="permission-card__empty">当前授权请求没有可用选项</text>
         </view>
 
-        <view v-if="showComposerTools" class="composer-tools" :style="upThemeCardStyle">
-          <view class="composer-tools__section">
-            <text class="composer-tools__title">快捷操作</text>
-            <view class="composer-tools__actions">
-              <view class="composer-tools__action" @click="toggleAttachmentKinds">
-                <text class="composer-tools__action-text">附件上传</text>
-              </view>
-              <view class="composer-tools__action" @click="openTodoPicker">
-                <text class="composer-tools__action-text">从待办选择获取任务</text>
-              </view>
-            </view>
-            <view v-if="showAttachmentKinds" class="composer-tools__subactions">
-              <view class="composer-tools__subaction" @click="handleChooseImages">图片</view>
-              <view class="composer-tools__subaction" @click="handleChooseFiles">文件</view>
-            </view>
-          </view>
-
-          <view class="composer-tools__section">
-            <text class="composer-tools__title">会话配置</text>
-            <view
-              :class="['composer-config-row', !modelOption && 'composer-config-row--disabled']"
-              @click="toggleConfigRow('model')"
-            >
-              <text class="composer-config-row__label">模型</text>
-              <text class="composer-config-row__value">{{ modelSummary }}</text>
-            </view>
-            <view
-              v-if="expandedConfigKey === 'model' && modelOption"
-              class="config-chip-grid"
-            >
-              <view
-                v-for="value in modelOption.kind.options"
-                :key="value.value"
-                :class="[
-                  'config-chip',
-                  detailAgentConfig.selectedValues[modelOption.id] === value.value && 'config-chip--active',
-                ]"
-                @click.stop="selectDetailConfigValue(modelOption.id, value.value)"
-              >
-                <text class="config-chip__title">{{ value.name }}</text>
-              </view>
-            </view>
-
-            <view
-              :class="['composer-config-row', !reasoningOption && 'composer-config-row--disabled']"
-              @click="toggleConfigRow('reasoning')"
-            >
-              <text class="composer-config-row__label">推理强度</text>
-              <text class="composer-config-row__value">{{ reasoningSummary }}</text>
-            </view>
-            <view
-              v-if="expandedConfigKey === 'reasoning' && reasoningOption"
-              class="config-chip-grid"
-            >
-              <view
-                v-for="value in reasoningOption.kind.options"
-                :key="value.value"
-                :class="[
-                  'config-chip',
-                  detailAgentConfig.selectedValues[reasoningOption.id] === value.value && 'config-chip--active',
-                ]"
-                @click.stop="selectDetailConfigValue(reasoningOption.id, value.value)"
-              >
-                <text class="config-chip__title">{{ value.name }}</text>
-              </view>
-            </view>
-
-            <view
-              :class="['composer-config-row', !hasPermissionOptions && 'composer-config-row--disabled']"
-              @click="toggleConfigRow('permission')"
-            >
-              <text class="composer-config-row__label">授权类型</text>
-              <text class="composer-config-row__value">{{ permissionSummary }}</text>
-            </view>
-            <view
-              v-if="expandedConfigKey === 'permission' && detailAgentConfig.modes?.available_modes?.length"
-              class="config-chip-grid"
-            >
-              <view
-                v-for="mode in detailAgentConfig.modes?.available_modes || []"
-                :key="mode.id"
-                :class="['config-chip', detailAgentConfig.selectedModeId === mode.id && 'config-chip--active']"
-                @click.stop="selectDetailMode(mode.id)"
-              >
-                <text class="config-chip__title">{{ mode.name }}</text>
-              </view>
-            </view>
-            <view
-              v-else-if="expandedConfigKey === 'permission' && permissionOption"
-              class="config-chip-grid"
-            >
-              <view
-                v-for="value in permissionOption.kind.options"
-                :key="value.value"
-                :class="[
-                  'config-chip',
-                  detailAgentConfig.selectedValues[permissionOption.id] === value.value && 'config-chip--active',
-                ]"
-                @click.stop="selectDetailConfigValue(permissionOption.id, value.value)"
-              >
-                <text class="config-chip__title">{{ value.name }}</text>
-              </view>
-            </view>
-          </view>
-        </view>
-
         <view
           v-if="slashState.visible && filteredSlashCommands.length > 0"
           class="slash-panel"
@@ -381,11 +275,7 @@
           </view>
         </view>
 
-        <view class="input-row">
-          <view class="input-action" @click="toggleComposerTools">
-            <up-icon :name="showComposerTools ? 'close' : 'plus'" size="18" :color="upThemeVar('--up-content-color', '#606266')"></up-icon>
-          </view>
-
+        <view class="input-main-row">
           <view class="input-box">
             <up-textarea
               class="composer-textarea"
@@ -402,10 +292,6 @@
             ></up-textarea>
           </view>
 
-          <view class="input-action" @click="sendContinueMessage">
-            <up-icon name="arrow-right" size="17" :color="upThemeVar('--up-content-color', '#606266')"></up-icon>
-          </view>
-
           <view
             class="send-btn"
             :class="{ 'send-btn--active': canSend, 'send-btn--loading': sending }"
@@ -414,6 +300,150 @@
             <up-loading-icon v-if="sending" color="#ffffff" size="20"></up-loading-icon>
             <up-icon v-else name="arrow-up" size="22" color="#ffffff"></up-icon>
           </view>
+        </view>
+
+        <view class="input-tool-row">
+          <view class="input-tool-btn" @click="handleChooseImages">
+            <view class="input-tool-btn__icon">
+              <image class="input-tool-btn__glyph" src="/static/icons/composer-image.svg" mode="aspectFit"></image>
+            </view>
+          </view>
+
+          <view class="input-tool-btn" @click="handleChooseFiles">
+            <view class="input-tool-btn__icon">
+              <image class="input-tool-btn__glyph" src="/static/icons/composer-file.svg" mode="aspectFit"></image>
+            </view>
+          </view>
+
+          <view
+            :class="['input-tool-btn', composerPanelMode === 'quick_reply' && 'input-tool-btn--active']"
+            @click="toggleComposerPanel('quick_reply')"
+          >
+            <view class="input-tool-btn__icon">
+              <image class="input-tool-btn__glyph" src="/static/icons/composer-quick.svg" mode="aspectFit"></image>
+            </view>
+          </view>
+
+          <view
+            :class="['input-tool-btn', composerPanelMode === 'config' && 'input-tool-btn--active']"
+            @click="toggleComposerPanel('config')"
+          >
+            <view class="input-tool-btn__icon">
+              <image class="input-tool-btn__glyph" src="/static/icons/composer-config.svg" mode="aspectFit"></image>
+            </view>
+          </view>
+        </view>
+
+        <view v-if="showComposerPanel" class="composer-panel" :style="upThemeCardStyle">
+          <view class="composer-panel__header">
+            <text class="composer-panel__title">{{ composerPanelTitle }}</text>
+            <view class="composer-panel__close" @click="closeComposerPanel">
+              <up-icon name="close" size="14" :color="upThemeVar('--up-content-color', '#606266')"></up-icon>
+            </view>
+          </view>
+
+          <view v-if="composerPanelMode === 'quick_reply'" class="composer-panel__body composer-panel__body--quick">
+            <view
+              v-for="item in quickReplyItems"
+              :key="item.value"
+              class="composer-quick-chip"
+              @click="sendQuickReply(item.value)"
+            >
+              <text class="composer-quick-chip__text">{{ item.label }}</text>
+            </view>
+          </view>
+
+          <scroll-view v-else scroll-y class="composer-panel__scroll">
+            <view class="composer-panel__scroll-content">
+              <view class="composer-panel__section">
+                <text class="composer-panel__section-title">模型配置</text>
+                <view
+                  :class="['composer-config-row', !modelOption && 'composer-config-row--disabled']"
+                  @click="toggleConfigRow('model')"
+                >
+                  <text class="composer-config-row__label">模型</text>
+                  <text class="composer-config-row__value">{{ modelSummary }}</text>
+                </view>
+                <view
+                  v-if="expandedConfigKey === 'model' && modelOption"
+                  class="config-chip-grid"
+                >
+                  <view
+                    v-for="value in modelOption.kind.options"
+                    :key="value.value"
+                    :class="[
+                      'config-chip',
+                      detailAgentConfig.selectedValues[modelOption.id] === value.value && 'config-chip--active',
+                    ]"
+                    @click.stop="selectDetailConfigValue(modelOption.id, value.value)"
+                  >
+                    <text class="config-chip__title">{{ value.name }}</text>
+                  </view>
+                </view>
+
+                <view
+                  :class="['composer-config-row', !reasoningOption && 'composer-config-row--disabled']"
+                  @click="toggleConfigRow('reasoning')"
+                >
+                  <text class="composer-config-row__label">推理强度</text>
+                  <text class="composer-config-row__value">{{ reasoningSummary }}</text>
+                </view>
+                <view
+                  v-if="expandedConfigKey === 'reasoning' && reasoningOption"
+                  class="config-chip-grid"
+                >
+                  <view
+                    v-for="value in reasoningOption.kind.options"
+                    :key="value.value"
+                    :class="[
+                      'config-chip',
+                      detailAgentConfig.selectedValues[reasoningOption.id] === value.value && 'config-chip--active',
+                    ]"
+                    @click.stop="selectDetailConfigValue(reasoningOption.id, value.value)"
+                  >
+                    <text class="config-chip__title">{{ value.name }}</text>
+                  </view>
+                </view>
+
+                <view
+                  :class="['composer-config-row', !hasPermissionOptions && 'composer-config-row--disabled']"
+                  @click="toggleConfigRow('permission')"
+                >
+                  <text class="composer-config-row__label">授权类型</text>
+                  <text class="composer-config-row__value">{{ permissionSummary }}</text>
+                </view>
+                <view
+                  v-if="expandedConfigKey === 'permission' && detailAgentConfig.modes?.available_modes?.length"
+                  class="config-chip-grid"
+                >
+                  <view
+                    v-for="mode in detailAgentConfig.modes?.available_modes || []"
+                    :key="mode.id"
+                    :class="['config-chip', detailAgentConfig.selectedModeId === mode.id && 'config-chip--active']"
+                    @click.stop="selectDetailMode(mode.id)"
+                  >
+                    <text class="config-chip__title">{{ mode.name }}</text>
+                  </view>
+                </view>
+                <view
+                  v-else-if="expandedConfigKey === 'permission' && permissionOption"
+                  class="config-chip-grid"
+                >
+                  <view
+                    v-for="value in permissionOption.kind.options"
+                    :key="value.value"
+                    :class="[
+                      'config-chip',
+                      detailAgentConfig.selectedValues[permissionOption.id] === value.value && 'config-chip--active',
+                    ]"
+                    @click.stop="selectDetailConfigValue(permissionOption.id, value.value)"
+                  >
+                    <text class="config-chip__title">{{ value.name }}</text>
+                  </view>
+                </view>
+              </view>
+            </view>
+          </scroll-view>
         </view>
 
         <view v-if="runtimeRetryText" class="input-feedback input-feedback--retry">
@@ -505,24 +535,6 @@
       </view>
     </up-popup>
 
-    <up-popup v-model:show="showTodoPicker" mode="bottom" :round="20">
-      <view class="todo-picker">
-        <view class="todo-picker__hd">
-          <text class="todo-picker__title">选择待办</text>
-        </view>
-        <view v-if="availableTodos.length === 0" class="todo-picker__empty">
-          <text class="todo-picker__empty-text">暂无未完成待办</text>
-        </view>
-        <view
-          v-for="item in availableTodos"
-          :key="item.id"
-          class="todo-picker__item"
-          @click="selectTodoForComposer(item)"
-        >
-          <text class="todo-picker__text">{{ item.text }}</text>
-        </view>
-      </view>
-    </up-popup>
   </view>
 </template>
 
@@ -565,14 +577,12 @@ import {
   createReadyDetailAgentConfigState,
   findModeName,
   findSelectedOptionValueName,
-  parseIncompleteTodos,
   persistAgentConfigCache,
   persistAgentConfigSelection,
   projectDetailConfigOptions,
   readFreshAgentConfigCache,
   readPersistedAgentConfigSelection,
   type ComposerConfigKey,
-  type ComposerTodoItem,
   type DetailAgentConfigState,
 } from "@/services/conversation/composerTools"
 import type {
@@ -654,11 +664,26 @@ interface StoredConnectionItem {
   }
 }
 
+type ComposerPanelMode = "" | "quick_reply" | "config"
+interface QuickReplyItem {
+  label: string
+  value: string
+}
+
 const auth = useAuthStore()
 const cacheStore = useConversationCacheStore()
 const runtime = useConversationRuntimeStore()
 const INITIAL_TURN_BATCH = 50
 const PROMPT_START_TIMEOUT_MS = 4000
+const quickReplyItems: QuickReplyItem[] = [
+  { label: "yes", value: "yes" },
+  { label: "继续", value: "继续" },
+  { label: "1", value: "1" },
+  { label: "2", value: "2" },
+  { label: "A", value: "A" },
+  { label: "B", value: "B" },
+  { label: "C", value: "C" },
+]
 
 const loading = ref(false)
 const sending = ref(false)
@@ -689,12 +714,9 @@ const draftQueue = ref<QueuedDraft[]>([])
 const queueExpanded = ref(false)
 const uploadingCount = ref(0)
 const showPlanDrawer = ref(false)
-const showComposerTools = ref(false)
-const showAttachmentKinds = ref(false)
-const showTodoPicker = ref(false)
+const composerPanelMode = ref<ComposerPanelMode>("")
 const expandedConfigKey = ref<ComposerConfigKey>("")
 const detailAgentConfig = ref<DetailAgentConfigState>(createEmptyDetailAgentConfigState())
-const availableTodos = ref<ComposerTodoItem[]>([])
 const currentAgentType = ref("claude_code")
 const detailProjectEntries = ref<DetailProjectEntry[]>([])
 const hasLoadedOnce = ref(false)
@@ -877,6 +899,12 @@ const runtimeStatusClass = computed(() => {
   if (runtimeStatus.value === "error") return "error"
   if (runtimeStatus.value === "connected") return "online"
   return "idle"
+})
+
+const showComposerPanel = computed(() => composerPanelMode.value !== "")
+const composerPanelTitle = computed(() => {
+  if (composerPanelMode.value === "config") return "模型配置"
+  return "快捷发送"
 })
 
 const agentLogoPath = computed(() => {
@@ -1103,9 +1131,7 @@ watch(
     queueExpanded.value,
     slashState.value.visible,
     filteredSlashCommands.value.length,
-    showComposerTools.value,
-    showAttachmentKinds.value,
-    showTodoPicker.value,
+    composerPanelMode.value,
     expandedConfigKey.value,
   ],
   () => {
@@ -1994,56 +2020,31 @@ async function applyPendingComposerConfig() {
   }
 }
 
-function toggleComposerTools() {
-  showComposerTools.value = !showComposerTools.value
-  if (!showComposerTools.value) {
+function toggleComposerPanel(mode: ComposerPanelMode) {
+  composerPanelMode.value = composerPanelMode.value === mode ? "" : mode
+  if (!composerPanelMode.value) {
     expandedConfigKey.value = ""
-    showAttachmentKinds.value = false
   }
 }
 
-function closeComposerTools() {
-  showComposerTools.value = false
-  showAttachmentKinds.value = false
+function closeComposerPanel() {
+  composerPanelMode.value = ""
   expandedConfigKey.value = ""
 }
 
-function toggleAttachmentKinds() {
-  showAttachmentKinds.value = !showAttachmentKinds.value
-}
-
-function loadAvailableTodos() {
-  const raw = uni.getStorageSync("mcode_todos")
-  availableTodos.value = parseIncompleteTodos(raw)
-}
-
-function openTodoPicker() {
-  loadAvailableTodos()
-  showTodoPicker.value = true
-}
-
-function selectTodoForComposer(item: ComposerTodoItem) {
-  inputText.value = inputText.value.trim()
-    ? `${inputText.value}\n${item.text}`
-    : item.text
-  showTodoPicker.value = false
-  closeComposerTools()
-}
-
-async function sendMessage() {
-  if (!canSend.value) return
-  if (!canSendSharedLive.value) {
-    showSharedLiveBlockedToast()
-    return
+function createStandaloneDraft(text: string): QueuedDraft | null {
+  const normalized = resolveSlashPreset(String(text || "").trim())
+  if (!normalized) return null
+  return {
+    id: createLocalId("draft"),
+    text: normalized,
+    attachments: [],
+    createdAt: Date.now(),
+    status: "pending",
   }
-  if (uploadingCount.value > 0) {
-    uni.showToast({ title: "文件上传中，请稍后发送", icon: "none" })
-    return
-  }
+}
 
-  const draft = createDraftFromComposer()
-  if (!draft) return
-
+async function submitPreparedDraft(draft: QueuedDraft) {
   if (isBusyForSend.value) {
     draftQueue.value.push(draft)
     queueExpanded.value = true
@@ -2061,7 +2062,19 @@ async function sendMessage() {
   }
 }
 
-async function sendContinueMessage() {
+async function sendQuickReply(text: string) {
+  if (!canSendSharedLive.value) {
+    showSharedLiveBlockedToast()
+    return
+  }
+  const draft = createStandaloneDraft(text)
+  if (!draft) return
+  closeComposerPanel()
+  await submitPreparedDraft(draft)
+}
+
+async function sendMessage() {
+  if (!canSend.value) return
   if (!canSendSharedLive.value) {
     showSharedLiveBlockedToast()
     return
@@ -2070,9 +2083,10 @@ async function sendContinueMessage() {
     uni.showToast({ title: "文件上传中，请稍后发送", icon: "none" })
     return
   }
-  inputText.value = "继续"
-  attachments.value = []
-  await sendMessage()
+
+  const draft = createDraftFromComposer()
+  if (!draft) return
+  await submitPreparedDraft(draft)
 }
 
 function createDraftFromComposer(): QueuedDraft | null {
@@ -2414,14 +2428,12 @@ function chooseFiles() {
 }
 
 function handleChooseImages() {
-  showAttachmentKinds.value = false
-  closeComposerTools()
+  closeComposerPanel()
   chooseImages()
 }
 
 function handleChooseFiles() {
-  showAttachmentKinds.value = false
-  closeComposerTools()
+  closeComposerPanel()
   chooseFiles()
 }
 
@@ -3451,7 +3463,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   z-index: 30;
   background-color: var(--mcode-card-bg);
   border-top: 1rpx solid var(--mcode-border-color);
-  padding: 14rpx 0;
+  padding: 14rpx 14rpx;
   padding-bottom: calc(14rpx + env(safe-area-inset-bottom));
   box-sizing: border-box;
 }
@@ -3623,55 +3635,6 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   border-radius: 16rpx;
   background-color: var(--mcode-card-bg);
   overflow: hidden;
-}
-
-.composer-tools {
-  margin-bottom: 12rpx;
-  padding: 22rpx 20rpx;
-  border-radius: 20rpx;
-  background: var(--mcode-card-bg);
-  border: 1rpx solid var(--mcode-border-color);
-  box-shadow: 0 10rpx 28rpx rgba(15, 23, 42, 0.05);
-  display: flex;
-  flex-direction: column;
-  gap: 18rpx;
-}
-
-.composer-tools__section {
-  display: flex;
-  flex-direction: column;
-  gap: 12rpx;
-}
-
-.composer-tools__title {
-  font-size: 22rpx;
-  font-weight: 600;
-  color: var(--mcode-text-secondary);
-}
-
-.composer-tools__actions,
-.composer-tools__subactions {
-  display: flex;
-  gap: 12rpx;
-  flex-wrap: wrap;
-}
-
-.composer-tools__action,
-.composer-tools__subaction {
-  min-width: 160rpx;
-  padding: 16rpx 18rpx;
-  border-radius: 16rpx;
-  background: var(--mcode-card-soft-bg);
-  border: 1rpx solid var(--mcode-border-color);
-  color: var(--mcode-text-primary);
-  font-size: 23rpx;
-  line-height: 1.4;
-  box-sizing: border-box;
-}
-
-.composer-tools__action-text {
-  font-size: 23rpx;
-  color: var(--mcode-text-primary);
 }
 
 .composer-config-row {
@@ -3942,31 +3905,21 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   }
 }
 
-.input-row {
+.input-main-row {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   gap: 12rpx;
-}
-
-.input-action {
-  width: 64rpx;
-  height: 64rpx;
-  border-radius: 16rpx;
-  background-color: var(--mcode-card-soft-bg);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
 }
 
 .input-box {
   flex: 1;
   background-color: var(--mcode-card-soft-bg);
   border-radius: 24rpx;
-  padding: 10rpx 20rpx;
-  min-height: 64rpx;
+  padding: 14rpx 20rpx;
+  min-height: 72rpx;
   display: flex;
   align-items: center;
+  box-sizing: border-box;
 }
 
 .composer-textarea {
@@ -3987,9 +3940,9 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   :deep(.uni-textarea-textarea),
   :deep(textarea) {
     min-height: 34rpx;
-    max-height: 200rpx;
-    line-height: 34rpx;
-    font-size: 28rpx;
+    max-height: 220rpx;
+    line-height: 36rpx;
+    font-size: 27rpx;
     background: transparent !important;
     overflow-y: auto;
   }
@@ -4016,6 +3969,147 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   &--loading {
     background-color: #2979ff;
   }
+}
+
+.input-tool-row {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  margin-top: 10rpx;
+}
+
+.input-tool-btn {
+  flex: 1;
+  min-width: 0;
+  height: 64rpx;
+  padding: 0;
+  border-radius: 20rpx;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+
+  &--active {
+    background: transparent;
+  }
+}
+
+.input-tool-btn__icon {
+  width: 56rpx;
+  height: 56rpx;
+  border-radius: 18rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--mcode-card-soft-bg);
+  transition: background-color 0.2s ease, transform 0.2s ease;
+}
+
+.input-tool-btn__glyph {
+  width: 32rpx;
+  height: 32rpx;
+  display: block;
+}
+
+.input-tool-btn--active .input-tool-btn__icon {
+  background: color-mix(in srgb, var(--mcode-primary) 12%, var(--mcode-card-bg) 88%);
+  transform: translateY(-1rpx);
+}
+
+.composer-panel {
+  margin-top: 12rpx;
+  height: 280rpx;
+  border-radius: 20rpx;
+  background: var(--mcode-card-bg);
+  border: 1rpx solid var(--mcode-border-color);
+  box-shadow: 0 10rpx 28rpx rgba(15, 23, 42, 0.05);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.composer-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12rpx;
+  padding: 18rpx 20rpx 14rpx;
+  border-bottom: 1rpx solid var(--mcode-border-color);
+  flex-shrink: 0;
+}
+
+.composer-panel__title {
+  font-size: 23rpx;
+  font-weight: 600;
+  color: var(--mcode-text-primary);
+}
+
+.composer-panel__close {
+  width: 44rpx;
+  height: 44rpx;
+  border-radius: 50%;
+  background: var(--mcode-card-soft-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.composer-panel__body {
+  flex: 1;
+  min-height: 0;
+}
+
+.composer-panel__body--quick {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 12rpx;
+  padding: 18rpx 20rpx 20rpx;
+  box-sizing: border-box;
+}
+
+.composer-quick-chip {
+  min-width: 96rpx;
+  padding: 16rpx 20rpx;
+  border-radius: 18rpx;
+  background: var(--mcode-card-soft-bg);
+  border: 1rpx solid var(--mcode-border-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+}
+
+.composer-quick-chip__text {
+  font-size: 24rpx;
+  line-height: 1;
+  color: var(--mcode-text-primary);
+}
+
+.composer-panel__scroll {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
+.composer-panel__scroll-content {
+  padding: 18rpx 20rpx 20rpx;
+  box-sizing: border-box;
+}
+
+.composer-panel__section {
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+}
+
+.composer-panel__section-title {
+  font-size: 22rpx;
+  font-weight: 600;
+  color: var(--mcode-text-secondary);
 }
 
 .scroll-bottom-fab {
@@ -4238,45 +4332,4 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   height: calc(24rpx + env(safe-area-inset-bottom));
 }
 
-.todo-picker {
-  padding: 24rpx 24rpx calc(24rpx + env(safe-area-inset-bottom));
-  display: flex;
-  flex-direction: column;
-  gap: 14rpx;
-}
-
-.todo-picker__hd {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.todo-picker__title {
-  font-size: 28rpx;
-  font-weight: 600;
-  color: var(--mcode-text-primary);
-}
-
-.todo-picker__empty {
-  padding: 24rpx 0;
-  text-align: center;
-}
-
-.todo-picker__empty-text {
-  font-size: 24rpx;
-  color: var(--mcode-text-tertiary);
-}
-
-.todo-picker__item {
-  padding: 20rpx 18rpx;
-  border-radius: 18rpx;
-  background: var(--mcode-card-soft-bg);
-  border: 1rpx solid var(--mcode-border-color);
-}
-
-.todo-picker__text {
-  font-size: 24rpx;
-  line-height: 1.5;
-  color: var(--mcode-text-primary);
-}
 </style>
