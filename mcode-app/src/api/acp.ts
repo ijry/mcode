@@ -814,6 +814,37 @@ class AcpApiClient {
             requestId: firstString(record.request_id, record.requestId),
           },
         }
+      case "claude_sdk_message": {
+        const message = toRecord(record.message)
+        if (
+          firstString(message?.type) !== "system" ||
+          firstString(message?.subtype) !== "api_retry"
+        ) {
+          return null
+        }
+        return {
+          connectionId,
+          type: "api_retry",
+          data: {
+            sessionId: firstString(message?.session_id, record.session_id, record.sessionId) || undefined,
+            attempt: firstNumber(message?.attempt),
+            maxRetries: firstNumber(message?.max_retries),
+            error: firstString(message?.error) || undefined,
+            errorStatus: firstNumber(message?.error_status),
+            retryDelayMs: firstNumber(message?.retry_delay_ms),
+          },
+        }
+      }
+      case "error":
+        return {
+          connectionId,
+          type: "error",
+          data: {
+            message: firstString(record.message) || "请求失败",
+            code: firstString(record.code) || undefined,
+            agentType: firstString(record.agent_type, record.agentType) || undefined,
+          },
+        }
       default:
         return null
     }
@@ -850,6 +881,10 @@ function parseJsonRecord(raw: unknown) {
   } catch {
     return null
   }
+}
+
+function toRecord(raw: unknown) {
+  return raw && typeof raw === "object" ? raw as Record<string, unknown> : null
 }
 
 function extractErrorText(rawOutput: unknown) {

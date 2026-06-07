@@ -144,14 +144,6 @@
           <text v-else class="permission-card__empty">当前授权请求没有可用选项</text>
         </view>
 
-        <view v-if="runtimeErrorText" class="runtime-error-card">
-          <view class="runtime-error-card__header">
-            <up-icon name="close-circle-fill" size="15" color="#fa3534"></up-icon>
-            <text class="runtime-error-card__title">运行失败</text>
-          </view>
-          <text class="runtime-error-card__text">{{ runtimeErrorText }}</text>
-        </view>
-
         <view v-if="showComposerTools" class="composer-tools" :style="upThemeCardStyle">
           <view class="composer-tools__section">
             <text class="composer-tools__title">快捷操作</text>
@@ -394,6 +386,16 @@
             <up-loading-icon v-if="sending" color="#ffffff" size="20"></up-loading-icon>
             <up-icon v-else name="arrow-up" size="22" color="#ffffff"></up-icon>
           </view>
+        </view>
+
+        <view v-if="runtimeRetryText" class="input-feedback input-feedback--retry">
+          <up-loading-icon mode="circle" size="14" color="#fa8c16"></up-loading-icon>
+          <text class="input-feedback__text">{{ runtimeRetryText }}</text>
+        </view>
+
+        <view v-if="runtimeErrorText" class="input-feedback input-feedback--error">
+          <up-icon name="close-circle-fill" size="14" color="#fa3534"></up-icon>
+          <text class="input-feedback__text">{{ runtimeErrorText }}</text>
         </view>
       </view>
 
@@ -799,7 +801,26 @@ const sharedLiveHint = computed(() => {
   }
   return "当前会话正在多端共享"
 })
-const runtimeErrorText = computed(() => firstString(session.value?.errorMessage) || "")
+const runtimeErrorText = computed(() => firstString(session.value?.inputErrorMessage) || "")
+const runtimeRetryText = computed(() => {
+  const retry = session.value?.apiRetry
+  if (!retry) return ""
+
+  const pieces: string[] = []
+  if (retry.error) pieces.push(retry.error)
+  if (typeof retry.errorStatus === "number") pieces.push(`HTTP ${Math.trunc(retry.errorStatus)}`)
+  if (typeof retry.attempt === "number" && typeof retry.maxRetries === "number") {
+    pieces.push(`正在重试 ${Math.trunc(retry.attempt)}/${Math.trunc(retry.maxRetries)}`)
+  } else if (typeof retry.attempt === "number") {
+    pieces.push(`正在重试（第 ${Math.trunc(retry.attempt)} 次）`)
+  } else {
+    pieces.push("正在重试")
+  }
+  if (typeof retry.retryDelayMs === "number") {
+    pieces.push(`${(retry.retryDelayMs / 1000).toFixed(1)}s 后继续`)
+  }
+  return pieces.filter(Boolean).join(" · ")
+})
 
 const canSend = computed(() => Boolean(inputText.value.trim() || attachments.value.length > 0))
 
@@ -3494,38 +3515,30 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   word-break: break-all;
 }
 
-.runtime-error-card {
-  display: flex;
-  flex-direction: column;
-  gap: 8rpx;
-  width: 100%;
-  min-width: 0;
-  margin-bottom: 12rpx;
-  padding: 18rpx 20rpx;
-  border-radius: 18rpx;
-  background: color-mix(in srgb, var(--mcode-error) 8%, var(--mcode-card-bg) 92%);
-  border: 1rpx solid color-mix(in srgb, var(--mcode-error) 22%, transparent);
-  box-sizing: border-box;
-}
-
-.runtime-error-card__header {
+.input-feedback {
   display: flex;
   align-items: center;
   gap: 8rpx;
+  margin-top: 10rpx;
+  padding: 12rpx 4rpx 0;
+  min-width: 0;
 }
 
-.runtime-error-card__title {
-  font-size: 24rpx;
-  font-weight: 600;
+.input-feedback--retry {
+  color: #fa8c16;
+}
+
+.input-feedback--error {
   color: var(--mcode-error);
 }
 
-.runtime-error-card__text {
-  display: block;
+.input-feedback__text {
+  display: flex;
+  min-width: 0;
   font-size: 22rpx;
   line-height: 1.5;
-  color: color-mix(in srgb, var(--mcode-error) 72%, var(--mcode-text-primary) 28%);
   word-break: break-all;
+  flex: 1;
 }
 
 .slash-panel {

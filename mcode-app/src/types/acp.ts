@@ -143,7 +143,17 @@ export interface AcpAgentInfo {
 }
 
 export interface EventEnvelope {
-  type: "stream_batch" | "tool_call" | "tool_call_update" | "status_changed" | "turn_complete" | "usage_update" | "permission_request" | "permission_resolved"
+  type:
+    | "stream_batch"
+    | "tool_call"
+    | "tool_call_update"
+    | "status_changed"
+    | "turn_complete"
+    | "usage_update"
+    | "permission_request"
+    | "permission_resolved"
+    | "api_retry"
+    | "error"
   connectionId: string
   seq?: number
   data: any
@@ -206,6 +216,21 @@ export interface UsageUpdateEvent {
   inputTokens: number
   outputTokens: number
   totalTokens: number
+}
+
+export interface ApiRetryEvent {
+  sessionId?: string
+  attempt?: number | null
+  maxRetries?: number | null
+  error?: string
+  errorStatus?: number | null
+  retryDelayMs?: number | null
+}
+
+export interface RuntimeErrorEvent {
+  message: string
+  code?: string
+  agentType?: string
 }
 
 export interface PermissionRequest {
