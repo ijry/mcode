@@ -32,7 +32,7 @@
     <view class="bubble-body">
       <view :class="['bubble', `bubble--${message.role}`]">
         <!-- 内容渲染 -->
-        <view v-for="(part, index) in message.content" :key="index" class="part-wrap">
+        <view v-for="(part, index) in displayParts" :key="index" class="part-wrap">
           <!-- 文本 -->
           <view v-if="part.type === 'text'" class="part-text">
             <up-markdown :content="part.text || ''"></up-markdown>
@@ -48,6 +48,9 @@
           </view>
 
           <!-- 工具调用 -->
+          <view v-else-if="part.type === 'tool_call_group'" class="part-tool">
+            <ToolCallGroupBlock :toolCalls="part.tool_calls || []" />
+          </view>
           <view v-else-if="part.type === 'tool_call'" class="part-tool">
             <ToolCallBlock :toolCall="part.tool_call!" />
           </view>
@@ -138,8 +141,9 @@
 
 <script setup lang="ts">
 import { computed } from "vue"
-import type { MessageTurn } from "@/types/acp"
+import type { ContentPart, MessageTurn, ToolCall } from "@/types/acp"
 import ToolCallBlock from "./ToolCallBlock.vue"
+import ToolCallGroupBlock from "./ToolCallGroupBlock.vue"
 
 const props = defineProps<{
   message: MessageTurn
@@ -150,6 +154,38 @@ const props = defineProps<{
 const emit = defineEmits<{
   regenerate: []
 }>()
+
+type DisplayPart = ContentPart & {
+  type: ContentPart["type"] | "tool_call_group"
+  tool_calls?: ToolCall[]
+}
+
+const displayParts = computed<DisplayPart[]>(() => {
+  const grouped: DisplayPart[] = []
+  let pendingToolCalls: ToolCall[] = []
+
+  const flushPendingToolCalls = () => {
+    if (pendingToolCalls.length === 0) return
+    grouped.push({
+      type: "tool_call_group",
+      tool_calls: pendingToolCalls,
+    })
+    pendingToolCalls = []
+  }
+
+  for (const part of props.message.content || []) {
+    if (part.type === "tool_call" && part.tool_call) {
+      pendingToolCalls.push(part.tool_call)
+      continue
+    }
+
+    flushPendingToolCalls()
+    grouped.push(part as DisplayPart)
+  }
+
+  flushPendingToolCalls()
+  return grouped
+})
 
 const agentLogoPath = computed(() => {
   const key = normalizeAgentType(props.agentType)

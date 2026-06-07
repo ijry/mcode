@@ -88,20 +88,20 @@
         @scroll="handleMessageScroll"
       >
         <view class="message-list__content">
-          <view v-if="messages.length === 0" class="empty-messages">
+          <view v-if="renderMessageItems.length === 0" class="empty-messages">
             <up-empty mode="message" text="开始新的对话吧"></up-empty>
           </view>
 
           <view
-            v-for="(msg, index) in messages"
-            :key="msg.id"
-            :id="messageAnchorId(msg.id)"
+            v-for="(item, index) in renderMessageItems"
+            :key="item.key"
+            :id="messageAnchorId(item.anchorId)"
             class="message-item"
           >
             <MessageBubble
-              :message="msg"
+              :message="item.message"
               :agent-type="currentAgentType"
-              :showRegenerate="index === messages.length - 1 && msg.role === 'assistant'"
+              :showRegenerate="index === renderMessageItems.length - 1 && item.message.role === 'assistant'"
               @regenerate="regenerateLastMessage"
             />
           </view>
@@ -335,13 +335,6 @@
         </view>
 
         <view v-if="showComposerPanel" class="composer-panel" :style="upThemeCardStyle">
-          <view class="composer-panel__header">
-            <text class="composer-panel__title">{{ composerPanelTitle }}</text>
-            <view class="composer-panel__close" @click="closeComposerPanel">
-              <up-icon name="close" size="14" :color="upThemeVar('--up-content-color', '#606266')"></up-icon>
-            </view>
-          </view>
-
           <view v-if="composerPanelMode === 'quick_reply'" class="composer-panel__body composer-panel__body--quick">
             <view
               v-for="item in quickReplyItems"
@@ -741,10 +734,78 @@ const messages = computed(() => {
   return runtime.getMessages(conversationId.value)
 })
 
+interface RenderMessageItem {
+  key: string
+  anchorId: string
+  sourceIds: string[]
+  message: MessageTurn
+}
+
+const renderMessageItems = computed<RenderMessageItem[]>(() => {
+  if (messages.value.length === 0) return []
+
+  const result: RenderMessageItem[] = []
+  let assistantBuffer: MessageTurn[] = []
+
+  const pushBufferedAssistantMessages = () => {
+    if (assistantBuffer.length === 0) return
+
+    if (assistantBuffer.length === 1) {
+      const single = assistantBuffer[0]
+      result.push({
+        key: single.id,
+        anchorId: single.id,
+        sourceIds: [single.id],
+        message: single,
+      })
+      assistantBuffer = []
+      return
+    }
+
+    const first = assistantBuffer[0]
+    const last = assistantBuffer[assistantBuffer.length - 1]
+    result.push({
+      key: `merged-${first.id}-${last.id}`,
+      anchorId: first.id,
+      sourceIds: assistantBuffer.map((item) => item.id),
+      message: {
+        ...last,
+        id: last.id,
+        content: assistantBuffer.flatMap((item) => cloneRenderContentParts(item.content || [])),
+        timestamp: first.timestamp,
+      },
+    })
+    assistantBuffer = []
+  }
+
+  for (const message of messages.value) {
+    if (message.role === "assistant") {
+      assistantBuffer.push(message)
+      continue
+    }
+
+    pushBufferedAssistantMessages()
+    result.push({
+      key: message.id,
+      anchorId: message.id,
+      sourceIds: [message.id],
+      message,
+    })
+  }
+
+  pushBufferedAssistantMessages()
+  return result
+})
+
 const session = computed(() => {
   if (!conversationId.value) return null
   return runtime.getOrCreateSession(conversationId.value)
 })
+
+function cloneRenderContentParts(parts: ContentPart[]): ContentPart[] {
+  return JSON.parse(JSON.stringify(parts || [])) as ContentPart[]
+}
+
 const managedConversation = computed(() => {
   if (!conversationId.value) return null
   return runtime.getManagedConversation(conversationId.value)
@@ -1008,7 +1069,7 @@ const filteredPlanTasks = computed(() => {
 
 const showScrollToBottomFab = computed(
   () =>
-    messages.value.length > 0 &&
+    renderMessageItems.value.length > 0 &&
     !shouldAutoFollowBottom.value &&
     !isRestoringScroll.value
 )
@@ -1076,11 +1137,11 @@ onBackPress(() => {
 })
 
 watch(
-  () => messages.value.map((msg) => ({
-    id: msg.id,
-    role: msg.role,
-    status: msg.status,
-    content: JSON.stringify(msg.content || []),
+  () => renderMessageItems.value.map((item) => ({
+    id: item.anchorId,
+    role: item.message.role,
+    status: item.message.status,
+    content: JSON.stringify(item.message.content || []),
   })),
   (nextMessages, prevMessages) => {
     if (loading.value || !hasInitialBottomScroll.value || isRestoringScroll.value) return
@@ -1727,8 +1788,8 @@ function handleMessageScroll(event: any) {
     hasUnreadBelow.value = false
   }
   if (shouldAutoFollowBottom.value) {
-    const tail = messages.value[messages.value.length - 1]
-    anchorMessageId.value = tail?.id || ""
+    const tail = renderMessageItems.value[renderMessageItems.value.length - 1]
+    anchorMessageId.value = tail?.anchorId || ""
   }
   if (scrollTopValue <= 120) {
     detailDebugLog("scroll-near-top", {
@@ -1763,7 +1824,7 @@ async function loadOlderTurns() {
       return
     }
     const runtimeSession = runtime.getOrCreateSession(conversationId.value)
-    const firstVisibleMessageId = messages.value[0]?.id || anchorMessageId.value || ""
+    const firstVisibleMessageId = resolveRenderAnchorId(messages.value[0]?.id || anchorMessageId.value || "")
     runtimeSession.localTurns = [
       ...older.slice().reverse().map(mapPersistedTurnToMessage),
       ...runtimeSession.localTurns,
@@ -1788,7 +1849,7 @@ async function loadOlderTurns() {
 }
 
 function scrollToBottom(force = false) {
-  if (!messages.value.length) return
+  if (!renderMessageItems.value.length) return
   if (!force && !shouldAutoFollowBottom.value) return
   shouldAutoFollowBottom.value = true
   hasUnreadBelow.value = false
@@ -1803,6 +1864,13 @@ function scrollToBottom(force = false) {
 
 function messageAnchorId(messageId: string) {
   return `msg-${String(messageId).replace(/[^a-zA-Z0-9_-]/g, "_")}`
+}
+
+function resolveRenderAnchorId(messageId: string) {
+  const normalized = String(messageId || "").trim()
+  if (!normalized) return ""
+  const matched = renderMessageItems.value.find((item) => item.sourceIds.includes(normalized))
+  return matched?.anchorId || normalized
 }
 
 function getBottomAnchorId() {
@@ -1847,7 +1915,7 @@ function restoreScrollState(
     lastMeasuredScrollTop.value = cachedScrollTop
   } else if (cachedAnchorMessageId) {
     scrollIntoView.value = ""
-    scrollIntoView.value = messageAnchorId(cachedAnchorMessageId)
+    scrollIntoView.value = messageAnchorId(resolveRenderAnchorId(cachedAnchorMessageId))
   } else if (persistedAnchor) {
     scrollIntoView.value = ""
     scrollIntoView.value = persistedAnchor
@@ -3953,8 +4021,8 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 }
 
 .send-btn {
-  width: 72rpx;
-  height: 72rpx;
+  width: 68rpx;
+  height: 68rpx;
   border-radius: 50%;
   background-color: var(--mcode-border-color);
   display: flex;
@@ -4022,39 +4090,11 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   height: 280rpx;
   border-radius: 20rpx;
   background: var(--mcode-card-bg);
-  border: 1rpx solid var(--mcode-border-color);
-  box-shadow: 0 10rpx 28rpx rgba(15, 23, 42, 0.05);
+  box-shadow: none;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   box-sizing: border-box;
-}
-
-.composer-panel__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12rpx;
-  padding: 18rpx 20rpx 14rpx;
-  border-bottom: 1rpx solid var(--mcode-border-color);
-  flex-shrink: 0;
-}
-
-.composer-panel__title {
-  font-size: 23rpx;
-  font-weight: 600;
-  color: var(--mcode-text-primary);
-}
-
-.composer-panel__close {
-  width: 44rpx;
-  height: 44rpx;
-  border-radius: 50%;
-  background: var(--mcode-card-soft-bg);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
 }
 
 .composer-panel__body {
@@ -4067,7 +4107,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   flex-wrap: wrap;
   align-content: flex-start;
   gap: 12rpx;
-  padding: 18rpx 20rpx 20rpx;
+  padding: 24rpx 20rpx 20rpx;
   box-sizing: border-box;
 }
 
@@ -4096,7 +4136,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 }
 
 .composer-panel__scroll-content {
-  padding: 18rpx 20rpx 20rpx;
+  padding: 24rpx 20rpx 20rpx;
   box-sizing: border-box;
 }
 
