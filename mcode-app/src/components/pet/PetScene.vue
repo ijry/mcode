@@ -35,6 +35,36 @@
 
       <!-- sweat: small sweat drop -->
       <view v-else-if="dec === 'sweat'" class="pet-scene__sweat" />
+
+      <!-- heart: floating hearts for dream / happy -->
+      <template v-else-if="dec === 'heart'">
+        <text class="pet-scene__heart pet-scene__heart--1">♥</text>
+        <text class="pet-scene__heart pet-scene__heart--2">♥</text>
+      </template>
+
+      <!-- thought: thought bubble for curious -->
+      <view v-else-if="dec === 'thought'" class="pet-scene__thought">
+        <view class="pet-scene__thought-dot pet-scene__thought-dot--1" />
+        <view class="pet-scene__thought-dot pet-scene__thought-dot--2" />
+        <view class="pet-scene__thought-bubble">
+          <text class="pet-scene__thought-mark">?</text>
+        </view>
+      </view>
+
+      <!-- music: musical notes for happy-dance -->
+      <template v-else-if="dec === 'music'">
+        <text class="pet-scene__note pet-scene__note--1">♪</text>
+        <text class="pet-scene__note pet-scene__note--2">♫</text>
+      </template>
+
+      <!-- confetti: colourful scattered pieces -->
+      <template v-else-if="dec === 'confetti'">
+        <view class="pet-scene__confetti pet-scene__confetti--1" />
+        <view class="pet-scene__confetti pet-scene__confetti--2" />
+        <view class="pet-scene__confetti pet-scene__confetti--3" />
+        <view class="pet-scene__confetti pet-scene__confetti--4" />
+        <view class="pet-scene__confetti pet-scene__confetti--5" />
+      </template>
     </view>
   </view>
 </template>
@@ -76,8 +106,8 @@ defineProps<{
     animation: zzz-float 2.2s ease-out infinite;
 
     &--1 { top: -16rpx; animation-delay: 0s; }
-    &--2 { top: -30rpx; animation-delay: 0.5s; font-size: 16rpx; }
-    &--3 { top: -42rpx; animation-delay: 1s; font-size: 12rpx; }
+    &--2 { top: -30rpx; animation-delay: 0.55s; font-size: 16rpx; }
+    &--3 { top: -42rpx; animation-delay: 1.1s; font-size: 12rpx; }
   }
 
   // ── Snack ──
@@ -145,6 +175,92 @@ defineProps<{
     opacity: 0.8;
     animation: sweat-drop 1.5s ease-in-out infinite;
   }
+
+  // ── Heart ──
+  &__heart {
+    position: absolute;
+    font-size: 18rpx;
+    color: #f43f5e;
+    opacity: 0;
+    animation: heart-float 2s ease-out infinite;
+
+    &--1 { top: -18rpx; left: 6rpx; animation-delay: 0s; }
+    &--2 { top: -28rpx; left: 22rpx; animation-delay: 0.7s; font-size: 14rpx; color: #fb7185; }
+  }
+
+  // ── Thought bubble ──
+  &__thought {
+    position: absolute;
+    top: -44rpx;
+    right: -6rpx;
+
+    &-dot {
+      position: absolute;
+      border-radius: 50%;
+      background: var(--mcode-text-tertiary, #94a3b8);
+
+      &--1 {
+        width: 5rpx; height: 5rpx;
+        bottom: 0; right: 12rpx;
+        animation: thought-appear 0.3s ease-out 0.1s both;
+      }
+      &--2 {
+        width: 7rpx; height: 7rpx;
+        bottom: 6rpx; right: 6rpx;
+        animation: thought-appear 0.3s ease-out 0.2s both;
+      }
+    }
+
+    &-bubble {
+      position: absolute;
+      bottom: 14rpx;
+      right: 0;
+      width: 30rpx;
+      height: 26rpx;
+      border-radius: 50%;
+      background: var(--mcode-card-bg, #fff);
+      border: 2rpx solid var(--mcode-border, #e2e8f0);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      animation: thought-appear 0.4s ease-out 0.35s both;
+    }
+
+    &-mark {
+      font-size: 16rpx;
+      font-weight: bold;
+      color: var(--mcode-text-secondary, #64748b);
+      line-height: 1;
+    }
+  }
+
+  // ── Music notes ──
+  &__note {
+    position: absolute;
+    font-size: 18rpx;
+    color: #a855f7;
+    opacity: 0;
+    animation: note-float 1.8s ease-out infinite;
+
+    &--1 { top: -22rpx; left: 4rpx; animation-delay: 0s; }
+    &--2 { top: -30rpx; left: 20rpx; animation-delay: 0.6s; font-size: 14rpx; }
+  }
+
+  // ── Confetti ──
+  &__confetti {
+    position: absolute;
+    width: 8rpx;
+    height: 8rpx;
+    border-radius: 2rpx;
+    opacity: 0;
+    animation: confetti-burst 1.2s ease-out forwards;
+
+    &--1 { background: #f43f5e; top: 10rpx; left: 10rpx; animation-delay: 0s; }
+    &--2 { background: #3b82f6; top: 8rpx; left: 26rpx; animation-delay: 0.1s; border-radius: 50%; }
+    &--3 { background: #22c55e; top: 12rpx; left: 40rpx; animation-delay: 0.2s; }
+    &--4 { background: #fbbf24; top: 6rpx; left: 18rpx; animation-delay: 0.15s; border-radius: 50%; }
+    &--5 { background: #a855f7; top: 14rpx; left: 32rpx; animation-delay: 0.05s; }
+  }
 }
 
 // ── Keyframes ──
@@ -180,5 +296,30 @@ defineProps<{
 @keyframes sweat-drop {
   0%, 100% { transform: translateY(0); opacity: 0.8; }
   50% { transform: translateY(4rpx); opacity: 0.4; }
+}
+
+@keyframes heart-float {
+  0% { transform: translateY(0) scale(0.5); opacity: 0; }
+  25% { opacity: 1; transform: translateY(-8rpx) scale(1.1); }
+  80% { opacity: 0.7; }
+  100% { transform: translateY(-36rpx) scale(0.8); opacity: 0; }
+}
+
+@keyframes thought-appear {
+  0% { transform: scale(0); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes note-float {
+  0% { transform: translateY(0) rotate(-10deg) scale(0.7); opacity: 0; }
+  20% { opacity: 0.9; }
+  80% { opacity: 0.7; }
+  100% { transform: translateY(-32rpx) rotate(10deg) scale(1); opacity: 0; }
+}
+
+@keyframes confetti-burst {
+  0% { transform: translate(0, 0) rotate(0deg) scale(1); opacity: 1; }
+  60% { opacity: 1; }
+  100% { transform: translate(var(--tx, 20rpx), 40rpx) rotate(360deg) scale(0.3); opacity: 0; }
 }
 </style>

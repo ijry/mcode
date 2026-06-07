@@ -1,23 +1,73 @@
 import type { EmotionState } from '@/types/pet'
 
-/** Phase 1 motion identifiers */
+/** All motion identifiers */
 export type MotionId =
+  // Idle
   | 'idle-look-around'
   | 'idle-tail-swish'
+  | 'idle-ear-twitch'
+  | 'idle-groom'
+  | 'idle-sneeze'
+  | 'idle-shake'
+  // Bored
+  | 'bored-sigh'
+  | 'bored-slump'
+  // Stretch / yawn
   | 'stretch-yawn'
+  // Curious
+  | 'curious-peek'
+  | 'curious-sniff'
+  | 'curious-tilt-deep'
+  // Busy / alert
+  | 'busy-type'
+  | 'alert-freeze'
+  // Sleep
   | 'sleep-curl'
   | 'sleep-zzz'
+  | 'sleep-dream'
+  // Excited
+  | 'excited-spin'
+  | 'excited-wiggle'
+  // Happy
+  | 'happy-dance'
+  | 'happy-heart'
+  // Snack
   | 'snack-nibble'
   | 'snack-happy-chew'
+  // Play
   | 'play-hop'
   | 'play-ball'
+  | 'play-chase-tail'
+  | 'play-pounce'
+  // Celebration
   | 'self-proud'
+  | 'celebrate-confetti'
 
 /** Motion group categories */
-export type MotionGroup = 'idle' | 'sleep' | 'play' | 'snack' | 'celebration'
+export type MotionGroup =
+  | 'idle'
+  | 'bored'
+  | 'curious'
+  | 'busy'
+  | 'sleep'
+  | 'excited'
+  | 'happy'
+  | 'play'
+  | 'snack'
+  | 'celebration'
 
 /** Scene decorations rendered alongside the pet */
-export type SceneDecoration = 'zzz' | 'snack' | 'crumbs' | 'ball' | 'sparkles' | 'sweat'
+export type SceneDecoration =
+  | 'zzz'
+  | 'snack'
+  | 'crumbs'
+  | 'ball'
+  | 'sparkles'
+  | 'sweat'
+  | 'heart'
+  | 'thought'
+  | 'music'
+  | 'confetti'
 
 /** Motion priority for preemption rules */
 export type MotionPriority = 'high' | 'medium' | 'low'

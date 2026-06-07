@@ -6,14 +6,10 @@ import type {
 } from '@/types/petMotion'
 import type { EmotionState } from '@/types/pet'
 
-/**
- * Phase 1 motion templates.
- *
- * Each template defines eligibility (allowedEmotions, allowedHours),
- * cooldown, weight for random selection, decorations, and body class.
- */
 export const MOTION_TEMPLATES: MotionTemplate[] = [
+
   // ── Idle motions ──
+
   {
     id: 'idle-look-around',
     group: 'idle',
@@ -39,6 +35,84 @@ export const MOTION_TEMPLATES: MotionTemplate[] = [
     priority: 'low',
   },
   {
+    id: 'idle-ear-twitch',
+    group: 'idle',
+    durationMs: 1800,
+    cooldownMs: 15000,
+    weight: 3,
+    allowedEmotions: ['idle', 'curious'],
+    interruptible: true,
+    sceneDecorations: [],
+    bodyClass: 'ear-twitch',
+    priority: 'low',
+  },
+  {
+    id: 'idle-groom',
+    group: 'idle',
+    durationMs: 3200,
+    cooldownMs: 28000,
+    weight: 2,
+    allowedEmotions: ['idle', 'happy'],
+    interruptible: true,
+    sceneDecorations: [],
+    bodyClass: 'groom',
+    priority: 'low',
+  },
+  {
+    id: 'idle-sneeze',
+    group: 'idle',
+    durationMs: 1500,
+    cooldownMs: 45000,
+    weight: 1,
+    allowedEmotions: ['idle', 'bored'],
+    interruptible: true,
+    sceneDecorations: ['sweat'],
+    bodyClass: 'sneeze',
+    priority: 'low',
+  },
+  {
+    id: 'idle-shake',
+    group: 'idle',
+    durationMs: 1200,
+    cooldownMs: 18000,
+    weight: 2,
+    allowedEmotions: ['idle'],
+    interruptible: true,
+    sceneDecorations: [],
+    bodyClass: 'body-shake',
+    priority: 'low',
+  },
+
+  // ── Bored motions ──
+
+  {
+    id: 'bored-sigh',
+    group: 'bored',
+    durationMs: 3000,
+    cooldownMs: 25000,
+    weight: 4,
+    allowedEmotions: ['bored'],
+    interruptible: true,
+    sceneDecorations: [],
+    bodyClass: 'bored-sigh',
+    priority: 'low',
+  },
+  {
+    id: 'bored-slump',
+    group: 'bored',
+    durationMs: 4000,
+    cooldownMs: 30000,
+    weight: 3,
+    allowedEmotions: ['bored'],
+    interruptible: true,
+    sceneDecorations: [],
+    bodyClass: 'bored-slump',
+    priority: 'low',
+  },
+
+  // ── Stretch / yawn ──
+
+  {
     id: 'stretch-yawn',
     group: 'idle',
     durationMs: 3500,
@@ -52,7 +126,74 @@ export const MOTION_TEMPLATES: MotionTemplate[] = [
     priority: 'low',
   },
 
+  // ── Curious motions ──
+
+  {
+    id: 'curious-peek',
+    group: 'curious',
+    durationMs: 2800,
+    cooldownMs: 20000,
+    weight: 4,
+    allowedEmotions: ['curious'],
+    interruptible: true,
+    sceneDecorations: ['thought'],
+    bodyClass: 'curious-peek',
+    priority: 'medium',
+  },
+  {
+    id: 'curious-sniff',
+    group: 'curious',
+    durationMs: 2200,
+    cooldownMs: 18000,
+    weight: 3,
+    allowedEmotions: ['curious'],
+    interruptible: true,
+    sceneDecorations: [],
+    bodyClass: 'curious-sniff',
+    priority: 'medium',
+  },
+  {
+    id: 'curious-tilt-deep',
+    group: 'curious',
+    durationMs: 2500,
+    cooldownMs: 22000,
+    weight: 3,
+    allowedEmotions: ['curious'],
+    interruptible: true,
+    sceneDecorations: ['thought'],
+    bodyClass: 'curious-tilt-deep',
+    priority: 'medium',
+  },
+
+  // ── Busy / alert motions ──
+
+  {
+    id: 'busy-type',
+    group: 'busy',
+    durationMs: 3000,
+    cooldownMs: 15000,
+    weight: 4,
+    allowedEmotions: ['busy'],
+    interruptible: true,
+    sceneDecorations: [],
+    bodyClass: 'busy-type',
+    priority: 'medium',
+  },
+  {
+    id: 'alert-freeze',
+    group: 'busy',
+    durationMs: 2000,
+    cooldownMs: 20000,
+    weight: 3,
+    allowedEmotions: ['alert'],
+    interruptible: false,
+    sceneDecorations: ['sweat'],
+    bodyClass: 'alert-freeze',
+    priority: 'medium',
+  },
+
   // ── Sleep motions ──
+
   {
     id: 'sleep-curl',
     group: 'sleep',
@@ -77,8 +218,75 @@ export const MOTION_TEMPLATES: MotionTemplate[] = [
     bodyClass: 'sleep-zzz',
     priority: 'medium',
   },
+  {
+    id: 'sleep-dream',
+    group: 'sleep',
+    durationMs: 5500,
+    cooldownMs: 30000,
+    weight: 2,
+    allowedEmotions: ['sleeping'],
+    interruptible: true,
+    sceneDecorations: ['heart'],
+    bodyClass: 'sleep-dream',
+    priority: 'medium',
+  },
+
+  // ── Excited motions ──
+
+  {
+    id: 'excited-spin',
+    group: 'excited',
+    durationMs: 2000,
+    cooldownMs: 20000,
+    weight: 3,
+    allowedEmotions: ['excited'],
+    interruptible: true,
+    sceneDecorations: ['sparkles'],
+    bodyClass: 'excited-spin',
+    priority: 'medium',
+  },
+  {
+    id: 'excited-wiggle',
+    group: 'excited',
+    durationMs: 2500,
+    cooldownMs: 18000,
+    weight: 4,
+    allowedEmotions: ['excited'],
+    interruptible: true,
+    sceneDecorations: [],
+    bodyClass: 'excited-wiggle',
+    priority: 'medium',
+  },
+
+  // ── Happy motions ──
+
+  {
+    id: 'happy-dance',
+    group: 'happy',
+    durationMs: 3000,
+    cooldownMs: 22000,
+    weight: 3,
+    allowedEmotions: ['happy'],
+    interruptible: true,
+    sceneDecorations: ['music'],
+    bodyClass: 'happy-dance',
+    priority: 'medium',
+  },
+  {
+    id: 'happy-heart',
+    group: 'happy',
+    durationMs: 2500,
+    cooldownMs: 25000,
+    weight: 2,
+    allowedEmotions: ['happy'],
+    interruptible: true,
+    sceneDecorations: ['heart'],
+    bodyClass: 'happy-heart',
+    priority: 'medium',
+  },
 
   // ── Snack motions ──
+
   {
     id: 'snack-nibble',
     group: 'snack',
@@ -106,6 +314,7 @@ export const MOTION_TEMPLATES: MotionTemplate[] = [
   },
 
   // ── Play motions ──
+
   {
     id: 'play-hop',
     group: 'play',
@@ -131,8 +340,33 @@ export const MOTION_TEMPLATES: MotionTemplate[] = [
     trigger: 'doubleTap',
     priority: 'high',
   },
+  {
+    id: 'play-chase-tail',
+    group: 'play',
+    durationMs: 3000,
+    cooldownMs: 30000,
+    weight: 2,
+    allowedEmotions: ['excited', 'happy'],
+    interruptible: true,
+    sceneDecorations: [],
+    bodyClass: 'chase-tail',
+    priority: 'medium',
+  },
+  {
+    id: 'play-pounce',
+    group: 'play',
+    durationMs: 1800,
+    cooldownMs: 22000,
+    weight: 2,
+    allowedEmotions: ['excited', 'alert'],
+    interruptible: true,
+    sceneDecorations: [],
+    bodyClass: 'pounce',
+    priority: 'medium',
+  },
 
   // ── Celebration ──
+
   {
     id: 'self-proud',
     group: 'celebration',
@@ -145,6 +379,18 @@ export const MOTION_TEMPLATES: MotionTemplate[] = [
     bodyClass: 'self-proud',
     trigger: 'levelUp',
     priority: 'high',
+  },
+  {
+    id: 'celebrate-confetti',
+    group: 'celebration',
+    durationMs: 3500,
+    cooldownMs: 60000,
+    weight: 1,
+    allowedEmotions: ['excited'],
+    interruptible: true,
+    sceneDecorations: ['confetti', 'sparkles'],
+    bodyClass: 'celebrate-confetti',
+    priority: 'medium',
   },
 ]
 

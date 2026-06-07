@@ -18,13 +18,16 @@ describe('petMotionEngine', () => {
 
   describe('selectMotion', () => {
     it('returns null when no motions are eligible for the emotion', () => {
-      const result = selectMotion('alert', 12)
+      // sad has no motions configured
+      const result = selectMotion('sad', 12)
       expect(result).toBeNull()
     })
 
-    it('returns null for sad emotion', () => {
-      const result = selectMotion('sad', 12)
-      expect(result).toBeNull()
+    it('returns a motion for alert emotion', () => {
+      // alert-freeze and play-pounce are configured for alert
+      const result = selectMotion('alert', 12)
+      expect(result).not.toBeNull()
+      expect(result!.allowedEmotions).toContain('alert')
     })
 
     it('returns a valid motion for idle emotion', () => {

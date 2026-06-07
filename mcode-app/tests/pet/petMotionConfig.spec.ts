@@ -14,9 +14,8 @@ describe('petMotionConfig', () => {
       expect(MOTION_TEMPLATES.length).toBeGreaterThan(0)
     })
 
-    it('has expected phase 1 motion count', () => {
-      // We defined exactly 10 motions in the spec
-      expect(MOTION_TEMPLATES.length).toBe(10)
+    it('has at least 25 motions', () => {
+      expect(MOTION_TEMPLATES.length).toBeGreaterThanOrEqual(25)
     })
 
     it('all motion IDs are unique', () => {
@@ -70,12 +69,14 @@ describe('petMotionConfig', () => {
   describe('getMotionsByGroup', () => {
     it('returns correct count for idle group', () => {
       const idleMotions = getMotionsByGroup('idle')
-      expect(idleMotions.length).toBe(3) // look-around, tail-swish, stretch-yawn
+      // look-around, tail-swish, ear-twitch, groom, sneeze, shake, stretch-yawn
+      expect(idleMotions.length).toBe(7)
     })
 
     it('returns correct count for sleep group', () => {
       const sleepMotions = getMotionsByGroup('sleep')
-      expect(sleepMotions.length).toBe(2) // sleep-curl, sleep-zzz
+      // sleep-curl, sleep-zzz, sleep-dream
+      expect(sleepMotions.length).toBe(3)
     })
 
     it('returns empty array for unknown group', () => {
@@ -93,15 +94,20 @@ describe('petMotionConfig', () => {
 
     it('returns sleep motions for sleeping emotion', () => {
       const motions = getMotionsByEmotion('sleeping')
-      expect(motions.length).toBe(2)
+      // sleep-curl, sleep-zzz, sleep-dream
+      expect(motions.length).toBe(3)
       for (const m of motions) {
         expect(m.allowedEmotions).toContain('sleeping')
       }
     })
 
-    it('returns no motions for alert emotion (none configured)', () => {
+    it('returns motions for alert emotion', () => {
       const motions = getMotionsByEmotion('alert')
-      expect(motions.length).toBe(0)
+      // alert-freeze, play-pounce
+      expect(motions.length).toBeGreaterThanOrEqual(1)
+      for (const m of motions) {
+        expect(m.allowedEmotions).toContain('alert')
+      }
     })
 
     it('returns no motions for sad emotion', () => {
