@@ -369,10 +369,8 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         session.pendingPermission = null
         if (event.data.status === "error") {
           session.status = "error"
-          session.errorMessage = firstString(event.data.error, event.data.output) || "工具调用失败"
         } else {
           session.status = "running_tool"
-          session.errorMessage = null
         }
         if (!session.liveMessage) break
 
@@ -910,25 +908,8 @@ function deriveRuntimeError(snapshot: any, liveMessage: LiveMessage | null): str
   if (status === "error") {
     return (
       firstString(snapshot?.error, snapshot?.message, snapshot?.detail) ||
-      extractLiveMessageError(liveMessage) ||
       "会话运行失败"
     )
-  }
-  return extractLiveMessageError(liveMessage)
-}
-
-function extractLiveMessageError(liveMessage: LiveMessage | null): string | null {
-  if (!liveMessage?.content?.length) return null
-  for (let index = liveMessage.content.length - 1; index >= 0; index -= 1) {
-    const part = liveMessage.content[index]
-    if (part.type === "tool_call") {
-      const message = firstString(part.tool_call?.error)
-      if (message) return message
-    }
-    if (part.type === "text" && index === liveMessage.content.length - 1) {
-      const text = firstString(part.text)
-      if (text && /^error[:：]/i.test(text)) return text
-    }
   }
   return null
 }

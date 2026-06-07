@@ -3301,6 +3301,21 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   padding-top: 48rpx;
 }
 
+.shared-live-hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  padding: 10rpx 24rpx;
+  background-color: var(--mcode-page-bg);
+}
+
+.shared-live-hint__text {
+  font-size: 22rpx;
+  color: var(--mcode-text-tertiary);
+  text-align: center;
+}
+
 .history-status {
   display: flex;
   align-items: center;
