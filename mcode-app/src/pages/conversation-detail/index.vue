@@ -95,7 +95,24 @@
             <view class="permission-card__badge"></view>
             <text class="permission-card__title">需要授权</text>
           </view>
-          <text class="permission-card__desc">{{ pendingPermissionDescription }}</text>
+          <view v-if="pendingPermissionTextParts.length > 0" class="permission-card__desc">
+            <text
+              v-for="(part, index) in pendingPermissionTextParts"
+              :key="`permission-text-${index}`"
+              class="permission-card__desc-line"
+            >
+              {{ part }}
+            </text>
+          </view>
+          <scroll-view
+            v-if="pendingPermissionCommandBlock"
+            scroll-x
+            class="permission-card__command-scroll"
+          >
+            <view class="permission-card__command">
+              <text class="permission-card__command-text">{{ pendingPermissionCommandBlock }}</text>
+            </view>
+          </scroll-view>
           <view
             v-if="pendingPermissionCard.options.length > 0"
             class="permission-card__actions"
@@ -710,6 +727,11 @@ const pendingPermissionCard = computed<PermissionRequest | null>(() => session.v
 const pendingPermissionDescription = computed(() => {
   return pendingPermissionCard.value?.description || "智能体请求继续当前操作"
 })
+const pendingPermissionDescriptionParts = computed(() =>
+  splitPermissionDescription(pendingPermissionDescription.value)
+)
+const pendingPermissionTextParts = computed(() => pendingPermissionDescriptionParts.value.textParts)
+const pendingPermissionCommandBlock = computed(() => pendingPermissionDescriptionParts.value.commandBlock)
 const detailConfigProjection = computed(() =>
   projectDetailConfigOptions(detailAgentConfig.value.configOptions)
 )
@@ -2831,6 +2853,77 @@ function taskStatusLabel(status: PlanTaskStatus): string {
   return "待处理"
 }
 
+function splitPermissionDescription(description: string): {
+  textParts: string[]
+  commandBlock: string
+} {
+  const text = String(description || "").trim()
+  if (!text) {
+    return {
+      textParts: ["智能体请求继续当前操作"],
+      commandBlock: "",
+    }
+  }
+
+  const normalized = text.replace(/\r\n/g, "\n")
+  const lines = normalized
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+
+  const commandLines: string[] = []
+  const textParts: string[] = []
+  let collectingCommand = false
+
+  lines.forEach((line) => {
+    if (looksLikePermissionCommandLine(line)) {
+      collectingCommand = true
+      commandLines.push(stripPermissionCommandPrefix(line))
+      return
+    }
+
+    if (collectingCommand && looksLikeCommandContinuation(line)) {
+      commandLines.push(line)
+      return
+    }
+
+    collectingCommand = false
+    textParts.push(line)
+  })
+
+  if (commandLines.length === 0) {
+    return {
+      textParts: [normalized],
+      commandBlock: "",
+    }
+  }
+
+  return {
+    textParts,
+    commandBlock: commandLines.join("\n"),
+  }
+}
+
+function looksLikePermissionCommandLine(line: string): boolean {
+  if (!line) return false
+  if (/^(command|cmd|命令|执行命令)\s*[:：]/i.test(line)) return true
+  if (line.length >= 72 && /[\\/]/.test(line)) return true
+  if (line.length >= 96 && /--?[a-z0-9]/i.test(line)) return true
+  return false
+}
+
+function looksLikeCommandContinuation(line: string): boolean {
+  if (!line) return false
+  if (/^(>|\\$|#)/.test(line)) return true
+  if (/^(--?[a-z0-9]|\/|\.\.?[\\/])/.test(line)) return true
+  if (line.length >= 48 && /[=\\/]/.test(line)) return true
+  return false
+}
+
+function stripPermissionCommandPrefix(line: string): string {
+  return line.replace(/^(command|cmd|命令|执行命令)\s*[:：]\s*/i, "")
+}
+
 function countByStatus(status: PlanTaskStatus): number {
   return planTasks.value.filter((task) => task.status === status).length
 }
@@ -3243,12 +3336,16 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   display: flex;
   flex-direction: column;
   gap: 14rpx;
+  width: 100%;
+  min-width: 0;
   margin-bottom: 16rpx;
   padding: 22rpx 24rpx;
   border-radius: 22rpx;
   background: linear-gradient(180deg, color-mix(in srgb, var(--mcode-warning) 12%, var(--mcode-card-bg) 88%) 0%, var(--mcode-card-bg) 100%);
   border: 1rpx solid color-mix(in srgb, var(--mcode-warning) 28%, transparent);
   box-shadow: 0 10rpx 28rpx rgba(250, 173, 20, 0.08);
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
 .permission-card__header {
@@ -3272,36 +3369,75 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 }
 
 .permission-card__desc {
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+  width: 100%;
+  min-width: 0;
   font-size: 24rpx;
   line-height: 1.6;
   color: var(--mcode-text-secondary);
+}
+
+.permission-card__desc-line {
+  display: block;
+  width: 100%;
+  word-break: break-all;
+}
+
+.permission-card__command-scroll {
+  width: 100%;
+  max-width: 100%;
+  border-radius: 16rpx;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--mcode-text-primary) 5%, var(--mcode-card-bg) 95%);
+}
+
+.permission-card__command {
+  min-width: 100%;
+  padding: 18rpx 20rpx;
+  box-sizing: border-box;
+}
+
+.permission-card__command-text {
+  display: block;
+  font-size: 22rpx;
+  line-height: 1.45;
+  font-family: "Courier New", monospace;
+  white-space: pre;
+  color: var(--mcode-text-primary);
 }
 
 .permission-card__actions {
   display: flex;
   flex-direction: column;
   gap: 14rpx;
+  min-width: 0;
 }
 
 .permission-card__option {
   display: flex;
   flex-direction: column;
   gap: 8rpx;
+  width: 100%;
+  min-width: 0;
 }
 
 .permission-card__action {
   width: 100%;
   min-height: 72rpx;
-  padding: 0 24rpx;
+  padding: 16rpx 24rpx;
   border: none;
   border-radius: 18rpx;
   background: color-mix(in srgb, var(--mcode-warning) 16%, var(--mcode-card-bg) 84%);
   color: color-mix(in srgb, var(--mcode-warning) 64%, var(--mcode-text-primary) 36%);
   font-size: 24rpx;
   font-weight: 600;
-  line-height: 72rpx;
+  line-height: 1.4;
   text-align: center;
   box-sizing: border-box;
+  white-space: normal;
+  word-break: break-all;
 }
 
 .permission-card__action::after {
@@ -3317,14 +3453,18 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 }
 
 .permission-card__option-desc {
+  display: block;
+  width: 100%;
   font-size: 22rpx;
   line-height: 1.5;
   color: var(--mcode-text-tertiary);
+  word-break: break-all;
 }
 
 .permission-card__empty {
   font-size: 22rpx;
   color: var(--mcode-text-tertiary);
+  word-break: break-all;
 }
 
 .slash-panel {
