@@ -666,7 +666,10 @@ interface QuickReplyItem {
 const auth = useAuthStore()
 const cacheStore = useConversationCacheStore()
 const runtime = useConversationRuntimeStore()
-const INITIAL_TURN_BATCH = 50
+const INITIAL_TURN_BATCH = 20
+const INITIAL_TURN_EXPAND_BATCH = 30
+const INITIAL_TURN_MAX_BATCH = 200
+const INITIAL_USER_TURN_TARGET = 8
 const PROMPT_START_TIMEOUT_MS = 4000
 const quickReplyItems: QuickReplyItem[] = [
   { label: "yes", value: "yes" },
@@ -1257,7 +1260,10 @@ async function loadConversation() {
       syncConversationTitle(localSummary?.title)
       persistedRuntime = await getRuntime(conversationId.value)
       if (!hasHotRuntime) {
-        localTurns = await getNewestTurns(conversationId.value, initialTurnLimit)
+        localTurns = await getNewestTurns(
+          conversationId.value,
+          Math.min(initialTurnLimit, INITIAL_TURN_BATCH)
+        )
       }
     } catch (error) {
       console.warn("local conversation hydrate skipped", error)
@@ -1315,6 +1321,7 @@ async function loadConversation() {
       oldestLoadedCursor.value = getOldestCursorFromPersistedTurns(localTurns)
       hasMoreHistory.value = totalLocalTurnCount > localTurns.length
       finishInitialLoad(cachedViewState, persistedRuntime)
+      void reconcileRemoteTurnsAfterLocalHydrate(runtimeSession, cachedViewState, initialTurnLimit)
     } else {
       await hydrateRemoteMetadata()
       const gateway = await getDetailGateway()
@@ -1453,7 +1460,7 @@ async function refreshSessionTurnsFromDb(
   cachedViewState: ReturnType<typeof cacheStore.restore>,
   limit = resolveInitialTurnLimit(cachedViewState)
 ) {
-  const refreshedTurns = await getNewestTurns(conversationId.value, limit)
+  const refreshedTurns = await getNewestTurnsWithUserCoverage(conversationId.value, limit)
   const totalTurnCount = await countConversationTurns(conversationId.value)
   detailDebugLog("db-refresh", {
     limit,
@@ -1477,6 +1484,66 @@ async function refreshSessionTurnsFromDb(
     .map(mapPersistedTurnToMessage)
   oldestLoadedCursor.value = getOldestCursorFromPersistedTurns(refreshedTurns)
   hasMoreHistory.value = totalTurnCount > refreshedTurns.length
+}
+
+async function reconcileRemoteTurnsAfterLocalHydrate(
+  runtimeSession: ReturnType<typeof runtime.getOrCreateSession>,
+  cachedViewState: ReturnType<typeof cacheStore.restore>,
+  limit: number
+) {
+  if (!conversationId.value) return
+  if (hasActiveRuntimeState(runtimeSession)) return
+
+  const loadedUserTurns = runtimeSession.localTurns.filter((turn) => turn.role === "user").length
+  if (loadedUserTurns >= INITIAL_USER_TURN_TARGET && !hasMoreHistory.value) return
+
+  try {
+    const gateway = await getDetailGateway()
+    const result = await gateway.call<any>("get_folder_conversation", {
+      conversationId: conversationId.value,
+    })
+    detailDebugLog("local-hydrate-remote-reconcile", summarizeDetailTurns(result))
+    await persistConversationDetailSnapshot({
+      instanceKey: resolveDetailInstanceKey(),
+      conversationId: conversationId.value,
+      detail: result,
+      fallbackFolderId: folderId.value,
+    })
+    await refreshSessionTurnsFromDb(runtimeSession, cachedViewState, limit)
+  } catch (error) {
+    detailDebugLog("local-hydrate-remote-reconcile-failed", {
+      message: toErrorMessage(error),
+    })
+    console.warn("reconcile remote turns after local hydrate skipped", error)
+  }
+}
+
+async function getNewestTurnsWithUserCoverage(
+  targetConversationId: number,
+  limit: number
+) {
+  let turns = await getNewestTurns(targetConversationId, limit)
+  if (turns.length === 0) return turns
+
+  const userTurnCount = (items: PersistedTurnWithParts[]) =>
+    items.filter((item) => String(item.role || "") === "user").length
+
+  let oldestCursor = getOldestCursorFromPersistedTurns(turns)
+  while (
+    oldestCursor != null &&
+    turns.length < INITIAL_TURN_MAX_BATCH &&
+    userTurnCount(turns) < INITIAL_USER_TURN_TARGET
+  ) {
+    const remaining = INITIAL_TURN_MAX_BATCH - turns.length
+    const batchSize = Math.min(INITIAL_TURN_EXPAND_BATCH, remaining)
+    const older = await getOlderTurns(targetConversationId, oldestCursor, batchSize)
+    if (older.length === 0) break
+    turns = [...turns, ...older]
+    oldestCursor = getOldestCursorFromPersistedTurns(turns)
+    if (older.length < batchSize) break
+  }
+
+  return turns
 }
 
 function resolveInitialTurnLimit(

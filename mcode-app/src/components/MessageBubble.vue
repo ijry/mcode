@@ -155,8 +155,8 @@ const emit = defineEmits<{
   regenerate: []
 }>()
 
-type DisplayPart = ContentPart & {
-  type: ContentPart["type"] | "tool_call_group"
+type DisplayPart = ContentPart | {
+  type: "tool_call_group"
   tool_calls?: ToolCall[]
 }
 
@@ -465,10 +465,17 @@ function normalizeAgentType(raw?: string) {
 }
 
 /* ===== 图片 ===== */
-.part-image { margin: 8rpx 0; }
+.part-image {
+  width: 520rpx;
+  max-width: 100%;
+  margin: 8rpx 0;
+  overflow: hidden;
+}
 
 .msg-image {
+  display: block;
   width: 100%;
+  max-width: 100%;
   border-radius: 12rpx;
 }
 

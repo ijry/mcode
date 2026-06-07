@@ -1,5 +1,24 @@
 import { TTSOptions, TTSCallbacks, TTSVoice } from "../interface/index.uts"
 
+function invokeCallback(callback: any, arg?: any): void {
+  if (callback == null) return
+  if (typeof callback === "function") {
+    if (arg == null) {
+      callback()
+    } else {
+      callback(arg)
+    }
+    return
+  }
+  if (typeof callback.invoke === "function") {
+    if (arg == null) {
+      callback.invoke()
+    } else {
+      callback.invoke(arg)
+    }
+  }
+}
+
 /**
  * Web平台TTS模块（使用Web Speech API）
  */
@@ -9,7 +28,7 @@ export const TTSModule = {
    */
   speak(options: TTSOptions, callbacks?: TTSCallbacks): void {
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
-      callbacks?.onError?.invoke("Web Speech API not supported")
+      invokeCallback(callbacks?.onError, "Web Speech API not supported")
       return
     }
 
@@ -42,22 +61,22 @@ export const TTSModule = {
 
     // 设置回调
     utterance.onstart = () => {
-      callbacks?.onStart?.invoke()
+      invokeCallback(callbacks?.onStart)
     }
 
     utterance.onend = () => {
-      callbacks?.onComplete?.invoke()
+      invokeCallback(callbacks?.onComplete)
     }
 
     utterance.onerror = (event) => {
-      callbacks?.onError?.invoke("TTS error: " + event.error)
+      invokeCallback(callbacks?.onError, "TTS error: " + event.error)
     }
 
     utterance.onboundary = (event) => {
       // 计算进度
       if (event.charIndex != null && options.text.length > 0) {
         const progress = event.charIndex / options.text.length
-        callbacks?.onProgress?.invoke(progress)
+        invokeCallback(callbacks?.onProgress, progress)
       }
     }
 
