@@ -190,6 +190,20 @@ export async function getOlderTurns(
 }
 
 export async function upsertConversationSummary(input: ConversationSummaryRecord) {
+  await upsertConversationSummaryInternal(input)
+}
+
+export async function upsertConversationSummaries(inputs: ConversationSummaryRecord[]) {
+  if (inputs.length === 0) return
+
+  await sqliteDriver.transaction(async () => {
+    for (const input of inputs) {
+      await upsertConversationSummaryInternal(input)
+    }
+  })
+}
+
+async function upsertConversationSummaryInternal(input: ConversationSummaryRecord) {
   const current = await getConversationSummaryById(input.instanceKey, input.id)
   const next = current
     ? mergeConversationSummaryRecord(current, input)

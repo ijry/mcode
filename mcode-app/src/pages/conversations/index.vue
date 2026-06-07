@@ -487,6 +487,7 @@ import { normalizeConversationSummaryStatus } from "@/services/conversation/conv
 import {
   listConversationSummaries,
   upsertConversationSummary,
+  upsertConversationSummaries,
 } from "@/services/db/repositories/conversationRepository"
 import { getRegisteredRemoteInstanceDescriptor } from "@/services/realtime/remoteInstanceRegistry"
 import type { RelaySessionInfo } from "@/services/gateway"
@@ -1317,12 +1318,6 @@ async function refreshConnectionGroupFromLocalCache(instanceKey: string) {
       conversations: localConversations,
     })
   )
-  void scheduleOverviewConversationRefreshForConnection({
-    conn,
-    instanceKey,
-    folders,
-    tabs,
-  })
 }
 
 async function scheduleOverviewConversationRefresh(input: {
@@ -1360,31 +1355,15 @@ async function scheduleOverviewConversationRefresh(input: {
   await task
 }
 
-async function scheduleOverviewConversationRefreshForConnection(input: {
-  conn: ConnectionItem
-  instanceKey: string
-  folders: Project[]
-  tabs: OpenedTabItem[]
-}) {
-  const gateway = await createConnectionGateway(input.conn)
-  await scheduleOverviewConversationRefresh({
-    conn: input.conn,
-    gateway,
-    instanceKey: input.instanceKey,
-    folders: input.folders,
-    tabs: input.tabs,
-  })
-}
-
 async function persistConversationSummaries(
   instanceKey: string,
   conversations: Conversation[]
 ) {
   try {
     await ensureConversationSchema()
-    await Promise.all(
+    await upsertConversationSummaries(
       conversations.map((conversation) =>
-        upsertConversationSummary(mapConversationToSummaryRecord(instanceKey, conversation))
+        mapConversationToSummaryRecord(instanceKey, conversation)
       )
     )
   } catch (error) {
