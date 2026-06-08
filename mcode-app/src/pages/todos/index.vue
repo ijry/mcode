@@ -1,80 +1,71 @@
 <template>
-  <view class="page" :style="[upThemeVars, upThemePageStyle]">
-    <!-- 添加待办 -->
-    <view class="add-bar" :style="upThemeCardStyle">
-      <view class="add-input-wrap">
-        <up-textarea
-          v-model="newTodoText"
-          class="add-input-textarea"
-          placeholder="输入待办事项..."
-          autoHeight
-          border="surround"
-          :maxlength="-1"
-          :count="false"
-        ></up-textarea>
+  <view class="page todo-page" :style="[upThemeVars, upThemePageStyle]">
+    <view class="todo-shell">
+      <TodoPageHeader
+        v-model:activeTab="activeTab"
+        v-model:searchKeyword="searchKeyword"
+        @create="openCreatePopup"
+      />
+
+      <view class="todo-body" v-if="activeTab === 'local'">
+        <TodoSectionBlock title="进行中">
+          <TodoCardList
+            :items="localInProgressTodos"
+            mode="in-progress"
+            :editingId="editingId"
+            :editingText="editingText"
+            emptyText="暂无进行中的待办"
+            @toggle="toggleTodo"
+            @edit="startEdit"
+            @update:editingText="editingText = $event"
+            @finishEdit="finishEdit"
+            @send="openSendSheet"
+            @menu="openTodoMenu"
+          />
+        </TodoSectionBlock>
+
+        <TodoSectionBlock
+          title="已完成"
+          actionText="清除全部"
+          :disabled="localCompletedTodos.length === 0"
+          @action="clearCompletedTodos"
+        >
+          <TodoCardList
+            :items="localCompletedTodos"
+            mode="completed"
+            emptyText="暂无已完成待办"
+            @toggle="toggleTodo"
+            @send="openSendSheet"
+            @menu="openTodoMenu"
+          />
+        </TodoSectionBlock>
       </view>
-      <u-button
-        class="add-btn"
-        type="primary"
-        size="small"
-        :disabled="!newTodoText.trim()"
-        @click="addTodo"
-      >
-        添加
-      </u-button>
-    </view>
 
-    <!-- 待办列表 -->
-    <view class="todo-list" v-if="todos.length > 0" :style="upThemeCardStyle">
-      <view
-        v-for="item in todos"
-        :key="item.id"
-        class="todo-item"
-        :class="{ completed: item.completed }"
-      >
-        <!-- 勾选框 -->
-        <view class="todo-checkbox" @click="toggleTodo(item.id)">
-          <view class="checkbox-circle" :class="{ checked: item.completed }">
-            <u-icon v-if="item.completed" name="checkmark" size="16" color="#fff"></u-icon>
-          </view>
-        </view>
+      <view v-else class="todo-body">
+        <TodoSectionBlock title="进行中">
+          <TodoCardList
+            :items="[]"
+            mode="cloud-placeholder"
+            emptyText=""
+            @placeholderAction="openCreatePopup"
+          />
+        </TodoSectionBlock>
 
-        <!-- 文字 / 编辑输入框 -->
-        <view class="todo-text-wrap" @click="startEdit(item)">
-          <text v-if="editingId !== item.id" class="todo-text">{{ item.text }}</text>
-          <up-textarea
-            v-else
-            v-model="editingText"
-            class="todo-edit-textarea"
-            placeholder="输入待办事项..."
-            autoHeight
-            :focus="true"
-            :maxlength="-1"
-            :count="false"
-            border="surround"
-            @blur="finishEdit(item)"
-            @confirm="finishEditOnConfirm(item, $event)"
-          ></up-textarea>
-        </view>
-
-        <!-- 操作按钮 -->
-        <view class="todo-actions">
-          <view class="todo-action-btn" @click.stop="openSendSheet(item)">
-            <u-icon name="chat" size="20" color="#2979ff"></u-icon>
-          </view>
-          <view class="todo-action-btn" @click.stop="openTodoMenu(item)">
-            <u-icon name="more-dot-fill" size="18" :color="upThemeVar('--up-light-color', '#c0c4cc')"></u-icon>
-          </view>
-        </view>
+        <TodoSectionBlock title="已完成" actionText="清除全部" @action="clearCompletedTodos">
+          <TodoCardList
+            :items="[]"
+            mode="cloud-placeholder"
+            emptyText=""
+            @placeholderAction="clearCompletedTodos"
+          />
+        </TodoSectionBlock>
       </view>
     </view>
 
-    <!-- 空状态 -->
-    <view class="empty-state" v-else>
-      <u-icon name="checkbox-mark" size="100" :color="upThemeVar('--up-disabled-color', '#c8c9cc')"></u-icon>
-      <text class="empty-text">暂无待办事项</text>
-      <text class="empty-hint">在上方输入框添加待办</text>
-    </view>
+    <TodoCreatePopup
+      v-model:show="showCreatePopup"
+      @submit="createTodoFromPopup"
+    />
 
     <!-- 发送到新会话底部弹层 -->
     <up-popup v-model:show="showSendDialog" mode="bottom" :round="28">
@@ -178,6 +169,10 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from "vue"
 import { onShow } from "@dcloudio/uni-app"
+import TodoCardList from "./components/TodoCardList.vue"
+import TodoCreatePopup from "./components/TodoCreatePopup.vue"
+import TodoPageHeader from "./components/TodoPageHeader.vue"
+import TodoSectionBlock from "./components/TodoSectionBlock.vue"
 import { useAuthStore } from "@/stores/auth"
 import { createGateway } from "@/services/gateway"
 import { getDirectToken } from "@/services/gateway/directTokenStore"
@@ -185,15 +180,18 @@ import { toErrorMessage } from "@/services/gateway/error"
 import type { RelaySessionInfo } from "@/services/gateway"
 import type { ConnectionInfo } from "@/types/acp"
 import { usePetStore } from "@/stores/pet"
+import {
+  applyTodoEdit,
+  createTodoItem,
+  getVisibleTodoSections,
+  hideCompletedTodos,
+  normalizeStoredTodos,
+  toggleTodoCompletion,
+  type TodoItem,
+  type TodoTab,
+} from "./todoState"
 
 /* ===== 类型 ===== */
-interface TodoItem {
-  id: string
-  text: string
-  completed: boolean
-  createdAt: number
-}
-
 interface ConnectionItem {
   name: string
   mode: "direct" | "relay"
@@ -223,9 +221,11 @@ const STORAGE_KEY = "mcode_todos"
 const auth = useAuthStore()
 
 const todos = ref<TodoItem[]>([])
-const newTodoText = ref("")
+const activeTab = ref<TodoTab>("local")
+const searchKeyword = ref("")
 const editingId = ref<string | null>(null)
 const editingText = ref("")
+const showCreatePopup = ref(false)
 
 /* ===== 发送到新会话 ===== */
 const showSendDialog = ref(false)
@@ -261,6 +261,11 @@ const todoActions = [
 const selectedConnectionGroup = computed(() =>
   connectionGroups.value.find((group) => group.key === selectedConnectionKey.value)
 )
+const localSections = computed(() =>
+  getVisibleTodoSections(todos.value, searchKeyword.value)
+)
+const localInProgressTodos = computed(() => localSections.value.inProgress)
+const localCompletedTodos = computed(() => localSections.value.completed)
 
 const projectColumns = computed(() => [
   (selectedConnectionGroup.value?.projects || []).map((p) => ({
@@ -291,42 +296,63 @@ onShow(() => {
 
 /* ===== 待办增删改查 ===== */
 function loadTodos() {
-  const saved = uni.getStorageSync(STORAGE_KEY)
-  if (saved && Array.isArray(saved)) {
-    todos.value = saved
+  try {
+    todos.value = normalizeStoredTodos(uni.getStorageSync(STORAGE_KEY))
+  } catch (error) {
+    console.warn("load todos failed:", error)
+    todos.value = []
   }
 }
 
 function saveTodos() {
-  uni.setStorageSync(STORAGE_KEY, todos.value)
+  try {
+    uni.setStorageSync(STORAGE_KEY, todos.value)
+  } catch (error) {
+    console.warn("save todos failed:", error)
+    uni.showToast({ title: "保存失败", icon: "none" })
+  }
 }
 
-function addTodo() {
-  const text = newTodoText.value.trim()
-  if (!text) return
+function openCreatePopup() {
+  if (activeTab.value === "cloud") {
+    uni.showToast({ title: "云端待办即将上线", icon: "none" })
+    return
+  }
+  showCreatePopup.value = true
+}
 
-  todos.value.unshift({
-    id: Date.now().toString(),
-    text,
-    completed: false,
-    createdAt: Date.now(),
-  })
-  newTodoText.value = ""
+function createTodoFromPopup(text: string) {
+  todos.value.unshift(createTodoItem(text, Date.now()))
   saveTodos()
 }
 
 function toggleTodo(id: string) {
-  const item = todos.value.find((t) => t.id === id)
-  if (item) {
-    const wasIncomplete = !item.completed
-    item.completed = !item.completed
-    saveTodos()
-    if (wasIncomplete && item.completed) {
-      const petStore = usePetStore()
-      petStore.addExp('user', 15)
-      petStore.recordStat('totalTodosCompleted')
-    }
+  const before = todos.value.find((item) => item.id === id)
+  const wasIncomplete = Boolean(before && !before.completed)
+  todos.value = toggleTodoCompletion(todos.value, id, Date.now())
+  saveTodos()
+  if (wasIncomplete) {
+    const petStore = usePetStore()
+    petStore.addExp("user", 15)
+    petStore.recordStat("totalTodosCompleted")
   }
+}
+
+function clearCompletedTodos() {
+  if (activeTab.value === "cloud") {
+    uni.showToast({ title: "云端待办即将上线", icon: "none" })
+    return
+  }
+  uni.showModal({
+    title: "清除已完成",
+    content: "这些待办会被标记隐藏，之后不再显示。",
+    success: (res) => {
+      if (!res.confirm) return
+      const visibleCompletedIds = localCompletedTodos.value.map((item) => item.id)
+      todos.value = hideCompletedTodos(todos.value, visibleCompletedIds, Date.now())
+      saveTodos()
+    },
+  })
 }
 
 function startEdit(item: TodoItem) {
@@ -335,15 +361,12 @@ function startEdit(item: TodoItem) {
   editingText.value = item.text
 }
 
-function finishEdit(item: TodoItem) {
-  const text = editingText.value.trim()
-  if (text && text !== item.text) {
-    item.text = text
-    saveTodos()
-  } else if (!text) {
-    todos.value = todos.value.filter((t) => t.id !== item.id)
-    saveTodos()
+function finishEdit(item: TodoItem, value?: string) {
+  if (typeof value === "string") {
+    editingText.value = value
   }
+  todos.value = applyTodoEdit(todos.value, item.id, editingText.value)
+  saveTodos()
   editingId.value = null
   editingText.value = ""
 }
@@ -704,157 +727,22 @@ async function confirmSend() {
 <style scoped lang="scss">
 .page {
   min-height: 100vh;
-  background-color: var(--mcode-page-bg);
-  padding-bottom: calc(40rpx + env(safe-area-inset-bottom));
 }
 
-.add-bar {
-  display: flex;
-  align-items: center;
-  gap: 20rpx;
-  padding: 20rpx 24rpx;
-  background-color: var(--mcode-card-bg);
-  border-bottom: 1rpx solid var(--mcode-border-color);
+.todo-page {
+  background: #f5f5f7;
 }
 
-.add-input-wrap {
-  flex: 1;
-  min-width: 0;
-  background-color: var(--mcode-card-soft-bg);
-  border-radius: 16rpx;
-  padding: 8rpx 20rpx;
+.todo-shell {
+  min-height: 100vh;
+  padding: 28rpx 24rpx 40rpx;
 }
 
-.add-input-textarea {
-  width: 100%;
-
-  :deep(.u-textarea) {
-    padding: 0;
-    background: transparent;
-    border: none !important;
-  }
-
-  :deep(.u-textarea--no-radius) {
-    background: transparent !important;
-  }
-
-  :deep(.u-textarea__field),
-  :deep(.uni-textarea-textarea),
-  :deep(textarea) {
-    min-height: 42rpx;
-    line-height: 42rpx;
-    font-size: 30rpx;
-    background: transparent !important;
-  }
-}
-
-.add-btn {
-  width: auto !important;
-  flex-shrink: 0;
-}
-
-.todo-list {
-  margin: 20rpx 8rpx;
-  background-color: var(--mcode-card-bg);
-  border-radius: 26rpx;
-  overflow: hidden;
-}
-
-.todo-item {
-  display: flex;
-  align-items: center;
-  padding: 28rpx 24rpx;
-  border-bottom: 1rpx solid var(--mcode-border-color);
-  gap: 20rpx;
-
-  &:last-child {
-    border-bottom: none;
-  }
-}
-
-.todo-checkbox {
-  flex-shrink: 0;
-}
-
-.checkbox-circle {
-  width: 44rpx;
-  height: 44rpx;
-  border-radius: 50%;
-  border: 3rpx solid var(--mcode-border-color);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s;
-
-  &.checked {
-    background-color: #2979ff;
-    border-color: #2979ff;
-  }
-}
-
-.todo-text-wrap {
-  flex: 1;
-  min-width: 0;
-}
-
-.todo-edit-textarea {
-  width: 100%;
-}
-
-.todo-text {
-  font-size: 30rpx;
-  color: var(--mcode-text-primary);
-  line-height: 1.5;
-}
-
-.completed .todo-text {
-  color: var(--mcode-text-tertiary);
-  text-decoration: line-through;
-}
-
-.todo-actions {
-  display: flex;
-  align-items: center;
-  gap: 8rpx;
-  flex-shrink: 0;
-}
-
-.todo-action-btn {
-  width: 52rpx;
-  height: 52rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-
-  &:active {
-    background-color: var(--mcode-card-soft-bg);
-  }
-}
-
-.todo-delete {
-  flex-shrink: 0;
-  padding: 8rpx;
-}
-
-.empty-state {
+.todo-body {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding-top: 200rpx;
-  gap: 16rpx;
-}
-
-.empty-text {
-  font-size: 30rpx;
-  color: var(--mcode-text-tertiary);
-  margin-top: 20rpx;
-}
-
-.empty-hint {
-  font-size: 26rpx;
-  color: var(--mcode-text-tertiary);
+  gap: 28rpx;
+  padding-bottom: calc(36rpx + env(safe-area-inset-bottom));
 }
 
 /* ===== 发送弹层 ===== */
