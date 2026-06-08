@@ -12,12 +12,8 @@
       <u-icon name="arrow-right" :color="upThemeVar('--up-light-color', '#c0c4cc')" size="20"></u-icon>
     </view>
 
-    <view v-if="!isLoggedIn" class="auth-entry">
-      <u-button type="primary" shape="circle" @click="goLogin">登录 / 注册</u-button>
-    </view>
-
     <!-- 功能列表 -->
-    <view class="section" :style="upThemeCardStyle">
+    <view class="section">
       <view class="section-title">外观设置</view>
         <view class="menu-list" :style="upThemeCardStyle">
           <view class="menu-item" @click="showThemeSheet = true">
@@ -33,7 +29,7 @@
         </view>
     </view>
 
-    <view class="section" :style="upThemeCardStyle">
+    <view class="section">
       <view class="section-title">连接管理</view>
       <view class="menu-list" :style="upThemeCardStyle">
         <view class="menu-item" @click="goToConnections">
@@ -54,7 +50,7 @@
       </view>
     </view>
 
-    <view class="section" :style="upThemeCardStyle">
+    <view class="section">
       <view class="section-title">宠物陪伴</view>
       <view class="menu-list" :style="upThemeCardStyle">
         <view class="menu-item" @click="openPetManager">
@@ -67,7 +63,7 @@
       </view>
     </view>
 
-    <view class="section" :style="upThemeCardStyle">
+    <view class="section">
       <view class="section-title">关于</view>
       <view class="menu-list" :style="upThemeCardStyle">
         <view class="menu-item">
@@ -271,10 +267,6 @@ function logout() {
   background-color: var(--up-card-bg-color, #ffffff);
   border-radius: 30rpx;
   box-shadow: none;
-}
-
-.auth-entry {
-  padding: 8rpx 30rpx 4rpx;
 }
 
 .user-info {

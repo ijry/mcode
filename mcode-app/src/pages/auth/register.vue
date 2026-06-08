@@ -186,6 +186,10 @@
       </view>
     </view>
 
+    <view class="auth-notice">
+      <text class="auth-notice__text">用户系统即将退出，敬请期待</text>
+    </view>
+
     <AuthSafetyVerifyPopup
       v-model:show="showVerifyPopup"
       :verifyList="verifyList"
@@ -617,5 +621,21 @@ function handleBack() {
 .auth-link {
   font-size: 26rpx;
   color: var(--mcode-primary);
+}
+
+.auth-notice {
+  position: relative;
+  z-index: 1;
+  margin: 28rpx 28rpx 0;
+  padding: 18rpx 24rpx;
+  border-radius: 24rpx;
+  background: rgba(15, 23, 42, 0.04);
+  text-align: center;
+}
+
+.auth-notice__text {
+  font-size: 22rpx;
+  line-height: 1.6;
+  color: var(--mcode-text-tertiary);
 }
 </style>
