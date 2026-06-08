@@ -1,24 +1,22 @@
 <template>
   <view class="page todo-page" :style="[upThemeVars, upThemePageStyle]">
     <view class="todo-shell">
-      <TodoPageHeader
-        v-model:activeTab="activeTab"
-        v-model:searchKeyword="searchKeyword"
-        @create="openCreatePopup"
-      />
+      <up-sticky class="todo-sticky" :offset-top="0" :custom-nav-height="0" bg-color="#f5f5f7" z-index="20">
+        <TodoPageHeader
+          v-model:activeTab="activeTab"
+          v-model:searchKeyword="searchKeyword"
+          @create="openCreatePopup"
+        />
+      </up-sticky>
 
       <view class="todo-body" v-if="activeTab === 'local'">
         <TodoSectionBlock title="进行中">
           <TodoCardList
             :items="localInProgressTodos"
             mode="in-progress"
-            :editingId="editingId"
-            :editingText="editingText"
             emptyText="暂无进行中的待办"
             @toggle="toggleTodo"
             @edit="startEdit"
-            @update:editingText="editingText = $event"
-            @finishEdit="finishEdit"
             @send="openSendSheet"
             @menu="openTodoMenu"
           />
@@ -65,6 +63,13 @@
     <TodoCreatePopup
       v-model:show="showCreatePopup"
       @submit="createTodoFromPopup"
+    />
+    <TodoCreatePopup
+      v-model:show="showEditPopup"
+      title="编辑待办"
+      submitLabel="保存"
+      :initialValue="editingText"
+      @submit="finishEdit"
     />
 
     <!-- 发送到新会话底部弹层 -->
@@ -226,6 +231,7 @@ const searchKeyword = ref("")
 const editingId = ref<string | null>(null)
 const editingText = ref("")
 const showCreatePopup = ref(false)
+const showEditPopup = ref(false)
 
 /* ===== 发送到新会话 ===== */
 const showSendDialog = ref(false)
@@ -359,24 +365,17 @@ function startEdit(item: TodoItem) {
   if (item.completed) return
   editingId.value = item.id
   editingText.value = item.text
+  showEditPopup.value = true
 }
 
-function finishEdit(item: TodoItem, value?: string) {
-  if (typeof value === "string") {
-    editingText.value = value
-  }
-  todos.value = applyTodoEdit(todos.value, item.id, editingText.value)
+function finishEdit(value: string) {
+  if (!editingId.value) return
+  editingText.value = value
+  todos.value = applyTodoEdit(todos.value, editingId.value, editingText.value)
   saveTodos()
   editingId.value = null
   editingText.value = ""
-}
-
-function finishEditOnConfirm(item: TodoItem, event?: { detail?: { value?: string } }) {
-  const value = event?.detail?.value
-  if (typeof value === "string") {
-    editingText.value = value
-  }
-  finishEdit(item)
+  showEditPopup.value = false
 }
 
 function deleteTodo(id: string) {
@@ -727,6 +726,7 @@ async function confirmSend() {
 <style scoped lang="scss">
 .page {
   min-height: 100vh;
+  padding: 0 !important;
 }
 
 .todo-page {
@@ -735,7 +735,17 @@ async function confirmSend() {
 
 .todo-shell {
   min-height: 100vh;
-  padding: 28rpx 24rpx 40rpx;
+  padding: 0 24rpx 40rpx;
+}
+
+.todo-sticky {
+  position: relative;
+  z-index: 20;
+}
+
+.todo-sticky :deep(.u-sticky__content) {
+  padding-top: 28rpx;
+  background: #f5f5f7;
 }
 
 .todo-body {

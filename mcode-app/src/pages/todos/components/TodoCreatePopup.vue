@@ -1,7 +1,16 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue"
 
-const props = defineProps<{ show: boolean }>()
+const props = withDefaults(defineProps<{
+  show: boolean
+  title?: string
+  submitLabel?: string
+  initialValue?: string
+}>(), {
+  title: "新建待办",
+  submitLabel: "添加待办",
+  initialValue: "",
+})
 
 const emit = defineEmits<{
   (e: "update:show", value: boolean): void
@@ -14,7 +23,7 @@ const canSubmit = computed(() => draftText.value.trim().length > 0)
 watch(
   () => props.show,
   (visible) => {
-    if (!visible) draftText.value = ""
+    draftText.value = visible ? props.initialValue : ""
   }
 )
 
@@ -33,7 +42,7 @@ function submit() {
   <up-popup :show="props.show" mode="bottom" :round="28" @close="closePopup">
     <view class="todo-create-sheet">
       <view class="todo-create-sheet__hd">
-        <text class="todo-create-sheet__title">新建待办</text>
+        <text class="todo-create-sheet__title">{{ props.title }}</text>
         <view class="todo-create-sheet__close" @click="closePopup">
           <up-icon name="close" size="18" color="#909193"></up-icon>
         </view>
@@ -53,7 +62,7 @@ function submit() {
         :disabled="!canSubmit"
         customStyle="margin-top:16rpx"
         @click="submit"
-      >添加待办</up-button>
+      >{{ props.submitLabel }}</up-button>
 
       <view class="todo-create-sheet__safe"></view>
     </view>

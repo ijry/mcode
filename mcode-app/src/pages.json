@@ -18,7 +18,8 @@
       "path": "pages/conversations/index",
       "style": {
         "navigationBarTitleText": "会话",
-        "enablePullDownRefresh": true
+        "enablePullDownRefresh": true,
+        "navigationStyle": "custom"
       }
     },
     {
@@ -32,6 +33,7 @@
     {
       "path": "pages/todos/index",
       "style": {
+        "navigationStyle": "custom",
         "navigationBarTitleText": "待办",
         "enablePullDownRefresh": false
       }
@@ -99,4 +101,3 @@
     "backgroundColor": "#f8f8f8"
   }
 }
-

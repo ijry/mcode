@@ -5,15 +5,11 @@ const props = defineProps<{
   items: TodoItem[]
   mode: "in-progress" | "completed" | "cloud-placeholder"
   emptyText: string
-  editingId?: string | null
-  editingText?: string
 }>()
 
 const emit = defineEmits<{
   (e: "toggle", id: string): void
   (e: "edit", item: TodoItem): void
-  (e: "update:editingText", value: string): void
-  (e: "finishEdit", item: TodoItem, value?: string): void
   (e: "send", item: TodoItem): void
   (e: "menu", item: TodoItem): void
   (e: "placeholderAction"): void
@@ -34,27 +30,10 @@ const emit = defineEmits<{
       </view>
 
       <view class="todo-card__body" @click="props.mode === 'in-progress' && emit('edit', item)">
-        <template v-if="props.mode === 'in-progress' && props.editingId === item.id">
-          <up-textarea
-            class="todo-card__editor"
-            :modelValue="props.editingText || ''"
-            placeholder="输入待办事项..."
-            autoHeight
-            :focus="true"
-            :maxlength="-1"
-            :count="false"
-            border="surround"
-            @update:modelValue="emit('update:editingText', $event)"
-            @blur="emit('finishEdit', item)"
-            @confirm="emit('finishEdit', item, $event?.detail?.value)"
-          ></up-textarea>
-        </template>
-        <template v-else>
-          <text class="todo-card__title">{{ item.text }}</text>
-          <text class="todo-card__meta">
-            {{ props.mode === 'completed' ? '已完成' : '点击编辑或发送到新会话' }}
-          </text>
-        </template>
+        <text class="todo-card__title">{{ item.text }}</text>
+        <text class="todo-card__meta">
+          {{ props.mode === 'completed' ? '已完成' : '点击编辑或发送到新会话' }}
+        </text>
       </view>
 
       <view class="todo-card__side">
@@ -144,31 +123,6 @@ const emit = defineEmits<{
   font-size: 22rpx;
   color: #8b93a5;
   line-height: 1.3;
-}
-
-.todo-card__editor {
-  width: 100%;
-}
-
-.todo-card__editor :deep(.u-textarea) {
-  padding: 0;
-  border: none !important;
-  background: transparent !important;
-}
-
-.todo-card__editor :deep(.u-textarea--no-radius) {
-  background: transparent !important;
-}
-
-.todo-card__editor :deep(.u-textarea__field),
-.todo-card__editor :deep(.uni-textarea-textarea),
-.todo-card__editor :deep(textarea) {
-  min-height: 42rpx;
-  line-height: 42rpx;
-  font-size: 30rpx;
-  font-weight: 600;
-  color: #20242f;
-  background: transparent !important;
 }
 
 .todo-card__side {
