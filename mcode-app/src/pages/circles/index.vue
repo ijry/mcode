@@ -1,7 +1,7 @@
 <template>
   <view class="page circles-page" :style="[upThemeVars, upThemePageStyle]">
     <view class="circles-shell">
-      <up-sticky class="circles-sticky" :offset-top="0" :custom-nav-height="0" :bg-color="upThemeVar('--mcode-page-bg', '#f5f5f7')" z-index="20">
+      <up-sticky class="circles-sticky" :offset-top="0" :custom-nav-height="0" :bg-color="upThemeVar('--up-page-bg-color', '#f5f5f7')" z-index="20">
         <view class="circles-header">
           <view class="circles-header__copy">
             <text class="circles-header__eyebrow">COMMUNITY</text>
@@ -18,11 +18,11 @@
             placeholder="搜索话题、动态和案例"
             :show-action="false"
             shape="round"
-            :bgColor="upThemeVar('--mcode-field-bg', '#e9eaee')"
+            :bgColor="upThemeVar('--up-hover-bg-color', '#eef1f6')"
             borderColor="transparent"
-            :color="upThemeVar('--mcode-text-primary', '#1a1b1f')"
-            :placeholderColor="upThemeVar('--mcode-text-tertiary', '#9ca3af')"
-            :searchIconColor="upThemeVar('--mcode-text-tertiary', '#8b93a5')"
+            :color="upThemeVar('--up-main-color', '#1a1b1f')"
+            :placeholderColor="upThemeVar('--up-tips-color', '#9ca3af')"
+            :searchIconColor="upThemeVar('--up-tips-color', '#8b93a5')"
             :height="44"
           ></up-search>
         </view>
@@ -188,7 +188,13 @@ function showReservedToast(title: string) {
 }
 
 .circles-page {
-  background: var(--mcode-page-bg);
+  --circle-page-bg: var(--up-page-bg-color, #f5f5f7);
+  --circle-card-bg: var(--up-card-bg-color, #ffffff);
+  --circle-soft-bg: var(--up-hover-bg-color, #eef1f6);
+  --circle-border: 1rpx solid color-mix(in srgb, var(--up-border-color, #d8dde8) 72%, transparent);
+  --circle-shadow: 0 20rpx 52rpx rgba(15, 23, 42, 0.08);
+  --circle-soft-shadow: 0 10rpx 28rpx rgba(15, 23, 42, 0.06);
+  background: var(--circle-page-bg);
 }
 
 .circles-shell {
@@ -204,7 +210,7 @@ function showReservedToast(title: string) {
 
 .circles-sticky :deep(.u-sticky__content) {
   padding-top: 28rpx;
-  background: var(--mcode-page-bg);
+  background: var(--circle-page-bg);
 }
 
 .circles-header {
@@ -255,7 +261,7 @@ function showReservedToast(title: string) {
 .circles-searchbar :deep(.u-search__content) {
   border: none !important;
   border-radius: 24rpx !important;
-  background-color: var(--mcode-field-bg) !important;
+  background-color: var(--circle-soft-bg) !important;
 }
 
 .circle-hero,
@@ -264,9 +270,9 @@ function showReservedToast(title: string) {
 .feed-section,
 .post-card {
   border-radius: 32rpx;
-  background: var(--mcode-card-bg) !important;
-  border: var(--mcode-surface-border);
-  box-shadow: var(--mcode-soft-shadow) !important;
+  background: var(--circle-card-bg) !important;
+  border: var(--circle-border);
+  box-shadow: var(--circle-shadow) !important;
 }
 
 .circle-hero {
@@ -275,12 +281,7 @@ function showReservedToast(title: string) {
   gap: 24rpx;
   padding: 30rpx;
   overflow: hidden;
-  background:
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--mcode-primary) 14%, var(--mcode-card-bg) 86%),
-      var(--mcode-card-bg)
-    ) !important;
+  background: var(--circle-card-bg) !important;
 }
 
 .circle-hero__copy {
@@ -322,7 +323,7 @@ function showReservedToast(title: string) {
   min-width: 118rpx;
   padding: 16rpx 18rpx;
   border-radius: 24rpx;
-  background: rgba(255, 255, 255, 0.58);
+  background: var(--circle-soft-bg);
 }
 
 .circle-hero__stat-value {
@@ -343,12 +344,7 @@ function showReservedToast(title: string) {
   margin: 24rpx 0;
   padding: 24rpx 0 24rpx 24rpx;
   overflow: hidden;
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--mcode-primary) 7%, var(--mcode-card-bg) 93%),
-      var(--mcode-card-bg)
-    ) !important;
+  background: var(--circle-card-bg) !important;
 }
 
 .topic-section .section-head {
@@ -371,8 +367,8 @@ function showReservedToast(title: string) {
   flex-shrink: 0;
   padding: 22rpx;
   border-radius: 28rpx;
-  background: color-mix(in srgb, var(--topic-accent) 10%, var(--mcode-card-bg) 90%);
-  border: 1rpx solid color-mix(in srgb, var(--topic-accent) 22%, var(--mcode-card-bg) 78%);
+  background: color-mix(in srgb, var(--topic-accent) 10%, var(--circle-card-bg) 90%);
+  border: 1rpx solid color-mix(in srgb, var(--topic-accent) 22%, var(--circle-card-bg) 78%);
 }
 
 .topic-card__title,
@@ -477,7 +473,7 @@ function showReservedToast(title: string) {
   border-radius: 999rpx;
   font-size: 18rpx;
   font-weight: 800;
-  background: var(--mcode-card-soft-bg);
+  background: var(--circle-soft-bg);
   color: var(--mcode-text-tertiary);
 }
 
@@ -501,17 +497,12 @@ function showReservedToast(title: string) {
   flex-direction: column;
   gap: 18rpx;
   padding: 24rpx 20rpx calc(24rpx + env(safe-area-inset-bottom));
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--mcode-primary) 5%, var(--mcode-card-bg) 95%),
-      var(--mcode-card-bg) 42%
-    ) !important;
+  background: var(--circle-card-bg) !important;
 }
 
 .post-card {
   padding: 24rpx;
-  box-shadow: 0 10rpx 28rpx rgba(15, 23, 42, 0.06) !important;
+  box-shadow: var(--circle-soft-shadow) !important;
 }
 
 .post-card__author {
@@ -591,7 +582,7 @@ function showReservedToast(title: string) {
   margin-top: 20rpx;
   border-radius: 26rpx;
   overflow: hidden;
-  background: var(--mcode-card-soft-bg);
+  background: var(--circle-soft-bg);
 }
 
 .post-card__image {
@@ -612,7 +603,7 @@ function showReservedToast(title: string) {
   border-radius: 999rpx;
   font-size: 20rpx;
   font-weight: 700;
-  background: var(--mcode-card-soft-bg);
+  background: var(--circle-soft-bg);
   color: var(--mcode-text-secondary);
 }
 
@@ -623,7 +614,7 @@ function showReservedToast(title: string) {
   gap: 10rpx;
   margin-top: 22rpx;
   padding-top: 18rpx;
-  border-top: var(--mcode-surface-border);
+  border-top: var(--circle-border);
 }
 
 .post-action {
@@ -640,7 +631,7 @@ function showReservedToast(title: string) {
 }
 
 .post-action--active {
-  background: var(--mcode-card-soft-bg);
+  background: var(--circle-soft-bg);
   color: var(--mcode-text-primary);
 }
 
