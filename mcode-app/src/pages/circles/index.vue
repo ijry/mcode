@@ -46,21 +46,28 @@
         </view>
       </view>
 
-      <scroll-view class="topic-scroll" scroll-x show-scrollbar="false" enhanced>
-        <view class="topic-row">
-          <view
-            v-for="topic in mockTopics"
-            :key="topic.id"
-            class="topic-card"
-            :style="{ '--topic-accent': topic.accent }"
-            @click="showReservedToast(`${topic.title} 话题页即将接入`)"
-          >
-            <text class="topic-card__title">{{ topic.title }}</text>
-            <text class="topic-card__subtitle">{{ topic.subtitle }}</text>
-            <text class="topic-card__heat">{{ topic.heat }} 热度</text>
-          </view>
+      <view class="topic-section" :style="upThemeCardStyle">
+        <view class="section-head">
+          <text class="section-head__title">热门话题</text>
+          <text class="section-head__hint">{{ mockTopics.length }} 个</text>
         </view>
-      </scroll-view>
+
+        <scroll-view class="topic-scroll" scroll-x show-scrollbar="false" enhanced>
+          <view class="topic-row">
+            <view
+              v-for="topic in mockTopics"
+              :key="topic.id"
+              class="topic-card"
+              :style="{ '--topic-accent': topic.accent }"
+              @click="showReservedToast(`${topic.title} 话题页即将接入`)"
+            >
+              <text class="topic-card__title">{{ topic.title }}</text>
+              <text class="topic-card__subtitle">{{ topic.subtitle }}</text>
+              <text class="topic-card__heat">{{ topic.heat }} 热度</text>
+            </view>
+          </view>
+        </scroll-view>
+      </view>
 
       <view class="ranking-card" :style="upThemeCardStyle">
         <view class="section-head">
@@ -79,7 +86,7 @@
         </view>
       </view>
 
-      <view class="feed-section">
+      <view class="feed-section" :style="upThemeCardStyle">
         <view class="section-head section-head--feed">
           <text class="section-head__title">动态</text>
           <text class="section-head__hint">{{ filteredPosts.length }} 条</text>
@@ -252,7 +259,9 @@ function showReservedToast(title: string) {
 }
 
 .circle-hero,
+.topic-section,
 .ranking-card,
+.feed-section,
 .post-card {
   border-radius: 32rpx;
   background: var(--mcode-card-bg) !important;
@@ -330,9 +339,24 @@ function showReservedToast(title: string) {
   color: var(--mcode-text-tertiary);
 }
 
+.topic-section {
+  margin: 24rpx 0;
+  padding: 24rpx 0 24rpx 24rpx;
+  overflow: hidden;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--mcode-primary) 7%, var(--mcode-card-bg) 93%),
+      var(--mcode-card-bg)
+    ) !important;
+}
+
+.topic-section .section-head {
+  padding-right: 24rpx;
+}
+
 .topic-scroll {
   width: 100%;
-  margin: 24rpx 0;
   white-space: nowrap;
 }
 
@@ -476,11 +500,18 @@ function showReservedToast(title: string) {
   display: flex;
   flex-direction: column;
   gap: 18rpx;
-  padding-bottom: calc(36rpx + env(safe-area-inset-bottom));
+  padding: 24rpx 20rpx calc(24rpx + env(safe-area-inset-bottom));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--mcode-primary) 5%, var(--mcode-card-bg) 95%),
+      var(--mcode-card-bg) 42%
+    ) !important;
 }
 
 .post-card {
   padding: 24rpx;
+  box-shadow: 0 10rpx 28rpx rgba(15, 23, 42, 0.06) !important;
 }
 
 .post-card__author {
