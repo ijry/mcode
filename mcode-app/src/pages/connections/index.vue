@@ -4,8 +4,8 @@
       <view class="connections-topbar">
         <view class="connections-brand">
           <text class="connections-brand__mark">MCode</text>
-          <text class="connections-brand__title">我的连接</text>
-          <text class="connections-brand__subtitle">管理与切换你的远程连接</text>
+          <text class="connections-brand__title">随时随地控 AI</text>
+          <text class="connections-brand__subtitle">手机远程接入电脑端的 Claude/Codex/Gemini 等AI</text>
         </view>
 
         <view class="connections-topbar__action" @click="openAddPopup()">
@@ -17,12 +17,13 @@
       <view class="connections-hero" :style="upThemeCardStyle">
         <view class="connections-hero__copy">
           <text class="connections-hero__eyebrow">REMOTE CONTROL</text>
-          <text class="connections-hero__title">连接状态一眼可见</text>
-          <text class="connections-hero__desc">直连与中继统一管理，随时切换当前生效设备。</text>
+          <text class="connections-hero__title">远程Vibe，回桌位无缝接续</text>
+          <text class="connections-hero__desc">手机与电脑双向同步，随时接管你的电脑 AI。</text>
 
           <view class="connections-hero__chips">
-            <text class="connections-hero__chip">自动监测在线</text>
-            <text class="connections-hero__chip connections-hero__chip--ghost">教程指引</text>
+            <text class="connections-hero__chip">远程控制</text>
+            <text class="connections-hero__chip connections-hero__chip--ghost">双向同步</text>
+            <text class="connections-hero__chip connections-hero__chip--ghost">无缝切换</text>
           </view>
         </view>
 
@@ -38,8 +39,8 @@
           <u-icon name="plus" size="28" color="#007aff"></u-icon>
         </view>
 
-        <text class="connections-empty__title">还没有连接</text>
-        <text class="connections-empty__desc">添加直连或中继设备后，就能在这里快速切换和管理。</text>
+        <text class="connections-empty__title">先连接电脑</text>
+        <text class="connections-empty__desc">连接后即可随时接管电脑 AI，回工位也能继续。</text>
 
         <view class="connections-empty__actions">
           <view class="connections-empty__primary" @click="openAddPopup()">
@@ -105,7 +106,7 @@
 
           <view class="connections-add-card__body">
             <text class="connections-add-card__title">添加新设备</text>
-            <text class="connections-add-card__desc">新增直连或中继连接</text>
+            <text class="connections-add-card__desc">手机实时接入电脑 AI</text>
           </view>
 
           <u-icon name="arrow-right" size="14" color="#c7c7cc"></u-icon>
@@ -114,8 +115,8 @@
         <view class="connections-guide-card" :style="upThemeCardStyle" @click="openTutorialPopup">
           <view class="connections-guide-card__copy">
             <text class="connections-guide-card__eyebrow">SETUP GUIDE</text>
-            <text class="connections-guide-card__title">先完成电脑端部署</text>
-            <text class="connections-guide-card__desc">打开 codeg Web 服务后，再回到这里保存连接。</text>
+            <text class="connections-guide-card__title">先完成部署</text>
+            <text class="connections-guide-card__desc">完成电脑端配置后即可双向同步。</text>
           </view>
 
           <view class="connections-guide-card__action">
@@ -141,7 +142,7 @@
         <view class="connections-sheet__header">
           <view class="connections-sheet__heading">
             <text class="connections-sheet__title">{{ popupTitle }}</text>
-            <text class="connections-sheet__subtitle">保存后可直接切换和在线监测</text>
+            <text class="connections-sheet__subtitle">保存后即可远程控制与实时同步。</text>
           </view>
           <u-icon name="close" size="22" @click="closeAddPopup()"></u-icon>
         </view>
@@ -149,7 +150,7 @@
         <view class="connections-sheet__tutorial" @click="openTutorialPopup">
           <view class="connections-sheet__tutorial-copy">
             <text class="connections-sheet__tutorial-title">部署教程</text>
-            <text class="connections-sheet__tutorial-desc">首次使用前请先完成电脑端配置</text>
+            <text class="connections-sheet__tutorial-desc">先完成电脑端配置，再接入手机。</text>
           </view>
           <u-icon name="arrow-right" size="16" color="#007aff"></u-icon>
         </view>
@@ -234,7 +235,7 @@
         <view class="connections-tutorial__header">
           <view class="connections-tutorial__heading">
             <text class="connections-tutorial__title">部署教程</text>
-            <text class="connections-tutorial__subtitle">跟着这 3 步完成电脑端配置</text>
+            <text class="connections-tutorial__subtitle">3 步打通手机与电脑</text>
           </view>
           <u-icon name="close" size="22" @click="showTutorialPopup = false"></u-icon>
         </view>
@@ -243,7 +244,7 @@
           <view class="connections-tutorial__step">
             <text class="connections-tutorial__index">1</text>
             <view class="connections-tutorial__body">
-              <text class="connections-tutorial__step-title">在自己电脑下载安装 codeg</text>
+              <text class="connections-tutorial__step-title">安装并启动 codeg</text>
               <text class="connections-tutorial__link" @click="openDeploymentGuideLink">
                 {{ DEPLOYMENT_GUIDE_URL }}
               </text>
@@ -254,9 +255,9 @@
             <text class="connections-tutorial__index">2</text>
             <view class="connections-tutorial__body">
               <text class="connections-tutorial__step-title">
-                打开 codeg，点击右上角齿轮图标，然后点击 web服务 开启
+                开启 Web 服务，建立双向同步
               </text>
-              <text class="connections-tutorial__step-desc">拷贝这里的连接地址和访问 token</text>
+              <text class="connections-tutorial__step-desc">复制地址和 token，手机即可远程控制</text>
             </view>
           </view>
 
@@ -264,8 +265,9 @@
             <text class="connections-tutorial__index">3</text>
             <view class="connections-tutorial__body">
               <text class="connections-tutorial__step-title">
-                如果需要外网访问，请使用 ngrok 等内网穿透工具即可
+                回工位后无缝接续
               </text>
+              <text class="connections-tutorial__step-desc">需要外网时可配合 ngrok 使用</text>
             </view>
           </view>
         </view>
@@ -1097,16 +1099,21 @@ function persistConnectedMap() {
   display: inline-flex;
   align-items: center;
   gap: 10rpx;
+  margin-top: 20px !important;
   padding: 18rpx 24rpx;
   border-radius: 999rpx;
   background: linear-gradient(135deg, #0a84ff, #0066cc);
   box-shadow: 0 20rpx 40rpx rgba(0, 122, 255, 0.22);
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .connections-topbar__action-text {
   font-size: 24rpx;
   font-weight: 600;
   color: #ffffff;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .connections-hero,

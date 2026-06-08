@@ -1,28 +1,8 @@
 <template>
-  <view class="page conversations-page" :style="[upThemeVars, upThemePageStyle]">
-
-    <!-- 无连接 -->
-    <view v-if="!hasActiveConnection" class="empty-fullpage">
-      <up-empty mode="data" text="请先添加连接">
-        <template #bottom>
-          <up-button type="primary" @click="goToConnections" size="normal" customStyle="margin-top:32rpx">
-            前往添加
-          </up-button>
-        </template>
-      </up-empty>
-    </view>
-
-    <view
-      v-else
-      :class="[
-        'main-wrap',
-        showHistoryPanel ? 'main-wrap--history' : 'main-wrap--overview',
-      ]"
-    >
-
-      <!-- 顶部搜索 -->
-      <view class="search-bar" :style="upThemeCardStyle">
-        <view class="search-bar__inner">
+  <view class="page conversations-page" :style="[upThemeVars, upThemePageStyle, { backgroundColor: '#f2f2f7' }]">
+    <view class="conversations-shell">
+      <view class="conversations-searchbar">
+        <view class="conversations-searchbar__search">
           <up-search
             v-model="searchKeyword"
             placeholder="搜索会话..."
@@ -31,44 +11,62 @@
             @search="() => {}"
             @clear="() => {}"
           ></up-search>
-          <view class="quick-add-btn" @click="createConversation()">
-            <up-icon name="plus" size="16" color="#2979ff"></up-icon>
+          <view class="conversations-searchbar__action" @click="createConversation()">
+            <up-icon name="plus" size="16" color="#ffffff"></up-icon>
           </view>
         </view>
       </view>
 
-      <!-- 默认：连接分组会话总览 -->
-      <view v-if="!showHistoryPanel" class="group-panel">
-        <view v-if="loading && filteredConnectionGroups.length === 0" class="inline-loading">
-          <up-loading-icon color="#2979ff" size="28"></up-loading-icon>
-          <text class="inline-loading__text">加载中...</text>
-        </view>
-        <view v-if="!loading && filteredConnectionGroups.length === 0" class="empty-fullpage">
-          <up-empty mode="list" text="暂无分组会话"></up-empty>
-        </view>
+      <!-- 无连接 -->
+      <view v-if="!hasActiveConnection" class="empty-fullpage conversations-empty-fullpage">
+        <up-empty mode="data" text="请先添加连接">
+          <template #bottom>
+            <up-button type="primary" @click="goToConnections" size="normal" customStyle="margin-top:32rpx">
+              前往添加
+            </up-button>
+          </template>
+        </up-empty>
+      </view>
 
-        <view v-else class="group-list">
-          <view
-            v-for="group in filteredConnectionGroups"
-            :key="group.key"
-            class="group-section"
-          >
-            <view class="group-section__header">
-              <text class="group-section__title">{{ group.name }}</text>
-              <view
-                v-if="group.loadError"
-                class="group-section__error"
-                @click.stop="showGroupError(group)"
-              >
-                <up-icon name="warning-fill" size="14" color="#fa3534"></up-icon>
+      <view
+        v-else
+        :class="[
+          'main-wrap',
+          showHistoryPanel ? 'main-wrap--history' : 'main-wrap--overview',
+        ]"
+      >
+        <!-- 默认：连接分组会话总览 -->
+        <view v-if="!showHistoryPanel" class="group-panel">
+          <view v-if="loading && filteredConnectionGroups.length === 0" class="inline-loading">
+            <up-loading-icon color="#2979ff" size="28"></up-loading-icon>
+            <text class="inline-loading__text">加载中...</text>
+          </view>
+          <view v-if="!loading && filteredConnectionGroups.length === 0" class="empty-fullpage">
+            <up-empty mode="list" text="暂无分组会话"></up-empty>
+          </view>
+
+          <view v-else class="group-list">
+            <view
+              v-for="group in filteredConnectionGroups"
+              :key="group.key"
+              class="group-section"
+            >
+              <view class="group-section__header">
+                <text class="group-section__title">{{ group.name }}</text>
+                <view
+                  v-if="group.loadError"
+                  class="group-section__error"
+                  @click.stop="showGroupError(group)"
+                >
+                  <up-icon name="warning-fill" size="14" color="#fa3534"></up-icon>
+                </view>
               </view>
-            </view>
 
-            <view v-if="group.cards.length === 0" class="group-empty">
-              <text class="group-empty__text">
-                {{ group.loadError ? "该连接加载失败" : "暂无打开中的标签会话" }}
-              </text>
-            </view>
+              <view v-if="group.cards.length === 0" class="group-empty">
+                <text class="group-empty__text">
+                  {{ group.loadError ? "该连接加载失败" : "暂无打开中的标签会话" }}
+                </text>
+              </view>
 
               <view
                 v-for="card in group.cards"
@@ -77,157 +75,158 @@
                 :style="upThemeCardStyle"
                 @click="openLiveSession(card, group.key)"
               >
-              <view
-                :class="[
-                  'agent-logo',
-                  agentLogoClass(card.agentType),
-                  agentLogoPath(card.agentType) && 'agent-logo--real',
-                ]"
-              >
-                <image
-                  v-if="agentLogoPath(card.agentType)"
-                  class="agent-logo__img"
-                  :src="agentLogoPath(card.agentType)"
-                  mode="aspectFit"
-                />
-                <text v-else class="agent-logo__text">{{ agentLogoText(card.agentType) }}</text>
-              </view>
-
-              <view class="live-card__body">
-                <text class="live-card__project-title u-line-1">{{ card.projectName }}</text>
-                <view class="live-card__meta">
-                  <text class="live-card__session-name u-line-1">{{ card.title }}</text>
-                  <text class="live-card__time">{{ formatTime(card.updatedAt) }}</text>
-                </view>
-              </view>
-
-              <view class="card-status-corner">
-                <view :class="['status-chip', `status-chip--${statusClass(card.displayStatus)}`]">
-                  <text class="status-chip__text">{{ statusLabel(card.displayStatus) }}</text>
-                </view>
                 <view
-                  v-if="statusClass(card.displayStatus) === 'running'"
-                  class="status-wave"
-                ></view>
-              </view>
-            </view>
+                  :class="[
+                    'agent-logo',
+                    agentLogoClass(card.agentType),
+                    agentLogoPath(card.agentType) && 'agent-logo--real',
+                  ]"
+                >
+                  <image
+                    v-if="agentLogoPath(card.agentType)"
+                    class="agent-logo__img"
+                    :src="agentLogoPath(card.agentType)"
+                    mode="aspectFit"
+                  />
+                  <text v-else class="agent-logo__text">{{ agentLogoText(card.agentType) }}</text>
+                </view>
 
-            <view class="live-card history-card" :style="upThemeCardStyle" @click="openHistoryPanel(group)">
-              <view class="conv-card__icon history-card__icon">
-                <up-icon name="clock" size="18" color="#2979ff"></up-icon>
+                <view class="live-card__body">
+                  <text class="live-card__project-title u-line-1">{{ card.projectName }}</text>
+                  <view class="live-card__meta">
+                    <text class="live-card__session-name u-line-1">{{ card.title }}</text>
+                    <text class="live-card__time">{{ formatTime(card.updatedAt) }}</text>
+                  </view>
+                </view>
+
+                <view class="card-status-corner">
+                  <view :class="['status-chip', `status-chip--${statusClass(card.displayStatus)}`]">
+                    <text class="status-chip__text">{{ statusLabel(card.displayStatus) }}</text>
+                  </view>
+                  <view
+                    v-if="statusClass(card.displayStatus) === 'running'"
+                    class="status-wave"
+                  ></view>
+                </view>
               </view>
-              <view class="history-entry__left">
-                <text class="history-entry__text u-line-1">历史会话</text>
-                <text class="history-entry__desc u-line-1">可查看已结束或已完成会话并重新激活</text>
+
+              <view class="live-card history-card" :style="upThemeCardStyle" @click="openHistoryPanel(group)">
+                <view class="conv-card__icon history-card__icon">
+                  <up-icon name="clock" size="18" color="#2979ff"></up-icon>
+                </view>
+                <view class="history-entry__left">
+                  <text class="history-entry__text u-line-1">历史会话</text>
+                  <text class="history-entry__desc u-line-1">可查看已结束或已完成会话并重新激活</text>
+                </view>
+                <up-icon name="arrow-right" size="14" :color="upThemeVar('--up-light-color', '#c0c4cc')"></up-icon>
               </view>
-              <up-icon name="arrow-right" size="14" :color="upThemeVar('--up-light-color', '#c0c4cc')"></up-icon>
             </view>
           </view>
         </view>
-      </view>
 
-      <!-- 历史模式：展示原 up-cate-tab -->
-      <view v-else class="cate-wrap">
-        <view class="history-mode-bar" :style="upThemeCardStyle">
-          <view class="history-mode-back" @click="closeHistoryPanel">
-            <up-icon name="arrow-left" size="14" color="#2979ff"></up-icon>
-            <text class="history-mode-back__text">返回分组</text>
-          </view>
-          <text class="history-mode-title u-line-1">{{ historyGroupTitle }}</text>
-        </view>
-
-        <view v-if="historyLoading && projects.length === 0" class="inline-loading">
-          <up-loading-icon color="#2979ff" size="28"></up-loading-icon>
-          <text class="inline-loading__text">加载中...</text>
-        </view>
-        <view v-if="!historyLoading && projects.length === 0" class="empty-fullpage">
-          <up-empty mode="list" text="暂无历史会话"></up-empty>
-        </view>
-
-        <view v-else class="cate-wrap__inner">
-        <up-cate-tab
-          class="cate-tab"
-          :tabList="tabList"
-          tabKeyName="label"
-          mode="tab"
-          :height="cateTabHeight"
-          :current="currentTab"
-          @update:current="onTabChange"
-        >
-        <!-- 左侧 tab 项 -->
-        <template #tabItem="slotProps">
-          <view v-if="slotProps?.item" class="tab-item">
-            <text class="tab-item__name">{{ slotProps.item.label }}</text>
-            <view v-if="slotProps.item.count > 0" class="tab-item__badge">{{ slotProps.item.count }}</view>
-          </view>
-        </template>
-
-        <!-- 右侧顶部：新建按钮 -->
-        <template #rightTop="slotProps">
-          <view class="right-top-bar">
-            <view class="right-top-bar__title">
-              {{ getCurrentTabLabel(slotProps?.tabList) }}
+        <!-- 历史模式：展示原 up-cate-tab -->
+        <view v-else class="cate-wrap">
+          <view class="history-mode-bar" :style="upThemeCardStyle">
+            <view class="history-mode-back" @click="closeHistoryPanel">
+              <up-icon name="arrow-left" size="14" color="#2979ff"></up-icon>
+              <text class="history-mode-back__text">返回分组</text>
             </view>
-            <view
-              v-if="canCreateInHistory"
-              class="add-btn"
-              @click="createConversation(getCurrentTabProjectId(slotProps?.tabList))"
+            <text class="history-mode-title u-line-1">{{ historyGroupTitle }}</text>
+          </view>
+
+          <view v-if="historyLoading && projects.length === 0" class="inline-loading">
+            <up-loading-icon color="#2979ff" size="28"></up-loading-icon>
+            <text class="inline-loading__text">加载中...</text>
+          </view>
+          <view v-if="!historyLoading && projects.length === 0" class="empty-fullpage">
+            <up-empty mode="list" text="暂无历史会话"></up-empty>
+          </view>
+
+          <view v-else class="cate-wrap__inner">
+            <up-cate-tab
+              class="cate-tab"
+              :tabList="tabList"
+              tabKeyName="label"
+              mode="tab"
+              :height="cateTabHeight"
+              :current="currentTab"
+              @update:current="onTabChange"
             >
-              <up-icon name="plus" size="18" color="#2979ff"></up-icon>
-              <text class="add-btn__label">新建</text>
-            </view>
-            <view v-else class="history-mode-tip">历史模式</view>
-          </view>
-        </template>
+              <!-- 左侧 tab 项 -->
+              <template #tabItem="slotProps">
+                <view v-if="slotProps?.item" class="tab-item">
+                  <text class="tab-item__name">{{ slotProps.item.label }}</text>
+                  <view v-if="slotProps.item.count > 0" class="tab-item__badge">{{ slotProps.item.count }}</view>
+                </view>
+              </template>
 
-        <!-- 右侧每个分类的内容 -->
-        <template #itemList="slotProps">
-          <!-- 无会话 -->
-          <view v-if="getConversationList(slotProps?.item).length === 0" class="empty-section">
-            <up-empty mode="message" text="暂无会话" iconSize="60"></up-empty>
-            <up-button
-              type="primary"
-              plain
-              size="small"
-              @click="createConversation(slotProps?.item?.projectId)"
-              customStyle="margin-top:24rpx"
-            >创建第一个会话</up-button>
-          </view>
+              <!-- 右侧顶部：新建按钮 -->
+              <template #rightTop="slotProps">
+                <view class="right-top-bar">
+                  <view class="right-top-bar__title">
+                    {{ getCurrentTabLabel(slotProps?.tabList) }}
+                  </view>
+                  <view
+                    v-if="canCreateInHistory"
+                    class="add-btn"
+                    @click="createConversation(getCurrentTabProjectId(slotProps?.tabList))"
+                  >
+                    <up-icon name="plus" size="18" color="#2979ff"></up-icon>
+                    <text class="add-btn__label">新建</text>
+                  </view>
+                  <view v-else class="history-mode-tip">历史模式</view>
+                </view>
+              </template>
 
-          <!-- 会话列表 -->
-          <view v-else class="conv-list">
-            <view
-              v-for="conv in getConversationList(slotProps?.item)"
-              :key="conv.id"
-              class="conv-card"
-              :style="upThemeCardStyle"
-              @click="openConversation(conv, historyGroupKey)"
-            >
-              <view class="conv-card__icon">
-                <up-icon name="chat-fill" size="17" color="#2979ff"></up-icon>
-              </view>
-              <view class="conv-card__body">
-                <text class="conv-card__title u-line-1">{{ conv.title || '未命名会话' }}</text>
-                <view class="conv-card__meta">
-                  <up-tag
-                    :text="formatAgentType(conv.agent_type)"
-                    type="info"
-                    size="mini"
+              <!-- 右侧每个分类的内容 -->
+              <template #itemList="slotProps">
+                <!-- 无会话 -->
+                <view v-if="getConversationList(slotProps?.item).length === 0" class="empty-section">
+                  <up-empty mode="message" text="暂无会话" iconSize="60"></up-empty>
+                  <up-button
+                    type="primary"
                     plain
-                  ></up-tag>
-                  <text class="conv-card__time">{{ formatTime(conv.updated_at) }}</text>
+                    size="small"
+                    @click="createConversation(slotProps?.item?.projectId)"
+                    customStyle="margin-top:24rpx"
+                  >创建第一个会话</up-button>
                 </view>
-              </view>
-              <view class="conv-card__actions">
-                <view class="conv-card__menu" @click.stop="showConversationMenu(conv)">
-                  <up-icon name="more-dot-fill" size="16" :color="upThemeVar('--up-tips-color', '#909193')"></up-icon>
+
+                <!-- 会话列表 -->
+                <view v-else class="conv-list">
+                  <view
+                    v-for="conv in getConversationList(slotProps?.item)"
+                    :key="conv.id"
+                    class="conv-card"
+                    :style="upThemeCardStyle"
+                    @click="openConversation(conv, historyGroupKey)"
+                  >
+                    <view class="conv-card__icon">
+                      <up-icon name="chat-fill" size="17" color="#2979ff"></up-icon>
+                    </view>
+                    <view class="conv-card__body">
+                      <text class="conv-card__title u-line-1">{{ conv.title || '未命名会话' }}</text>
+                      <view class="conv-card__meta">
+                        <up-tag
+                          :text="formatAgentType(conv.agent_type)"
+                          type="info"
+                          size="mini"
+                          plain
+                        ></up-tag>
+                        <text class="conv-card__time">{{ formatTime(conv.updated_at) }}</text>
+                      </view>
+                    </view>
+                    <view class="conv-card__actions">
+                      <view class="conv-card__menu" @click.stop="showConversationMenu(conv)">
+                        <up-icon name="more-dot-fill" size="16" :color="upThemeVar('--up-tips-color', '#909193')"></up-icon>
+                      </view>
+                      <up-icon name="arrow-right" size="12" :color="upThemeVar('--up-light-color', '#c0c4cc')"></up-icon>
+                    </view>
+                  </view>
                 </view>
-                <up-icon name="arrow-right" size="12" :color="upThemeVar('--up-light-color', '#c0c4cc')"></up-icon>
-              </view>
-            </view>
+              </template>
+            </up-cate-tab>
           </view>
-        </template>
-        </up-cate-tab>
         </view>
       </view>
     </view>
@@ -1731,7 +1730,7 @@ function syncCateTabHeight() {
     const proxy = instance?.proxy
     if (!proxy) return
     const query = uni.createSelectorQuery().in(proxy)
-    query.select(".search-bar").boundingClientRect((rect: any) => {
+    query.select(".conversations-searchbar").boundingClientRect((rect: any) => {
       const windowHeight = Number(uni.getSystemInfoSync().windowHeight || 0)
       const searchHeight = Number(rect?.height || 0)
       const nextHeight = Math.max(windowHeight - searchHeight, 260)
@@ -2099,9 +2098,41 @@ function formatTime(time?: string): string {
 .page {
   min-height: 100vh;
   padding: 0 !important;
-  background-color: var(--mcode-page-bg);
+}
+
+.conversations-page {
+  background: #f2f2f7;
+}
+
+.conversations-shell {
+  min-height: 100vh;
+  padding: 16rpx 20rpx 36rpx;
+}
+
+.conversations-searchbar {
+  padding: 4rpx 4rpx 16rpx;
+}
+
+.conversations-searchbar__search {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.conversations-searchbar__search :deep(.u-search) {
+  flex: 1;
+}
+
+.conversations-searchbar__action {
+  width: 56rpx;
+  height: 56rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 16rpx;
+  background: linear-gradient(135deg, #0a84ff, #0066cc);
+  box-shadow: 0 16rpx 32rpx rgba(0, 122, 255, 0.2);
+  flex-shrink: 0;
 }
 
 .main-wrap {
@@ -2144,23 +2175,23 @@ function formatTime(time?: string): string {
 }
 
 .group-list {
-  padding: 16rpx 20rpx calc(40rpx + env(safe-area-inset-bottom));
+  padding: 0 0 calc(28rpx + env(safe-area-inset-bottom));
   display: flex;
   flex-direction: column;
-  gap: 36rpx;
+  gap: 24rpx;
 }
 
 .group-section__header {
   display: flex;
   align-items: center;
   gap: 10rpx;
-  margin-bottom: 10rpx;
+  margin-bottom: 6rpx;
   padding-left: 4rpx;
 }
 
 .group-section__title {
   display: block;
-  font-size: 28rpx;
+  font-size: 30rpx;
   font-weight: 600;
   color: var(--mcode-text-primary);
   flex: 0 1 auto;
@@ -2189,36 +2220,35 @@ function formatTime(time?: string): string {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 14rpx;
-  padding: 16rpx;
-  border-radius: 22rpx;
+  gap: 16rpx;
+  padding: 18rpx 16rpx;
+  border-radius: 24rpx;
   background-color: var(--mcode-card-bg);
-  border: 1rpx solid var(--mcode-border-color);
-  box-shadow: none;
-  margin-bottom: 22rpx;
+  box-shadow: 0 18rpx 40rpx rgba(60, 64, 67, 0.06);
+  margin-bottom: 12rpx;
+  overflow: hidden;
 }
 
 .agent-logo {
-  width: 58rpx;
-  height: 58rpx;
-  border-radius: 18rpx;
+  width: 64rpx;
+  height: 64rpx;
+  border-radius: 20rpx;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  background-color: var(--mcode-card-soft-bg);
-  border: 1rpx solid var(--mcode-border-color);
+  background-color: rgba(0, 122, 255, 0.1);
 }
 
 .agent-logo__text {
   font-size: 18rpx;
   font-weight: 700;
-  color: var(--mcode-text-secondary);
+  color: #007aff;
 }
 
 .agent-logo__img {
-  width: 58rpx;
-  height: 58rpx;
+  width: 64rpx;
+  height: 64rpx;
   display: block;
 }
 
@@ -2243,9 +2273,9 @@ function formatTime(time?: string): string {
 }
 
 .live-card__project-title {
-  font-size: 27rpx;
-  font-weight: 600;
-  color: var(--mcode-text-primary);
+  font-size: 28rpx;
+  font-weight: 700;
+  color: #1d1d1f;
 }
 
 .live-card__meta {
@@ -2258,13 +2288,13 @@ function formatTime(time?: string): string {
 .live-card__session-name {
   flex: 1;
   min-width: 0;
-  font-size: 22rpx;
-  color: var(--mcode-text-secondary);
+  font-size: 23rpx;
+  color: #6e6e73;
 }
 
 .live-card__time {
   font-size: 21rpx;
-  color: var(--mcode-text-tertiary);
+  color: #8e8e93;
   flex-shrink: 0;
 }
 
@@ -2280,36 +2310,36 @@ function formatTime(time?: string): string {
 .status-chip {
   position: relative;
   z-index: 2;
-  padding: 2rpx 10rpx;
+  padding: 4rpx 12rpx;
   border-radius: 999rpx;
-  background-color: var(--mcode-card-soft-bg);
+  background-color: rgba(142, 142, 147, 0.12);
 }
 
 .status-chip__text {
   font-size: 18rpx;
-  color: var(--mcode-text-secondary);
+  color: #8e8e93;
 }
 
 .status-chip--running {
-  background-color: color-mix(in srgb, var(--mcode-success) 12%, var(--mcode-card-bg) 88%);
+  background-color: rgba(52, 199, 89, 0.14);
 }
 .status-chip--running .status-chip__text {
   color: #19be6b;
 }
 .status-chip--completed {
-  background-color: color-mix(in srgb, var(--mcode-primary) 10%, var(--mcode-card-bg) 90%);
+  background-color: rgba(0, 122, 255, 0.12);
 }
 .status-chip--completed .status-chip__text {
-  color: #2979ff;
+  color: #007aff;
 }
 .status-chip--stopped .status-chip__text {
-  color: var(--mcode-text-tertiary);
+  color: #8e8e93;
 }
 .status-chip--error {
-  background-color: color-mix(in srgb, var(--mcode-error) 12%, var(--mcode-card-bg) 88%);
+  background-color: rgba(255, 69, 58, 0.12);
 }
 .status-chip--error .status-chip__text {
-  color: #f56c6c;
+  color: #ff453a;
 }
 
 .status-wave {
@@ -2339,6 +2369,7 @@ function formatTime(time?: string): string {
 
 .history-card {
   margin-top: 4rpx;
+  background: linear-gradient(135deg, rgba(0, 122, 255, 0.1), rgba(255, 255, 255, 0.96));
 }
 
 .history-entry__left {
@@ -2353,12 +2384,12 @@ function formatTime(time?: string): string {
 
 .history-entry__text {
   font-size: 26rpx;
-  color: var(--mcode-text-primary);
+  color: #1d1d1f;
 }
 
 .history-entry__desc {
   font-size: 22rpx;
-  color: var(--mcode-text-tertiary);
+  color: #8e8e93;
   line-height: 1.4;
 }
 
@@ -2369,7 +2400,7 @@ function formatTime(time?: string): string {
 }
 
 .inline-loading {
-  min-height: 320rpx;
+  min-height: 220rpx;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -2379,7 +2410,7 @@ function formatTime(time?: string): string {
 
 .inline-loading__text {
   font-size: 24rpx;
-  color: var(--mcode-text-tertiary);
+  color: #8e8e93;
 }
 
 .history-mode-bar {
@@ -2387,9 +2418,10 @@ function formatTime(time?: string): string {
   align-items: center;
   justify-content: space-between;
   gap: 12rpx;
-  padding: 12rpx 12rpx;
-  border-bottom: 1rpx solid var(--mcode-border-color);
-  background-color: var(--mcode-card-bg);
+  padding: 16rpx 16rpx;
+  border-radius: 24rpx;
+  background-color: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 18rpx 40rpx rgba(60, 64, 67, 0.06);
 }
 
 .history-mode-back {
@@ -2409,33 +2441,7 @@ function formatTime(time?: string): string {
   min-width: 0;
   text-align: right;
   font-size: 24rpx;
-  color: var(--mcode-text-secondary);
-}
-
-/* ===== 搜索栏 ===== */
-.search-bar {
-  padding: 16rpx 12rpx;
-  background-color: var(--mcode-card-bg);
-  border-bottom: 1rpx solid var(--mcode-border-color);
-  flex-shrink: 0;
-}
-
-.search-bar__inner {
-  display: flex;
-  align-items: center;
-  gap: 12rpx;
-}
-
-.quick-add-btn {
-  width: 56rpx;
-  height: 56rpx;
-  border-radius: 50%;
-  border: 1rpx solid color-mix(in srgb, var(--mcode-primary) 22%, var(--mcode-card-bg) 78%);
-  background-color: color-mix(in srgb, var(--mcode-primary) 10%, var(--mcode-card-bg) 90%);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
+  color: #6e6e73;
 }
 
 /* ===== 空状态 ===== */
@@ -2446,6 +2452,10 @@ function formatTime(time?: string): string {
   align-items: center;
   justify-content: center;
   padding-bottom: 100rpx;
+}
+
+.conversations-empty-fullpage {
+  min-height: 52vh;
 }
 
 /* ===== 左侧 Tab 项 ===== */
@@ -2533,10 +2543,10 @@ function formatTime(time?: string): string {
 
 /* ===== 会话列表 ===== */
 .conv-list {
-  padding: 10rpx 16rpx;
+  padding: 8rpx 12rpx;
   display: flex;
   flex-direction: column;
-  gap: 12rpx;
+  gap: 10rpx;
 }
 
 .conv-card {
