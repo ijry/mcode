@@ -69,4 +69,12 @@ describe("historyPresentation", () => {
 
     expect(meta).toBe("Codex · 31分钟前")
   })
+  it("returns an empty section list when the keyword removes every conversation", () => {
+    const sections = buildHistoryProjectSections(
+      [project({ conversations: [conversation({ title: "只保留这个标题" })] })],
+      "不存在的关键字"
+    )
+
+    expect(sections).toEqual([])
+  })
 })

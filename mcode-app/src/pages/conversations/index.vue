@@ -1,20 +1,28 @@
 <template>
-  <view class="page conversations-page" :style="[upThemeVars, upThemePageStyle, { backgroundColor: '#f2f2f7' }]">
+  <view class="page conversations-page" :style="[upThemeVars, upThemePageStyle, { backgroundColor: '#f5f5f7' }]">
     <view class="conversations-shell">
-      <view class="conversations-searchbar">
-        <view class="conversations-searchbar__search">
-          <up-search
-            v-model="searchKeyword"
-            placeholder="搜索会话..."
-            :show-action="false"
-            shape="round"
-            @search="() => {}"
-            @clear="() => {}"
-          ></up-search>
-          <view class="conversations-searchbar__action" @click="createConversation()">
-            <up-icon name="plus" size="16" color="#ffffff"></up-icon>
-          </view>
+      <view class="conversations-header">
+        <text class="conversations-header__title">会话</text>
+        <view class="conversations-header__action" @click="createConversation()">
+          <up-icon name="plus" size="16" color="#2f7cf6"></up-icon>
         </view>
+      </view>
+
+      <view class="conversations-searchbar">
+        <up-search
+          v-model="searchKeyword"
+          placeholder="搜索会话..."
+          :show-action="false"
+          shape="round"
+          bgColor="#e9eaee"
+          borderColor="transparent"
+          color="#1a1b1f"
+          placeholderColor="#9ca3af"
+          searchIconColor="#8b93a5"
+          :height="44"
+          @search="() => {}"
+          @clear="() => {}"
+        ></up-search>
       </view>
 
       <!-- 无连接 -->
@@ -62,171 +70,133 @@
                 </view>
               </view>
 
-              <view v-if="group.cards.length === 0" class="group-empty">
-                <text class="group-empty__text">
-                  {{ group.loadError ? "该连接加载失败" : "暂无打开中的标签会话" }}
-                </text>
-              </view>
+              <view class="group-section__cards">
+                <view v-if="group.cards.length === 0" class="group-empty">
+                  <text class="group-empty__text">
+                    {{ group.loadError ? "该连接加载失败" : "暂无打开中的标签会话" }}
+                  </text>
+                </view>
 
-              <view
-                v-for="card in group.cards"
-                :key="`${group.key}-${card.tabId}`"
-                class="live-card"
-                :style="upThemeCardStyle"
-                @click="openLiveSession(card, group.key)"
-              >
                 <view
-                  :class="[
-                    'agent-logo',
-                    agentLogoClass(card.agentType),
-                    agentLogoPath(card.agentType) && 'agent-logo--real',
-                  ]"
+                  v-for="card in group.cards"
+                  :key="`${group.key}-${card.tabId}`"
+                  class="live-card"
+                  :style="upThemeCardStyle"
+                  @click="openLiveSession(card, group.key)"
                 >
-                  <image
-                    v-if="agentLogoPath(card.agentType)"
-                    class="agent-logo__img"
-                    :src="agentLogoPath(card.agentType)"
-                    mode="aspectFit"
-                  />
-                  <text v-else class="agent-logo__text">{{ agentLogoText(card.agentType) }}</text>
-                </view>
-
-                <view class="live-card__body">
-                  <text class="live-card__project-title u-line-1">{{ card.projectName }}</text>
-                  <view class="live-card__meta">
-                    <text class="live-card__session-name u-line-1">{{ card.title }}</text>
-                    <text class="live-card__time">{{ formatTime(card.updatedAt) }}</text>
-                  </view>
-                </view>
-
-                <view class="card-status-corner">
-                  <view :class="['status-chip', `status-chip--${statusClass(card.displayStatus)}`]">
-                    <text class="status-chip__text">{{ statusLabel(card.displayStatus) }}</text>
-                  </view>
                   <view
-                    v-if="statusClass(card.displayStatus) === 'running'"
-                    class="status-wave"
-                  ></view>
-                </view>
-              </view>
+                    :class="[
+                      'agent-logo',
+                      agentLogoClass(card.agentType),
+                      agentLogoPath(card.agentType) && 'agent-logo--real',
+                    ]"
+                  >
+                    <image
+                      v-if="agentLogoPath(card.agentType)"
+                      class="agent-logo__img"
+                      :src="agentLogoPath(card.agentType)"
+                      mode="aspectFit"
+                    />
+                    <text v-else class="agent-logo__text">{{ agentLogoText(card.agentType) }}</text>
+                  </view>
 
-              <view class="live-card history-card" :style="upThemeCardStyle" @click="openHistoryPanel(group)">
-                <view class="conv-card__icon history-card__icon">
-                  <up-icon name="clock" size="18" color="#2979ff"></up-icon>
+                  <view class="live-card__body">
+                    <text class="live-card__project-title u-line-1">{{ card.projectName }}</text>
+                    <text class="live-card__session-name u-line-1">{{ card.title || "未命名会话" }}</text>
+                  </view>
+
+                  <view class="live-card__side">
+                    <view :class="['status-chip', `status-chip--${statusClass(card.displayStatus)}` ]">
+                      <text class="status-chip__text">{{ statusLabel(card.displayStatus) }}</text>
+                    </view>
+                    <text class="live-card__stamp">{{ formatTime(card.updatedAt) }}</text>
+                  </view>
                 </view>
-                <view class="history-entry__left">
-                  <text class="history-entry__text u-line-1">历史会话</text>
-                  <text class="history-entry__desc u-line-1">可查看已结束或已完成会话并重新激活</text>
+
+                <view class="live-card live-card--history" :style="upThemeCardStyle" @click="openHistoryPanel(group)">
+                  <view class="agent-logo agent-logo--history">
+                    <up-icon name="clock" size="18" color="#2f7cf6"></up-icon>
+                  </view>
+                  <view class="live-card__body">
+                    <text class="live-card__project-title u-line-1">历史会话</text>
+                    <text class="live-card__session-name u-line-1">查看已结束或已完成会话</text>
+                  </view>
+                  <view class="live-card__side live-card__side--history">
+                    <view class="status-chip status-chip--history">
+                      <text class="status-chip__text">查看</text>
+                    </view>
+                    <up-icon name="arrow-right" size="12" color="#c0c4cc"></up-icon>
+                  </view>
                 </view>
-                <up-icon name="arrow-right" size="14" :color="upThemeVar('--up-light-color', '#c0c4cc')"></up-icon>
               </view>
             </view>
           </view>
         </view>
 
-        <!-- 历史模式：展示原 up-cate-tab -->
-        <view v-else class="cate-wrap">
+        <!-- 历史模式：项目分组列表 -->
+        <view v-else class="history-list">
           <view class="history-mode-bar" :style="upThemeCardStyle">
             <view class="history-mode-back" @click="closeHistoryPanel">
               <up-icon name="arrow-left" size="14" color="#2979ff"></up-icon>
               <text class="history-mode-back__text">返回分组</text>
             </view>
             <text class="history-mode-title u-line-1">{{ historyGroupTitle }}</text>
+            <view
+              v-if="canCreateInHistory"
+              class="history-mode-create"
+              @click="createConversation()"
+            >
+              <up-icon name="plus" size="14" color="#2979ff"></up-icon>
+              <text class="history-mode-create__text">新建</text>
+            </view>
           </view>
 
-          <view v-if="historyLoading && projects.length === 0" class="inline-loading">
+          <view v-if="historyLoading && historyProjectSections.length === 0" class="inline-loading">
             <up-loading-icon color="#2979ff" size="28"></up-loading-icon>
             <text class="inline-loading__text">加载中...</text>
           </view>
-          <view v-if="!historyLoading && projects.length === 0" class="empty-fullpage">
+          <view v-else-if="historyProjectSections.length === 0" class="empty-fullpage">
             <up-empty mode="list" text="暂无历史会话"></up-empty>
           </view>
 
-          <view v-else class="cate-wrap__inner">
-            <up-cate-tab
-              class="cate-tab"
-              :tabList="tabList"
-              tabKeyName="label"
-              mode="tab"
-              :height="cateTabHeight"
-              :current="currentTab"
-              @update:current="onTabChange"
+          <scroll-view v-else class="history-scroll" scroll-y enhanced>
+            <view
+              v-for="section in historyProjectSections"
+              :key="section.projectId"
+              class="history-section"
             >
-              <!-- 左侧 tab 项 -->
-              <template #tabItem="slotProps">
-                <view v-if="slotProps?.item" class="tab-item">
-                  <text class="tab-item__name">{{ slotProps.item.label }}</text>
-                  <view v-if="slotProps.item.count > 0" class="tab-item__badge">{{ slotProps.item.count }}</view>
-                </view>
-              </template>
+              <view class="history-section__header">
+                <text class="history-section__title u-line-1">{{ section.title }}</text>
+                <text class="history-section__count">{{ section.count }}</text>
+              </view>
+              <text v-if="section.path" class="history-section__path u-line-1">{{ section.path }}</text>
 
-              <!-- 右侧顶部：新建按钮 -->
-              <template #rightTop="slotProps">
-                <view class="right-top-bar">
-                  <view class="right-top-bar__title">
-                    {{ getCurrentTabLabel(slotProps?.tabList) }}
+              <view class="conv-list conv-list--history">
+                <view
+                  v-for="conv in section.conversations"
+                  :key="conv.id"
+                  class="conv-card conv-card--history"
+                  :style="upThemeCardStyle"
+                  @click="openConversation(conv, historyGroupKey)"
+                >
+                  <view class="conv-card__icon">
+                    <up-icon name="chat-fill" size="17" color="#2979ff"></up-icon>
                   </view>
-                  <view
-                    v-if="canCreateInHistory"
-                    class="add-btn"
-                    @click="createConversation(getCurrentTabProjectId(slotProps?.tabList))"
-                  >
-                    <up-icon name="plus" size="18" color="#2979ff"></up-icon>
-                    <text class="add-btn__label">新建</text>
+                  <view class="conv-card__body">
+                    <text class="conv-card__title u-line-1">{{ conv.title || "未命名会话" }}</text>
+                    <text class="conv-card__subtitle u-line-1">{{ getHistoryConversationMeta(conv) }}</text>
                   </view>
-                  <view v-else class="history-mode-tip">历史模式</view>
-                </view>
-              </template>
-
-              <!-- 右侧每个分类的内容 -->
-              <template #itemList="slotProps">
-                <!-- 无会话 -->
-                <view v-if="getConversationList(slotProps?.item).length === 0" class="empty-section">
-                  <up-empty mode="message" text="暂无会话" iconSize="60"></up-empty>
-                  <up-button
-                    type="primary"
-                    plain
-                    size="small"
-                    @click="createConversation(slotProps?.item?.projectId)"
-                    customStyle="margin-top:24rpx"
-                  >创建第一个会话</up-button>
-                </view>
-
-                <!-- 会话列表 -->
-                <view v-else class="conv-list">
-                  <view
-                    v-for="conv in getConversationList(slotProps?.item)"
-                    :key="conv.id"
-                    class="conv-card"
-                    :style="upThemeCardStyle"
-                    @click="openConversation(conv, historyGroupKey)"
-                  >
-                    <view class="conv-card__icon">
-                      <up-icon name="chat-fill" size="17" color="#2979ff"></up-icon>
+                  <view class="conv-card__actions">
+                    <view class="conv-card__menu" @click.stop="showConversationMenu(conv)">
+                      <up-icon name="more-dot-fill" size="16" :color="upThemeVar('--up-tips-color', '#909193')"></up-icon>
                     </view>
-                    <view class="conv-card__body">
-                      <text class="conv-card__title u-line-1">{{ conv.title || '未命名会话' }}</text>
-                      <view class="conv-card__meta">
-                        <up-tag
-                          :text="formatAgentType(conv.agent_type)"
-                          type="info"
-                          size="mini"
-                          plain
-                        ></up-tag>
-                        <text class="conv-card__time">{{ formatTime(conv.updated_at) }}</text>
-                      </view>
-                    </view>
-                    <view class="conv-card__actions">
-                      <view class="conv-card__menu" @click.stop="showConversationMenu(conv)">
-                        <up-icon name="more-dot-fill" size="16" :color="upThemeVar('--up-tips-color', '#909193')"></up-icon>
-                      </view>
-                      <up-icon name="arrow-right" size="12" :color="upThemeVar('--up-light-color', '#c0c4cc')"></up-icon>
-                    </view>
+                    <up-icon name="arrow-right" size="12" :color="upThemeVar('--up-light-color', '#c0c4cc')"></up-icon>
                   </view>
                 </view>
-              </template>
-            </up-cate-tab>
-          </view>
+              </view>
+            </view>
+            <view class="safe-bottom"></view>
+          </scroll-view>
         </view>
       </view>
     </view>
@@ -448,8 +418,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick, getCurrentInstance, watch } from "vue"
-import { onPullDownRefresh, onReady, onShow, onUnload } from "@dcloudio/uni-app"
+import { ref, computed, onMounted, watch } from "vue"
+import { onPullDownRefresh, onShow, onUnload } from "@dcloudio/uni-app"
 import { useAuthStore } from "@/stores/auth"
 import { useConversationRuntimeStore } from "@/stores/conversationRuntime"
 import { acpApi } from "@/api/acp"
@@ -482,6 +452,10 @@ import {
   type ConversationOverviewProject,
   type ConversationOverviewOpenedTab,
 } from "@/services/conversation/conversationOverviewSnapshot"
+import {
+  buildHistoryProjectSections,
+  formatHistoryConversationMeta,
+} from "@/pages/conversations/historyPresentation"
 import { normalizeConversationSummaryStatus } from "@/services/conversation/conversationSummaryStatus"
 import {
   listConversationSummaries,
@@ -502,7 +476,6 @@ const auth = useAuthStore()
 const runtime = useConversationRuntimeStore()
 const loading = ref(false)
 const creating = ref(false)
-const currentTab = ref(0)
 const searchKeyword = ref("")
 const showCreateDialog = ref(false)
 const showCreateConfigDialog = ref(false)
@@ -517,7 +490,6 @@ const selectedAgentType = ref("claude_code")
 const newConversationTitle = ref("")
 const newTaskContent = ref("")
 const currentConversation = ref<Conversation | null>(null)
-const cateTabHeight = ref("calc(100vh - 160rpx)")
 const showHistoryPanel = ref(false)
 const historyGroupKey = ref("")
 const historyGroupTitle = ref("")
@@ -617,21 +589,6 @@ interface ConnectionGroup extends ConnectionConversationSnapshot {
 const projects = ref<Project[]>([])
 const connectionGroups = ref<ConnectionGroup[]>([])
 
-// up-cate-tab 所需数据结构
-const tabList = computed(() => {
-  const kw = searchKeyword.value.toLowerCase()
-  return projects.value.map((p) => {
-    const convs = normalizeList((p as any).conversations).filter(
-      (c) => !kw || (c.title || "").toLowerCase().includes(kw)
-    )
-    return {
-      label: p.name || p.path || "未命名项目",
-      projectId: p.id,
-      count: convs.length,
-      conversations: convs,
-    }
-  })
-})
 
 const filteredConnectionGroups = computed<DisplayConnectionGroup[]>(() => {
   const kw = searchKeyword.value.trim().toLowerCase()
@@ -680,6 +637,10 @@ const canCreateInHistory = computed(() => {
   if (!showHistoryPanel.value || !historyGroupKey.value) return false
   return historyGroupKey.value === currentAuthConnectionKey()
 })
+
+const historyProjectSections = computed(() =>
+  buildHistoryProjectSections(projects.value, searchKeyword.value)
+)
 
 watch(
   () => [showCreateDialog.value, selectedConnectionKey.value] as const,
@@ -1081,10 +1042,6 @@ const hasActiveConnection = computed(() => {
   return getConnectedConnections().length > 0
 })
 
-function onTabChange(idx: number) {
-  currentTab.value = idx
-}
-
 onMounted(() => {
   if (!disposeOverviewInvalidation) {
     disposeOverviewInvalidation = subscribeConversationOverviewInvalidation((instanceKey) => {
@@ -1092,7 +1049,6 @@ onMounted(() => {
       void refreshConnectionGroupFromLocalCache(instanceKey)
     })
   }
-  syncCateTabHeight()
 })
 
 onUnload(() => {
@@ -1108,18 +1064,12 @@ onPullDownRefresh(() => {
 
   loadOverviewData({ force: true }).finally(() => {
     uni.stopPullDownRefresh()
-    syncCateTabHeight()
   })
-})
-
-onReady(() => {
-  syncCateTabHeight()
 })
 
 onShow(() => {
   const shouldForceRefresh = consumeConversationListDirty()
   void loadOverviewData(shouldForceRefresh ? { force: true } : undefined)
-  syncCateTabHeight()
 })
 
 async function loadOverviewData(options?: { force?: boolean }) {
@@ -1173,7 +1123,6 @@ async function loadOverviewDataInternal() {
       const current = connectionGroups.value.find((group) => group.key === historyGroupKey.value)
       if (current) {
         projects.value = current.projects
-        if (current.projects.length > 0) currentTab.value = 0
         void ensureHistoryProjectsLoaded(current)
       } else {
         showHistoryPanel.value = false
@@ -1761,37 +1710,10 @@ function loadData() {
   return loadOverviewData({ force: true })
 }
 
-function syncCateTabHeight() {
-  nextTick(() => {
-    const instance = getCurrentInstance()
-    const proxy = instance?.proxy
-    if (!proxy) return
-    const query = uni.createSelectorQuery().in(proxy)
-    query.select(".conversations-searchbar").boundingClientRect((rect: any) => {
-      const windowHeight = Number(uni.getSystemInfoSync().windowHeight || 0)
-      const searchHeight = Number(rect?.height || 0)
-      const nextHeight = Math.max(windowHeight - searchHeight, 260)
-      cateTabHeight.value = `${nextHeight}px`
-    })
-    query.exec()
-  })
-}
 
-function getConversationList(item: any): Conversation[] {
-  return normalizeList(item?.conversations) as Conversation[]
+function getHistoryConversationMeta(conversation: Conversation): string {
+  return formatHistoryConversationMeta(conversation, formatAgentType, formatTime)
 }
-
-function getCurrentTabLabel(slotTabList: any): string {
-  const list = normalizeList(slotTabList)
-  return list[currentTab.value]?.label || ""
-}
-
-function getCurrentTabProjectId(slotTabList: any): number | undefined {
-  const list = normalizeList(slotTabList)
-  const projectId = list[currentTab.value]?.projectId
-  return typeof projectId === "number" ? projectId : undefined
-}
-
 function goToConnections() {
   uni.switchTab({ url: "/pages/connections/index" })
 }
@@ -1800,9 +1722,7 @@ function openHistoryPanel(group: ConnectionGroup) {
   historyGroupKey.value = group.key
   historyGroupTitle.value = group.name
   projects.value = group.projects
-  currentTab.value = 0
   showHistoryPanel.value = true
-  syncCateTabHeight()
   void ensureHistoryProjectsLoaded(group)
 }
 
@@ -2184,42 +2104,69 @@ function formatTime(time?: string): string {
 }
 
 .conversations-page {
-  background: #f2f2f7;
+  background: #f5f5f7;
 }
 
 .conversations-shell {
   min-height: 100vh;
-  padding: 16rpx 20rpx 36rpx;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  padding: 28rpx 24rpx 40rpx;
 }
 
-.conversations-searchbar {
-  padding: 4rpx 4rpx 16rpx;
-}
-
-.conversations-searchbar__search {
+.conversations-header {
   display: flex;
   align-items: center;
-  gap: 12rpx;
+  justify-content: space-between;
+  margin-bottom: 18rpx;
 }
 
-.conversations-searchbar__search :deep(.u-search) {
-  flex: 1;
+.conversations-header__title {
+  font-size: 60rpx;
+  font-weight: 700;
+  line-height: 1.08;
+  letter-spacing: -0.04em;
+  color: #20242f;
 }
 
-.conversations-searchbar__action {
-  width: 56rpx;
-  height: 56rpx;
+.conversations-header__action {
+  width: 48rpx;
+  height: 48rpx;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 16rpx;
-  background: linear-gradient(135deg, #0a84ff, #0066cc);
-  box-shadow: 0 16rpx 32rpx rgba(0, 122, 255, 0.2);
+  border-radius: 999rpx;
+  border: 2rpx solid #2f7cf6;
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 6rpx 18rpx rgba(47, 124, 246, 0.08);
   flex-shrink: 0;
+}
+
+.conversations-searchbar {
+  margin-bottom: 28rpx;
+}
+
+.conversations-searchbar :deep(.u-search__content) {
+  border: none !important;
+  border-radius: 24rpx !important;
+  background-color: #e9eaee !important;
+  box-shadow: none !important;
+}
+
+.conversations-searchbar :deep(.u-search__content__input) {
+  font-size: 26rpx;
+  color: #1a1b1f;
+}
+
+.conversations-searchbar :deep(.u-search__content__icon) {
+  margin-right: 8rpx;
 }
 
 .main-wrap {
   width: 100%;
+  flex: 1;
+  min-height: 0;
 }
 
 .main-wrap--overview {
@@ -2233,56 +2180,39 @@ function formatTime(time?: string): string {
   flex-direction: column;
   overflow: hidden;
 }
-
-.cate-wrap {
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-
-.cate-wrap__inner {
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.cate-tab {
-  height: 100%;
-}
-
 .group-panel {
   display: block;
   min-height: 0;
 }
 
 .group-list {
-  padding: 0 0 calc(28rpx + env(safe-area-inset-bottom));
+  padding: 0 0 calc(36rpx + env(safe-area-inset-bottom));
   display: flex;
   flex-direction: column;
-  gap: 24rpx;
+  gap: 28rpx;
 }
 
 .group-section__header {
   display: flex;
   align-items: center;
-  gap: 10rpx;
-  margin-bottom: 6rpx;
-  padding-left: 4rpx;
+  gap: 8rpx;
+  margin-bottom: 12rpx;
+  padding: 0 8rpx;
 }
 
 .group-section__title {
   display: block;
-  font-size: 30rpx;
+  font-size: 22rpx;
   font-weight: 600;
-  color: var(--mcode-text-primary);
+  color: #9198a8;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   flex: 0 1 auto;
 }
 
 .group-section__error {
-  width: 34rpx;
-  height: 34rpx;
+  width: 32rpx;
+  height: 32rpx;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2290,54 +2220,58 @@ function formatTime(time?: string): string {
   background: rgba(250, 53, 52, 0.1);
 }
 
+.group-section__cards {
+  display: flex;
+  flex-direction: column;
+  gap: 14rpx;
+}
+
 .group-empty {
-  padding: 18rpx 4rpx 10rpx;
+  padding: 8rpx 10rpx 6rpx;
 }
 
 .group-empty__text {
-  font-size: 24rpx;
-  color: var(--mcode-text-tertiary);
+  font-size: 22rpx;
+  color: #a0a5b3;
 }
 
 .live-card {
-  position: relative;
   display: flex;
   align-items: center;
-  gap: 16rpx;
+  gap: 18rpx;
   padding: 18rpx 16rpx;
-  border-radius: 24rpx;
-  background-color: var(--mcode-card-bg);
-  box-shadow: 0 18rpx 40rpx rgba(60, 64, 67, 0.06);
-  margin-bottom: 12rpx;
+  border-radius: 22rpx;
+  background: rgba(255, 255, 255, 0.96) !important;
+  box-shadow: 0 10rpx 26rpx rgba(15, 23, 42, 0.06) !important;
   overflow: hidden;
 }
 
 .agent-logo {
   width: 64rpx;
   height: 64rpx;
-  border-radius: 20rpx;
+  border-radius: 18rpx;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  background-color: rgba(0, 122, 255, 0.1);
+  background: linear-gradient(180deg, #eef4ff 0%, #e6edf8 100%);
 }
 
 .agent-logo__text {
   font-size: 18rpx;
   font-weight: 700;
-  color: #007aff;
+  color: #2f7cf6;
 }
 
 .agent-logo__img {
-  width: 64rpx;
-  height: 64rpx;
+  width: 56rpx;
+  height: 56rpx;
   display: block;
 }
 
 .agent-logo--real {
-  background-color: var(--mcode-card-soft-bg) !important;
-  border: 1rpx solid var(--mcode-border-color);
+  background: #ffffff !important;
+  border: 1rpx solid #e5e7eb;
 }
 
 .agent-logo--claude_code,
@@ -2346,8 +2280,12 @@ function formatTime(time?: string): string {
 .agent-logo--gemini,
 .agent-logo--open_claw,
 .agent-logo--cline {
-  background-color: var(--mcode-card-soft-bg);
-  border: 1rpx solid var(--mcode-border-color);
+  background: #ffffff;
+  border: 1rpx solid #e5e7eb;
+}
+
+.agent-logo--history {
+  background: linear-gradient(180deg, #edf4ff 0%, #dfe9fb 100%);
 }
 
 .live-card__body {
@@ -2356,130 +2294,130 @@ function formatTime(time?: string): string {
 }
 
 .live-card__project-title {
-  font-size: 28rpx;
+  display: block;
+  font-size: 34rpx;
   font-weight: 700;
-  color: #1d1d1f;
-}
-
-.live-card__meta {
-  margin-top: 8rpx;
-  display: flex;
-  align-items: center;
-  gap: 12rpx;
+  color: #111827;
+  line-height: 1.25;
 }
 
 .live-card__session-name {
-  flex: 1;
-  min-width: 0;
-  font-size: 23rpx;
-  color: #6e6e73;
+  display: block;
+  margin-top: 8rpx;
+  font-size: 26rpx;
+  color: #5f6778;
+  line-height: 1.3;
 }
 
-.live-card__time {
-  font-size: 21rpx;
-  color: #8e8e93;
-  flex-shrink: 0;
-}
-
-.card-status-corner {
-  position: absolute;
-  right: 12rpx;
-  top: 10rpx;
+.live-card__side {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-end;
   justify-content: center;
+  gap: 10rpx;
+  flex-shrink: 0;
+  padding-left: 8rpx;
+}
+
+.live-card__side--history {
+  gap: 12rpx;
+}
+
+.live-card__stamp {
+  font-size: 20rpx;
+  color: #949bab;
+  line-height: 1.2;
 }
 
 .status-chip {
   position: relative;
-  z-index: 2;
-  padding: 4rpx 12rpx;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34rpx;
+  padding: 6rpx 14rpx;
   border-radius: 999rpx;
   background-color: rgba(142, 142, 147, 0.12);
+  overflow: visible;
 }
 
 .status-chip__text {
+  position: relative;
+  z-index: 1;
+  display: block;
   font-size: 18rpx;
+  line-height: 1;
+  font-weight: 600;
+  text-align: center;
   color: #8e8e93;
 }
 
 .status-chip--running {
-  background-color: rgba(52, 199, 89, 0.14);
-}
-.status-chip--running .status-chip__text {
-  color: #19be6b;
-}
-.status-chip--completed {
-  background-color: rgba(0, 122, 255, 0.12);
-}
-.status-chip--completed .status-chip__text {
-  color: #007aff;
-}
-.status-chip--stopped .status-chip__text {
-  color: #8e8e93;
-}
-.status-chip--error {
-  background-color: rgba(255, 69, 58, 0.12);
-}
-.status-chip--error .status-chip__text {
-  color: #ff453a;
+  background-color: rgba(52, 199, 89, 0.16);
 }
 
-.status-wave {
+.status-chip--running::after {
+  content: "";
   position: absolute;
-  width: 100%;
-  height: 100%;
-  border-radius: 999rpx;
-  background-color: rgba(25, 190, 107, 0.24);
-  z-index: 1;
-  animation: statusPulse 1.4s ease-out infinite;
+  inset: 0;
+  border-radius: inherit;
+  background: rgba(52, 199, 89, 0.18);
+  animation: runningPulse 1.5s ease-out infinite;
 }
 
-@keyframes statusPulse {
+.status-chip--running .status-chip__text {
+  color: #21a453;
+}
+
+.status-chip--completed {
+  background-color: rgba(116, 126, 147, 0.12);
+}
+
+.status-chip--completed .status-chip__text {
+  color: #727b8b;
+}
+
+.status-chip--stopped {
+  background-color: rgba(255, 95, 86, 0.14);
+}
+
+.status-chip--stopped .status-chip__text {
+  color: #ff5f56;
+}
+
+.status-chip--error {
+  background-color: rgba(255, 95, 86, 0.14);
+}
+
+.status-chip--error .status-chip__text {
+  color: #ff5f56;
+}
+
+.status-chip--history {
+  background-color: rgba(142, 142, 147, 0.12);
+}
+
+.status-chip--history .status-chip__text {
+  color: #7b8190;
+}
+
+@keyframes runningPulse {
   0% {
     transform: scale(1);
-    opacity: 0.7;
+    opacity: 0.75;
   }
   70% {
-    transform: scale(1.55);
+    transform: scale(1.42);
     opacity: 0;
   }
   100% {
-    transform: scale(1.55);
+    transform: scale(1.42);
     opacity: 0;
   }
 }
 
-.history-card {
-  margin-top: 4rpx;
-  background: linear-gradient(135deg, rgba(0, 122, 255, 0.1), rgba(255, 255, 255, 0.96));
-}
-
-.history-entry__left {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: center;
-  gap: 4rpx;
-}
-
-.history-entry__text {
-  font-size: 26rpx;
-  color: #1d1d1f;
-}
-
-.history-entry__desc {
-  font-size: 22rpx;
-  color: #8e8e93;
-  line-height: 1.4;
-}
-
-.history-card__icon {
-  width: 58rpx;
-  height: 58rpx;
-  border-radius: 18rpx;
+.live-card--history {
+  background: rgba(255, 255, 255, 0.96) !important;
 }
 
 .inline-loading {
@@ -2496,15 +2434,28 @@ function formatTime(time?: string): string {
   color: #8e8e93;
 }
 
+.history-list {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.history-scroll {
+  flex: 1;
+  min-height: 0;
+}
+
 .history-mode-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12rpx;
-  padding: 16rpx 16rpx;
-  border-radius: 24rpx;
-  background-color: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 18rpx 40rpx rgba(60, 64, 67, 0.06);
+  padding: 14rpx 16rpx;
+  border-radius: 22rpx;
+  background: rgba(255, 255, 255, 0.96) !important;
+  box-shadow: 0 8rpx 24rpx rgba(15, 23, 42, 0.06) !important;
+  flex-shrink: 0;
 }
 
 .history-mode-back {
@@ -2522,9 +2473,72 @@ function formatTime(time?: string): string {
 .history-mode-title {
   flex: 1;
   min-width: 0;
-  text-align: right;
+  text-align: center;
   font-size: 24rpx;
-  color: #6e6e73;
+  font-weight: 600;
+  color: #303544;
+}
+
+.history-mode-create {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4rpx;
+  min-width: 92rpx;
+  min-height: 44rpx;
+  padding: 0 14rpx;
+  border-radius: 999rpx;
+  background: rgba(47, 124, 246, 0.1);
+  flex-shrink: 0;
+}
+
+.history-mode-create__text {
+  display: block;
+  font-size: 22rpx;
+  line-height: 1;
+  font-weight: 600;
+  color: var(--mcode-primary);
+}
+
+.history-section {
+  margin-top: 24rpx;
+}
+
+.history-section__header {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  padding: 0 8rpx;
+}
+
+.history-section__title {
+  display: block;
+  max-width: 560rpx;
+  font-size: 22rpx;
+  font-weight: 700;
+  color: #7d8596;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.history-section__count {
+  min-width: 34rpx;
+  height: 30rpx;
+  padding: 0 10rpx;
+  border-radius: 999rpx;
+  background: rgba(47, 124, 246, 0.1);
+  font-size: 18rpx;
+  line-height: 30rpx;
+  text-align: center;
+  color: var(--mcode-primary);
+}
+
+.history-section__path {
+  display: block;
+  margin-top: 6rpx;
+  padding: 0 8rpx 12rpx;
+  font-size: 20rpx;
+  color: #a0a5b3;
 }
 
 /* ===== 空状态 ===== */
@@ -2541,95 +2555,17 @@ function formatTime(time?: string): string {
   min-height: 52vh;
 }
 
-/* ===== 左侧 Tab 项 ===== */
-.tab-item {
-  position: relative;
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 8rpx;
-  width: 100%;
-  padding: 0 12rpx;
-  box-sizing: border-box;
-  overflow: hidden;
-}
-
-.tab-item__name {
-  flex: 1;
-  min-width: 0;
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  line-height: 1.3;
-  font-size: 24rpx;
-  color: inherit;
-}
-
-.tab-item__badge {
-  flex-shrink: 0;
-  font-size: 20rpx;
-  color: var(--mcode-primary);
-  background-color: color-mix(in srgb, var(--mcode-primary) 10%, var(--mcode-card-bg) 90%);
-  border-radius: 20rpx;
-  padding: 2rpx 10rpx;
-  line-height: 1.2;
-}
-
-/* ===== 右侧顶部栏 ===== */
-.right-top-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 20rpx 12rpx 16rpx;
-  border-bottom: 1rpx solid var(--mcode-border-color);
-}
-
-.right-top-bar__title {
-  font-size: 30rpx;
-  font-weight: 600;
-  color: var(--mcode-text-primary);
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.add-btn {
-  display: flex;
-  align-items: center;
-  gap: 4rpx;
-  padding: 6rpx 12rpx;
-  background-color: color-mix(in srgb, var(--mcode-primary) 10%, var(--mcode-card-bg) 90%);
-  border-radius: 24rpx;
-  flex-shrink: 0;
-  max-width: 112rpx;
-  min-width: 0;
-  overflow: hidden;
-
-  &:active { background-color: color-mix(in srgb, var(--mcode-primary) 18%, var(--mcode-card-bg) 82%); }
-}
-
-.add-btn__label {
-  font-size: 20rpx;
-  color: var(--mcode-primary);
-  font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.history-mode-tip {
-  font-size: 22rpx;
-  color: var(--mcode-text-tertiary);
-}
-
 /* ===== 会话列表 ===== */
 .conv-list {
   padding: 8rpx 12rpx;
   display: flex;
   flex-direction: column;
   gap: 10rpx;
+}
+
+.conv-list--history {
+  gap: 12rpx;
+  padding: 0;
 }
 
 .conv-card {
@@ -2643,6 +2579,14 @@ function formatTime(time?: string): string {
   transition: transform 0.15s;
 
   &:active { transform: scale(0.985); }
+}
+
+.conv-card--history {
+  gap: 18rpx;
+  padding: 18rpx 16rpx;
+  border-radius: 22rpx;
+  background: rgba(255, 255, 255, 0.96) !important;
+  box-shadow: 0 10rpx 26rpx rgba(15, 23, 42, 0.06) !important;
 }
 
 .conv-card__icon {
@@ -2671,25 +2615,14 @@ function formatTime(time?: string): string {
   line-height: 1.3;
 }
 
-.conv-card__meta {
-  display: flex;
-  align-items: center;
-  gap: 10rpx;
-  min-height: 30rpx;
+.conv-card__subtitle {
+  display: block;
+  margin-top: 4rpx;
+  font-size: 22rpx;
+  color: #6b7280;
+  line-height: 1.3;
 }
 
-.conv-card__meta :deep(.u-tag) {
-  transform: scale(0.92);
-  transform-origin: left center;
-  line-height: 16px !important;
-  min-height: 16px !important;
-}
-
-.conv-card__time {
-  font-size: 20rpx;
-  color: var(--mcode-text-tertiary);
-  line-height: 1.2;
-}
 
 .conv-card__actions {
   display: flex;
@@ -2707,13 +2640,6 @@ function formatTime(time?: string): string {
   justify-content: center;
 }
 
-/* ===== 空会话 ===== */
-.empty-section {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 60rpx 0;
-}
 
 /* ===== 创建弹层 ===== */
 .create-sheet {
@@ -2930,32 +2856,4 @@ function formatTime(time?: string): string {
   height: calc(32rpx + env(safe-area-inset-bottom));
 }
 
-:deep(.u-cate-tab__view) {
-  width: 180rpx !important;
-  min-width: 180rpx;
-  max-width: 180rpx;
-}
-
-:deep(.u-cate-tab__item) {
-  min-height: 120rpx;
-  height: auto;
-  align-items: flex-start;
-  justify-content: center;
-}
-
-:deep(.u-cate-tab__right-box) {
-  min-width: 0;
-}
-
-:deep(.u-cate-tab__page-item) {
-  margin-bottom: 0;
-  border: none;
-  padding: 0;
-  border-radius: 0;
-  background: transparent;
-}
-
-:deep(.u-cate-tab__page-item:last-child) {
-  min-height: 0;
-}
 </style>
