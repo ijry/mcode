@@ -1,6 +1,8 @@
 import type { ConversationSummaryRecord } from "@/services/db/repositories/conversationRepository"
 import { normalizeConversationSummaryStatus } from "@/services/conversation/conversationSummaryStatus"
 
+const RECENT_ACTIVE_WINDOW_MS = 24 * 60 * 60 * 1000
+
 export interface ConversationOverviewConversation {
   id: number
   title?: string
@@ -109,12 +111,12 @@ export function buildConnectionConversationSnapshot(
       .map((card) => Number(card.conversationId || 0))
       .filter((conversationId) => conversationId > 0)
   )
-  const startOfToday = getStartOfTodayTimestamp(input.now ?? Date.now())
+  const recentActiveThreshold = getRecentActiveThreshold(input.now ?? Date.now())
 
   const recentActiveCards = conversations
     .filter((conversation) => {
       if (openedConversationIds.has(conversation.id)) return false
-      return getConversationActivityTimestamp(conversation) >= startOfToday
+      return getConversationActivityTimestamp(conversation) >= recentActiveThreshold
     })
     .sort(
       (left, right) =>
@@ -214,10 +216,10 @@ export function getConversationActivityTimestamp(
   )
 }
 
-function getStartOfTodayTimestamp(now: number) {
-  const date = new Date(now)
-  date.setHours(0, 0, 0, 0)
-  return date.getTime()
+function getRecentActiveThreshold(now: number) {
+  if (!Number.isFinite(now)) return 0
+  // Keep late-night activity visible after midnight instead of resetting at 00:00.
+  return Math.max(0, now - RECENT_ACTIVE_WINDOW_MS)
 }
 
 function normalizeAgentType(value?: string): string {
