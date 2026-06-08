@@ -177,13 +177,22 @@ pub(crate) async fn handle_event(
         // and across both `ToolCall` and `ToolCallUpdate`, so `ToolCall` no
         // longer reaches this worker at all (see `is_lifecycle_relevant`).
         AcpEvent::SessionStarted { session_id } => {
-            // Look up conversation_id from the live state.
-            let Some(state_arc) = manager.get_state(&envelope.connection_id).await else {
+            // Look up conversation_id (and the emitter) from the live state.
+            let Some((state_arc, emitter)) =
+                manager.get_state_and_emitter(&envelope.connection_id).await
+            else {
                 return Ok(());
             };
             let conversation_id = state_arc.read().await.conversation_id;
             if let Some(cid) = conversation_id {
                 conversation_service::update_external_id(db_conn, cid, session_id.clone()).await?;
+                // The external_id just landed on the row. The create-time
+                // sidebar upsert carried `external_id: null` (no session yet),
+                // so re-broadcast the full summary on `conversation://changed`
+                // to converge every client. Root-only (the helper skips
+                // delegation children). Best-effort, after the DB write.
+                crate::commands::conversations::emit_conversation_upsert(&emitter, db_conn, cid)
+                    .await;
             }
             Ok(())
         }
@@ -509,7 +518,7 @@ fn find_delegation_args(
 /// agent gets to decide both fields:
 ///
 /// * `title` is a free-form human-readable string the host composes. Some
-///   hosts copy the MCP method verbatim (`mcp__codeg-delegate__delegate_to_agent`),
+///   hosts copy the MCP method verbatim (`mcp__codeg-mcp__delegate_to_agent`),
 ///   some prefix it with a verb (`Run mcp__…__delegate_to_agent`), some
 ///   rephrase it (`Delegate to codex`). We match by substring so any
 ///   form containing `delegate_to_agent` is captured.
@@ -528,8 +537,7 @@ fn is_delegation_invocation(title: &str, raw_input: Option<&str>) -> bool {
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(raw) {
             if let Some(args) = find_delegation_args(&v, 0) {
                 let has_task = args.get("task").and_then(|t| t.as_str()).is_some();
-                let has_agent_type =
-                    args.get("agent_type").and_then(|a| a.as_str()).is_some();
+                let has_agent_type = args.get("agent_type").and_then(|a| a.as_str()).is_some();
                 if has_task && has_agent_type {
                     return true;
                 }
@@ -560,8 +568,7 @@ fn extract_delegation_match_key(raw_input: Option<&str>) -> Option<DelegationMat
     let task = args.get("task").and_then(|v| v.as_str())?.to_string();
     // Parse `agent_type` through the same serde path the MCP listener uses,
     // so the stored enum equals `DelegationRequest::agent_type`.
-    let agent_type: AgentType =
-        serde_json::from_value(args.get("agent_type")?.clone()).ok()?;
+    let agent_type: AgentType = serde_json::from_value(args.get("agent_type")?.clone()).ok()?;
     let working_dir = args
         .get("working_dir")
         .and_then(|v| v.as_str())
@@ -571,6 +578,18 @@ fn extract_delegation_match_key(raw_input: Option<&str>) -> Option<DelegationMat
         task,
         working_dir,
     })
+}
+
+/// True when an ACP `ToolCallUpdate.status` string is terminal for delegation
+/// correlation. The live value is `format!("{:?}", ToolCallStatus).to_lowercase()`
+/// over the `agent-client-protocol-schema` enum (variants `Pending`,
+/// `InProgress`, `Completed`, `Failed`), so terminal == `completed` | `failed`.
+/// Cancellation never arrives via this field — it flows through the turn-cancel
+/// / teardown path, which already drains pending entries on the broker. The
+/// enum is `#[non_exhaustive]`; if a `Cancelled` variant is added upstream,
+/// extend this set alongside `acp::connection`'s status mapping.
+fn is_terminal_tool_call_status(status: Option<&str>) -> bool {
+    matches!(status, Some("completed" | "failed"))
 }
 
 /// Synchronously register a parent-side `delegate_to_agent` tool_call_id with
@@ -606,10 +625,58 @@ fn extract_delegation_match_key(raw_input: Option<&str>) -> Option<DelegationMat
 /// flood — those carry streaming `raw_output`, not `raw_input`. The broker's
 /// own two-tier dedupe absorbs the repeated registrations a multi-update
 /// delegation call produces.
+///
+/// A TERMINAL tool-call event (status `completed`/`failed`, via EITHER
+/// `ToolCall` or `ToolCallUpdate` — some hosts ship status flips on the
+/// non-update variant, see `register_pending_tool_call`'s dedupe doc) is handled
+/// the opposite way: instead of registering, it tombstones any still-pending
+/// entry for that `tool_call_id` via
+/// [`DelegationBroker::tombstone_pending_tool_call`], so a `delegate_to_agent`
+/// that went terminal without its MCP round-trip ever arriving can't leave a
+/// stale keyed entry for a later same-key delegation to mis-claim.
 async fn register_delegation_tool_call_from_event(
     broker: &DelegationBroker,
     envelope: &EventEnvelope,
 ) {
+    // Terminal tool-call event (completed/failed) → tombstone by id, don't
+    // register. Read BOTH variants, symmetric with the registration path below:
+    // some hosts ship status flips on the non-update `ToolCall` variant, not
+    // only `ToolCallUpdate` (`register_pending_tool_call`'s dedupe doc). Keyed on
+    // `tool_call_id` membership rather than `is_delegation_invocation`: a bare
+    // terminal update may carry `title: None` / `raw_input: None`, leaving no
+    // derivable key, so we let the broker no-op when the id isn't a pending
+    // delegation. This removes a STALE keyed entry (the call failed / the turn
+    // was interrupted / its round-trip never reached the broker) so a later
+    // identical (agent_type, task, working_dir) call can't claim its dead id and
+    // bind to the wrong card.
+    let terminal: Option<(&String, &str)> = match &envelope.payload {
+        AcpEvent::ToolCall {
+            tool_call_id,
+            status,
+            ..
+        } if is_terminal_tool_call_status(Some(status)) => Some((tool_call_id, status.as_str())),
+        AcpEvent::ToolCallUpdate {
+            tool_call_id,
+            status,
+            ..
+        } if is_terminal_tool_call_status(status.as_deref()) => {
+            Some((tool_call_id, status.as_deref().unwrap_or("")))
+        }
+        _ => None,
+    };
+    if let Some((tool_call_id, status)) = terminal {
+        let removed = broker
+            .tombstone_pending_tool_call(&envelope.connection_id, tool_call_id)
+            .await;
+        if removed {
+            eprintln!(
+                "[delegation] tombstoned stale parent tool_call_id={tool_call_id} on conn={} (terminal status={status})",
+                envelope.connection_id
+            );
+        }
+        return;
+    }
+
     let (tool_call_id, title, raw_input): (&String, &str, Option<&str>) = match &envelope.payload {
         AcpEvent::ToolCall {
             tool_call_id,
@@ -690,8 +757,7 @@ mod delegation_title_tests {
     fn extract_match_key_peels_wrapper_layers() {
         // Codex-style: args nested under `params.input` (mirrors the
         // `findDelegationArgs` walker in delegated-sub-thread.tsx).
-        let nested =
-            r#"{"params":{"input":{"agent_type":"codex","task":"t","working_dir":"/w"}}}"#;
+        let nested = r#"{"params":{"input":{"agent_type":"codex","task":"t","working_dir":"/w"}}}"#;
         let key = extract_delegation_match_key(Some(nested)).expect("nested key parses");
         assert_eq!(key.agent_type, AgentType::Codex);
         assert_eq!(key.task, "t");
@@ -741,7 +807,7 @@ mod delegation_title_tests {
     #[test]
     fn matches_mcp_prefixed_method_in_title() {
         assert!(is_delegation_invocation(
-            "mcp__codeg-delegate__delegate_to_agent",
+            "mcp__codeg-mcp__delegate_to_agent",
             None
         ));
         assert!(is_delegation_invocation(
@@ -779,6 +845,20 @@ mod delegation_title_tests {
             "write",
             Some(r#"{"path":"/tmp/x","content":"y"}"#)
         ));
+    }
+
+    #[test]
+    fn terminal_status_set_is_completed_and_failed_only() {
+        use super::is_terminal_tool_call_status as is_terminal;
+        assert!(is_terminal(Some("completed")));
+        assert!(is_terminal(Some("failed")));
+        assert!(!is_terminal(Some("pending")));
+        assert!(!is_terminal(Some("in_progress")));
+        assert!(!is_terminal(None));
+        // Cancellation never arrives via this field (it flows through the
+        // turn-cancel path), so it must not be treated as terminal here.
+        assert!(!is_terminal(Some("canceled")));
+        assert!(!is_terminal(Some("cancelled")));
     }
 }
 
@@ -866,6 +946,207 @@ mod delegation_registration_tests {
         }
     }
 
+    /// `tool_call_update_event` with an explicit `status` (the base helper
+    /// hardcodes `None`). Used to drive the terminal-tombstone branch.
+    fn tool_call_update_event_with_status(
+        tool_call_id: &str,
+        status: Option<&str>,
+        raw_input: Option<&str>,
+    ) -> EventEnvelope {
+        EventEnvelope {
+            seq: 2,
+            connection_id: "parent-conn".into(),
+            payload: AcpEvent::ToolCallUpdate {
+                tool_call_id: tool_call_id.into(),
+                title: None,
+                status: status.map(|s| s.to_string()),
+                content: None,
+                raw_input: raw_input.map(|s| s.to_string()),
+                raw_output: None,
+                raw_output_append: None,
+                locations: None,
+                meta: None,
+                images: None,
+            },
+        }
+    }
+
+    /// `tool_call_event` with an explicit `status` (the base helper hardcodes
+    /// `"pending"`). Some hosts ship terminal status flips on the non-update
+    /// `ToolCall` variant, so the tombstone branch must read it too.
+    fn tool_call_event_with_status(
+        tool_call_id: &str,
+        title: &str,
+        status: &str,
+        raw_input: Option<&str>,
+    ) -> EventEnvelope {
+        EventEnvelope {
+            seq: 1,
+            connection_id: "parent-conn".into(),
+            payload: AcpEvent::ToolCall {
+                tool_call_id: tool_call_id.into(),
+                title: title.into(),
+                kind: "other".into(),
+                status: status.into(),
+                content: None,
+                raw_input: raw_input.map(|s| s.to_string()),
+                raw_output: None,
+                locations: None,
+                meta: None,
+                images: None,
+            },
+        }
+    }
+
+    /// A terminal `ToolCallUpdate` (completed) for a registered delegation
+    /// tombstones its keyed entry, so a `delegate_to_agent` that went terminal
+    /// without its round-trip ever arriving leaves nothing for a later same-key
+    /// delegation to mis-claim.
+    #[tokio::test]
+    async fn terminal_update_tombstones_registered_delegation() {
+        let b = broker();
+        register_delegation_tool_call_from_event(
+            &b,
+            &tool_call_event(
+                "tc-1",
+                "delegate_to_agent",
+                Some(r#"{"agent_type":"codex","task":"research"}"#),
+            ),
+        )
+        .await;
+        register_delegation_tool_call_from_event(
+            &b,
+            &tool_call_update_event_with_status("tc-1", Some("completed"), None),
+        )
+        .await;
+        assert!(
+            b.take_matching_tool_call("parent-conn", &codex_key("research"))
+                .await
+                .is_none(),
+            "a terminal ToolCallUpdate must tombstone the stale keyed entry"
+        );
+    }
+
+    /// A NON-terminal update must NOT tombstone: this is the serialized
+    /// round-trip case (Claude Code runs parallel `delegate_to_agent` calls
+    /// one-at-a-time, so the 2nd entry waits `in_progress` for up to ~77s before
+    /// its round-trip fires). Evicting it here would reintroduce the dead-card
+    /// bug the keyed-retention rule was added to fix.
+    #[tokio::test]
+    async fn non_terminal_update_does_not_tombstone() {
+        let b = broker();
+        register_delegation_tool_call_from_event(
+            &b,
+            &tool_call_event(
+                "tc-late",
+                "delegate_to_agent",
+                Some(r#"{"agent_type":"codex","task":"slow"}"#),
+            ),
+        )
+        .await;
+        register_delegation_tool_call_from_event(
+            &b,
+            &tool_call_update_event_with_status("tc-late", Some("in_progress"), None),
+        )
+        .await;
+        assert_eq!(
+            b.take_matching_tool_call("parent-conn", &codex_key("slow"))
+                .await
+                .as_deref(),
+            Some("tc-late"),
+            "a non-terminal update must leave the waiting entry claimable"
+        );
+    }
+
+    /// A terminal update for an unrelated (non-delegation) tool call no-ops and
+    /// leaves a registered delegation intact — the tombstone runs for every
+    /// terminal update but only removes a matching pending delegation id.
+    #[tokio::test]
+    async fn terminal_update_for_unrelated_tool_is_harmless() {
+        let b = broker();
+        register_delegation_tool_call_from_event(
+            &b,
+            &tool_call_event(
+                "tc-deleg",
+                "delegate_to_agent",
+                Some(r#"{"agent_type":"codex","task":"research"}"#),
+            ),
+        )
+        .await;
+        register_delegation_tool_call_from_event(
+            &b,
+            &tool_call_update_event_with_status("tc-bash-42", Some("completed"), None),
+        )
+        .await;
+        assert_eq!(
+            b.take_matching_tool_call("parent-conn", &codex_key("research"))
+                .await
+                .as_deref(),
+            Some("tc-deleg"),
+            "a terminal update for an unrelated tool must leave the delegation intact"
+        );
+    }
+
+    /// A terminal status shipped via the non-update `ToolCall` variant (some
+    /// hosts use it for status flips — see `register_pending_tool_call`'s dedupe
+    /// doc) tombstones too, symmetric with the `ToolCallUpdate` path. Without
+    /// this, a terminal `ToolCall` still carrying the delegation shape would
+    /// RE-REGISTER the stale entry instead of removing it. Uses `failed` to also
+    /// drive that terminal value through the dispatcher.
+    #[tokio::test]
+    async fn terminal_tool_call_variant_tombstones_registered_delegation() {
+        let b = broker();
+        register_delegation_tool_call_from_event(
+            &b,
+            &tool_call_event(
+                "tc-1",
+                "delegate_to_agent",
+                Some(r#"{"agent_type":"codex","task":"research"}"#),
+            ),
+        )
+        .await;
+        register_delegation_tool_call_from_event(
+            &b,
+            &tool_call_event_with_status(
+                "tc-1",
+                "delegate_to_agent",
+                "failed",
+                Some(r#"{"agent_type":"codex","task":"research"}"#),
+            ),
+        )
+        .await;
+        assert!(
+            b.take_matching_tool_call("parent-conn", &codex_key("research"))
+                .await
+                .is_none(),
+            "a terminal ToolCall (status flip via the non-update variant) must tombstone"
+        );
+    }
+
+    /// A terminal `ToolCall` for an id with no pending entry must NOT register a
+    /// fresh one — it short-circuits at the terminal branch before the register
+    /// path, so it can't itself create the stale entry it exists to prevent.
+    #[tokio::test]
+    async fn terminal_tool_call_does_not_register_fresh_entry() {
+        let b = broker();
+        register_delegation_tool_call_from_event(
+            &b,
+            &tool_call_event_with_status(
+                "tc-1",
+                "delegate_to_agent",
+                "completed",
+                Some(r#"{"agent_type":"codex","task":"research"}"#),
+            ),
+        )
+        .await;
+        assert!(
+            b.take_matching_tool_call("parent-conn", &codex_key("research"))
+                .await
+                .is_none(),
+            "a terminal ToolCall with no prior registration must not create an entry"
+        );
+    }
+
     /// The headline regression: a delegation whose `agent_type`/`task` arrive
     /// on a `ToolCallUpdate` (the initial `ToolCall` had a model-generated
     /// title and no `raw_input`) is still registered, keyed, and claimable by
@@ -918,7 +1199,7 @@ mod delegation_registration_tests {
         // tc-2 registers unkeyed (tool-name title, no raw_input yet).
         register_delegation_tool_call_from_event(
             &b,
-            &tool_call_event("tc-2", "mcp__codeg-delegate__delegate_to_agent", None),
+            &tool_call_event("tc-2", "mcp__codeg-mcp__delegate_to_agent", None),
         )
         .await;
         // A parallel keyed sibling sharing the queue (must not be mixed up).
@@ -926,7 +1207,7 @@ mod delegation_registration_tests {
             &b,
             &tool_call_event(
                 "tc-sibling",
-                "mcp__codeg-delegate__delegate_to_agent",
+                "mcp__codeg-mcp__delegate_to_agent",
                 Some(r#"{"agent_type":"codex","task":"sibling"}"#),
             ),
         )
@@ -934,7 +1215,11 @@ mod delegation_registration_tests {
         // tc-2's args arrive on an update → backfills its key.
         register_delegation_tool_call_from_event(
             &b,
-            &tool_call_update_event("tc-2", None, Some(r#"{"agent_type":"codex","task":"build"}"#)),
+            &tool_call_update_event(
+                "tc-2",
+                None,
+                Some(r#"{"agent_type":"codex","task":"build"}"#),
+            ),
         )
         .await;
         // In-loop claims are exact-match-only, so tc-2 is claimable purely
@@ -1269,6 +1554,53 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(reloaded.external_id.as_deref(), Some("ext-99"));
+    }
+
+    #[tokio::test]
+    async fn handle_event_session_started_broadcasts_conversation_upsert() {
+        // SessionStarted persists external_id; it must ALSO re-broadcast the
+        // full summary on `conversation://changed` so every client's sidebar
+        // converges (the create-time upsert carried external_id: null).
+        use crate::web::event_bridge::{WebEventBroadcaster, CONVERSATION_CHANGED_EVENT};
+        let db = test_helpers::fresh_in_memory_db().await;
+        let folder_id = test_helpers::seed_folder(&db, "/tmp/test-sess-upsert").await;
+        let conv =
+            conversation_service::create(&db.conn, folder_id, AgentType::ClaudeCode, None, None)
+                .await
+                .unwrap();
+        let broadcaster = Arc::new(WebEventBroadcaster::new());
+        let mut rx = broadcaster.subscribe();
+        let mgr = ConnectionManager::new();
+        {
+            let mut map = mgr.connections.lock().await;
+            let mut conn = fake_connection_with_state("c1", Some(conv.id));
+            conn.emitter = EventEmitter::test_web_only(broadcaster.clone());
+            map.insert("c1".to_string(), conn);
+        }
+        let env = EventEnvelope {
+            seq: 1,
+            connection_id: "c1".to_string(),
+            payload: AcpEvent::SessionStarted {
+                session_id: "ext-99".into(),
+            },
+        };
+        handle_event(&db.conn, &mgr, &env, None).await.unwrap();
+
+        // external_id persisted on the row...
+        let reloaded = conversation_service::get_by_id(&db.conn, conv.id)
+            .await
+            .unwrap();
+        assert_eq!(reloaded.external_id.as_deref(), Some("ext-99"));
+
+        // ...and a `conversation://changed` upsert carrying it was broadcast.
+        let evt = rx
+            .try_recv()
+            .expect("SessionStarted should broadcast a conversation upsert");
+        assert_eq!(evt.channel, CONVERSATION_CHANGED_EVENT);
+        let p = &*evt.payload;
+        assert_eq!(p["kind"], "upsert");
+        assert_eq!(p["summary"]["id"], conv.id);
+        assert_eq!(p["summary"]["external_id"], "ext-99");
     }
 
     #[tokio::test]
@@ -2298,8 +2630,7 @@ mod tests {
             DelegationOutcome::Err { code, message, .. } => {
                 assert_eq!(code, "canceled");
                 assert_eq!(
-                    message,
-                    "canceled: child session ended without TurnComplete: transport closed",
+                    message, "canceled: child session ended without TurnComplete: transport closed",
                     "terminal Error detail must reach the broker without waiting for Disconnected"
                 );
             }
@@ -2401,7 +2732,10 @@ mod tests {
         match &outcome {
             DelegationOutcome::Err { code, message, .. } => {
                 assert_eq!(code, "canceled");
-                assert_eq!(message, "canceled: child session ended without TurnComplete");
+                assert_eq!(
+                    message,
+                    "canceled: child session ended without TurnComplete"
+                );
             }
             other => panic!("expected Err{{canceled}}, got {other:?}"),
         }

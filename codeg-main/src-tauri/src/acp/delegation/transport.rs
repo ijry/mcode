@@ -16,12 +16,24 @@
 //!
 //! ### Message shapes
 //!
-//! Inbound traffic is a tagged [`BrokerMessage`] enum (`kind: "call"` or
-//! `kind: "cancel"`). The `call` arm carries a [`BrokerRequest`] and
-//! receives a [`BrokerResponse`] on the same socket; the `cancel` arm is
-//! a fire-and-forget [`BrokerCancelRequest`] that targets a previously-
-//! issued call by `external_handle` and gets a `Value::Null` ack. Both
-//! arms are authenticated by the same per-launch `token`.
+//! Inbound traffic is a tagged [`BrokerMessage`] enum, one variant per MCP
+//! tool plus the MCP cancel notification:
+//!   * `call` — [`BrokerRequest`] for `delegate_to_agent`; returns a
+//!     [`BrokerResponse`] wrapping a `DelegationTaskReport` (a `Running` ack, or
+//!     a terminal report).
+//!   * `status` — [`BrokerStatusRequest`] for `get_delegation_status`. Carries a
+//!     `task_ids` list (one or many) and an optional `wait_ms` long-poll —
+//!     omitted is an immediate snapshot, an explicit `0` blocks until a task is
+//!     terminal, a positive value is a bounded wait. Returns a `{ "tasks": [..] }`
+//!     envelope with one task report per requested id (in request order); a
+//!     batch wait wakes as soon as ANY requested task reaches a terminal state.
+//!   * `cancel_task` — [`BrokerCancelTaskRequest`] for `cancel_delegation`;
+//!     returns a task report.
+//!   * `cancel` — fire-and-forget [`BrokerCancelRequest`] from MCP
+//!     `notifications/cancelled`, targeting an in-flight `delegate_to_agent`
+//!     call by `external_handle`; gets a `Value::Null` ack.
+//!
+//! All arms are authenticated by the same per-launch `token`.
 //!
 //! ### Version coupling
 //!
@@ -83,6 +95,61 @@ pub struct BrokerCancelRequest {
     pub reason: Option<String>,
 }
 
+/// Query the status (and, optionally, block briefly for the result) of one or
+/// more previously-issued delegation tasks by their broker `task_id`s. Backs the
+/// `get_delegation_status` MCP tool. Authenticated by the same per-launch
+/// `token`; the listener scopes each lookup to the token's parent connection
+/// so one parent can't read another's tasks.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BrokerStatusRequest {
+    pub token: String,
+    /// One or many task ids to resolve. The companion forwards the MCP
+    /// `task_ids` array into this list (trimmed, de-duplicated, order-preserving).
+    /// The listener returns one report per id, in this order.
+    pub task_ids: Vec<String>,
+    /// How long the listener may block waiting for a task to reach a terminal
+    /// state before returning the current (possibly still-running) snapshot.
+    /// `None` (omitted) returns an immediate snapshot; an explicit `0` blocks
+    /// with no timeout until a task finishes (long-running children); any
+    /// positive value is a long-poll the listener clamps to a hard ceiling so a
+    /// single bounded call can't hang unbounded. For a batch the wait resolves as
+    /// soon as ANY requested task reaches a terminal state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait_ms: Option<u64>,
+}
+
+/// Cancel a previously-issued delegation task by its broker `task_id`. Backs
+/// the `cancel_delegation` MCP tool. Distinct from [`BrokerCancelRequest`],
+/// which targets an in-flight `tools/call` by its companion-minted
+/// `external_handle` for MCP `notifications/cancelled`; this targets a running
+/// task the LLM is explicitly stopping by id.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BrokerCancelTaskRequest {
+    pub token: String,
+    pub task_id: String,
+}
+
+/// Pull the pending live-feedback notes for the parent session. Backs the
+/// `check_user_feedback` MCP tool. Authenticated by the same per-launch
+/// `token`; the listener resolves the parent connection from it and scopes the
+/// drain to that connection so one parent can't read another's feedback.
+/// Always returns an immediate snapshot — no blocking wait.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BrokerFeedbackRequest {
+    pub token: String,
+}
+
+/// Confirm delivery of feedback notes, marking them `Delivered`. Sent by the
+/// companion AFTER its `check_user_feedback` round-trip wins (i.e. it is
+/// returning the result to the agent), NOT by the listener at UDS-write time —
+/// so a per-request cancel that suppresses the agent-facing response (the agent
+/// staying alive) leaves the notes pending for the next check (at-least-once).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BrokerCommitFeedbackRequest {
+    pub token: String,
+    pub ids: Vec<String>,
+}
+
 /// Tagged top-level message dispatched by the listener. Adding new variants
 /// is the wire-stable way to grow the broker protocol without touching the
 /// frame layer.
@@ -91,11 +158,17 @@ pub struct BrokerCancelRequest {
 pub enum BrokerMessage {
     Call(BrokerRequest),
     Cancel(BrokerCancelRequest),
+    Status(BrokerStatusRequest),
+    CancelTask(BrokerCancelTaskRequest),
+    Feedback(BrokerFeedbackRequest),
+    CommitFeedback(BrokerCommitFeedbackRequest),
 }
 
 /// The wrapped outcome the main process returns over the same socket.
-/// `outcome` is a serialized [`super::types::DelegationOutcome`] for `Call`
-/// messages and `Value::Null` for `Cancel` acknowledgements.
+/// `outcome` is a serialized [`super::types::DelegationTaskReport`] for `Call`
+/// / `CancelTask` messages, a `{ "tasks": [report, ...] }` envelope (one report
+/// per requested id, in request order) for `Status`, and `Value::Null` for
+/// `Cancel` acknowledgements.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BrokerResponse {
     pub outcome: Value,
@@ -145,32 +218,73 @@ where
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("decode: {e}")))
 }
 
-/// One-shot client round-trip: connect, write the request, read the response,
-/// drop the connection.
+/// One-shot client round-trip: connect, write one [`BrokerMessage`], read the
+/// response, drop the connection. The three public helpers below differ only
+/// in which message they build, so the connect/write/read is shared here.
 #[cfg(unix)]
-pub async fn client_round_trip(
-    socket_path: &str,
-    req: &BrokerRequest,
-) -> io::Result<BrokerResponse> {
+async fn message_round_trip(socket_path: &str, msg: &BrokerMessage) -> io::Result<BrokerResponse> {
     use tokio::net::UnixStream;
     let mut stream = UnixStream::connect(socket_path).await?;
-    let msg = BrokerMessage::Call(req.clone());
-    write_frame(&mut stream, &msg).await?;
+    write_frame(&mut stream, msg).await?;
     read_frame(&mut stream).await
 }
 
 /// Windows path uses named pipes; the address format is `\\.\pipe\<name>`.
 #[cfg(windows)]
+async fn message_round_trip(socket_path: &str, msg: &BrokerMessage) -> io::Result<BrokerResponse> {
+    let mut stream = open_named_pipe_with_retry(socket_path)
+        .await
+        .map_err(|e| io::Error::other(format!("open pipe: {e}")))?;
+    write_frame(&mut stream, msg).await?;
+    read_frame(&mut stream).await
+}
+
+/// Dispatch a `delegate_to_agent` call and read back the broker's
+/// [`super::types::DelegationTaskReport`] (a `Running` ack, or a terminal
+/// report when the child finished during setup / setup failed).
 pub async fn client_round_trip(
     socket_path: &str,
     req: &BrokerRequest,
 ) -> io::Result<BrokerResponse> {
-    let mut stream = open_named_pipe_with_retry(socket_path)
-        .await
-        .map_err(|e| io::Error::other(format!("open pipe: {e}")))?;
-    let msg = BrokerMessage::Call(req.clone());
-    write_frame(&mut stream, &msg).await?;
-    read_frame(&mut stream).await
+    message_round_trip(socket_path, &BrokerMessage::Call(req.clone())).await
+}
+
+/// Dispatch a `get_delegation_status` query and read back the
+/// `{ "tasks": [report, ...] }` envelope (one report per requested id, in
+/// request order).
+pub async fn client_status_round_trip(
+    socket_path: &str,
+    req: &BrokerStatusRequest,
+) -> io::Result<BrokerResponse> {
+    message_round_trip(socket_path, &BrokerMessage::Status(req.clone())).await
+}
+
+/// Dispatch a `cancel_delegation` request and read back the task report.
+pub async fn client_cancel_task_round_trip(
+    socket_path: &str,
+    req: &BrokerCancelTaskRequest,
+) -> io::Result<BrokerResponse> {
+    message_round_trip(socket_path, &BrokerMessage::CancelTask(req.clone())).await
+}
+
+/// Dispatch a `check_user_feedback` query and read back the
+/// `{ "feedback": [..], "count": N }` envelope (the pending notes drained for
+/// the parent session, possibly empty).
+pub async fn client_feedback_round_trip(
+    socket_path: &str,
+    req: &BrokerFeedbackRequest,
+) -> io::Result<BrokerResponse> {
+    message_round_trip(socket_path, &BrokerMessage::Feedback(req.clone())).await
+}
+
+/// Confirm delivery of feedback notes (fire-and-forget). Reads the empty ack so
+/// the listener can flush before the socket drops; the body carries nothing.
+pub async fn client_commit_feedback(
+    socket_path: &str,
+    req: &BrokerCommitFeedbackRequest,
+) -> io::Result<()> {
+    let _ = message_round_trip(socket_path, &BrokerMessage::CommitFeedback(req.clone())).await?;
+    Ok(())
 }
 
 /// Total budget for `open()` retries on Windows named pipes. Has to be
@@ -227,10 +341,7 @@ async fn open_named_pipe_with_retry(
 /// race that loses to a completed response is fine, the companion will
 /// suppress the response per MCP spec either way.
 #[cfg(unix)]
-pub async fn client_cancel(
-    socket_path: &str,
-    req: &BrokerCancelRequest,
-) -> io::Result<()> {
+pub async fn client_cancel(socket_path: &str, req: &BrokerCancelRequest) -> io::Result<()> {
     use tokio::net::UnixStream;
     let mut stream = UnixStream::connect(socket_path).await?;
     let msg = BrokerMessage::Cancel(req.clone());
@@ -242,10 +353,7 @@ pub async fn client_cancel(
 }
 
 #[cfg(windows)]
-pub async fn client_cancel(
-    socket_path: &str,
-    req: &BrokerCancelRequest,
-) -> io::Result<()> {
+pub async fn client_cancel(socket_path: &str, req: &BrokerCancelRequest) -> io::Result<()> {
     let mut stream = open_named_pipe_with_retry(socket_path)
         .await
         .map_err(|e| io::Error::other(format!("open pipe: {e}")))?;
@@ -279,7 +387,7 @@ mod tests {
                 assert_eq!(req.input["agent_type"], "codex");
                 assert_eq!(req.external_handle.as_deref(), Some("h1"));
             }
-            BrokerMessage::Cancel(_) => panic!("expected Call variant"),
+            other => panic!("expected Call variant, got {other:?}"),
         }
     }
 
@@ -299,7 +407,7 @@ mod tests {
                 assert_eq!(req.external_handle, "h1");
                 assert_eq!(req.reason.as_deref(), Some("user requested"));
             }
-            BrokerMessage::Call(_) => panic!("expected Cancel variant"),
+            other => panic!("expected Cancel variant, got {other:?}"),
         }
     }
 
@@ -342,7 +450,7 @@ mod tests {
             let msg: BrokerMessage = read_frame(&mut conn).await.unwrap();
             match msg {
                 BrokerMessage::Call(req) => assert_eq!(req.token, "tok"),
-                BrokerMessage::Cancel(_) => panic!("expected Call"),
+                other => panic!("expected Call, got {other:?}"),
             }
             let resp = BrokerResponse {
                 outcome: json!({"kind": "ok", "text": "hello"}),
@@ -380,7 +488,7 @@ mod tests {
             let msg: BrokerMessage = read_frame(&mut conn).await.unwrap();
             match msg {
                 BrokerMessage::Call(req) => assert_eq!(req.token, "tok"),
-                BrokerMessage::Cancel(_) => panic!("expected Call"),
+                other => panic!("expected Call, got {other:?}"),
             }
             let resp = BrokerResponse {
                 outcome: json!({"kind": "ok", "text": "hello"}),

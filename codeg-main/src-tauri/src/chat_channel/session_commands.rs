@@ -337,6 +337,7 @@ pub async fn handle_task(
             content_buffer: String::new(),
             tool_calls: Vec::new(),
             tool_call_inputs: std::collections::HashMap::new(),
+            delegation_rendered: std::collections::HashSet::new(),
             last_flushed: Instant::now(),
             pending_prompt: Some(task_description.to_string()),
             permission_pending: None,
@@ -510,6 +511,7 @@ pub async fn handle_resume(
             content_buffer: String::new(),
             tool_calls: Vec::new(),
             tool_call_inputs: std::collections::HashMap::new(),
+            delegation_rendered: std::collections::HashSet::new(),
             last_flushed: Instant::now(),
             pending_prompt: None,
             permission_pending: None,
@@ -717,7 +719,14 @@ pub async fn handle_followup(req: FollowupRequest<'_>) -> RichMessage {
     }];
 
     if let Err(e) = req.conn_mgr.send_prompt(&connection_id, blocks).await {
-        // Connection may have died
+        // A turn is already in flight on this (shared) connection — another
+        // client, or a previous prompt still running. This is transient: the
+        // connection is alive, so do NOT tear down the bridge/session. Tell the
+        // user to retry once the current turn finishes.
+        if matches!(e, crate::acp::error::AcpError::TurnInProgress) {
+            return RichMessage::info(i18n::agent_busy_retry(req.lang).to_string());
+        }
+        // Otherwise the connection may have died — clean up.
         req.bridge.lock().await.remove(&connection_id);
         let _ = sender_context_service::clear_session(req.db, req.channel_id, req.sender_id).await;
         return RichMessage::error(format!(

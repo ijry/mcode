@@ -58,7 +58,7 @@ INSTA_UPDATE=auto cargo test --features test-utils     # 自动写新 .snap
 
 - **`codeg`**（`tauri-runtime`，默认）：完整桌面应用，包含 Tauri 窗口管理、系统通知、自动更新等
 - **`codeg-server`**（无 feature，`--no-default-features`）：独立服务器模式，仅编译 Axum HTTP API + WebSocket
-- **`codeg-mcp`**（无 feature）：per-launch stdio MCP 伴生进程，被注入到代理 CLI 的 MCP 配置中，向 LLM 暴露内置 `delegate_to_agent` 工具。
+- **`codeg-mcp`**（无 feature）：per-launch stdio MCP 伴生进程，被注入到代理 CLI 的 MCP 配置中，向 LLM 暴露**异步**子智能体委托工具。
 
 ### 共享核心
 
@@ -108,8 +108,6 @@ INSTA_UPDATE=auto cargo test --features test-utils     # 自动写新 .snap
 
 ## 关键约束
 
-- **默认工作范围**：除非用户特别指定，所有任务默认都指向 `mcode-app`
-- **小任务执行方式**：对于范围清晰、影响面小的小任务，默认直接开发，不必先走 superpower 流程；只有在用户特别指定或任务明显需要时再使用
 - **仅支持静态导出**：`next.config.ts` 设置 `output: "export"`，不支持动态路由（`[param]`），必须使用查询参数替代
 - **路径别名**：`@/*` 映射到 `./src/*`，导入写法为 `@/lib/utils`、`@/components/ui/button`
 - **服务器部署**：通过环境变量配置（`CODEG_PORT`、`CODEG_HOST`、`CODEG_TOKEN`、`CODEG_DATA_DIR`、`CODEG_STATIC_DIR`）

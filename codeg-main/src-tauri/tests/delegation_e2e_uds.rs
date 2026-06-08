@@ -1,6 +1,8 @@
-//! End-to-end Phase 6 integration: drive a real UDS round-trip from a
+//! End-to-end Phase 6 integration: drive real UDS round-trips from a
 //! companion-style client through the listener → broker → mock spawner →
-//! `complete_call`, and assert the outcome is delivered to the wire.
+//! `complete_call`. Under the async protocol `delegate_to_agent` returns a
+//! Running ack and the terminal result is collected by a follow-up
+//! `get_delegation_status` round-trip — both asserted over the wire.
 //!
 //! Skipped on non-unix targets (named-pipe windows path tested separately).
 
@@ -18,7 +20,9 @@ use codeg_lib::acp::delegation::listener::{
     DelegationListener, ParentSessionLookup, TokenEntry, TokenRegistry,
 };
 use codeg_lib::acp::delegation::spawner::{mock::MockSpawner, ConnectionSpawner};
-use codeg_lib::acp::delegation::transport::{client_round_trip, BrokerRequest};
+use codeg_lib::acp::delegation::transport::{
+    client_round_trip, client_status_round_trip, BrokerRequest, BrokerStatusRequest,
+};
 use codeg_lib::acp::delegation::types::{DelegationError, DelegationOutcome, DelegationSuccess};
 use codeg_lib::models::AgentType;
 use serde_json::json;
@@ -37,6 +41,19 @@ impl ParentSessionLookup for FixedParent {
     async fn current_conversation_id(&self, _: &str) -> Option<i32> {
         Some(self.0)
     }
+}
+
+/// No-op feedback access — this e2e suite exercises delegation, not feedback.
+struct NoFeedback;
+#[async_trait]
+impl codeg_lib::acp::feedback::SessionFeedbackAccess for NoFeedback {
+    async fn read_pending_feedback(
+        &self,
+        _parent_connection_id: &str,
+    ) -> Vec<codeg_lib::acp::feedback::PendingFeedback> {
+        Vec::new()
+    }
+    async fn commit_feedback_delivered(&self, _parent_connection_id: &str, _ids: Vec<String>) {}
 }
 
 #[tokio::test]
@@ -72,6 +89,7 @@ async fn end_to_end_uds_happy_path() {
         broker.clone(),
         tokens,
         Arc::new(FixedParent(1)) as Arc<dyn ParentSessionLookup>,
+        Arc::new(NoFeedback) as Arc<dyn codeg_lib::acp::feedback::SessionFeedbackAccess>,
     );
 
     // PID-scoped socket inside the OS temp dir — no clashes across test bins.
@@ -91,31 +109,9 @@ async fn end_to_end_uds_happy_path() {
     }
     assert!(socket.exists(), "listener never bound the socket");
 
-    // Drive completion from a parallel task so the client send→recv races
-    // against the broker registration.
-    let broker_for_completion = broker.clone();
-    let completer = tokio::spawn(async move {
-        loop {
-            if let Some(call_id) = broker_for_completion.peek_first_pending_call_id().await {
-                broker_for_completion
-                    .complete_call(
-                        &call_id,
-                        DelegationOutcome::Ok(DelegationSuccess {
-                            text: "uds-result".into(),
-                            child_conversation_id: 77,
-                            child_agent_type: AgentType::Codex,
-                            turn_count: 1,
-                            duration_ms: 12,
-                            token_usage: None,
-                        }),
-                    )
-                    .await;
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
-    });
-
+    // 1. delegate_to_agent → Running ack carrying the child conversation id and
+    //    a task_id to follow up on. Under the async protocol the call returns
+    //    immediately instead of blocking for the result.
     let req = BrokerRequest {
         token: "tok".into(),
         parent_connection_id: "p1".into(),
@@ -123,16 +119,158 @@ async fn end_to_end_uds_happy_path() {
         external_handle: None,
         input: json!({"agent_type": "codex", "task": "do x"}),
     };
-    let resp = client_round_trip(&socket.to_string_lossy(), &req)
+    let ack = client_round_trip(&socket.to_string_lossy(), &req)
         .await
         .expect("client round-trip");
+    assert_eq!(ack.outcome["status"], "running");
+    assert_eq!(ack.outcome["child_conversation_id"], 77);
+    let task_id = ack.outcome["task_id"]
+        .as_str()
+        .expect("running ack carries a task_id")
+        .to_string();
 
-    completer.await.unwrap();
+    // 2. The lifecycle resolves the child on TurnComplete. The ack already
+    //    returned, so the task is registered and `complete_call` migrates it to
+    //    completed deterministically — no race against registration.
+    broker
+        .complete_call(
+            &task_id,
+            DelegationOutcome::Ok(DelegationSuccess {
+                text: "uds-result".into(),
+                child_conversation_id: 77,
+                child_agent_type: AgentType::Codex,
+                turn_count: 1,
+                duration_ms: 12,
+                token_usage: None,
+            }),
+        )
+        .await;
+
+    // 3. get_delegation_status → Completed with the result text, over the wire.
+    //    The Status arm returns a `{ tasks: [..] }` envelope; one id → one entry.
+    let status_req = BrokerStatusRequest {
+        token: "tok".into(),
+        task_ids: vec![task_id],
+        wait_ms: Some(1_000),
+    };
+    let resp = client_status_round_trip(&socket.to_string_lossy(), &status_req)
+        .await
+        .expect("status round-trip");
     listener_task.abort();
 
-    assert_eq!(resp.outcome["kind"], "ok");
-    assert_eq!(resp.outcome["text"], "uds-result");
-    assert_eq!(resp.outcome["child_conversation_id"], 77);
+    assert_eq!(resp.outcome["tasks"][0]["status"], "completed");
+    assert_eq!(resp.outcome["tasks"][0]["text"], "uds-result");
+    assert_eq!(resp.outcome["tasks"][0]["child_conversation_id"], 77);
+}
+
+/// Batch `get_delegation_status` over the wire: two delegations are started,
+/// one completes, and a single status round-trip with `task_ids: [t1, t2]`
+/// returns both reports in request order — `t1` completed, `t2` still running.
+#[tokio::test]
+async fn end_to_end_uds_batch_status() {
+    let mock = Arc::new(MockSpawner::new());
+    // Two children: first resolves to conv 77, second to conv 88.
+    mock.queue_spawn(Ok("child-conn-1".into())).await;
+    mock.queue_send(Ok(77)).await;
+    mock.queue_spawn(Ok("child-conn-2".into())).await;
+    mock.queue_send(Ok(88)).await;
+
+    let broker = Arc::new(DelegationBroker::new(
+        mock.clone() as Arc<dyn ConnectionSpawner>,
+        Arc::new(AlwaysRoot) as Arc<dyn ConversationDepthLookup>,
+    ));
+    broker
+        .set_config(DelegationConfig {
+            enabled: true,
+            depth_limit: 8,
+            ..DelegationConfig::default()
+        })
+        .await;
+
+    let tokens = Arc::new(TokenRegistry::default());
+    tokens
+        .register(
+            "tok".into(),
+            TokenEntry {
+                parent_connection_id: "p1".into(),
+                working_dir: PathBuf::from("/tmp"),
+            },
+        )
+        .await;
+
+    let listener = DelegationListener::new(
+        broker.clone(),
+        tokens,
+        Arc::new(FixedParent(1)) as Arc<dyn ParentSessionLookup>,
+        Arc::new(NoFeedback) as Arc<dyn codeg_lib::acp::feedback::SessionFeedbackAccess>,
+    );
+
+    let dir = tempfile::tempdir().unwrap();
+    let socket = dir.path().join("codeg-e2e-batch.sock");
+    let socket_for_listener = socket.clone();
+    let listener_task = tokio::spawn(async move {
+        let _ = listener.run(socket_for_listener).await;
+    });
+    for _ in 0..50 {
+        if socket.exists() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(socket.exists(), "listener never bound the socket");
+
+    // Start two delegations; capture each task_id from its Running ack.
+    let mut task_ids = Vec::new();
+    for task in ["do x", "do y"] {
+        let req = BrokerRequest {
+            token: "tok".into(),
+            parent_connection_id: "p1".into(),
+            parent_tool_use_id: format!("pt-{task}"),
+            external_handle: None,
+            input: json!({ "agent_type": "codex", "task": task }),
+        };
+        let ack = client_round_trip(&socket.to_string_lossy(), &req)
+            .await
+            .expect("client round-trip");
+        assert_eq!(ack.outcome["status"], "running");
+        task_ids.push(ack.outcome["task_id"].as_str().unwrap().to_string());
+    }
+
+    // Resolve only the FIRST task.
+    broker
+        .complete_call(
+            &task_ids[0],
+            DelegationOutcome::Ok(DelegationSuccess {
+                text: "first-result".into(),
+                child_conversation_id: 77,
+                child_agent_type: AgentType::Codex,
+                turn_count: 1,
+                duration_ms: 9,
+                token_usage: None,
+            }),
+        )
+        .await;
+
+    // Immediate batch poll → both reports, in request order.
+    let status_req = BrokerStatusRequest {
+        token: "tok".into(),
+        task_ids: task_ids.clone(),
+        wait_ms: None,
+    };
+    let resp = client_status_round_trip(&socket.to_string_lossy(), &status_req)
+        .await
+        .expect("batch status round-trip");
+    listener_task.abort();
+
+    let tasks = resp.outcome["tasks"]
+        .as_array()
+        .expect("batch status returns a tasks array");
+    assert_eq!(tasks.len(), 2);
+    assert_eq!(tasks[0]["status"], "completed");
+    assert_eq!(tasks[0]["text"], "first-result");
+    assert_eq!(tasks[0]["task_id"], task_ids[0].as_str());
+    assert_eq!(tasks[1]["status"], "running");
+    assert_eq!(tasks[1]["task_id"], task_ids[1].as_str());
 }
 
 #[tokio::test]
@@ -148,6 +286,7 @@ async fn end_to_end_uds_invalid_token_rejected() {
         broker,
         tokens,
         Arc::new(FixedParent(1)) as Arc<dyn ParentSessionLookup>,
+        Arc::new(NoFeedback) as Arc<dyn codeg_lib::acp::feedback::SessionFeedbackAccess>,
     );
 
     let dir = tempfile::tempdir().unwrap();
@@ -176,6 +315,6 @@ async fn end_to_end_uds_invalid_token_rejected() {
         .expect("client round-trip");
     listener_task.abort();
 
-    assert_eq!(resp.outcome["kind"], "err");
-    assert_eq!(resp.outcome["code"], "canceled");
+    assert_eq!(resp.outcome["status"], "canceled");
+    assert_eq!(resp.outcome["error_code"], "canceled");
 }

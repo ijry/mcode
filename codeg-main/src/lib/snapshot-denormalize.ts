@@ -1,4 +1,5 @@
 import type {
+  ActiveDelegationState,
   AvailableCommandInfo,
   ConnectionStatus,
   LiveContentBlock as WireLiveContentBlock,
@@ -15,6 +16,7 @@ import type {
   LiveContentBlock as LocalLiveContentBlock,
   LiveMessage as LocalLiveMessage,
   PendingPermission,
+  PendingUserMessage,
   ToolCallInfo,
 } from "@/contexts/acp-connections-context"
 
@@ -40,10 +42,19 @@ export interface SnapshotPatch {
   usage: SessionUsageUpdateInfo | null
   liveMessage: LocalLiveMessage | null
   pendingPermission: PendingPermission | null
+  /** In-flight user prompt carried by the snapshot, so a client attaching
+   *  mid-turn can synthesize the user turn (Bug-2 / cross-client viewing).
+   *  `null` when no turn is in flight. */
+  pendingUserMessage: PendingUserMessage | null
   promptCapabilities: PromptCapabilitiesInfo | null
   selectorsReady: boolean
   supportsFork: boolean
   eventSeq: number
+  /** Live sub-agent delegations carried by the snapshot. Consumed directly at
+   *  the attach call sites to re-seed `DelegationProvider` bindings (see
+   *  `seedDelegationsFromSnapshot`); the reducer does not store this on
+   *  ConnectionState. `[]` when the server omitted the field. */
+  activeDelegations: ActiveDelegationState[]
 }
 
 const DEFAULT_PROMPT_CAPS: PromptCapabilitiesInfo = {
@@ -81,10 +92,17 @@ export function denormalizeSnapshot(wire: LiveSessionSnapshot): SnapshotPatch {
           options: wire.pending_permission.options,
         }
       : null,
+    pendingUserMessage: wire.pending_user_message
+      ? {
+          messageId: wire.pending_user_message.message_id,
+          blocks: wire.pending_user_message.blocks,
+        }
+      : null,
     promptCapabilities: wire.prompt_capabilities ?? DEFAULT_PROMPT_CAPS,
     selectorsReady: wire.selectors_ready,
     supportsFork: wire.fork_supported,
     eventSeq: wire.event_seq,
+    activeDelegations: wire.active_delegations ?? [],
   }
 }
 

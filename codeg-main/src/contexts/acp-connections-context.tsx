@@ -28,14 +28,18 @@ import {
   acpDisconnect,
   acpTouchConnection,
   acpGetSessionSnapshot,
+  acpFindConnectionForConversation,
 } from "@/lib/api"
 import { denormalizeSnapshot } from "@/lib/snapshot-denormalize"
+import { buildDelegationSeedEnvelopes } from "@/lib/delegation-seed"
 import type {
   AgentType,
   AcpAgentStatus,
   AcpEvent,
+  ActiveDelegationState,
   AvailableCommandInfo,
   ConnectionStatus,
+  ConversationConnectionInfo,
   EventEnvelope,
   PlanEntryInfo,
   PermissionOptionInfo,
@@ -45,6 +49,7 @@ import type {
   PromptCapabilitiesInfo,
   PromptInputBlock,
   ToolCallImageWire,
+  UserMessageBlock,
 } from "@/lib/types"
 import { AGENT_LABELS } from "@/lib/types"
 import {
@@ -102,6 +107,15 @@ export interface PendingPermission {
   options: PermissionOptionInfo[]
 }
 
+/** In-flight user prompt carried on a connection (from a `user_message` event
+ *  or a snapshot's `pending_user_message`). Mirrored into the runtime as a
+ *  synthesized user turn for cross-client VIEWERS so they see the sender's
+ *  message (the sender renders its own optimistic turn and ignores it). */
+export interface PendingUserMessage {
+  messageId: string
+  blocks: UserMessageBlock[]
+}
+
 export interface PendingQuestion {
   tool_call_id: string
   question: string
@@ -147,6 +161,10 @@ export interface ConnectionState {
   usage: SessionUsageUpdateInfo | null
   liveMessage: LiveMessage | null
   pendingPermission: PendingPermission | null
+  /** In-flight user prompt for the current turn — set from a `user_message`
+   *  event or a snapshot's `pending_user_message`. A VIEWER mirrors this into
+   *  the runtime as a synthesized user turn; `null` outside an active turn. */
+  pendingUserMessage: PendingUserMessage | null
   pendingQuestion: PendingQuestion | null
   claudeApiRetry: ClaudeApiRetryState | null
   error: string | null
@@ -192,12 +210,32 @@ export interface ConnectionState {
    * connections.
    */
   parentConnectionId: string | null
+  /**
+   * True when this client did NOT spawn the backend connection but attached to
+   * one another client already owns (cross-client live streaming, discovered
+   * via `acp_find_connection_for_conversation`). A viewer is a NON-OWNING,
+   * co-controlling client: it streams the same turn and MAY drive the shared
+   * agent (sendPrompt/cancel target the owner's connection, serialized
+   * server-side by its prompt_lock; turn-level concurrency rejection is a
+   * tracked follow-up). The one hard invariant: on teardown a viewer MUST
+   * detach (drop its attach subscription / reverse-map entry) and MUST NOT
+   * `acpDisconnect` — that would kill the agent for the owner. Like
+   * `isDelegationChild`, viewers are skipped by the idle sweep's disconnect
+   * path. Distinct from `isDelegationChild` (broker-owned child bookkeeping);
+   * a plain viewer is the lighter cousin with no delegation state.
+   */
+  isViewer: boolean
 }
 
 type ConnectRequest = {
   agentType: AgentType
   workingDir?: string
   sessionId?: string
+  // Persisted conversation id (when known) — drives the cross-client viewer
+  // discovery gate in connect(). Not part of `sameConnectRequest` equality
+  // (sessionId already distinguishes), but carried so a re-fired pending
+  // request still runs discovery.
+  conversationId?: number
 }
 
 function sameConnectRequest(a: ConnectRequest, b: ConnectRequest) {
@@ -217,6 +255,9 @@ type Action =
       connectionId: string
       agentType: AgentType
       workingDir: string | null
+      // Set when attaching to a connection another client owns (viewer).
+      // Defaults to false (owner) when omitted.
+      isViewer?: boolean
     }
   | {
       type: "HYDRATE_FROM_SNAPSHOT"
@@ -805,6 +846,7 @@ function connectionsReducer(
         usage: null,
         liveMessage: null,
         pendingPermission: null,
+        pendingUserMessage: null,
         pendingQuestion: null,
         claudeApiRetry: null,
         error: null,
@@ -813,6 +855,7 @@ function connectionsReducer(
         isDelegationChild: false,
         parentToolUseId: null,
         parentConnectionId: null,
+        isViewer: action.isViewer ?? false,
       })
       return next
     }
@@ -852,6 +895,7 @@ function connectionsReducer(
         usage: null,
         liveMessage: null,
         pendingPermission: null,
+        pendingUserMessage: null,
         pendingQuestion: null,
         claudeApiRetry: null,
         error: null,
@@ -860,6 +904,7 @@ function connectionsReducer(
         isDelegationChild: true,
         parentToolUseId: action.parentToolUseId,
         parentConnectionId: action.parentConnectionId,
+        isViewer: false,
       })
       return next
     }
@@ -946,6 +991,7 @@ function connectionsReducer(
         usage: action.patch.usage,
         liveMessage: action.patch.liveMessage,
         pendingPermission: action.patch.pendingPermission,
+        pendingUserMessage: action.patch.pendingUserMessage,
         promptCapabilities: mergedPromptCapabilities,
         selectorsReady: mergedSelectorsReady,
         supportsFork: mergedSupportsFork,
@@ -1656,14 +1702,19 @@ export interface AcpActionsValue {
     contextKey: string,
     agentType: AgentType,
     workingDir?: string,
-    sessionId?: string
+    sessionId?: string,
+    conversationId?: number
   ): Promise<void>
   disconnect(contextKey: string): Promise<void>
   disconnectAll(): Promise<void>
   sendPrompt(
     contextKey: string,
     blocks: PromptInputBlock[],
-    opts?: { folderId?: number | null; conversationId?: number | null }
+    opts?: {
+      folderId?: number | null
+      conversationId?: number | null
+      clientMessageId?: string | null
+    }
   ): Promise<void>
   setMode(contextKey: string, modeId: string): Promise<void>
   setConfigOption(
@@ -2586,6 +2637,46 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
     [dispatch, handleMappedEvent]
   )
 
+  // Re-seed `DelegationProvider` bindings from a snapshot's active_delegations.
+  // `delegation_started` / `delegation_completed` are transient — they mutate
+  // no SessionState field, so they are NOT in `to_snapshot()` and (on the
+  // snapshot attach path) are never replayed. Without this, a web/server client
+  // that cold-attaches, re-attaches after a broadcast lag, or refreshes
+  // mid-delegation never establishes the live binding: the card shows a
+  // premature "completed" and no "查看会话" until the child finally finishes.
+  // We synthesize the same envelopes the broker emits live and fan them ONLY to
+  // the JS event subscribers (DelegationProvider), bypassing applyMappedEnvelope
+  // so we neither run the store reducer (which has no case for these) nor touch
+  // `lastAppliedSeq` / trip the seq-dedup. Idempotent with any live/replayed
+  // event for the same `parent_tool_use_id` (DelegationProvider overwrites the
+  // binding and `attachDelegationChild` early-returns when already attached).
+  const seedDelegationsFromSnapshot = useCallback(
+    (
+      connectionId: string,
+      activeDelegations: ActiveDelegationState[],
+      eventSeq: number
+    ) => {
+      const envelopes = buildDelegationSeedEnvelopes(
+        connectionId,
+        activeDelegations,
+        eventSeq
+      )
+      for (const envelope of envelopes) {
+        for (const ref of eventSubscribersRef.current) {
+          try {
+            ref.current(envelope)
+          } catch (err) {
+            console.error(
+              "[acp-context] delegation seed subscriber threw:",
+              err
+            )
+          }
+        }
+      }
+    },
+    []
+  )
+
   // Open a Subscribe-with-Snapshot stream for `connectionId` and route its
   // frames into the store under `contextKey`. Returns the subscription
   // handle for cleanup, or `null` when the active transport doesn't
@@ -2613,6 +2704,15 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
           const patch = denormalizeSnapshot(snapshot)
           dispatch({ type: "HYDRATE_FROM_SNAPSHOT", contextKey, patch })
           lastActivityRef.current.set(contextKey, Date.now())
+          // Recover delegation bindings the snapshot carries but the transient
+          // events don't (the load-bearing fix for the web-only "running shows
+          // completed / no 查看会话" bug). Uses the snapshot's own connection_id
+          // as the parent id.
+          seedDelegationsFromSnapshot(
+            patch.connectionId,
+            patch.activeDelegations,
+            patch.eventSeq
+          )
         },
         onReplay: (events) => {
           for (const envelope of events) {
@@ -2651,7 +2751,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
       attachSubscriptionsRef.current.set(contextKey, activeSub)
       return activeSub
     },
-    [applyMappedEnvelope, dispatch]
+    [applyMappedEnvelope, dispatch, seedDelegationsFromSnapshot]
   )
 
   // Tear down an attach subscription: detach the WS subscription so the
@@ -2830,6 +2930,10 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
         // would otherwise call acpDisconnect on a backend connection
         // still mid-prompt for the parent's tool_use.
         if (conn.isDelegationChild) continue
+        // Viewers don't own their backend connection — acpDisconnect here
+        // would kill another client's agent. The viewer is torn down when its
+        // tab unmounts (disconnect's isViewer branch detaches it).
+        if (conn.isViewer) continue
         const lastActive = lastActivityRef.current.get(contextKey) ?? 0
         if (now - lastActive > CONNECTION_IDLE_TIMEOUT_MS) {
           toDisconnect.push({
@@ -2872,6 +2976,10 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
         // connection" error from the backend.
         const conn = store.connections.get(contextKey)
         if (conn?.isDelegationChild) continue
+        // Viewers attach to a connection another client owns — never
+        // acpDisconnect it on our unmount. The attach-sub detach loop below
+        // releases our read-only subscription cleanly.
+        if (conn?.isViewer) continue
         acpDisconnect(connectionId).catch(() => {})
       }
       for (const [, sub] of attachSubs) {
@@ -2884,14 +2992,123 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  // True when this client already owns (or is already viewing) the given
+  // backend connection: some store entry references it, or the desktop
+  // firehose already routes it via the reverse-map. Guards the discovery gate
+  // from demoting an owner to a viewer on a re-render — a viewer never
+  // `acpDisconnect`s, so a mis-tagged owner would leak its agent process.
+  const isConnectionOwnedLocally = useCallback((connectionId: string) => {
+    if (reverseMapRef.current.has(connectionId)) return true
+    for (const conn of storeRef.current.connections.values()) {
+      if (conn.connectionId === connectionId) return true
+    }
+    return false
+  }, [])
+
+  // Attach this client to a backend connection ANOTHER client owns
+  // (cross-client live streaming). The viewer is a NON-OWNING, co-controlling
+  // client: it streams the same turn and may also drive the shared agent
+  // (sendPrompt/cancel go to the owner's connection, serialized server-side by
+  // its prompt_lock; turn-level concurrency rejection is tracked as a
+  // follow-up). The one hard invariant: a viewer's teardown DETACHES, never
+  // `acpDisconnect`s — that would kill the owner's agent. Generalizes
+  // `attachDelegationChild`: Subscribe-with-Snapshot attach on web, snapshot-
+  // hydrate + firehose reverse-map on desktop.
+  //
+  // ALWAYS a COLD attach (no `sinceSeq`): the viewer has applied no prior
+  // events, so it must receive a full snapshot of the in-flight turn — passing
+  // the discovered `event_seq` as a cursor could yield only a post-cursor
+  // replay and miss all earlier live state. Reconnects re-attach with the
+  // running `lastAppliedSeq` (see `setupAttachSubscription.onDetached`).
+  const connectAsViewer = useCallback(
+    async (
+      contextKey: string,
+      connectionId: string,
+      agentType: AgentType,
+      workingDir: string | null
+    ) => {
+      dispatch({
+        type: "CONNECTION_CREATED",
+        contextKey,
+        connectionId,
+        agentType,
+        workingDir,
+        isViewer: true,
+      })
+      lastActivityRef.current.set(contextKey, Date.now())
+
+      const stream = getEventStream()
+      if (stream) {
+        // Web / remote: the per-connection WS attach delivers snapshot +
+        // replay + live events atomically over the same socket.
+        setupAttachSubscription(contextKey, connectionId, undefined)
+        return
+      }
+
+      // Desktop firehose: the global `acp://event` stream only carries FUTURE
+      // events, so fetch a snapshot to backfill the in-flight turn, then route
+      // this connection's events via the reverse-map and drain anything that
+      // arrived while the snapshot was in flight. Mirrors the legacy owner
+      // path in `connect()`.
+      let patch: import("@/lib/snapshot-denormalize").SnapshotPatch | null =
+        null
+      try {
+        const snapshot = await acpGetSessionSnapshot(connectionId)
+        if (snapshot) patch = denormalizeSnapshot(snapshot)
+      } catch (e) {
+        console.warn(
+          "[acp-context] viewer snapshot fetch failed for",
+          connectionId,
+          e
+        )
+      }
+      // Detach race: the tab may have disconnected (disconnect() removed the
+      // entry) while the snapshot fetch was in flight. Re-check the store still
+      // holds THIS viewer connection BEFORE applying the snapshot, seeding
+      // delegations, or installing firehose routing — otherwise we'd hydrate /
+      // seed child streams / route for a viewer no one is watching anymore.
+      if (
+        storeRef.current.connections.get(contextKey)?.connectionId !==
+        connectionId
+      ) {
+        return
+      }
+      if (patch) {
+        dispatch({ type: "HYDRATE_FROM_SNAPSHOT", contextKey, patch })
+        seedDelegationsFromSnapshot(
+          patch.connectionId,
+          patch.activeDelegations,
+          patch.eventSeq
+        )
+      }
+      reverseMapRef.current.set(connectionId, contextKey)
+      for (const env of consumeBufferedEvents(connectionId)) {
+        applyMappedEnvelope(contextKey, env)
+      }
+    },
+    [
+      applyMappedEnvelope,
+      consumeBufferedEvents,
+      dispatch,
+      seedDelegationsFromSnapshot,
+      setupAttachSubscription,
+    ]
+  )
+
   const connect = useCallback(
     async (
       contextKey: string,
       agentType: AgentType,
       workingDir?: string,
-      sessionId?: string
+      sessionId?: string,
+      conversationId?: number
     ) => {
-      const request: ConnectRequest = { agentType, workingDir, sessionId }
+      const request: ConnectRequest = {
+        agentType,
+        workingDir,
+        sessionId,
+        conversationId,
+      }
       if (connectingKeysRef.current.has(contextKey)) {
         pendingConnectRequestsRef.current.set(contextKey, request)
         return
@@ -2958,7 +3175,12 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
             existing.status !== "disconnected" &&
             existing.status !== "error"
           ) {
-            await acpDisconnect(existing.connectionId).catch(() => {})
+            // A viewer doesn't own the backend connection — detach only, never
+            // acpDisconnect (that would kill the owner's agent). Owners are
+            // disconnected normally before re-spawning under new params.
+            if (!existing.isViewer) {
+              await acpDisconnect(existing.connectionId).catch(() => {})
+            }
             reverseMapRef.current.delete(existing.connectionId)
             teardownAttachSubscription(contextKey)
             lastActivityRef.current.delete(contextKey)
@@ -3018,6 +3240,63 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
               contextKey,
               orphanConn.connectionId,
               orphanCursor
+            )
+            return
+          }
+        }
+
+        // Cross-client viewer attach. Before spawning a NEW backend agent, ask
+        // whether another client already holds a LIVE connection for this
+        // persisted conversation; if so, attach to it as a (co-controlling)
+        // both clients stream the same in-flight turn (fixes desktop→browser
+        // streaming). Only for real persisted conversations (id > 0) — a
+        // brand-new conversation has no live owner yet, so we spawn + own.
+        // Best-effort: a discovery failure falls through to the owner spawn.
+        if (conversationId != null && conversationId > 0) {
+          let discovered: ConversationConnectionInfo | null = null
+          try {
+            // Pass sessionId so discovery can fall back to external_id when the
+            // live owner hasn't bound its conversation_id yet (pre-first-prompt
+            // window) — without it a second client would reuse the owner's
+            // connection as a mis-tagged owner and kill it on tab close. The
+            // external_id fallback is matched WITH agentType (external_id is
+            // unique only per agent).
+            discovered = await acpFindConnectionForConversation(
+              conversationId,
+              sessionId,
+              agentType
+            )
+          } catch (e) {
+            console.warn(
+              "[acp-context] connection discovery failed for conversation",
+              conversationId,
+              e
+            )
+          }
+          // Discovery awaited: re-check the abandon/supersede guards in case a
+          // disconnect() or a newer connect() for this key landed meanwhile
+          // (mirrors the post-acpConnect guards below). The finally block
+          // clears connectingKeys/abandoned, so a bare return is safe.
+          if (abandonedKeysRef.current.has(contextKey)) {
+            return
+          }
+          const pendingAfterDiscovery =
+            pendingConnectRequestsRef.current.get(contextKey)
+          if (
+            pendingAfterDiscovery &&
+            !sameConnectRequest(pendingAfterDiscovery, request)
+          ) {
+            return
+          }
+          if (
+            discovered &&
+            !isConnectionOwnedLocally(discovered.connection_id)
+          ) {
+            await connectAsViewer(
+              contextKey,
+              discovered.connection_id,
+              agentType,
+              nextWorkingDir
             )
             return
           }
@@ -3112,6 +3391,15 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
               contextKey,
               patch: snapshotPatch,
             })
+            // Recover delegation bindings from the snapshot here too. On
+            // Tauri the firehose also delivers the events (so this is an
+            // idempotent no-op), but it keeps RemoteDesktop and the legacy
+            // path symmetric with the attach path above.
+            seedDelegationsFromSnapshot(
+              snapshotPatch.connectionId,
+              snapshotPatch.activeDelegations,
+              snapshotPatch.eventSeq
+            )
           }
 
           reverseMapRef.current.set(connectionId, contextKey)
@@ -3177,7 +3465,8 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
                   contextKey,
                   pendingRequest.agentType,
                   pendingRequest.workingDir,
-                  pendingRequest.sessionId
+                  pendingRequest.sessionId,
+                  pendingRequest.conversationId
                 )
                 .catch(() => {})
             })
@@ -3188,9 +3477,12 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
     [
       applyMappedEnvelope,
       buildOpenAgentsSettingsAction,
+      connectAsViewer,
       consumeBufferedEvents,
       dispatch,
+      isConnectionOwnedLocally,
       resolveConnectBlockState,
+      seedDelegationsFromSnapshot,
       setActiveKey,
       setupAttachSubscription,
       t,
@@ -3212,6 +3504,19 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
         }
         return
       }
+      if (conn.isViewer) {
+        // Viewer teardown: drop our read-only attachment WITHOUT
+        // `acpDisconnect` — the backend connection belongs to another client,
+        // and disconnecting it would kill the owner's agent mid-turn. Mirrors
+        // detachDelegationChild. The owner's own disconnect / the idle sweep
+        // governs the connection's real lifetime.
+        teardownAttachSubscription(contextKey)
+        reverseMapRef.current.delete(conn.connectionId)
+        pendingUnmappedEventsRef.current.delete(conn.connectionId)
+        lastActivityRef.current.delete(contextKey)
+        dispatch({ type: "CONNECTION_REMOVED", contextKey })
+        return
+      }
       await acpDisconnect(conn.connectionId)
       reverseMapRef.current.delete(conn.connectionId)
       teardownAttachSubscription(contextKey)
@@ -3226,7 +3531,12 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
     const promises: Promise<void>[] = []
     pendingConnectRequestsRef.current.clear()
     for (const [contextKey, conn] of storeRef.current.connections) {
-      promises.push(acpDisconnect(conn.connectionId).catch(() => {}))
+      // Viewers attach to a connection another client owns — detach our
+      // read-only subscription but never acpDisconnect (that would kill the
+      // owner's agent). Owners are torn down normally.
+      if (!conn.isViewer) {
+        promises.push(acpDisconnect(conn.connectionId).catch(() => {}))
+      }
       reverseMapRef.current.delete(conn.connectionId)
       teardownAttachSubscription(contextKey)
       pendingUnmappedEventsRef.current.delete(conn.connectionId)
@@ -3240,7 +3550,11 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
     async (
       contextKey: string,
       blocks: PromptInputBlock[],
-      opts?: { folderId?: number | null; conversationId?: number | null }
+      opts?: {
+        folderId?: number | null
+        conversationId?: number | null
+        clientMessageId?: string | null
+      }
     ) => {
       const conn = storeRef.current.connections.get(contextKey)
       if (!conn) return
@@ -3249,7 +3563,8 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
         conn.connectionId,
         blocks,
         opts?.folderId ?? null,
-        opts?.conversationId ?? null
+        opts?.conversationId ?? null,
+        opts?.clientMessageId ?? null
       )
     },
     []
