@@ -559,6 +559,7 @@ import {
 import { connectionSessionManager } from "@/services/conversation/connectionSessionManager"
 import { markConversationListDirty } from "@/services/conversation/conversationListRefresh"
 import { persistConversationDetailSnapshot } from "@/services/conversation/conversationDetailPersistence"
+import { hasRenderableRuntimeState } from "@/services/conversation/runtimeViewState"
 import { buildRemoteInstanceKey } from "@/services/realtime/instance-key"
 import {
   getRegisteredRemoteInstanceDescriptor,
@@ -1255,7 +1256,7 @@ async function loadConversation() {
       runtimeSession.localTurns.length
     )
     const managed = connectionSessionManager.getByConversationId(conversationId.value)
-    const hasHotRuntime = hasActiveRuntimeState(runtimeSession)
+    const hasHotRuntime = hasRenderableRuntimeState(runtimeSession)
 
     let localSummary: Awaited<ReturnType<typeof getConversationSummaryById>> | null = null
     let localTurns: PersistedTurnWithParts[] = []
@@ -1452,14 +1453,6 @@ function refreshConversation() {
     .catch(() => {})
 }
 
-function hasActiveRuntimeState(runtimeSession: ReturnType<typeof runtime.getOrCreateSession>) {
-  return Boolean(
-    runtimeSession.connectionId ||
-    runtimeSession.liveMessage ||
-    runtimeSession.optimisticTurns.length > 0
-  )
-}
-
 async function refreshSessionTurnsFromDb(
   runtimeSession: ReturnType<typeof runtime.getOrCreateSession>,
   cachedViewState: ReturnType<typeof cacheStore.restore>,
@@ -1497,7 +1490,7 @@ async function reconcileRemoteTurnsAfterLocalHydrate(
   limit: number
 ) {
   if (!conversationId.value) return
-  if (hasActiveRuntimeState(runtimeSession)) return
+  if (hasRenderableRuntimeState(runtimeSession)) return
 
   const loadedUserTurns = runtimeSession.localTurns.filter((turn) => turn.role === "user").length
   if (loadedUserTurns >= INITIAL_USER_TURN_TARGET && !hasMoreHistory.value) return

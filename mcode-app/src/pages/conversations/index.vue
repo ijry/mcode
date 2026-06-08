@@ -347,7 +347,7 @@
         <up-button
           type="primary"
           :loading="creating"
-          :disabled="!selectedProjectId || !selectedConnectionKey"
+          :disabled="creating || !selectedProjectId || !selectedConnectionKey"
           shape="circle"
           @click="confirmCreate"
           customStyle="margin-top:16rpx"
@@ -532,6 +532,10 @@ const loadingCreateAgents = ref(false)
 let createAgentProbeToken = 0
 let createAgentListToken = 0
 let disposeOverviewInvalidation: (() => void) | null = null
+let activeCreateRequestId = ""
+let activeCreateRequestFingerprint = ""
+let activeCreateConversationId = 0
+let activeCreatePromptAttempted = false
 
 interface CreateAgentOption {
   label: string
@@ -685,6 +689,7 @@ watch(
       createAgentListToken += 1
       showCreateConfigDialog.value = false
       resetCreateAgentConfig("")
+      clearPendingCreateRequest()
       return
     }
     void loadCreateAgents()
@@ -788,6 +793,38 @@ function resetCreateAgentConfig(message = "") {
     selectedValues: {},
     message,
   }
+}
+
+function clearPendingCreateRequest() {
+  activeCreateRequestId = ""
+  activeCreateRequestFingerprint = ""
+  activeCreateConversationId = 0
+  activeCreatePromptAttempted = false
+}
+
+function createConversationRequestFingerprint() {
+  const selectedValues = Object.entries(createAgentConfig.value.selectedValues)
+    .sort(([left], [right]) => left.localeCompare(right))
+  return JSON.stringify({
+    connectionKey: selectedConnectionKey.value,
+    projectId: selectedProjectId.value,
+    agentType: selectedAgentType.value,
+    title: newConversationTitle.value.trim(),
+    taskContent: newTaskContent.value.trim(),
+    modeId: createAgentConfig.value.selectedModeId || "",
+    selectedValues,
+  })
+}
+
+function resolveCreateRequestId() {
+  const fingerprint = createConversationRequestFingerprint()
+  if (!activeCreateRequestId || activeCreateRequestFingerprint !== fingerprint) {
+    activeCreateRequestId = `mcode-create-${Date.now().toString(36)}-${Math.random()
+      .toString(36)
+      .slice(2, 10)}`
+    activeCreateRequestFingerprint = fingerprint
+  }
+  return activeCreateRequestId
 }
 
 function normalizeStorageRecord<T>(raw: unknown): Record<string, T> {
@@ -1835,6 +1872,7 @@ function openConversation(conv: Conversation, connKey?: string) {
 }
 
 function createConversation(projectId?: number) {
+  clearPendingCreateRequest()
   const defaultConnectionKey = showHistoryPanel.value
     ? historyGroupKey.value
     : currentAuthConnectionKey() || connectionGroups.value[0]?.key || ""
@@ -1913,18 +1951,53 @@ function resolveConnectedSessionId(connection: ConnectionInfo | null | undefined
   return String(connection.sessionId || "").trim()
 }
 
+async function shouldSkipCreatePromptReplay(
+  gateway: Awaited<ReturnType<typeof createConnectionGateway>>,
+  conversationId: number
+) {
+  if (!activeCreateRequestId) return false
+  if (activeCreateConversationId !== conversationId) return false
+  if (!activeCreatePromptAttempted) return false
+
+  try {
+    const detail = await gateway.call<any>("get_folder_conversation", {
+      conversationId,
+    })
+    if (Array.isArray(detail?.turns) && detail.turns.length > 0) {
+      return true
+    }
+  } catch (error) {
+    console.warn("create prompt replay detail probe skipped:", error)
+  }
+
+  try {
+    const existingConnection = await acpApi.acpFindConnectionForConversation(conversationId)
+    if (existingConnection?.connection_id) {
+      return true
+    }
+  } catch (error) {
+    console.warn("create prompt replay connection probe skipped:", error)
+  }
+
+  return false
+}
+
 async function confirmCreate() {
+  if (creating.value) return
+
+  creating.value = true
   if (!selectedConnectionKey.value) {
     uni.showToast({ title: "请选择连接", icon: "none" })
+    creating.value = false
     return
   }
 
   if (!selectedProjectId.value) {
     uni.showToast({ title: "请选择项目", icon: "none" })
+    creating.value = false
     return
   }
 
-  creating.value = true
   try {
     persistSelectedAgentType(selectedConnectionKey.value, selectedAgentType.value)
     persistCurrentCreateAgentConfigSelection()
@@ -1958,6 +2031,7 @@ async function confirmCreate() {
 
     await applyCreateAgentConfig(gateway, connectionId)
 
+    const clientRequestId = resolveCreateRequestId()
     const createResult = await gateway.call<any>("create_conversation", {
       folderId: selectedProjectId.value,
       agentType: selectedAgentType.value,
@@ -1980,12 +2054,20 @@ async function confirmCreate() {
     })
 
     if (taskContent) {
-      await gateway.call("acp_prompt", {
-        connectionId,
-        blocks: [{ type: "text", text: taskContent }],
-        folderId: selectedProjectId.value,
-        conversationId: newConversationId,
-      })
+      const skipPromptReplay = await shouldSkipCreatePromptReplay(
+        gateway,
+        newConversationId
+      )
+      if (!skipPromptReplay) {
+        activeCreateConversationId = newConversationId
+        activeCreatePromptAttempted = true
+        await gateway.call("acp_prompt", {
+          connectionId,
+          blocks: [{ type: "text", text: taskContent }],
+          folderId: selectedProjectId.value,
+          conversationId: newConversationId,
+        })
+      }
     }
 
     runtime.bindCreatedConversationRuntime({
@@ -2005,6 +2087,7 @@ async function confirmCreate() {
 
     uni.showToast({ title: "创建成功", icon: "success" })
     showCreateDialog.value = false
+    clearPendingCreateRequest()
     newConversationTitle.value = ""
     newTaskContent.value = ""
     resetCreateAgentConfig("")
