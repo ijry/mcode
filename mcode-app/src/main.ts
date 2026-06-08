@@ -2,10 +2,12 @@ import { createSSRApp } from "vue"
 import uviewPlus from "uview-plus"
 import pinia from "./stores"
 import App from "./App.vue"
+import { setXycloudBaseUrl } from "@/services/xycloudAuth"
 import "./uni.scss"
 import "uno.css"
 
 installLegacyCompat()
+setXycloudBaseUrl(String(import.meta.env.VITE_XYCLOUD_BASE_URL || ""))
 
 declare global {
   interface Array<T> {

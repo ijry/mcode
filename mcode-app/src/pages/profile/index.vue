@@ -1,15 +1,19 @@
 <template>
   <view class="page" :style="[upThemeVars, upThemePageStyle]">
     <!-- 用户信息卡片 -->
-    <view class="user-card" :style="upThemeCardStyle">
+    <view class="user-card" :style="upThemeCardStyle" @click="goAuthEntry">
       <view class="user-info">
-        <u-avatar size="80" :text="userInfo.name || '未登录'"></u-avatar>
+        <u-avatar size="80" :text="displayName"></u-avatar>
         <view class="user-details">
-          <text class="user-name">{{ userInfo.name || "未登录" }}</text>
-          <text class="user-email">{{ userInfo.email || "点击登录" }}</text>
+          <text class="user-name">{{ displayName }}</text>
+          <text class="user-email">{{ displayEmail }}</text>
         </view>
       </view>
       <u-icon name="arrow-right" :color="upThemeVar('--up-light-color', '#c0c4cc')" size="20"></u-icon>
+    </view>
+
+    <view v-if="!isLoggedIn" class="auth-entry">
+      <u-button type="primary" shape="circle" @click="goLogin">登录 / 注册</u-button>
     </view>
 
     <!-- 功能列表 -->
@@ -93,7 +97,7 @@
     </view>
 
     <!-- 退出登录按钮 -->
-    <view class="logout-container" v-if="userInfo.name">
+    <view class="logout-container" v-if="isLoggedIn">
       <u-button type="error" size="large" plain @click="logout">退出登录</u-button>
     </view>
 
@@ -113,14 +117,14 @@
 
 <script setup lang="ts">
 import { computed, ref, onMounted } from "vue"
-import { useAuthStore } from "@/stores/auth"
 import { applyThemePreference, getCurrentThemePreference, type ThemePreference } from "@/services/theme"
 import { usePetStore } from "@/stores/pet"
 import { usePetEngine } from "@/services/petEngine"
 import PetPanel from "@/components/pet/PetPanel.vue"
+import { useAccountStore } from "@/stores/account"
 
-const auth = useAuthStore()
 const petStore = usePetStore()
+const account = useAccountStore()
 const version = ref("1.0.0")
 const themePreference = ref<ThemePreference>("system")
 const showThemeSheet = ref(false)
@@ -132,32 +136,19 @@ const themeActions = [
 ]
 const { currentEmotion } = usePetEngine()
 
-interface UserInfo {
-  name?: string
-  email?: string
-}
-
-const userInfo = ref<UserInfo>({
-  name: "",
-  email: "",
-})
 const themeLabel = computed(() => {
   if (themePreference.value === "dark") return "深色"
   if (themePreference.value === "light") return "浅色"
   return "跟随系统"
 })
 
+const isLoggedIn = computed(() => account.isLoggedIn)
+const displayName = computed(() => account.userInfo?.name || "未登录")
+const displayEmail = computed(() => account.userInfo?.email || "点击登录 / 注册")
+
 onMounted(() => {
-  loadUserInfo()
   loadThemePreference()
 })
-
-function loadUserInfo() {
-  const savedUser = uni.getStorageSync("mcode_user_info")
-  if (savedUser) {
-    userInfo.value = savedUser
-  }
-}
 
 function loadThemePreference() {
   themePreference.value = getCurrentThemePreference()
@@ -177,6 +168,18 @@ function goToConnections() {
   uni.switchTab({
     url: "/pages/connections/index",
   })
+}
+
+function goLogin() {
+  uni.navigateTo({
+    url: "/pages/auth/login",
+  })
+}
+
+function goAuthEntry() {
+  if (!isLoggedIn.value) {
+    goLogin()
+  }
 }
 
 function openPetManager() {
@@ -200,12 +203,14 @@ function clearCache() {
         try {
           // 保留用户信息和主题设置
           const user = uni.getStorageSync("mcode_user_info")
+          const token = uni.getStorageSync("mcode_user_token")
           const savedThemePreference = uni.getStorageSync("mcode_theme_preference")
 
           uni.clearStorageSync()
 
           // 恢复保留的数据
           if (user) uni.setStorageSync("mcode_user_info", user)
+          if (token) uni.setStorageSync("mcode_user_token", token)
           if (savedThemePreference !== undefined && savedThemePreference !== "") {
             uni.setStorageSync("mcode_theme_preference", savedThemePreference)
           }
@@ -242,8 +247,7 @@ function logout() {
     content: "确定要退出登录吗？",
     success: (res) => {
       if (res.confirm) {
-        uni.removeStorageSync("mcode_user_info")
-        userInfo.value = {}
+        account.logout()
         uni.showToast({ title: "已退出登录", icon: "success" })
       }
     },
@@ -267,6 +271,10 @@ function logout() {
   background-color: var(--up-card-bg-color, #ffffff);
   border-radius: 30rpx;
   box-shadow: none;
+}
+
+.auth-entry {
+  padding: 8rpx 30rpx 4rpx;
 }
 
 .user-info {

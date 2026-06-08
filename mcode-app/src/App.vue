@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { onLaunch, onShow, onHide } from "@dcloudio/uni-app"
 import { initializeThemePreference } from "@/services/theme"
+import { useAccountStore } from "@/stores/account"
+
+useAccountStore()
 
 onLaunch(() => {
   console.log("App Launch")
