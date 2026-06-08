@@ -25,4 +25,5 @@
 Thumbs.db
 .idea/
 .vscode/
+.worktrees/
 mcode-app/unpackage/resources
