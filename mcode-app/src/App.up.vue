@@ -24,5 +24,7 @@ onMounted(async () => {
 <style scoped>
 .up-root-wrap {
   min-height: 100vh;
+  background: var(--up-page-bg-color, var(--up-bg-color, #f3f4f6));
+  color: var(--up-main-color, #303133);
 }
 </style>

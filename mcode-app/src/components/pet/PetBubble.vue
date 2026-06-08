@@ -30,7 +30,7 @@ defineProps<{
   left: 50%;
   transform: translateX(-50%);
   margin-bottom: 12rpx;
-  background: var(--mcode-card-bg);
+  background: var(--up-card-bg-color, #ffffff);
   border-radius: 16rpx;
   padding: 10rpx 20rpx;
   box-shadow: 0 4rpx 16rpx rgba(0, 0, 0, 0.12);
@@ -40,7 +40,7 @@ defineProps<{
 
   &__text {
     font-size: 24rpx;
-    color: var(--mcode-text-primary);
+    color: var(--up-main-color, #303133);
     line-height: 1.4;
   }
 
@@ -53,7 +53,7 @@ defineProps<{
     height: 0;
     border-left: 10rpx solid transparent;
     border-right: 10rpx solid transparent;
-    border-top: 10rpx solid var(--mcode-card-bg);
+    border-top: 10rpx solid var(--up-card-bg-color, #ffffff);
   }
 
   &--flash {

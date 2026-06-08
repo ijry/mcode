@@ -24,8 +24,8 @@ onHide(() => {
 @import "uview-plus/index.scss";
 
 page {
-  background-color: var(--mcode-page-bg);
-  color: var(--mcode-text-primary);
+  background-color: var(--up-page-bg-color, var(--up-bg-color, #f3f4f6));
+  color: var(--up-main-color, #303133);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial,
     sans-serif;
 }

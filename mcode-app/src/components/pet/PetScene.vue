@@ -101,7 +101,7 @@ defineProps<{
     right: -8rpx;
     font-size: 20rpx;
     font-weight: bold;
-    color: var(--mcode-text-tertiary, #94a3b8);
+    color: var(--up-tips-color, #909193);
     opacity: 0;
     animation: zzz-float 2.2s ease-out infinite;
 
@@ -197,7 +197,7 @@ defineProps<{
     &-dot {
       position: absolute;
       border-radius: 50%;
-      background: var(--mcode-text-tertiary, #94a3b8);
+      background: var(--up-tips-color, #909193);
 
       &--1 {
         width: 5rpx; height: 5rpx;
@@ -218,8 +218,8 @@ defineProps<{
       width: 30rpx;
       height: 26rpx;
       border-radius: 50%;
-      background: var(--mcode-card-bg, #fff);
-      border: 2rpx solid var(--mcode-border, #e2e8f0);
+      background: var(--up-card-bg-color, #ffffff);
+      border: 2rpx solid var(--up-border-color, #dadbde);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -229,7 +229,7 @@ defineProps<{
     &-mark {
       font-size: 16rpx;
       font-weight: bold;
-      color: var(--mcode-text-secondary, #64748b);
+      color: var(--up-content-color, #606266);
       line-height: 1;
     }
   }

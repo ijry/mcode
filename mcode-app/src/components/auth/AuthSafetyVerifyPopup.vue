@@ -172,7 +172,7 @@ function resetForm() {
 const fieldInputStyle = {
   width: "100%",
   height: "68rpx",
-  background: "var(--mcode-card-soft-bg)",
+  background: "var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6))",
 }
 
 const fieldRowInputStyle = {
@@ -182,7 +182,7 @@ const fieldRowInputStyle = {
   height: "56rpx",
   padding: "0 16rpx",
   boxSizing: "border-box",
-  background: "var(--mcode-card-soft-bg)",
+  background: "var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6))",
 }
 
 async function handleConfirm() {
@@ -202,7 +202,7 @@ function close() {
 <style scoped lang="scss">
 .popup-panel {
   padding: 36rpx 30rpx calc(28rpx + env(safe-area-inset-bottom));
-  background: var(--mcode-card-bg);
+  background: var(--up-card-bg-color, #ffffff);
 }
 
 .popup-panel__header {
@@ -215,7 +215,7 @@ function close() {
 .popup-panel__title {
   font-size: 34rpx;
   font-weight: 600;
-  color: var(--mcode-text-primary);
+  color: var(--up-main-color, #303133);
 }
 
 .popup-panel__body {
@@ -232,7 +232,7 @@ function close() {
 
 .field__label {
   font-size: 26rpx;
-  color: var(--mcode-text-secondary);
+  color: var(--up-content-color, #606266);
 }
 
 .field__row {

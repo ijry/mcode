@@ -1,7 +1,7 @@
 <template>
   <view class="page todo-page" :style="[upThemeVars, upThemePageStyle]">
     <view class="todo-shell">
-      <up-sticky class="todo-sticky" :offset-top="0" :custom-nav-height="0" bg-color="#f5f5f7" z-index="20">
+      <up-sticky class="todo-sticky" :offset-top="0" :custom-nav-height="0" :bg-color="upThemeVar('--up-page-bg-color', '#f5f5f7')" z-index="20">
         <TodoPageHeader
           v-model:activeTab="activeTab"
           v-model:searchKeyword="searchKeyword"
@@ -730,7 +730,7 @@ async function confirmSend() {
 }
 
 .todo-page {
-  background: #f5f5f7;
+  background: var(--up-page-bg-color, var(--up-bg-color, #f3f4f6));
 }
 
 .todo-shell {
@@ -745,7 +745,7 @@ async function confirmSend() {
 
 .todo-sticky :deep(.u-sticky__content) {
   padding-top: 28rpx;
-  background: #f5f5f7;
+  background: var(--up-page-bg-color, var(--up-bg-color, #f3f4f6));
 }
 
 .todo-body {
@@ -758,7 +758,7 @@ async function confirmSend() {
 /* ===== 发送弹层 ===== */
 .create-sheet {
   padding: 36rpx 20rpx 0;
-  background-color: var(--mcode-card-bg);
+  background-color: var(--up-card-bg-color, #ffffff);
   border-radius: 28rpx 28rpx 0 0;
 }
 
@@ -772,7 +772,7 @@ async function confirmSend() {
 .create-sheet__title {
   font-size: 34rpx;
   font-weight: 600;
-  color: var(--mcode-text-primary);
+  color: var(--up-main-color, #303133);
 }
 
 .create-sheet__close {
@@ -781,7 +781,7 @@ async function confirmSend() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: var(--mcode-card-soft-bg);
+  background-color: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
   border-radius: 50%;
 }
 
@@ -792,7 +792,7 @@ async function confirmSend() {
 .form-label {
   display: block;
   font-size: 26rpx;
-  color: var(--mcode-text-tertiary);
+  color: var(--up-tips-color, #909193);
   margin-bottom: 12rpx;
 }
 
@@ -801,13 +801,13 @@ async function confirmSend() {
   align-items: center;
   justify-content: space-between;
   padding: 20rpx 24rpx;
-  background-color: var(--mcode-card-soft-bg);
+  background-color: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
   border-radius: 56rpx;
 }
 
 .form-readonly__text {
   font-size: 28rpx;
-  color: var(--mcode-text-primary);
+  color: var(--up-main-color, #303133);
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -817,14 +817,14 @@ async function confirmSend() {
 
 .send-preview {
   padding: 20rpx 24rpx;
-  background-color: color-mix(in srgb, var(--mcode-primary) 8%, var(--mcode-card-bg) 92%);
+  background-color: color-mix(in srgb, var(--up-primary, #2979ff) 8%, var(--up-card-bg-color, #ffffff) 92%);
   border-radius: 16rpx;
-  border: 1rpx solid color-mix(in srgb, var(--mcode-primary) 22%, var(--mcode-card-bg) 78%);
+  border: 1rpx solid color-mix(in srgb, var(--up-primary, #2979ff) 22%, var(--up-card-bg-color, #ffffff) 78%);
 }
 
 .send-preview__text {
   font-size: 28rpx;
-  color: var(--mcode-primary);
+  color: var(--up-primary, #2979ff);
   line-height: 1.5;
   word-break: break-all;
 }

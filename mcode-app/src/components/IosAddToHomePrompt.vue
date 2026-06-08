@@ -104,20 +104,20 @@ function isH5Runtime() {
   height: 8rpx;
   margin: 0 auto 8rpx;
   border-radius: 999rpx;
-  background: var(--mcode-border-color);
+  background: var(--up-border-color, #dadbde);
 }
 
 .ios-a2hs-sheet__title {
   font-size: 34rpx;
   font-weight: 600;
-  color: var(--mcode-text-primary);
+  color: var(--up-main-color, #303133);
   text-align: center;
 }
 
 .ios-a2hs-sheet__desc {
   font-size: 28rpx;
   line-height: 1.6;
-  color: var(--mcode-text-secondary);
+  color: var(--up-content-color, #606266);
   text-align: center;
 }
 </style>

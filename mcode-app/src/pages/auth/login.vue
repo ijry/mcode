@@ -1,5 +1,5 @@
 <template>
-  <view class="page auth-page">
+  <view class="page auth-page" :style="[upThemeVars, upThemePageStyle]">
     <view class="auth-orb auth-orb--one"></view>
     <view class="auth-orb auth-orb--two"></view>
 
@@ -10,7 +10,7 @@
       :border="false"
       left-icon="arrow-left"
       :bgColor="'transparent'"
-      :leftIconColor="upThemeVar('--mcode-text-primary', '#303133')"
+      :leftIconColor="upThemeVar('--up-main-color', '#303133')"
       @leftClick="handleBack"
     >
       <template #center>
@@ -106,7 +106,7 @@ const verifyInitialForm = computed(() => ({
 const fieldInputStyle = {
   width: "100%",
   height: "68rpx",
-  background: "var(--mcode-card-soft-bg)",
+  background: "var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6))",
 }
 
 onLoad((options) => {
@@ -217,7 +217,12 @@ function handleBack() {
   background:
     radial-gradient(circle at top left, rgba(41, 121, 255, 0.22), transparent 38%),
     radial-gradient(circle at top right, rgba(25, 190, 107, 0.14), transparent 32%),
-    linear-gradient(180deg, #f7fbff 0%, #f4f7fb 42%, #ffffff 100%);
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--up-primary, #2979ff) 8%, var(--up-page-bg-color, var(--up-bg-color, #f3f4f6)) 92%) 0%,
+      var(--up-page-bg-color, var(--up-bg-color, #f3f4f6)) 42%,
+      var(--up-card-bg-color, #ffffff) 100%
+    );
 }
 
 .auth-orb {
@@ -246,7 +251,7 @@ function handleBack() {
 .auth-navbar__title {
   font-size: 32rpx;
   font-weight: 600;
-  color: var(--mcode-text-primary);
+  color: var(--up-main-color, #303133);
 }
 
 .auth-hero {
@@ -262,7 +267,7 @@ function handleBack() {
   padding: 8rpx 12rpx;
   border-radius: 9999px;
   background: rgba(41, 121, 255, 0.12);
-  color: var(--mcode-primary);
+  color: var(--up-primary, #2979ff);
   font-size: 20rpx;
   font-weight: 600;
   line-height: 1.3;
@@ -274,7 +279,7 @@ function handleBack() {
   font-size: 48rpx;
   font-weight: 700;
   line-height: 1.2;
-  color: var(--mcode-text-primary);
+  color: var(--up-main-color, #303133);
 }
 
 .auth-hero__desc {
@@ -282,7 +287,7 @@ function handleBack() {
   margin-top: 12rpx;
   font-size: 26rpx;
   line-height: 1.6;
-  color: var(--mcode-text-secondary);
+  color: var(--up-content-color, #606266);
 }
 
 .auth-card {
@@ -291,8 +296,9 @@ function handleBack() {
   margin: 0 28rpx;
   padding: 36rpx 28rpx 30rpx;
   border-radius: 32rpx;
-  box-shadow: 0 24rpx 48rpx rgba(15, 23, 42, 0.08);
-  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 10rpx 26rpx rgba(15, 23, 42, 0.08);
+  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 92%, transparent);
+  border: 1rpx solid var(--up-border-color, #dadbde);
   backdrop-filter: blur(10px);
 }
 
@@ -305,7 +311,7 @@ function handleBack() {
 
 .field__label {
   font-size: 26rpx;
-  color: var(--mcode-text-secondary);
+  color: var(--up-content-color, #606266);
   font-weight: 500;
 }
 
@@ -315,8 +321,8 @@ function handleBack() {
   padding: 0 24rpx;
   border-radius: 20rpx;
   box-sizing: border-box;
-  background: var(--mcode-card-soft-bg);
-  color: var(--mcode-text-primary);
+  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
+  color: var(--up-main-color, #303133);
   font-size: 28rpx;
 }
 
@@ -338,7 +344,7 @@ function handleBack() {
 
 .auth-link {
   font-size: 26rpx;
-  color: var(--mcode-primary);
+  color: var(--up-primary, #2979ff);
 }
 
 .auth-notice {
@@ -347,13 +353,13 @@ function handleBack() {
   margin: 28rpx 28rpx 0;
   padding: 18rpx 24rpx;
   border-radius: 24rpx;
-  background: rgba(15, 23, 42, 0.04);
+  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
   text-align: center;
 }
 
 .auth-notice__text {
   font-size: 22rpx;
   line-height: 1.6;
-  color: var(--mcode-text-tertiary);
+  color: var(--up-tips-color, #909193);
 }
 </style>

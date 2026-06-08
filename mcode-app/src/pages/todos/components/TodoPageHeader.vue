@@ -28,11 +28,11 @@ const emit = defineEmits<{
         placeholder="搜索"
         :show-action="false"
         shape="round"
-        bgColor="#e9eaee"
+        :bgColor="upThemeVar('--up-hover-bg-color', '#e9eaee')"
         borderColor="transparent"
-        color="#1a1b1f"
-        placeholderColor="#9ca3af"
-        searchIconColor="#8b93a5"
+        :color="upThemeVar('--up-main-color', '#1a1b1f')"
+        :placeholderColor="upThemeVar('--up-tips-color', '#9ca3af')"
+        :searchIconColor="upThemeVar('--up-tips-color', '#8b93a5')"
         :height="44"
         @update:modelValue="emit('update:searchKeyword', $event)"
       ></up-search>
@@ -75,7 +75,7 @@ const emit = defineEmits<{
   font-weight: 700;
   line-height: 1.08;
   letter-spacing: -0.04em;
-  color: #20242f;
+  color: var(--up-main-color, #303133);
 }
 
 .todo-header__action {
@@ -93,13 +93,13 @@ const emit = defineEmits<{
 .todo-header__search :deep(.u-search__content) {
   border: none !important;
   border-radius: 24rpx !important;
-  background-color: #e9eaee !important;
+  background-color: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6)) !important;
   box-shadow: none !important;
 }
 
 .todo-header__search :deep(.u-search__content__input) {
   font-size: 26rpx;
-  color: #1a1b1f;
+  color: var(--up-main-color, #303133);
 }
 
 .todo-header__search :deep(.u-search__content__icon) {
@@ -112,7 +112,7 @@ const emit = defineEmits<{
   gap: 8rpx;
   padding: 8rpx;
   border-radius: 999rpx;
-  background: #e9eaee;
+  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
 }
 
 .todo-header__segment {
@@ -127,17 +127,17 @@ const emit = defineEmits<{
 }
 
 .todo-header__segment--active {
-  background: #ffffff;
-  box-shadow: 0 4rpx 14rpx rgba(15, 23, 42, 0.08);
+  background: var(--up-card-bg-color, #ffffff);
+  box-shadow: 0 10rpx 26rpx rgba(15, 23, 42, 0.08);
 }
 
 .todo-header__segment-text {
   font-size: 24rpx;
   font-weight: 600;
-  color: #5f6778;
+  color: var(--up-content-color, #606266);
 }
 
 .todo-header__segment--active .todo-header__segment-text {
-  color: #20242f;
+  color: var(--up-main-color, #303133);
 }
 </style>

@@ -77,8 +77,9 @@ const emit = defineEmits<{
   gap: 18rpx;
   padding: 18rpx 16rpx;
   border-radius: 22rpx;
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 10rpx 26rpx rgba(15, 23, 42, 0.06);
+  background: var(--up-card-bg-color, #ffffff);
+  border: 1rpx solid var(--up-border-color, #dadbde);
+  box-shadow: 0 10rpx 26rpx rgba(15, 23, 42, 0.08);
 }
 
 .todo-card--completed {
@@ -93,15 +94,15 @@ const emit = defineEmits<{
   width: 46rpx;
   height: 46rpx;
   border-radius: 50%;
-  border: 3rpx solid #d4d8e1;
+  border: 3rpx solid var(--up-border-color, #dadbde);
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
 .todo-card__check-circle--checked {
-  border-color: #2f7cf6;
-  background: #2f7cf6;
+  border-color: var(--up-primary, #2979ff);
+  background: var(--up-primary, #2979ff);
 }
 
 .todo-card__body {
@@ -115,13 +116,13 @@ const emit = defineEmits<{
 .todo-card__title {
   font-size: 30rpx;
   font-weight: 600;
-  color: #20242f;
+  color: var(--up-main-color, #303133);
   line-height: 1.3;
 }
 
 .todo-card__meta {
   font-size: 22rpx;
-  color: #8b93a5;
+  color: var(--up-tips-color, #909193);
   line-height: 1.3;
 }
 
@@ -139,17 +140,17 @@ const emit = defineEmits<{
   min-height: 34rpx;
   padding: 6rpx 14rpx;
   border-radius: 999rpx;
-  background: rgba(142, 142, 147, 0.12);
+  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
 }
 
 .todo-card__badge--completed {
-  background: rgba(47, 124, 246, 0.12);
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 12%, var(--up-card-bg-color, #ffffff) 88%);
 }
 
 .todo-card__badge-text {
   font-size: 18rpx;
   font-weight: 600;
-  color: #2f7cf6;
+  color: var(--up-primary, #2979ff);
 }
 
 .todo-card__icon-btn {
@@ -164,20 +165,21 @@ const emit = defineEmits<{
 .todo-empty-card {
   padding: 28rpx 24rpx;
   border-radius: 22rpx;
-  background: rgba(255, 255, 255, 0.88);
-  box-shadow: 0 10rpx 26rpx rgba(15, 23, 42, 0.04);
+  background: var(--up-card-bg-color, #ffffff);
+  border: 1rpx solid var(--up-border-color, #dadbde);
+  box-shadow: 0 10rpx 26rpx rgba(15, 23, 42, 0.08);
   text-align: center;
 }
 
 .todo-empty-card--actionable {
-  border: 2rpx dashed #d4d8e1;
+  border: 2rpx dashed var(--up-border-color, #dadbde);
 }
 
 .todo-empty-card__title {
   display: block;
   font-size: 26rpx;
   font-weight: 600;
-  color: #5f6778;
+  color: var(--up-content-color, #606266);
   line-height: 1.3;
 }
 
@@ -185,7 +187,7 @@ const emit = defineEmits<{
   display: block;
   margin-top: 10rpx;
   font-size: 22rpx;
-  color: #98a1b3;
+  color: var(--up-tips-color, #909193);
   line-height: 1.5;
 }
 </style>

@@ -116,8 +116,8 @@ function formatJson(obj: any): string {
 .tool-block {
   border-radius: 12rpx;
   overflow: hidden;
-  background-color: var(--mcode-card-soft-bg);
-  border: 1rpx solid var(--mcode-border-color);
+  background-color: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
+  border: 1rpx solid var(--up-border-color, #dadbde);
 }
 
 /* ===== 头部 ===== */
@@ -128,7 +128,7 @@ function formatJson(obj: any): string {
   padding: 1px 4px;
   transition: background-color 0.15s;
 
-  &:active { background-color: var(--mcode-card-muted-bg); }
+  &:active { background-color: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6)); }
 }
 
 .tool-hd__left {
@@ -160,7 +160,7 @@ function formatJson(obj: any): string {
   &--running  { background-color: #2979ff; animation: pulse 1s infinite; }
   &--completed { background-color: #19be6b; }
   &--error    { background-color: #fa3534; }
-  &--pending  { background-color: var(--mcode-border-color); }
+  &--pending  { background-color: var(--up-border-color, #dadbde); }
 }
 
 @keyframes pulse {
@@ -171,7 +171,7 @@ function formatJson(obj: any): string {
 .tool-name {
   font-size: 24rpx;
   font-family: "Courier New", monospace;
-  color: var(--mcode-text-primary);
+  color: var(--up-main-color, #303133);
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -197,7 +197,7 @@ function formatJson(obj: any): string {
   align-items: center;
   gap: 6rpx;
   font-size: 22rpx;
-  color: var(--mcode-text-tertiary);
+  color: var(--up-tips-color, #909193);
   font-weight: 500;
 
   &__text--success { color: #19be6b; }
@@ -214,9 +214,9 @@ function formatJson(obj: any): string {
   padding: 16rpx 20rpx;
   border-radius: 10rpx;
 
-  &--dark    { background-color: var(--mcode-code-bg); }
-  &--success { background-color: color-mix(in srgb, var(--mcode-success) 12%, var(--mcode-card-bg) 88%); border-left: 4rpx solid var(--mcode-success); }
-  &--error   { background-color: color-mix(in srgb, var(--mcode-error) 12%, var(--mcode-card-bg) 88%); border-left: 4rpx solid var(--mcode-error); }
+  &--dark    { background-color: #101318; }
+  &--success { background-color: color-mix(in srgb, var(--up-success, #19be6b) 12%, var(--up-card-bg-color, #ffffff) 88%); border-left: 4rpx solid var(--up-success, #19be6b); }
+  &--error   { background-color: color-mix(in srgb, var(--up-error, #fa3534) 12%, var(--up-card-bg-color, #ffffff) 88%); border-left: 4rpx solid var(--up-error, #fa3534); }
 }
 
 .code-text {
@@ -224,8 +224,8 @@ function formatJson(obj: any): string {
   font-family: "Courier New", monospace;
   line-height: 1;
   white-space: pre;
-  color: var(--mcode-code-text);
+  color: #d7dde8;
 
-  &--dark { color: var(--mcode-text-primary); white-space: pre-wrap; word-break: break-all; }
+  &--dark { color: var(--up-main-color, #303133); white-space: pre-wrap; word-break: break-all; }
 }
 </style>

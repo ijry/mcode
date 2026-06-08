@@ -44,7 +44,7 @@ function submit() {
       <view class="todo-create-sheet__hd">
         <text class="todo-create-sheet__title">{{ props.title }}</text>
         <view class="todo-create-sheet__close" @click="closePopup">
-          <up-icon name="close" size="18" color="#909193"></up-icon>
+          <up-icon name="close" size="18" :color="upThemeVar('--up-tips-color', '#909193')"></up-icon>
         </view>
       </view>
 
@@ -72,7 +72,7 @@ function submit() {
 <style scoped lang="scss">
 .todo-create-sheet {
   padding: 36rpx 20rpx 0;
-  background: #ffffff;
+  background: var(--up-card-bg-color, #ffffff);
   border-radius: 28rpx 28rpx 0 0;
 }
 
@@ -86,7 +86,7 @@ function submit() {
 .todo-create-sheet__title {
   font-size: 34rpx;
   font-weight: 600;
-  color: #20242f;
+  color: var(--up-main-color, #303133);
 }
 
 .todo-create-sheet__close {
@@ -96,7 +96,7 @@ function submit() {
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  background: #f1f2f5;
+  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
 }
 
 .todo-create-sheet__safe {

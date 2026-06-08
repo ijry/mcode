@@ -1,7 +1,7 @@
 <template>
-  <view class="page conversations-page" :style="[upThemeVars, upThemePageStyle, { backgroundColor: '#f5f5f7' }]">
+  <view class="page conversations-page" :style="[upThemeVars, upThemePageStyle]">
     <view class="conversations-shell">
-      <up-sticky class="conversations-sticky" :offset-top="0" :custom-nav-height="0" bg-color="#f5f5f7" z-index="20">
+      <up-sticky class="conversations-sticky" :offset-top="0" :custom-nav-height="0" :bg-color="upThemeVar('--up-page-bg-color', '#f5f5f7')" z-index="20">
         <view class="conversations-header">
           <text class="conversations-header__title">会话</text>
           <view class="conversations-header__action" @click="createConversation()">
@@ -15,11 +15,11 @@
             placeholder="搜索会话..."
             :show-action="false"
             shape="round"
-            bgColor="#e9eaee"
+            :bgColor="upThemeVar('--up-hover-bg-color', '#e9eaee')"
             borderColor="transparent"
-            color="#1a1b1f"
-            placeholderColor="#9ca3af"
-            searchIconColor="#8b93a5"
+            :color="upThemeVar('--up-main-color', '#1a1b1f')"
+            :placeholderColor="upThemeVar('--up-tips-color', '#9ca3af')"
+            :searchIconColor="upThemeVar('--up-tips-color', '#8b93a5')"
             :height="44"
             @search="() => {}"
             @clear="() => {}"
@@ -2147,7 +2147,7 @@ function formatTime(time?: string): string {
 }
 
 .conversations-page {
-  background: #f5f5f7;
+  background: var(--up-page-bg-color, var(--up-bg-color, #f3f4f6));
 }
 
 .conversations-shell {
@@ -2165,7 +2165,7 @@ function formatTime(time?: string): string {
 
 .conversations-sticky :deep(.u-sticky__content) {
   padding-top: 28rpx;
-  background: #f5f5f7;
+  background: var(--up-page-bg-color, var(--up-bg-color, #f3f4f6));
 }
 
 .conversations-header {
@@ -2180,7 +2180,7 @@ function formatTime(time?: string): string {
   font-weight: 700;
   line-height: 1.08;
   letter-spacing: -0.04em;
-  color: #20242f;
+  color: var(--up-main-color, #303133);
 }
 
 .conversations-header__action {
@@ -2190,8 +2190,8 @@ function formatTime(time?: string): string {
   align-items: center;
   justify-content: center;
   border-radius: 999rpx;
-  border: 2rpx solid #2f7cf6;
-  background: rgba(255, 255, 255, 0.72);
+  border: 2rpx solid var(--up-primary, #2979ff);
+  background: var(--up-card-bg-color, #ffffff);
   box-shadow: 0 6rpx 18rpx rgba(47, 124, 246, 0.08);
   flex-shrink: 0;
 }
@@ -2203,13 +2203,13 @@ function formatTime(time?: string): string {
 .conversations-searchbar :deep(.u-search__content) {
   border: none !important;
   border-radius: 24rpx !important;
-  background-color: #e9eaee !important;
+  background-color: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6)) !important;
   box-shadow: none !important;
 }
 
 .conversations-searchbar :deep(.u-search__content__input) {
   font-size: 26rpx;
-  color: #1a1b1f;
+  color: var(--up-main-color, #303133);
 }
 
 .conversations-searchbar :deep(.u-search__content__icon) {
@@ -2257,7 +2257,7 @@ function formatTime(time?: string): string {
   display: block;
   font-size: 22rpx;
   font-weight: 600;
-  color: #9198a8;
+  color: var(--up-tips-color, #909193);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   flex: 0 1 auto;
@@ -2270,7 +2270,7 @@ function formatTime(time?: string): string {
   align-items: center;
   justify-content: center;
   border-radius: 999rpx;
-  background: rgba(250, 53, 52, 0.1);
+  background: color-mix(in srgb, var(--up-error, #fa3534) 10%, var(--up-card-bg-color, #ffffff) 90%);
 }
 
 .group-section__cards {
@@ -2285,7 +2285,7 @@ function formatTime(time?: string): string {
 
 .group-empty__text {
   font-size: 22rpx;
-  color: #a0a5b3;
+  color: var(--up-tips-color, #909193);
 }
 
 .live-card {
@@ -2294,8 +2294,9 @@ function formatTime(time?: string): string {
   gap: 18rpx;
   padding: 18rpx 16rpx;
   border-radius: 22rpx;
-  background: rgba(255, 255, 255, 0.96) !important;
-  box-shadow: 0 10rpx 26rpx rgba(15, 23, 42, 0.06) !important;
+  background: var(--up-card-bg-color, #ffffff) !important;
+  border: 1rpx solid var(--up-border-color, #dadbde);
+  box-shadow: 0 10rpx 26rpx rgba(15, 23, 42, 0.08) !important;
   overflow: hidden;
 }
 
@@ -2307,13 +2308,13 @@ function formatTime(time?: string): string {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  background: linear-gradient(180deg, #eef4ff 0%, #e6edf8 100%);
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 12%, var(--up-card-bg-color, #ffffff) 88%);
 }
 
 .agent-logo__text {
   font-size: 18rpx;
   font-weight: 700;
-  color: #2f7cf6;
+  color: var(--up-primary, #2979ff);
 }
 
 .agent-logo__img {
@@ -2323,8 +2324,8 @@ function formatTime(time?: string): string {
 }
 
 .agent-logo--real {
-  background: #ffffff !important;
-  border: 1rpx solid #e5e7eb;
+  background: var(--up-card-bg-color, #ffffff) !important;
+  border: 1rpx solid var(--up-border-color, #dadbde);
 }
 
 .agent-logo--claude_code,
@@ -2333,12 +2334,12 @@ function formatTime(time?: string): string {
 .agent-logo--gemini,
 .agent-logo--open_claw,
 .agent-logo--cline {
-  background: #ffffff;
-  border: 1rpx solid #e5e7eb;
+  background: var(--up-card-bg-color, #ffffff);
+  border: 1rpx solid var(--up-border-color, #dadbde);
 }
 
 .agent-logo--history {
-  background: linear-gradient(180deg, #edf4ff 0%, #dfe9fb 100%);
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 12%, var(--up-card-bg-color, #ffffff) 88%);
 }
 
 .live-card__body {
@@ -2350,7 +2351,7 @@ function formatTime(time?: string): string {
   display: block;
   font-size: 34rpx;
   font-weight: 700;
-  color: #111827;
+  color: var(--up-main-color, #303133);
   line-height: 1.25;
 }
 
@@ -2358,7 +2359,7 @@ function formatTime(time?: string): string {
   display: block;
   margin-top: 8rpx;
   font-size: 26rpx;
-  color: #5f6778;
+  color: var(--up-content-color, #606266);
   line-height: 1.3;
 }
 
@@ -2378,7 +2379,7 @@ function formatTime(time?: string): string {
 
 .live-card__stamp {
   font-size: 20rpx;
-  color: #949bab;
+  color: var(--up-tips-color, #909193);
   line-height: 1.2;
 }
 
@@ -2390,7 +2391,7 @@ function formatTime(time?: string): string {
   min-height: 34rpx;
   padding: 6rpx 14rpx;
   border-radius: 999rpx;
-  background-color: rgba(142, 142, 147, 0.12);
+  background-color: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
   overflow: visible;
 }
 
@@ -2402,7 +2403,7 @@ function formatTime(time?: string): string {
   line-height: 1;
   font-weight: 600;
   text-align: center;
-  color: #8e8e93;
+  color: var(--up-tips-color, #909193);
 }
 
 .status-chip--running {
@@ -2423,11 +2424,11 @@ function formatTime(time?: string): string {
 }
 
 .status-chip--completed {
-  background-color: rgba(116, 126, 147, 0.12);
+  background-color: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
 }
 
 .status-chip--completed .status-chip__text {
-  color: #727b8b;
+  color: var(--up-content-color, #606266);
 }
 
 .status-chip--stopped {
@@ -2447,11 +2448,11 @@ function formatTime(time?: string): string {
 }
 
 .status-chip--history {
-  background-color: rgba(142, 142, 147, 0.12);
+  background-color: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
 }
 
 .status-chip--history .status-chip__text {
-  color: #7b8190;
+  color: var(--up-content-color, #606266);
 }
 
 @keyframes runningPulse {
@@ -2470,7 +2471,7 @@ function formatTime(time?: string): string {
 }
 
 .live-card--history {
-  background: rgba(255, 255, 255, 0.96) !important;
+  background: var(--up-card-bg-color, #ffffff) !important;
 }
 
 .inline-loading {
@@ -2484,7 +2485,7 @@ function formatTime(time?: string): string {
 
 .inline-loading__text {
   font-size: 24rpx;
-  color: #8e8e93;
+  color: var(--up-tips-color, #909193);
 }
 
 .history-list {
@@ -2511,13 +2512,14 @@ function formatTime(time?: string): string {
 .history-collapse-item {
   overflow: hidden;
   border-radius: 22rpx;
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 10rpx 26rpx rgba(15, 23, 42, 0.06);
+  background: var(--up-card-bg-color, #ffffff);
+  border: 1rpx solid var(--up-border-color, #dadbde);
+  box-shadow: 0 10rpx 26rpx rgba(15, 23, 42, 0.08);
 }
 
 .history-collapse-item :deep(.u-cell) {
   background: transparent !important;
-  box-shadow: 0 0.3125rem 0.8125rem rgba(15, 23, 42, 0.06);
+  box-shadow: none;
 }
 
 .history-collapse-item :deep(.u-cell__body) {
@@ -2537,8 +2539,9 @@ function formatTime(time?: string): string {
   gap: 12rpx;
   padding: 14rpx 16rpx;
   border-radius: 22rpx;
-  background: rgba(255, 255, 255, 0.96) !important;
-  box-shadow: 0 8rpx 24rpx rgba(15, 23, 42, 0.06) !important;
+  background: var(--up-card-bg-color, #ffffff) !important;
+  border: 1rpx solid var(--up-border-color, #dadbde);
+  box-shadow: 0 10rpx 26rpx rgba(15, 23, 42, 0.08) !important;
   flex-shrink: 0;
 }
 
@@ -2551,7 +2554,7 @@ function formatTime(time?: string): string {
 
 .history-mode-back__text {
   font-size: 24rpx;
-  color: var(--mcode-primary);
+  color: var(--up-primary, #2979ff);
 }
 
 .history-mode-title {
@@ -2560,7 +2563,7 @@ function formatTime(time?: string): string {
   text-align: center;
   font-size: 24rpx;
   font-weight: 600;
-  color: #303544;
+  color: var(--up-main-color, #303133);
 }
 
 .history-mode-create {
@@ -2572,7 +2575,7 @@ function formatTime(time?: string): string {
   min-height: 44rpx;
   padding: 0 14rpx;
   border-radius: 999rpx;
-  background: rgba(47, 124, 246, 0.1);
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 12%, var(--up-card-bg-color, #ffffff) 88%);
   flex-shrink: 0;
 }
 
@@ -2581,7 +2584,7 @@ function formatTime(time?: string): string {
   font-size: 22rpx;
   line-height: 1;
   font-weight: 600;
-  color: var(--mcode-primary);
+  color: var(--up-primary, #2979ff);
 }
 
 .history-section__header {
@@ -2600,7 +2603,7 @@ function formatTime(time?: string): string {
   display: block;
   font-size: 28rpx;
   font-weight: 700;
-  color: #1f2937;
+  color: var(--up-main-color, #303133);
 }
 
 .history-section__count {
@@ -2608,18 +2611,18 @@ function formatTime(time?: string): string {
   height: 30rpx;
   padding: 0 10rpx;
   border-radius: 999rpx;
-  background: rgba(47, 124, 246, 0.1);
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 12%, var(--up-card-bg-color, #ffffff) 88%);
   font-size: 18rpx;
   line-height: 30rpx;
   text-align: center;
-  color: var(--mcode-primary);
+  color: var(--up-primary, #2979ff);
 }
 
 .history-section__path {
   display: block;
   margin-top: 6rpx;
   font-size: 20rpx;
-  color: #a0a5b3;
+  color: var(--up-tips-color, #909193);
 }
 
 /* ===== 空状态 ===== */
@@ -2654,9 +2657,10 @@ function formatTime(time?: string): string {
   align-items: center;
   gap: 12rpx;
   padding: 14rpx 12rpx;
-  background-color: var(--mcode-card-bg);
+  background-color: var(--up-card-bg-color, #ffffff);
+  border: 1rpx solid var(--up-border-color, #dadbde);
   border-radius: 18rpx;
-  box-shadow: 0 1rpx 8rpx rgba(0, 0, 0, 0.04);
+  box-shadow: none;
   transition: transform 0.15s;
 
   &:active { transform: scale(0.985); }
@@ -2666,14 +2670,14 @@ function formatTime(time?: string): string {
   gap: 18rpx;
   padding: 18rpx 16rpx;
   border-radius: 22rpx;
-  background: rgba(255, 255, 255, 0.96) !important;
-  box-shadow: 0 10rpx 26rpx rgba(15, 23, 42, 0.06) !important;
+  background: var(--up-card-bg-color, #ffffff) !important;
+  box-shadow: none !important;
 }
 
 .conv-card__icon {
   width: 52rpx;
   height: 52rpx;
-  background-color: color-mix(in srgb, var(--mcode-primary) 10%, var(--mcode-card-bg) 90%);
+  background-color: color-mix(in srgb, var(--up-primary, #2979ff) 10%, var(--up-card-bg-color, #ffffff) 90%);
   border-radius: 14rpx;
   display: flex;
   align-items: center;
@@ -2692,7 +2696,7 @@ function formatTime(time?: string): string {
 .conv-card__title {
   font-size: 24rpx;
   font-weight: 500;
-  color: var(--mcode-text-primary);
+  color: var(--up-main-color, #303133);
   line-height: 1.3;
 }
 
@@ -2700,7 +2704,7 @@ function formatTime(time?: string): string {
   display: block;
   margin-top: 4rpx;
   font-size: 22rpx;
-  color: #6b7280;
+  color: var(--up-content-color, #606266);
   line-height: 1.3;
 }
 
@@ -2725,7 +2729,7 @@ function formatTime(time?: string): string {
 /* ===== 创建弹层 ===== */
 .create-sheet {
   padding: 36rpx 20rpx 0;
-  background-color: var(--mcode-card-bg);
+  background-color: var(--up-card-bg-color, #ffffff);
   border-radius: 28rpx 28rpx 0 0;
 }
 
@@ -2739,7 +2743,7 @@ function formatTime(time?: string): string {
 .create-sheet__title {
   font-size: 34rpx;
   font-weight: 600;
-  color: var(--mcode-text-primary);
+  color: var(--up-main-color, #303133);
 }
 
 .create-sheet__close {
@@ -2748,7 +2752,7 @@ function formatTime(time?: string): string {
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: var(--mcode-card-soft-bg);
+  background-color: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
   border-radius: 50%;
 }
 
@@ -2759,7 +2763,7 @@ function formatTime(time?: string): string {
 .form-label {
   display: block;
   font-size: 26rpx;
-  color: var(--mcode-text-tertiary);
+  color: var(--up-tips-color, #909193);
   margin-bottom: 12rpx;
 }
 
@@ -2768,13 +2772,13 @@ function formatTime(time?: string): string {
   align-items: center;
   justify-content: space-between;
   padding: 20rpx 24rpx;
-  background-color: var(--mcode-card-soft-bg);
+  background-color: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
   border-radius: 56rpx;
 }
 
 .form-readonly__text {
   font-size: 28rpx;
-  color: var(--mcode-text-primary);
+  color: var(--up-main-color, #303133);
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -2796,7 +2800,7 @@ function formatTime(time?: string): string {
 
 .form-helper-inline {
   font-size: 22rpx;
-  color: var(--mcode-text-tertiary);
+  color: var(--up-tips-color, #909193);
   line-height: 1.4;
 }
 
@@ -2806,7 +2810,7 @@ function formatTime(time?: string): string {
   padding: 0 8rpx;
   font-size: 22rpx;
   line-height: 1.4;
-  color: var(--mcode-text-tertiary);
+  color: var(--up-tips-color, #909193);
   word-break: break-all;
 }
 
@@ -2833,14 +2837,14 @@ function formatTime(time?: string): string {
   flex-shrink: 0;
   padding: 20rpx 12rpx 18rpx;
   border-radius: 24rpx;
-  background: var(--mcode-card-soft-bg);
+  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
   border: 2rpx solid transparent;
   transition: all 0.18s ease;
 }
 
 .agent-card--active {
-  background: color-mix(in srgb, var(--mcode-primary) 10%, var(--mcode-card-bg) 90%);
-  border-color: var(--mcode-primary);
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 10%, var(--up-card-bg-color, #ffffff) 90%);
+  border-color: var(--up-primary, #2979ff);
   box-shadow: 0 8rpx 24rpx rgba(41, 121, 255, 0.12);
 }
 
@@ -2854,7 +2858,7 @@ function formatTime(time?: string): string {
 }
 
 .agent-card__logo--real {
-  background: var(--mcode-card-bg);
+  background: var(--up-card-bg-color, #ffffff);
 }
 
 .agent-card__logo-img {
@@ -2865,14 +2869,14 @@ function formatTime(time?: string): string {
 .agent-card__logo-text {
   font-size: 24rpx;
   font-weight: 700;
-  color: var(--mcode-text-primary);
+  color: var(--up-main-color, #303133);
 }
 
 .agent-card__label {
   font-size: 22rpx;
   line-height: 1.3;
   text-align: center;
-  color: var(--mcode-text-primary);
+  color: var(--up-main-color, #303133);
 }
 
 .config-loading {
@@ -2886,7 +2890,7 @@ function formatTime(time?: string): string {
 .config-hint__text,
 .config-section__desc {
   font-size: 24rpx;
-  color: var(--mcode-text-secondary);
+  color: var(--up-content-color, #606266);
 }
 
 .config-hint {
@@ -2901,7 +2905,7 @@ function formatTime(time?: string): string {
   display: block;
   margin-bottom: 12rpx;
   font-size: 24rpx;
-  color: var(--mcode-text-secondary);
+  color: var(--up-content-color, #606266);
 }
 
 .config-section__desc {
@@ -2919,18 +2923,18 @@ function formatTime(time?: string): string {
 .config-chip {
   padding: 14rpx 20rpx;
   border-radius: 999rpx;
-  background: var(--mcode-card-soft-bg);
+  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
   border: 2rpx solid transparent;
 }
 
 .config-chip--active {
-  background: color-mix(in srgb, var(--mcode-primary) 10%, var(--mcode-card-bg) 90%);
-  border-color: var(--mcode-primary);
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 10%, var(--up-card-bg-color, #ffffff) 90%);
+  border-color: var(--up-primary, #2979ff);
 }
 
 .config-chip__title {
   font-size: 24rpx;
-  color: var(--mcode-text-primary);
+  color: var(--up-main-color, #303133);
 }
 
 .safe-bottom {

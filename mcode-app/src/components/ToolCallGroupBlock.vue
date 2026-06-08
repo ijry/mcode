@@ -124,7 +124,7 @@ function classifyToolCall(toolCall: ToolCall): "command" | "file_change" | "netw
   min-height: 48rpx;
   padding: 10rpx 18rpx;
   border-radius: 999rpx;
-  background: color-mix(in srgb, var(--mcode-card-soft-bg) 88%, var(--mcode-card-bg) 12%);
+  background: color-mix(in srgb, var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6)) 88%, var(--up-card-bg-color, #ffffff) 12%);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -149,13 +149,13 @@ function classifyToolCall(toolCall: ToolCall): "command" | "file_change" | "netw
   &--running { background: #2979ff; animation: tool-group-pulse 1s infinite; }
   &--completed { background: #8f9bb3; }
   &--error { background: #fa3534; }
-  &--pending { background: var(--mcode-border-color); }
+  &--pending { background: var(--up-border-color, #dadbde); }
 }
 
 .tool-group__label {
   font-size: 22rpx;
   line-height: 1.2;
-  color: var(--mcode-text-secondary);
+  color: var(--up-content-color, #606266);
 }
 
 .tool-group__failure {

@@ -1,5 +1,5 @@
 <template>
-  <view class="page connections-page" :style="[upThemeVars, upThemePageStyle, { backgroundColor: '#f2f2f7' }]">
+  <view class="page connections-page" :style="[upThemeVars, upThemePageStyle]">
     <view class="connections-shell">
       <view class="connections-topbar">
         <view class="connections-brand">
@@ -287,7 +287,7 @@ import { buildWebSocketProtocols } from "@/services/gateway/wsProtocol"
 
 declare const plus: any
 
-const DEPLOYMENT_GUIDE_URL = "https://github.com/xintaofei/codeg/releases"
+const DEPLOYMENT_GUIDE_URL = "https://pan.quark.cn/s/0008015b1d33"
 
 const auth = useAuthStore()
 const formRef = ref()
@@ -1054,6 +1054,7 @@ function persistConnectedMap() {
 
 .connections-page {
   padding: 0;
+  background: var(--up-page-bg-color, var(--up-bg-color, #f3f4f6));
 }
 
 .connections-shell {
@@ -1079,20 +1080,20 @@ function persistConnectedMap() {
   font-weight: 700;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: #007aff;
+  color: var(--up-primary, #2979ff);
 }
 
 .connections-brand__title {
   font-size: 42rpx;
   line-height: 1.2;
   font-weight: 700;
-  color: #1d1d1f;
+  color: var(--up-main-color, #303133);
 }
 
 .connections-brand__subtitle {
   font-size: 26rpx;
   line-height: 1.5;
-  color: #8e8e93;
+  color: var(--up-tips-color, #909193);
 }
 
 .connections-topbar__action {
@@ -1124,7 +1125,7 @@ function persistConnectedMap() {
 .connections-sheet,
 .connections-tutorial {
   border-radius: 32rpx;
-  box-shadow: 0 18rpx 48rpx rgba(60, 64, 67, 0.08);
+  box-shadow: 0 10rpx 26rpx rgba(15, 23, 42, 0.08);
 }
 
 .connections-hero {
@@ -1135,7 +1136,13 @@ function persistConnectedMap() {
   padding: 30rpx;
   margin-bottom: 24rpx;
   overflow: hidden;
-  background: linear-gradient(135deg, rgba(0, 122, 255, 0.14), rgba(255, 255, 255, 0.92));
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--up-primary, #2979ff) 14%, var(--up-card-bg-color, #ffffff) 86%),
+      var(--up-card-bg-color, #ffffff)
+    );
+  border: 1rpx solid var(--up-border-color, #dadbde);
 }
 
 .connections-hero__copy {
@@ -1150,14 +1157,14 @@ function persistConnectedMap() {
   font-size: 20rpx;
   font-weight: 700;
   letter-spacing: 0.2em;
-  color: #007aff;
+  color: var(--up-primary, #2979ff);
 }
 
 .connections-hero__title {
   font-size: 36rpx;
   line-height: 1.25;
   font-weight: 700;
-  color: #1d1d1f;
+  color: var(--up-main-color, #303133);
 }
 
 .connections-hero__desc,
@@ -1170,7 +1177,7 @@ function persistConnectedMap() {
 .connections-tutorial__step-desc {
   font-size: 24rpx;
   line-height: 1.6;
-  color: #6e6e73;
+  color: var(--up-content-color, #606266);
 }
 
 .connections-hero__chips {
@@ -1188,13 +1195,13 @@ function persistConnectedMap() {
 }
 
 .connections-hero__chip {
-  background: rgba(0, 122, 255, 0.12);
-  color: #007aff;
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 12%, var(--up-card-bg-color, #ffffff) 88%);
+  color: var(--up-primary, #2979ff);
 }
 
 .connections-hero__chip--ghost {
-  background: rgba(255, 255, 255, 0.86);
-  color: #1d1d1f;
+  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
+  color: var(--up-main-color, #303133);
 }
 
 .connections-hero__art {
@@ -1212,7 +1219,8 @@ function persistConnectedMap() {
   min-height: 520rpx;
   padding: 48rpx 32rpx;
   text-align: center;
-  background: #ffffff;
+  background: var(--up-card-bg-color, #ffffff);
+  border: 1rpx solid var(--up-border-color, #dadbde);
 }
 
 .connections-empty__icon {
@@ -1222,7 +1230,7 @@ function persistConnectedMap() {
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  background: rgba(0, 122, 255, 0.1);
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 12%, var(--up-card-bg-color, #ffffff) 88%);
 }
 
 .connections-empty__title,
@@ -1231,7 +1239,7 @@ function persistConnectedMap() {
 .connections-tutorial__title {
   font-size: 34rpx;
   font-weight: 700;
-  color: #1d1d1f;
+  color: var(--up-main-color, #303133);
 }
 
 .connections-empty__actions {
@@ -1256,13 +1264,13 @@ function persistConnectedMap() {
 }
 
 .connections-empty__primary {
-  background: #007aff;
+  background: var(--up-primary, #2979ff);
   color: #ffffff;
 }
 
 .connections-empty__secondary {
-  background: rgba(0, 122, 255, 0.1);
-  color: #007aff;
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 12%, var(--up-card-bg-color, #ffffff) 88%);
+  color: var(--up-primary, #2979ff);
 }
 
 .connections-stack {
@@ -1276,7 +1284,8 @@ function persistConnectedMap() {
   align-items: flex-start;
   gap: 20rpx;
   padding: 24rpx;
-  background: #ffffff;
+  background: var(--up-card-bg-color, #ffffff);
+  border: 1rpx solid var(--up-border-color, #dadbde);
 }
 
 .connection-card--online {
@@ -1291,11 +1300,11 @@ function persistConnectedMap() {
   align-items: center;
   justify-content: center;
   border-radius: 26rpx;
-  background: rgba(142, 142, 147, 0.1);
+  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
 }
 
 .connection-card__icon--online {
-  background: rgba(0, 122, 255, 0.12);
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 12%, var(--up-card-bg-color, #ffffff) 88%);
 }
 
 .connection-card__body {
@@ -1317,7 +1326,7 @@ function persistConnectedMap() {
   flex: 1;
   font-size: 30rpx;
   font-weight: 700;
-  color: #1d1d1f;
+  color: var(--up-main-color, #303133);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1328,7 +1337,7 @@ function persistConnectedMap() {
   align-items: center;
   padding: 8rpx 14rpx;
   border-radius: 999rpx;
-  background: rgba(142, 142, 147, 0.12);
+  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
 }
 
 .connection-card__status--online {
@@ -1338,7 +1347,7 @@ function persistConnectedMap() {
 .connection-card__status-text {
   font-size: 20rpx;
   font-weight: 700;
-  color: #8e8e93;
+  color: var(--up-tips-color, #909193);
 }
 
 .connection-card__status--online .connection-card__status-text {
@@ -1353,13 +1362,13 @@ function persistConnectedMap() {
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  background: rgba(142, 142, 147, 0.08);
+  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
 }
 
 .connection-card__meta {
   font-size: 24rpx;
   line-height: 1.5;
-  color: #6e6e73;
+  color: var(--up-content-color, #606266);
   word-break: break-all;
 }
 
@@ -1373,7 +1382,7 @@ function persistConnectedMap() {
 .connection-card__footer-link {
   font-size: 22rpx;
   font-weight: 600;
-  color: #007aff;
+  color: var(--up-primary, #2979ff);
 }
 
 .connections-add-card,
@@ -1383,7 +1392,8 @@ function persistConnectedMap() {
   gap: 18rpx;
   margin-top: 18rpx;
   padding: 24rpx;
-  background: #ffffff;
+  background: var(--up-card-bg-color, #ffffff);
+  border: 1rpx solid var(--up-border-color, #dadbde);
 }
 
 .connections-add-card__icon {
@@ -1393,7 +1403,7 @@ function persistConnectedMap() {
   align-items: center;
   justify-content: center;
   border-radius: 22rpx;
-  background: rgba(0, 122, 255, 0.1);
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 12%, var(--up-card-bg-color, #ffffff) 88%);
   flex-shrink: 0;
 }
 
@@ -1410,13 +1420,14 @@ function persistConnectedMap() {
 .connections-add-card__title {
   font-size: 28rpx;
   font-weight: 700;
-  color: #1d1d1f;
+  color: var(--up-main-color, #303133);
 }
 
 .connections-guide-card {
   align-items: flex-start;
   justify-content: space-between;
   background: linear-gradient(135deg, #0a84ff, #0066cc);
+  border: none;
 }
 
 .connections-guide-card__eyebrow,
@@ -1437,7 +1448,7 @@ function persistConnectedMap() {
 
 .connections-sheet {
   padding: 18rpx 24rpx 28rpx;
-  background: #ffffff;
+  background: var(--up-card-bg-color, #ffffff);
 }
 
 .connections-sheet__handle {
@@ -1445,7 +1456,7 @@ function persistConnectedMap() {
   height: 8rpx;
   margin: 0 auto 18rpx;
   border-radius: 999rpx;
-  background: #d1d1d6;
+  background: var(--up-border-color, #dadbde);
 }
 
 .connections-sheet__header,
@@ -1469,20 +1480,20 @@ function persistConnectedMap() {
   margin-bottom: 18rpx;
   padding: 20rpx 18rpx;
   border-radius: 24rpx;
-  background: rgba(0, 122, 255, 0.08);
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 12%, var(--up-card-bg-color, #ffffff) 88%);
 }
 
 .connections-sheet__tutorial-title {
   font-size: 26rpx;
   font-weight: 600;
-  color: #007aff;
+  color: var(--up-primary, #2979ff);
 }
 
 .connections-sheet__tutorial-desc,
 .connections-sheet__tip,
 .connections-tutorial__link {
   font-size: 22rpx;
-  color: #6e6e73;
+  color: var(--up-content-color, #606266);
 }
 
 .connections-sheet__tabs {
@@ -1506,7 +1517,7 @@ function persistConnectedMap() {
   width: 640rpx;
   max-width: calc(100vw - 48rpx);
   padding: 26rpx;
-  background: #ffffff;
+  background: var(--up-card-bg-color, #ffffff);
 }
 
 .connections-tutorial__steps {
@@ -1520,7 +1531,8 @@ function persistConnectedMap() {
   gap: 16rpx;
   padding: 20rpx;
   border-radius: 24rpx;
-  background: #f2f2f7;
+  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
+  border: 1rpx solid var(--up-border-color, #dadbde);
 }
 
 .connections-tutorial__index {
@@ -1531,7 +1543,7 @@ function persistConnectedMap() {
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  background: #007aff;
+  background: var(--up-primary, #2979ff);
   color: #ffffff;
   font-size: 24rpx;
   font-weight: 700;
@@ -1548,7 +1560,7 @@ function persistConnectedMap() {
   font-size: 26rpx;
   line-height: 1.5;
   font-weight: 600;
-  color: #1d1d1f;
+  color: var(--up-main-color, #303133);
 }
 
 .connections-tutorial__link {

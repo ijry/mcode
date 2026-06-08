@@ -95,11 +95,11 @@ function selectAgent(agent: Agent) {
   align-items: center;
   gap: 10rpx;
   padding: 14rpx 20rpx;
-  background-color: var(--mcode-card-soft-bg);
+  background-color: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
   border-radius: 20rpx;
   transition: background-color 0.15s;
 
-  &:active { background-color: var(--mcode-card-muted-bg); }
+  &:active { background-color: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6)); }
 }
 
 .sel-dot {
@@ -112,12 +112,12 @@ function selectAgent(agent: Agent) {
 .sel-name {
   font-size: 26rpx;
   font-weight: 500;
-  color: var(--mcode-text-primary);
+  color: var(--up-main-color, #303133);
 }
 
 /* ===== 弹层 ===== */
 .picker-wrap {
-  background-color: var(--mcode-card-bg);
+  background-color: var(--up-card-bg-color, #ffffff);
   padding: 0 0 0;
 }
 
@@ -131,7 +131,7 @@ function selectAgent(agent: Agent) {
 .picker-hd__title {
   font-size: 34rpx;
   font-weight: 600;
-  color: var(--mcode-text-primary);
+  color: var(--up-main-color, #303133);
 }
 
 .picker-close {
@@ -140,7 +140,7 @@ function selectAgent(agent: Agent) {
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: var(--mcode-card-soft-bg);
+  background-color: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
   border-radius: 50%;
 }
 
@@ -159,10 +159,10 @@ function selectAgent(agent: Agent) {
   margin-bottom: 10rpx;
   transition: background-color 0.15s;
 
-  &:active { background-color: var(--mcode-card-muted-bg); }
+  &:active { background-color: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6)); }
 
   &--active {
-    background-color: color-mix(in srgb, var(--mcode-primary) 10%, var(--mcode-card-bg) 90%);
+    background-color: color-mix(in srgb, var(--up-primary, #2979ff) 10%, var(--up-card-bg-color, #ffffff) 90%);
   }
 }
 
@@ -187,12 +187,12 @@ function selectAgent(agent: Agent) {
 .agent-info__name {
   font-size: 30rpx;
   font-weight: 500;
-  color: var(--mcode-text-primary);
+  color: var(--up-main-color, #303133);
 }
 
 .agent-info__desc {
   font-size: 24rpx;
-  color: var(--mcode-text-tertiary);
+  color: var(--up-tips-color, #909193);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

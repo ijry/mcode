@@ -154,22 +154,22 @@ function selectCommand(cmd: Command) {
   align-items: center;
   gap: 8rpx;
   padding: 14rpx 20rpx;
-  background-color: color-mix(in srgb, var(--mcode-warning) 14%, var(--mcode-card-bg) 86%);
+  background-color: color-mix(in srgb, var(--up-warning, #f9ae3d) 14%, var(--up-card-bg-color, #ffffff) 86%);
   border-radius: 20rpx;
   transition: background-color 0.15s;
 
-  &:active { background-color: color-mix(in srgb, var(--mcode-warning) 22%, var(--mcode-card-bg) 78%); }
+  &:active { background-color: color-mix(in srgb, var(--up-warning, #f9ae3d) 22%, var(--up-card-bg-color, #ffffff) 78%); }
 }
 
 .trigger-label {
   font-size: 26rpx;
   font-weight: 500;
-  color: var(--mcode-warning);
+  color: var(--up-warning, #f9ae3d);
 }
 
 /* ===== 弹层容器 ===== */
 .menu-wrap {
-  background-color: var(--mcode-card-bg);
+  background-color: var(--up-card-bg-color, #ffffff);
   display: flex;
   flex-direction: column;
   max-height: 85vh;
@@ -186,7 +186,7 @@ function selectCommand(cmd: Command) {
 .menu-hd__title {
   font-size: 34rpx;
   font-weight: 600;
-  color: var(--mcode-text-primary);
+  color: var(--up-main-color, #303133);
 }
 
 .menu-close {
@@ -195,7 +195,7 @@ function selectCommand(cmd: Command) {
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: var(--mcode-card-soft-bg);
+  background-color: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
   border-radius: 50%;
 }
 
@@ -219,7 +219,7 @@ function selectCommand(cmd: Command) {
   display: block;
   font-size: 24rpx;
   font-weight: 600;
-  color: var(--mcode-text-tertiary);
+  color: var(--up-tips-color, #909193);
   text-transform: uppercase;
   letter-spacing: 1rpx;
   margin-bottom: 16rpx;
@@ -238,16 +238,16 @@ function selectCommand(cmd: Command) {
   align-items: center;
   gap: 20rpx;
   padding: 20rpx 16rpx;
-  background-color: var(--mcode-card-soft-bg);
+  background-color: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
   border-radius: 16rpx;
   transition: background-color 0.15s;
 
   &:active {
-    background-color: var(--mcode-card-muted-bg);
+    background-color: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
   }
 
   &--active {
-    background-color: color-mix(in srgb, var(--mcode-primary) 10%, var(--mcode-card-bg) 90%);
+    background-color: color-mix(in srgb, var(--up-primary, #2979ff) 10%, var(--up-card-bg-color, #ffffff) 90%);
   }
 }
 
@@ -272,12 +272,12 @@ function selectCommand(cmd: Command) {
 .cmd-info__name {
   font-size: 30rpx;
   font-weight: 500;
-  color: var(--mcode-text-primary);
+  color: var(--up-main-color, #303133);
 }
 
 .cmd-info__desc {
   font-size: 24rpx;
-  color: var(--mcode-text-tertiary);
+  color: var(--up-tips-color, #909193);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

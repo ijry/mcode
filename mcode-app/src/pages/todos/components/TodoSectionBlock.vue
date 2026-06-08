@@ -42,16 +42,16 @@ const emit = defineEmits<{
 .todo-section__title {
   font-size: 28rpx;
   font-weight: 600;
-  color: #6b7280;
+  color: var(--up-content-color, #606266);
 }
 
 .todo-section__action {
   font-size: 24rpx;
   font-weight: 600;
-  color: #2f7cf6;
+  color: var(--up-primary, #2979ff);
 }
 
 .todo-section__action--disabled {
-  color: #b6bdc9;
+  color: var(--up-tips-color, #909193);
 }
 </style>

@@ -16,7 +16,7 @@
         :border="false"
         left-icon="arrow-left"
         height="45px"
-        :bgColor="upThemeVar('--mcode-card-bg', '#ffffff')"
+        :bgColor="upThemeVar('--up-card-bg-color', '#ffffff')"
         :leftIconColor="upThemeVar('--up-content-color', '#303133')"
         @leftClick="handleBackNavigation"
       >
@@ -3382,7 +3382,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   padding: 0 !important;
   display: flex;
   flex-direction: column;
-  background-color: var(--mcode-page-bg);
+  background-color: var(--up-page-bg-color, var(--up-bg-color, #f3f4f6));
   overflow: hidden;
 }
 
@@ -3430,7 +3430,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 
 .detail-navbar__logo--fallback {
   border-radius: 999rpx;
-  background: color-mix(in srgb, var(--mcode-primary) 12%, var(--mcode-card-bg) 88%);
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 12%, var(--up-card-bg-color, #ffffff) 88%);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3439,7 +3439,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 .detail-navbar__logo-fallback {
   font-size: 18rpx;
   font-weight: 700;
-  color: var(--mcode-primary);
+  color: var(--up-primary, #2979ff);
 }
 
 .detail-navbar__title {
@@ -3448,7 +3448,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   font-size: 28rpx;
   line-height: 1.35;
   font-weight: 600;
-  color: var(--mcode-text-primary);
+  color: var(--up-main-color, #303133);
 }
 
 .detail-navbar__meta-row {
@@ -3460,14 +3460,14 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 .detail-navbar__meta-text {
   font-size: 20rpx;
   line-height: 1.2;
-  color: var(--mcode-text-tertiary);
+  color: var(--up-tips-color, #909193);
 }
 
 .runtime-dot {
   width: 12rpx;
   height: 12rpx;
   border-radius: 50%;
-  background-color: var(--mcode-border-color);
+  background-color: var(--up-border-color, #dadbde);
 
   &--online {
     background-color: #19be6b;
@@ -3500,11 +3500,11 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   align-items: center;
   justify-content: center;
   border-radius: 16rpx;
-  background-color: var(--mcode-card-soft-bg);
+  background-color: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
   box-sizing: border-box;
 
   &:active {
-    background-color: var(--mcode-card-muted-bg);
+    background-color: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
   }
 }
 
@@ -3541,7 +3541,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   justify-content: center;
   flex-shrink: 0;
   padding: 10rpx 24rpx;
-  background-color: var(--mcode-page-bg);
+  background-color: var(--up-page-bg-color, var(--up-bg-color, #f3f4f6));
 }
 
 .shared-live-hint--with-plan {
@@ -3550,7 +3550,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 
 .shared-live-hint__text {
   font-size: 22rpx;
-  color: var(--mcode-text-tertiary);
+  color: var(--up-tips-color, #909193);
   text-align: center;
 }
 
@@ -3561,7 +3561,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   gap: 10rpx;
   flex-shrink: 0;
   padding: 12rpx 24rpx;
-  background-color: var(--mcode-page-bg);
+  background-color: var(--up-page-bg-color, var(--up-bg-color, #f3f4f6));
 }
 
 .history-status--with-plan {
@@ -3570,7 +3570,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 
 .history-status__text {
   font-size: 22rpx;
-  color: var(--mcode-text-tertiary);
+  color: var(--up-tips-color, #909193);
 }
 
 .stats-bar {
@@ -3583,7 +3583,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 
 .stats-text {
   font-size: 22rpx;
-  color: var(--mcode-text-tertiary);
+  color: var(--up-tips-color, #909193);
 }
 
 .list-bottom {
@@ -3594,8 +3594,8 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   position: relative;
   flex-shrink: 0;
   z-index: 30;
-  background-color: var(--mcode-card-bg);
-  border-top: 1rpx solid var(--mcode-border-color);
+  background-color: var(--up-card-bg-color, #ffffff);
+  border-top: 1rpx solid var(--up-border-color, #dadbde);
   padding: 14rpx 14rpx;
   padding-bottom: calc(14rpx + env(safe-area-inset-bottom));
   box-sizing: border-box;
@@ -3610,8 +3610,8 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   margin-bottom: 16rpx;
   padding: 22rpx 24rpx;
   border-radius: 22rpx;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--mcode-warning) 12%, var(--mcode-card-bg) 88%) 0%, var(--mcode-card-bg) 100%);
-  border: 1rpx solid color-mix(in srgb, var(--mcode-warning) 28%, transparent);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--up-warning, #f9ae3d) 12%, var(--up-card-bg-color, #ffffff) 88%) 0%, var(--up-card-bg-color, #ffffff) 100%);
+  border: 1rpx solid color-mix(in srgb, var(--up-warning, #f9ae3d) 28%, transparent);
   box-shadow: 0 10rpx 28rpx rgba(250, 173, 20, 0.08);
   overflow: hidden;
   box-sizing: border-box;
@@ -3634,7 +3634,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 .permission-card__title {
   font-size: 26rpx;
   font-weight: 600;
-  color: color-mix(in srgb, var(--mcode-warning) 62%, var(--mcode-text-primary) 38%);
+  color: color-mix(in srgb, var(--up-warning, #f9ae3d) 62%, var(--up-main-color, #303133) 38%);
 }
 
 .permission-card__desc {
@@ -3645,7 +3645,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   min-width: 0;
   font-size: 24rpx;
   line-height: 1.6;
-  color: var(--mcode-text-secondary);
+  color: var(--up-content-color, #606266);
 }
 
 .permission-card__desc-line {
@@ -3659,7 +3659,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   max-width: 100%;
   border-radius: 16rpx;
   overflow: hidden;
-  background: color-mix(in srgb, var(--mcode-text-primary) 5%, var(--mcode-card-bg) 95%);
+  background: color-mix(in srgb, var(--up-main-color, #303133) 5%, var(--up-card-bg-color, #ffffff) 95%);
 }
 
 .permission-card__command {
@@ -3674,7 +3674,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   line-height: 1.45;
   font-family: "Courier New", monospace;
   white-space: pre;
-  color: var(--mcode-text-primary);
+  color: var(--up-main-color, #303133);
 }
 
 .permission-card__actions {
@@ -3698,8 +3698,8 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   padding: 16rpx 24rpx;
   border: none;
   border-radius: 18rpx;
-  background: color-mix(in srgb, var(--mcode-warning) 16%, var(--mcode-card-bg) 84%);
-  color: color-mix(in srgb, var(--mcode-warning) 64%, var(--mcode-text-primary) 36%);
+  background: color-mix(in srgb, var(--up-warning, #f9ae3d) 16%, var(--up-card-bg-color, #ffffff) 84%);
+  color: color-mix(in srgb, var(--up-warning, #f9ae3d) 64%, var(--up-main-color, #303133) 36%);
   font-size: 24rpx;
   font-weight: 600;
   line-height: 1.4;
@@ -3718,7 +3718,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 }
 
 .permission-card__action--loading {
-  background: color-mix(in srgb, var(--mcode-warning) 28%, var(--mcode-card-bg) 72%);
+  background: color-mix(in srgb, var(--up-warning, #f9ae3d) 28%, var(--up-card-bg-color, #ffffff) 72%);
 }
 
 .permission-card__option-desc {
@@ -3726,13 +3726,13 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   width: 100%;
   font-size: 22rpx;
   line-height: 1.5;
-  color: var(--mcode-text-tertiary);
+  color: var(--up-tips-color, #909193);
   word-break: break-all;
 }
 
 .permission-card__empty {
   font-size: 22rpx;
-  color: var(--mcode-text-tertiary);
+  color: var(--up-tips-color, #909193);
   word-break: break-all;
 }
 
@@ -3750,7 +3750,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 }
 
 .input-feedback--error {
-  color: var(--mcode-error);
+  color: var(--up-error, #fa3534);
 }
 
 .input-feedback__text {
@@ -3764,9 +3764,9 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 
 .slash-panel {
   margin-bottom: 12rpx;
-  border: 1rpx solid var(--mcode-border-color);
+  border: 1rpx solid var(--up-border-color, #dadbde);
   border-radius: 16rpx;
-  background-color: var(--mcode-card-bg);
+  background-color: var(--up-card-bg-color, #ffffff);
   overflow: hidden;
 }
 
@@ -3777,8 +3777,8 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   gap: 12rpx;
   padding: 16rpx 18rpx;
   border-radius: 16rpx;
-  background: var(--mcode-card-soft-bg);
-  border: 1rpx solid var(--mcode-border-color);
+  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
+  border: 1rpx solid var(--up-border-color, #dadbde);
 }
 
 .composer-config-row--disabled {
@@ -3787,12 +3787,12 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 
 .composer-config-row__label {
   font-size: 23rpx;
-  color: var(--mcode-text-primary);
+  color: var(--up-main-color, #303133);
 }
 
 .composer-config-row__value {
   font-size: 22rpx;
-  color: var(--mcode-text-tertiary);
+  color: var(--up-tips-color, #909193);
 }
 
 .config-chip-grid {
@@ -3804,18 +3804,18 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 .config-chip {
   padding: 14rpx 20rpx;
   border-radius: 999rpx;
-  background: var(--mcode-card-soft-bg);
+  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
   border: 2rpx solid transparent;
 }
 
 .config-chip--active {
-  background: color-mix(in srgb, var(--mcode-primary) 10%, var(--mcode-card-bg) 90%);
-  border-color: var(--mcode-primary);
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 10%, var(--up-card-bg-color, #ffffff) 90%);
+  border-color: var(--up-primary, #2979ff);
 }
 
 .config-chip__title {
   font-size: 24rpx;
-  color: var(--mcode-text-primary);
+  color: var(--up-main-color, #303133);
 }
 
 .slash-item {
@@ -3824,7 +3824,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   align-items: center;
   justify-content: space-between;
   gap: 12rpx;
-  border-bottom: 1rpx solid var(--mcode-border-color);
+  border-bottom: 1rpx solid var(--up-border-color, #dadbde);
 
   &:last-child {
     border-bottom: none;
@@ -3840,13 +3840,13 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 
 .slash-item__key {
   font-size: 21rpx;
-  color: var(--mcode-primary);
+  color: var(--up-primary, #2979ff);
   font-family: "Courier New", monospace;
 }
 
 .slash-item__desc {
   font-size: 21rpx;
-  color: var(--mcode-text-tertiary);
+  color: var(--up-tips-color, #909193);
   flex: 1;
   min-width: 0;
   text-align: right;
@@ -3856,7 +3856,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   margin-bottom: 10rpx;
   padding: 10rpx 14rpx;
   border-radius: 14rpx;
-  background: var(--mcode-card-soft-bg);
+  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
   display: flex;
   flex-direction: column;
   gap: 8rpx;
@@ -3879,12 +3879,12 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 
 .upload-queue__name {
   font-size: 22rpx;
-  color: var(--mcode-text-secondary);
+  color: var(--up-content-color, #606266);
 }
 
 .upload-queue__status {
   font-size: 21rpx;
-  color: var(--mcode-text-tertiary);
+  color: var(--up-tips-color, #909193);
 
   &--success {
     color: #19be6b;
@@ -3918,8 +3918,8 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   width: 184rpx;
   height: 112rpx;
   border-radius: 12rpx;
-  background: var(--mcode-card-soft-bg);
-  border: 1rpx solid var(--mcode-border-color);
+  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
+  border: 1rpx solid var(--up-border-color, #dadbde);
   display: flex;
   align-items: center;
   gap: 8rpx;
@@ -3929,7 +3929,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 
 .attachment-file__name {
   font-size: 22rpx;
-  color: var(--mcode-text-secondary);
+  color: var(--up-content-color, #606266);
   flex: 1;
   min-width: 0;
 }
@@ -3951,8 +3951,8 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   margin-bottom: 10rpx;
   padding: 10rpx 14rpx;
   border-radius: 14rpx;
-  background: color-mix(in srgb, var(--mcode-primary) 8%, var(--mcode-card-bg) 92%);
-  border: 1rpx solid color-mix(in srgb, var(--mcode-primary) 22%, var(--mcode-card-bg) 78%);
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 8%, var(--up-card-bg-color, #ffffff) 92%);
+  border: 1rpx solid color-mix(in srgb, var(--up-primary, #2979ff) 22%, var(--up-card-bg-color, #ffffff) 78%);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -3966,7 +3966,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 
 .queue-bar__text {
   font-size: 23rpx;
-  color: var(--mcode-primary);
+  color: var(--up-primary, #2979ff);
 }
 
 .queue-panel {
@@ -3979,8 +3979,8 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 .queue-item {
   padding: 12rpx;
   border-radius: 14rpx;
-  background: var(--mcode-card-soft-bg);
-  border: 1rpx solid var(--mcode-border-color);
+  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
+  border: 1rpx solid var(--up-border-color, #dadbde);
   display: flex;
   align-items: flex-start;
   gap: 12rpx;
@@ -3994,7 +3994,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 .queue-item__text {
   display: block;
   font-size: 23rpx;
-  color: var(--mcode-text-primary);
+  color: var(--up-main-color, #303133);
   line-height: 1.4;
 }
 
@@ -4008,14 +4008,14 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 .queue-item__status {
   font-size: 20rpx;
 
-  &--pending { color: var(--mcode-text-tertiary); }
+  &--pending { color: var(--up-tips-color, #909193); }
   &--sending { color: #2979ff; }
   &--failed { color: #fa3534; }
 }
 
 .queue-item__time {
   font-size: 20rpx;
-  color: var(--mcode-text-tertiary);
+  color: var(--up-tips-color, #909193);
 }
 
 .queue-item__actions {
@@ -4027,14 +4027,14 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 
 .queue-op {
   font-size: 20rpx;
-  color: var(--mcode-text-tertiary);
+  color: var(--up-tips-color, #909193);
   padding: 6rpx 10rpx;
   border-radius: 999rpx;
-  background-color: var(--mcode-card-soft-bg);
+  background-color: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
 
   &--primary {
-    color: var(--mcode-primary);
-    background-color: color-mix(in srgb, var(--mcode-primary) 10%, var(--mcode-card-bg) 90%);
+    color: var(--up-primary, #2979ff);
+    background-color: color-mix(in srgb, var(--up-primary, #2979ff) 10%, var(--up-card-bg-color, #ffffff) 90%);
   }
 }
 
@@ -4046,7 +4046,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 
 .input-box {
   flex: 1;
-  background-color: var(--mcode-card-soft-bg);
+  background-color: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
   border-radius: 24rpx;
   padding: 14rpx 20rpx;
   min-height: 72rpx;
@@ -4089,7 +4089,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   width: 68rpx;
   height: 68rpx;
   border-radius: 50%;
-  background-color: var(--mcode-border-color);
+  background-color: var(--up-border-color, #dadbde);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -4135,7 +4135,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--mcode-card-soft-bg);
+  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
   transition: background-color 0.2s ease, transform 0.2s ease;
 }
 
@@ -4146,7 +4146,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 }
 
 .input-tool-btn--active .input-tool-btn__icon {
-  background: color-mix(in srgb, var(--mcode-primary) 12%, var(--mcode-card-bg) 88%);
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 12%, var(--up-card-bg-color, #ffffff) 88%);
   transform: translateY(-1rpx);
 }
 
@@ -4154,7 +4154,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   margin-top: 12rpx;
   height: 280rpx;
   border-radius: 20rpx;
-  background: var(--mcode-card-bg);
+  background: var(--up-card-bg-color, #ffffff);
   box-shadow: none;
   display: flex;
   flex-direction: column;
@@ -4180,8 +4180,8 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   min-width: 96rpx;
   padding: 16rpx 20rpx;
   border-radius: 18rpx;
-  background: var(--mcode-card-soft-bg);
-  border: 1rpx solid var(--mcode-border-color);
+  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
+  border: 1rpx solid var(--up-border-color, #dadbde);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -4191,7 +4191,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 .composer-quick-chip__text {
   font-size: 24rpx;
   line-height: 1;
-  color: var(--mcode-text-primary);
+  color: var(--up-main-color, #303133);
 }
 
 .composer-panel__scroll {
@@ -4214,7 +4214,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 .composer-panel__section-title {
   font-size: 22rpx;
   font-weight: 600;
-  color: var(--mcode-text-secondary);
+  color: var(--up-content-color, #606266);
 }
 
 .scroll-bottom-fab {
@@ -4270,7 +4270,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 }
 
 .plan-drawer {
-  background-color: var(--mcode-card-bg);
+  background-color: var(--up-card-bg-color, #ffffff);
   height: min(68vh, calc(100vh - 160rpx));
   max-height: min(68vh, calc(100vh - 160rpx));
   display: flex;
@@ -4285,20 +4285,20 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   align-items: center;
   justify-content: space-between;
   padding: 30rpx 30rpx 18rpx;
-  border-bottom: 1rpx solid var(--mcode-border-color);
+  border-bottom: 1rpx solid var(--up-border-color, #dadbde);
   box-sizing: border-box;
   flex-shrink: 0;
 }
 
 .plan-drawer__title {
   font-size: 32rpx;
-  color: var(--mcode-text-primary);
+  color: var(--up-main-color, #303133);
   font-weight: 600;
 }
 
 .plan-drawer__count {
   font-size: 24rpx;
-  color: var(--mcode-text-tertiary);
+  color: var(--up-tips-color, #909193);
 }
 
 .plan-filters {
@@ -4315,8 +4315,8 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 .plan-filter {
   flex-shrink: 0;
   font-size: 22rpx;
-  color: var(--mcode-text-secondary);
-  background-color: var(--mcode-card-soft-bg);
+  color: var(--up-content-color, #606266);
+  background-color: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
   border-radius: 999rpx;
   padding: 10rpx 14rpx;
   line-height: 1;
@@ -4326,8 +4326,8 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 }
 
 .plan-filter--active {
-  color: var(--mcode-primary);
-  background-color: color-mix(in srgb, var(--mcode-primary) 10%, var(--mcode-card-bg) 90%);
+  color: var(--up-primary, #2979ff);
+  background-color: color-mix(in srgb, var(--up-primary, #2979ff) 10%, var(--up-card-bg-color, #ffffff) 90%);
 }
 
 .plan-filter__count {
@@ -4359,7 +4359,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   align-items: flex-start;
   gap: 14rpx;
   padding: 20rpx 16rpx;
-  background: var(--mcode-card-soft-bg);
+  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
   border-radius: 16rpx;
   margin-bottom: 12rpx;
   width: 100%;
@@ -4375,9 +4375,9 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   width: 14rpx;
   height: 14rpx;
   border-radius: 50%;
-  background-color: var(--mcode-border-color);
+  background-color: var(--up-border-color, #dadbde);
 
-  &--pending { background-color: var(--mcode-border-color); }
+  &--pending { background-color: var(--up-border-color, #dadbde); }
   &--in_progress { background-color: #2979ff; }
   &--completed { background-color: #19be6b; }
   &--failed { background-color: #fa3534; }
@@ -4391,7 +4391,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 .plan-task__subject {
   display: block;
   font-size: 28rpx;
-  color: var(--mcode-text-primary);
+  color: var(--up-main-color, #303133);
   line-height: 1.45;
   word-break: break-word;
 }
@@ -4400,7 +4400,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   display: block;
   margin-top: 8rpx;
   font-size: 23rpx;
-  color: var(--mcode-text-tertiary);
+  color: var(--up-tips-color, #909193);
   line-height: 1.4;
   word-break: break-word;
 }
@@ -4416,20 +4416,20 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   white-space: nowrap;
 
   &--pending {
-    color: var(--mcode-text-secondary);
-    background-color: var(--mcode-card-soft-bg);
+    color: var(--up-content-color, #606266);
+    background-color: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
   }
   &--in_progress {
-    color: var(--mcode-primary);
-    background-color: color-mix(in srgb, var(--mcode-primary) 10%, var(--mcode-card-bg) 90%);
+    color: var(--up-primary, #2979ff);
+    background-color: color-mix(in srgb, var(--up-primary, #2979ff) 10%, var(--up-card-bg-color, #ffffff) 90%);
   }
   &--completed {
-    color: var(--mcode-success);
-    background-color: color-mix(in srgb, var(--mcode-success) 12%, var(--mcode-card-bg) 88%);
+    color: var(--up-success, #19be6b);
+    background-color: color-mix(in srgb, var(--up-success, #19be6b) 12%, var(--up-card-bg-color, #ffffff) 88%);
   }
   &--failed {
-    color: var(--mcode-error);
-    background-color: color-mix(in srgb, var(--mcode-error) 12%, var(--mcode-card-bg) 88%);
+    color: var(--up-error, #fa3534);
+    background-color: color-mix(in srgb, var(--up-error, #fa3534) 12%, var(--up-card-bg-color, #ffffff) 88%);
   }
 }
 

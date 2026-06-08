@@ -255,7 +255,7 @@ function slotIcon(slot: string): string {
   box-sizing: border-box;
   border-radius: 28rpx;
   overflow: hidden;
-  background: var(--mcode-card-bg);
+  background: var(--up-card-bg-color, #ffffff);
   box-shadow: 0 18rpx 56rpx rgba(15, 23, 42, 0.12);
 
   &__header {
@@ -274,12 +274,12 @@ function slotIcon(slot: string): string {
   &__name {
     font-size: 36rpx;
     font-weight: 600;
-    color: var(--mcode-text-primary);
+    color: var(--up-main-color, #303133);
   }
 
   &__level {
     font-size: 28rpx;
-    color: var(--mcode-primary);
+    color: var(--up-primary, #2979ff);
     font-weight: 500;
   }
 
@@ -310,7 +310,7 @@ function slotIcon(slot: string): string {
 
   &__exp-track {
     height: 12rpx;
-    background: var(--mcode-card-soft-bg);
+    background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
     border-radius: 6rpx;
     overflow: hidden;
   }
@@ -324,7 +324,7 @@ function slotIcon(slot: string): string {
 
   &__exp-label {
     font-size: 22rpx;
-    color: var(--mcode-text-tertiary);
+    color: var(--up-tips-color, #909193);
     text-align: right;
     display: block;
     margin-top: 4rpx;
@@ -334,7 +334,7 @@ function slotIcon(slot: string): string {
     display: flex;
     gap: 0;
     margin-bottom: 16rpx;
-    border-bottom: 2rpx solid var(--mcode-border-color);
+    border-bottom: 2rpx solid var(--up-border-color, #dadbde);
   }
 
   &__tab {
@@ -342,13 +342,13 @@ function slotIcon(slot: string): string {
     text-align: center;
     padding: 16rpx 0;
     font-size: 28rpx;
-    color: var(--mcode-text-tertiary);
+    color: var(--up-tips-color, #909193);
     border-bottom: 4rpx solid transparent;
     transition: all 0.2s;
 
     &--active {
-      color: var(--mcode-primary);
-      border-bottom-color: var(--mcode-primary);
+      color: var(--up-primary, #2979ff);
+      border-bottom-color: var(--up-primary, #2979ff);
       font-weight: 500;
     }
   }
@@ -368,7 +368,7 @@ function slotIcon(slot: string): string {
   &__handle-bar {
     width: 80rpx;
     height: 8rpx;
-    background: var(--mcode-border-color);
+    background: var(--up-border-color, #dadbde);
     border-radius: 4rpx;
   }
 }
@@ -378,17 +378,17 @@ function slotIcon(slot: string): string {
     display: flex;
     justify-content: space-between;
     padding: 16rpx 0;
-    border-bottom: 1rpx solid var(--mcode-border-color);
+    border-bottom: 1rpx solid var(--up-border-color, #dadbde);
   }
 
   &__label {
     font-size: 28rpx;
-    color: var(--mcode-text-secondary);
+    color: var(--up-content-color, #606266);
   }
 
   &__value {
     font-size: 28rpx;
-    color: var(--mcode-text-primary);
+    color: var(--up-main-color, #303133);
     font-weight: 500;
   }
 }
@@ -396,7 +396,7 @@ function slotIcon(slot: string): string {
 .tab-skins {
   &__section-title {
     font-size: 26rpx;
-    color: var(--mcode-text-tertiary);
+    color: var(--up-tips-color, #909193);
     margin-bottom: 12rpx;
     font-weight: 500;
   }
@@ -413,13 +413,13 @@ function slotIcon(slot: string): string {
     align-items: center;
     padding: 16rpx;
     border-radius: 12rpx;
-    border: 2rpx solid var(--mcode-border-color);
+    border: 2rpx solid var(--up-border-color, #dadbde);
     min-width: 140rpx;
     position: relative;
 
     &--active {
-      border-color: var(--mcode-primary);
-      background: color-mix(in srgb, var(--mcode-primary) 10%, var(--mcode-card-bg) 90%);
+      border-color: var(--up-primary, #2979ff);
+      background: color-mix(in srgb, var(--up-primary, #2979ff) 10%, var(--up-card-bg-color, #ffffff) 90%);
     }
 
     &--locked {
@@ -441,7 +441,7 @@ function slotIcon(slot: string): string {
 
   &__name {
     font-size: 22rpx;
-    color: var(--mcode-text-primary);
+    color: var(--up-main-color, #303133);
   }
 }
 
@@ -451,7 +451,7 @@ function slotIcon(slot: string): string {
     align-items: center;
     gap: 16rpx;
     padding: 16rpx 0;
-    border-bottom: 1rpx solid var(--mcode-border-color);
+    border-bottom: 1rpx solid var(--up-border-color, #dadbde);
     opacity: 0.5;
 
     &--unlocked {
@@ -471,14 +471,14 @@ function slotIcon(slot: string): string {
 
   &__name {
     font-size: 28rpx;
-    color: var(--mcode-text-primary);
+    color: var(--up-main-color, #303133);
     font-weight: 500;
     display: block;
   }
 
   &__desc {
     font-size: 22rpx;
-    color: var(--mcode-text-tertiary);
+    color: var(--up-tips-color, #909193);
     display: block;
     margin-top: 4rpx;
   }
