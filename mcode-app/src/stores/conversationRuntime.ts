@@ -433,12 +433,19 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
           syncManagedSendPermission(session.conversationId)
           break
         }
+        const previousStatus = session.status
         session.status = event.data.status
         if (event.data.status === "error") {
           session.inputErrorMessage =
             firstString(event.data.message) || session.inputErrorMessage || "连接异常"
         } else {
-          session.inputErrorMessage = null
+          const preserveTerminalError =
+            event.data.status === "idle"
+            && previousStatus === "error"
+            && Boolean(firstString(session.inputErrorMessage))
+          if (!preserveTerminalError) {
+            session.inputErrorMessage = null
+          }
           session.apiRetry = null
         }
         if (event.data.status !== "waiting_permission") {

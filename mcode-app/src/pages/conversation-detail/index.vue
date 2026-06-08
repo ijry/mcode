@@ -10,7 +10,7 @@
 
     <view v-else class="detail-container">
       <up-navbar
-        :autoBack="true"
+        :autoBack="false"
         :fixed="true"
         :placeholder="true"
         :border="false"
@@ -18,6 +18,7 @@
         height="45px"
         :bgColor="upThemeVar('--mcode-card-bg', '#ffffff')"
         :leftIconColor="upThemeVar('--up-content-color', '#303133')"
+        @leftClick="handleBackNavigation"
       >
         <template #center>
           <view class="detail-navbar">
@@ -1132,10 +1133,14 @@ onUnload(() => {
   }
 })
 
-onBackPress(() => {
+function handleBackNavigation() {
   uni.switchTab({
     url: "/pages/conversations/index",
   })
+}
+
+onBackPress(() => {
+  handleBackNavigation()
   return true
 })
 
@@ -4222,7 +4227,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 .scroll-bottom-fab {
   position: fixed;
   right: 24rpx;
-  bottom: 120px;
+  bottom: 150px;
   z-index: 30;
   width: 72rpx;
   height: 72rpx;
