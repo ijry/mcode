@@ -1,76 +1,129 @@
 <template>
-  <view class="page" :style="[upThemeVars, upThemePageStyle]">
-    <view v-if="false" class="hero-banner">
-      <image
-        class="hero-banner__img"
-        src="/static/illustrations/connection-ai-coding-hero.svg"
-        mode="widthFix"
-      />
-    </view>
-
-    <view class="header" :style="upThemeCardStyle">
-      <text class="header-slogan">随时随地 AI Coding</text>
-      <view class="add-conn-btn" @click="openAddPopup()">
-        <u-icon name="plus" size="18" color="#2979ff"></u-icon>
-        <text class="add-conn-btn__text">新增连接</text>
-      </view>
-    </view>
-
-    <view v-if="connections.length === 0" class="empty-container">
-      <u-empty mode="data" text="暂无连接">
-        <template #bottom>
-          <u-button type="primary" @click="openAddPopup()" size="normal">
-            立即添加
-          </u-button>
-        </template>
-      </u-empty>
-    </view>
-
-    <view v-else class="connection-list">
-      <view
-        v-for="(conn, index) in connections"
-        :key="index"
-        class="connection-item"
-        :style="upThemeCardStyle"
-        @click="activateConnection(conn)"
-      >
-        <view
-          class="connection-icon"
-          :style="{
-            backgroundColor: isConnectionConnected(conn)
-              ? '#19be6b18'
-              : upThemeVar('--up-light-color', '#c0c4cc') + '22',
-          }"
-        >
-          <u-icon
-            :name="conn.mode === 'direct' ? 'wifi' : 'cloud'"
-            size="24"
-            :color="isConnectionConnected(conn) ? '#19be6b' : upThemeVar('--up-tips-color', '#909193')"
-          ></u-icon>
+  <view class="page connections-page" :style="[upThemeVars, upThemePageStyle, { backgroundColor: '#f2f2f7' }]">
+    <view class="connections-shell">
+      <view class="connections-topbar">
+        <view class="connections-brand">
+          <text class="connections-brand__mark">MCode</text>
+          <text class="connections-brand__title">我的连接</text>
+          <text class="connections-brand__subtitle">管理与切换你的远程连接</text>
         </view>
 
-        <view class="connection-info">
-          <view class="connection-info__title">
-            <text class="connection-info__name">{{ conn.name }}</text>
-            <view
-              :class="['status-dot', isConnectionConnected(conn) && 'status-dot--online']"
-            ></view>
+        <view class="connections-topbar__action" @click="openAddPopup()">
+          <u-icon name="plus" size="16" color="#ffffff"></u-icon>
+          <text class="connections-topbar__action-text">新增连接</text>
+        </view>
+      </view>
+
+      <view class="connections-hero" :style="upThemeCardStyle">
+        <view class="connections-hero__copy">
+          <text class="connections-hero__eyebrow">REMOTE CONTROL</text>
+          <text class="connections-hero__title">连接状态一眼可见</text>
+          <text class="connections-hero__desc">直连与中继统一管理，随时切换当前生效设备。</text>
+
+          <view class="connections-hero__chips">
+            <text class="connections-hero__chip">自动监测在线</text>
+            <text class="connections-hero__chip connections-hero__chip--ghost">教程指引</text>
           </view>
-          <text class="connection-info__desc">
-            {{ conn.mode === 'direct' ? '直连模式' : '中继模式' }} · {{ conn.url }}
-          </text>
         </view>
 
-        <view class="row-menu-btn" @click.stop="showConnectionMenu(conn, index)">
-          <u-icon name="more-dot-fill" :color="upThemeVar('--up-light-color', '#c0c4cc')" size="18"></u-icon>
+        <image
+          class="connections-hero__art"
+          src="/static/illustrations/connection-ai-coding-hero.svg"
+          mode="widthFix"
+        />
+      </view>
+
+      <view v-if="connections.length === 0" class="connections-empty" :style="upThemeCardStyle">
+        <view class="connections-empty__icon">
+          <u-icon name="plus" size="28" color="#007aff"></u-icon>
+        </view>
+
+        <text class="connections-empty__title">还没有连接</text>
+        <text class="connections-empty__desc">添加直连或中继设备后，就能在这里快速切换和管理。</text>
+
+        <view class="connections-empty__actions">
+          <view class="connections-empty__primary" @click="openAddPopup()">
+            <text>立即添加</text>
+          </view>
+          <view class="connections-empty__secondary" @click="openTutorialPopup">
+            <text>查看教程</text>
+          </view>
         </view>
       </view>
-    </view>
 
-    <view v-if="false" class="app-intro-box">
-      <text class="app-intro-text">
-        本APP是一个远程遥控APP，可以遥控电脑上的CodeX/Claude Code等进行随时随地任务处理，电脑/服务器端需要安装codeg
-      </text>
+      <view v-else class="connections-stack">
+        <view
+          v-for="(conn, index) in connections"
+          :key="index"
+          class="connection-card"
+          :class="{ 'connection-card--online': isConnectionConnected(conn) }"
+          :style="upThemeCardStyle"
+          @click="activateConnection(conn)"
+        >
+          <view
+            class="connection-card__icon"
+            :class="{ 'connection-card__icon--online': isConnectionConnected(conn) }"
+          >
+            <u-icon
+              :name="conn.mode === 'direct' ? 'wifi' : 'cloud'"
+              size="24"
+              :color="isConnectionConnected(conn) ? '#007aff' : '#8e8e93'"
+            ></u-icon>
+          </view>
+
+          <view class="connection-card__body">
+            <view class="connection-card__head">
+              <text class="connection-card__name">{{ conn.name }}</text>
+              <view
+                class="connection-card__status"
+                :class="{ 'connection-card__status--online': isConnectionConnected(conn) }"
+              >
+                <text class="connection-card__status-text">
+                  {{ getConnectionBadgeText(isConnectionConnected(conn)) }}
+                </text>
+              </view>
+              <view class="connection-card__menu" @click.stop="showConnectionMenu(conn, index)">
+                <u-icon name="more-dot-fill" size="18" color="#c7c7cc"></u-icon>
+              </view>
+            </view>
+
+            <text class="connection-card__meta">
+              {{ getConnectionSubtitle(conn.mode, conn.url) }}
+            </text>
+
+            <view class="connection-card__footer">
+              <text class="connection-card__footer-link">管理连接</text>
+              <u-icon name="arrow-right" size="14" color="#007aff"></u-icon>
+            </view>
+          </view>
+        </view>
+
+        <view class="connections-add-card" :style="upThemeCardStyle" @click="openAddPopup()">
+          <view class="connections-add-card__icon">
+            <u-icon name="plus" size="24" color="#007aff"></u-icon>
+          </view>
+
+          <view class="connections-add-card__body">
+            <text class="connections-add-card__title">添加新设备</text>
+            <text class="connections-add-card__desc">新增直连或中继连接</text>
+          </view>
+
+          <u-icon name="arrow-right" size="14" color="#c7c7cc"></u-icon>
+        </view>
+
+        <view class="connections-guide-card" :style="upThemeCardStyle" @click="openTutorialPopup">
+          <view class="connections-guide-card__copy">
+            <text class="connections-guide-card__eyebrow">SETUP GUIDE</text>
+            <text class="connections-guide-card__title">先完成电脑端部署</text>
+            <text class="connections-guide-card__desc">打开 codeg Web 服务后，再回到这里保存连接。</text>
+          </view>
+
+          <view class="connections-guide-card__action">
+            <text>查看教程</text>
+            <u-icon name="arrow-right" size="14" color="#ffffff"></u-icon>
+          </view>
+        </view>
+      </view>
     </view>
 
     <!-- 连接操作菜单 -->
@@ -81,30 +134,37 @@
       @close="showActionSheet = false"
     ></u-action-sheet>
 
-    <u-popup :show="showAddPopup" mode="bottom" :round="10" @close="closeAddPopup">
-      <view class="popup-content" :style="upThemeCardStyle">
-        <view class="popup-header">
-          <text class="popup-title">{{ popupTitle }}</text>
-          <u-icon name="close" size="24" @click="closeAddPopup()"></u-icon>
-        </view>
+    <u-popup :show="showAddPopup" mode="bottom" :round="28" @close="closeAddPopup">
+      <view class="connections-sheet" :style="upThemeCardStyle">
+        <view class="connections-sheet__handle"></view>
 
-        <view class="tutorial-entry" @click="openTutorialPopup">
-          <view class="tutorial-entry__copy">
-            <text class="tutorial-entry__title">部署教程</text>
-            <text class="tutorial-entry__desc">首次使用前请先完成电脑端配置</text>
+        <view class="connections-sheet__header">
+          <view class="connections-sheet__heading">
+            <text class="connections-sheet__title">{{ popupTitle }}</text>
+            <text class="connections-sheet__subtitle">保存后可直接切换和在线监测</text>
           </view>
-          <u-icon name="arrow-right" size="16" color="#2979ff"></u-icon>
+          <u-icon name="close" size="22" @click="closeAddPopup()"></u-icon>
         </view>
 
-        <u-subsection
-          :list="['手动配置', '扫码连接']"
-          :current="subsectionIndex"
-          @change="subsectionChange"
-          activeColor="#2979ff"
-        ></u-subsection>
+        <view class="connections-sheet__tutorial" @click="openTutorialPopup">
+          <view class="connections-sheet__tutorial-copy">
+            <text class="connections-sheet__tutorial-title">部署教程</text>
+            <text class="connections-sheet__tutorial-desc">首次使用前请先完成电脑端配置</text>
+          </view>
+          <u-icon name="arrow-right" size="16" color="#007aff"></u-icon>
+        </view>
 
-        <view v-if="subsectionIndex === 0" class="form-container">
-          <u-form :model="form" ref="formRef" labelWidth="80">
+        <view class="connections-sheet__tabs">
+          <u-subsection
+            :list="['手动配置', '扫码连接']"
+            :current="subsectionIndex"
+            @change="subsectionChange"
+            activeColor="#007aff"
+          ></u-subsection>
+        </view>
+
+        <view v-if="subsectionIndex === 0" class="connections-sheet__form">
+          <u-form :model="form" ref="formRef" labelWidth="84">
             <u-form-item label="连接名称" prop="name" required>
               <u-input v-model="form.name" placeholder="请输入连接名称"></u-input>
             </u-form-item>
@@ -152,55 +212,58 @@
             </view>
           </u-form>
 
-          <view class="form-actions">
+          <view class="connections-sheet__actions">
             <u-button type="primary" @click="submitConnection" :loading="loading" block>
               保存连接
             </u-button>
           </view>
         </view>
 
-        <view v-else class="scan-container">
+        <view v-else class="connections-sheet__scan">
           <u-empty mode="coupon" text="扫码功能暂未支持">
             <template #bottom>
-              <text class="tip-text">敬请期待</text>
+              <text class="connections-sheet__tip">敬请期待</text>
             </template>
           </u-empty>
         </view>
       </view>
     </u-popup>
 
-    <u-popup v-model:show="showTutorialPopup" mode="center" :round="16">
-      <view class="tutorial-popup">
-        <view class="popup-header">
-          <text class="popup-title">部署教程</text>
-          <u-icon name="close" size="24" @click="showTutorialPopup = false"></u-icon>
+    <u-popup v-model:show="showTutorialPopup" mode="center" :round="20">
+      <view class="connections-tutorial">
+        <view class="connections-tutorial__header">
+          <view class="connections-tutorial__heading">
+            <text class="connections-tutorial__title">部署教程</text>
+            <text class="connections-tutorial__subtitle">跟着这 3 步完成电脑端配置</text>
+          </view>
+          <u-icon name="close" size="22" @click="showTutorialPopup = false"></u-icon>
         </view>
 
-        <view class="tutorial-steps">
-          <view class="tutorial-step">
-            <text class="tutorial-step__index">1</text>
-            <view class="tutorial-step__body">
-              <text class="tutorial-step__title">在自己电脑下载安装 codeg</text>
-              <text class="tutorial-step__link" @click="openDeploymentGuideLink">
+        <view class="connections-tutorial__steps">
+          <view class="connections-tutorial__step">
+            <text class="connections-tutorial__index">1</text>
+            <view class="connections-tutorial__body">
+              <text class="connections-tutorial__step-title">在自己电脑下载安装 codeg</text>
+              <text class="connections-tutorial__link" @click="openDeploymentGuideLink">
                 {{ DEPLOYMENT_GUIDE_URL }}
               </text>
             </view>
           </view>
 
-          <view class="tutorial-step">
-            <text class="tutorial-step__index">2</text>
-            <view class="tutorial-step__body">
-              <text class="tutorial-step__title">
+          <view class="connections-tutorial__step">
+            <text class="connections-tutorial__index">2</text>
+            <view class="connections-tutorial__body">
+              <text class="connections-tutorial__step-title">
                 打开 codeg，点击右上角齿轮图标，然后点击 web服务 开启
               </text>
-              <text class="tutorial-step__desc">拷贝这里的连接地址和访问 token</text>
+              <text class="connections-tutorial__step-desc">拷贝这里的连接地址和访问 token</text>
             </view>
           </view>
 
-          <view class="tutorial-step">
-            <text class="tutorial-step__index">3</text>
-            <view class="tutorial-step__body">
-              <text class="tutorial-step__title">
+          <view class="connections-tutorial__step">
+            <text class="connections-tutorial__index">3</text>
+            <view class="connections-tutorial__body">
+              <text class="connections-tutorial__step-title">
                 如果需要外网访问，请使用 ngrok 等内网穿透工具即可
               </text>
             </view>
@@ -225,6 +288,7 @@ declare const plus: any
 const DEPLOYMENT_GUIDE_URL = "https://github.com/xintaofei/codeg/releases"
 
 const auth = useAuthStore()
+const formRef = ref()
 const showAddPopup = ref(false)
 const showTutorialPopup = ref(false)
 const subsectionIndex = ref(0)
@@ -274,6 +338,15 @@ const connectionActions = computed(() => {
     { name: "删除", color: "#fa3534" },
   ]
 })
+
+function getConnectionSubtitle(mode: ConnectionItem["mode"], url: string) {
+  const modeText = mode === "direct" ? "直连模式" : "中继模式"
+  return `${modeText} · ${normalizeBaseUrl(url)}`
+}
+
+function getConnectionBadgeText(online: boolean) {
+  return online ? "在线" : "离线"
+}
 
 onMounted(() => {
   connectedMap.value = uni.getStorageSync("mcode_connected_map") || {}
@@ -975,284 +1048,538 @@ function persistConnectedMap() {
 <style scoped lang="scss">
 .page {
   min-height: 100vh;
-  background-color: var(--mcode-page-bg);
 }
 
-.hero-banner {
-  padding: 20rpx 24rpx 10rpx;
-  background-color: var(--mcode-page-bg);
+.connections-page {
+  padding: 0;
 }
 
-.hero-banner__img {
-  width: 100%;
-  display: block;
-  border-radius: 18rpx;
+.connections-shell {
+  padding: 24rpx 24rpx 40rpx;
 }
 
-.header {
-  padding: 10rpx 24rpx 20rpx;
-  background-color: var(--mcode-page-bg);
-  border-bottom: 1rpx solid var(--mcode-border-color);
-}
-
-.add-conn-btn {
-  height: 76rpx;
-  border: 2rpx dashed color-mix(in srgb, var(--mcode-primary) 44%, var(--mcode-card-bg) 56%);
-  border-radius: 14rpx;
-  background-color: color-mix(in srgb, var(--mcode-primary) 8%, var(--mcode-card-bg) 92%);
+.connections-topbar {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10rpx;
-
-  &:active {
-    background-color: color-mix(in srgb, var(--mcode-primary) 14%, var(--mcode-card-bg) 86%);
-    border-color: color-mix(in srgb, var(--mcode-primary) 58%, var(--mcode-card-bg) 42%);
-  }
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24rpx;
+  padding: 18rpx 10rpx 20rpx;
 }
 
-.add-conn-btn__text {
-  font-size: 28rpx;
-  color: var(--mcode-primary);
-  font-weight: 500;
-}
-
-.header-slogan {
-  display: block;
-  margin-bottom: 20rpx;
-  padding-left: 4rpx;
-  font-size: 24rpx;
-  line-height: 1.6;
-  color: var(--mcode-text-secondary);
-  letter-spacing: 1rpx;
-}
-
-.empty-container {
-  padding-top: 200rpx;
-}
-
-.connection-list {
-  padding: 20rpx 24rpx;
-}
-
-.app-intro-box {
-  margin: 420rpx 108rpx 44rpx;
-  padding: 18rpx 20rpx;
-  border: 2rpx dashed var(--mcode-border-color);
-  border-radius: 14rpx;
-  background-color: var(--mcode-card-bg);
-}
-
-.app-intro-text {
-  font-size: 24rpx;
-  line-height: 1.7;
-  color: var(--mcode-text-tertiary);
-}
-
-.connection-item {
-  display: flex;
-  align-items: center;
-  gap: 20rpx;
-  padding: 20rpx 16rpx;
-  background-color: var(--mcode-card-soft-bg);
-  border-radius: 16rpx;
-  margin-bottom: 10rpx;
-  transition: background-color 0.15s;
-
-  &:active { background-color: var(--mcode-card-muted-bg); }
-}
-
-.connection-icon {
-  width: 76rpx;
-  height: 76rpx;
-  border-radius: 18rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.connection-info {
-  flex: 1;
-  min-width: 0;
+.connections-brand {
   display: flex;
   flex-direction: column;
-  gap: 6rpx;
-}
-
-.connection-info__name {
-  font-size: 30rpx;
-  font-weight: 500;
-  color: var(--mcode-text-primary);
-}
-
-.connection-info__title {
-  display: flex;
-  align-items: center;
   gap: 10rpx;
 }
 
-.connection-info__desc {
+.connections-brand__mark {
+  font-size: 22rpx;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #007aff;
+}
+
+.connections-brand__title {
+  font-size: 42rpx;
+  line-height: 1.2;
+  font-weight: 700;
+  color: #1d1d1f;
+}
+
+.connections-brand__subtitle {
+  font-size: 26rpx;
+  line-height: 1.5;
+  color: #8e8e93;
+}
+
+.connections-topbar__action {
+  display: inline-flex;
+  align-items: center;
+  gap: 10rpx;
+  padding: 18rpx 24rpx;
+  border-radius: 999rpx;
+  background: linear-gradient(135deg, #0a84ff, #0066cc);
+  box-shadow: 0 20rpx 40rpx rgba(0, 122, 255, 0.22);
+}
+
+.connections-topbar__action-text {
   font-size: 24rpx;
-  color: var(--mcode-text-tertiary);
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.connections-hero,
+.connections-empty,
+.connection-card,
+.connections-add-card,
+.connections-guide-card,
+.connections-sheet,
+.connections-tutorial {
+  border-radius: 32rpx;
+  box-shadow: 0 18rpx 48rpx rgba(60, 64, 67, 0.08);
+}
+
+.connections-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20rpx;
+  padding: 30rpx;
+  margin-bottom: 24rpx;
+  overflow: hidden;
+  background: linear-gradient(135deg, rgba(0, 122, 255, 0.14), rgba(255, 255, 255, 0.92));
+}
+
+.connections-hero__copy {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 14rpx;
+}
+
+.connections-hero__eyebrow,
+.connections-guide-card__eyebrow {
+  font-size: 20rpx;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  color: #007aff;
+}
+
+.connections-hero__title {
+  font-size: 36rpx;
+  line-height: 1.25;
+  font-weight: 700;
+  color: #1d1d1f;
+}
+
+.connections-hero__desc,
+.connections-empty__desc,
+.connections-guide-card__desc,
+.connections-add-card__desc,
+.connections-sheet__subtitle,
+.connections-sheet__tutorial-desc,
+.connections-tutorial__subtitle,
+.connections-tutorial__step-desc {
+  font-size: 24rpx;
+  line-height: 1.6;
+  color: #6e6e73;
+}
+
+.connections-hero__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
+}
+
+.connections-hero__chip,
+.connections-hero__chip--ghost {
+  padding: 10rpx 18rpx;
+  border-radius: 999rpx;
+  font-size: 22rpx;
+  font-weight: 600;
+}
+
+.connections-hero__chip {
+  background: rgba(0, 122, 255, 0.12);
+  color: #007aff;
+}
+
+.connections-hero__chip--ghost {
+  background: rgba(255, 255, 255, 0.86);
+  color: #1d1d1f;
+}
+
+.connections-hero__art {
+  width: 220rpx;
+  flex-shrink: 0;
+  opacity: 0.95;
+}
+
+.connections-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16rpx;
+  min-height: 520rpx;
+  padding: 48rpx 32rpx;
+  text-align: center;
+  background: #ffffff;
+}
+
+.connections-empty__icon {
+  width: 104rpx;
+  height: 104rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(0, 122, 255, 0.1);
+}
+
+.connections-empty__title,
+.connections-sheet__title,
+.connections-guide-card__title,
+.connections-tutorial__title {
+  font-size: 34rpx;
+  font-weight: 700;
+  color: #1d1d1f;
+}
+
+.connections-empty__actions {
+  display: flex;
+  gap: 16rpx;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: 8rpx;
+}
+
+.connections-empty__primary,
+.connections-empty__secondary,
+.connections-guide-card__action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10rpx;
+  padding: 18rpx 28rpx;
+  border-radius: 999rpx;
+  font-size: 24rpx;
+  font-weight: 600;
+}
+
+.connections-empty__primary {
+  background: #007aff;
+  color: #ffffff;
+}
+
+.connections-empty__secondary {
+  background: rgba(0, 122, 255, 0.1);
+  color: #007aff;
+}
+
+.connections-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 18rpx;
+}
+
+.connection-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 20rpx;
+  padding: 24rpx;
+  background: #ffffff;
+}
+
+.connection-card--online {
+  box-shadow: 0 22rpx 50rpx rgba(0, 122, 255, 0.1);
+}
+
+.connection-card__icon {
+  width: 88rpx;
+  height: 88rpx;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 26rpx;
+  background: rgba(142, 142, 147, 0.1);
+}
+
+.connection-card__icon--online {
+  background: rgba(0, 122, 255, 0.12);
+}
+
+.connection-card__body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+  min-width: 0;
+}
+
+.connection-card__head {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  min-width: 0;
+}
+
+.connection-card__name {
+  flex: 1;
+  font-size: 30rpx;
+  font-weight: 700;
+  color: #1d1d1f;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.status-dot {
-  width: 14rpx;
-  height: 14rpx;
-  border-radius: 50%;
-  background-color: var(--mcode-border-color);
+.connection-card__status {
+  display: inline-flex;
+  align-items: center;
+  padding: 8rpx 14rpx;
+  border-radius: 999rpx;
+  background: rgba(142, 142, 147, 0.12);
+}
+
+.connection-card__status--online {
+  background: rgba(52, 199, 89, 0.14);
+}
+
+.connection-card__status-text {
+  font-size: 20rpx;
+  font-weight: 700;
+  color: #8e8e93;
+}
+
+.connection-card__status--online .connection-card__status-text {
+  color: #34c759;
+}
+
+.connection-card__menu {
+  width: 48rpx;
+  height: 48rpx;
   flex-shrink: 0;
-}
-
-.status-dot--online {
-  background-color: #19be6b;
-}
-
-.connection-item:last-child {
-  margin-bottom: 8rpx;
-}
-
-.row-menu-btn {
-  width: 44rpx;
-  height: 44rpx;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 12rpx;
+  border-radius: 50%;
+  background: rgba(142, 142, 147, 0.08);
 }
 
-.popup-content {
-  padding: 40rpx 30rpx;
-  background-color: var(--mcode-card-bg);
-  border-radius: 20rpx 20rpx 0 0;
-  max-height: 80vh;
+.connection-card__meta {
+  font-size: 24rpx;
+  line-height: 1.5;
+  color: #6e6e73;
+  word-break: break-all;
 }
 
-.popup-header {
+.connection-card__footer {
+  display: inline-flex;
+  align-items: center;
+  gap: 8rpx;
+  margin-top: 4rpx;
+}
+
+.connection-card__footer-link {
+  font-size: 22rpx;
+  font-weight: 600;
+  color: #007aff;
+}
+
+.connections-add-card,
+.connections-guide-card {
   display: flex;
   align-items: center;
+  gap: 18rpx;
+  margin-top: 18rpx;
+  padding: 24rpx;
+  background: #ffffff;
+}
+
+.connections-add-card__icon {
+  width: 72rpx;
+  height: 72rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 22rpx;
+  background: rgba(0, 122, 255, 0.1);
+  flex-shrink: 0;
+}
+
+.connections-add-card__body,
+.connections-guide-card__copy,
+.connections-sheet__heading,
+.connections-tutorial__heading {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+  min-width: 0;
+}
+
+.connections-add-card__title {
+  font-size: 28rpx;
+  font-weight: 700;
+  color: #1d1d1f;
+}
+
+.connections-guide-card {
+  align-items: flex-start;
   justify-content: space-between;
-  margin-bottom: 30rpx;
+  background: linear-gradient(135deg, #0a84ff, #0066cc);
 }
 
-.popup-title {
-  font-size: 36rpx;
-  font-weight: 600;
-  color: var(--mcode-text-primary);
+.connections-guide-card__eyebrow,
+.connections-guide-card__title,
+.connections-guide-card__desc {
+  color: #ffffff;
 }
 
-.tutorial-entry {
-  margin-bottom: 24rpx;
-  padding: 22rpx 24rpx;
-  border-radius: 16rpx;
-  background-color: color-mix(in srgb, var(--mcode-primary) 8%, var(--mcode-card-bg) 92%);
+.connections-guide-card__desc {
+  opacity: 0.88;
+}
+
+.connections-guide-card__action {
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+}
+
+.connections-sheet {
+  padding: 18rpx 24rpx 28rpx;
+  background: #ffffff;
+}
+
+.connections-sheet__handle {
+  width: 88rpx;
+  height: 8rpx;
+  margin: 0 auto 18rpx;
+  border-radius: 999rpx;
+  background: #d1d1d6;
+}
+
+.connections-sheet__header,
+.connections-tutorial__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16rpx;
+  margin-bottom: 18rpx;
+}
+
+.connections-sheet__subtitle {
+  margin-top: 4rpx;
+}
+
+.connections-sheet__tutorial {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16rpx;
-
-  &:active {
-    background-color: color-mix(in srgb, var(--mcode-primary) 14%, var(--mcode-card-bg) 86%);
-  }
-}
-
-.tutorial-entry__copy {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8rpx;
-}
-
-.tutorial-entry__title {
-  font-size: 28rpx;
-  font-weight: 600;
-  color: var(--mcode-primary);
-}
-
-.tutorial-entry__desc {
-  font-size: 24rpx;
-  color: var(--mcode-text-secondary);
-}
-
-.tutorial-popup {
-  width: 640rpx;
-  max-width: calc(100vw - 64rpx);
-  padding: 36rpx 30rpx;
-  background-color: var(--mcode-card-bg);
+  margin-bottom: 18rpx;
+  padding: 20rpx 18rpx;
   border-radius: 24rpx;
+  background: rgba(0, 122, 255, 0.08);
 }
 
-.tutorial-steps {
+.connections-sheet__tutorial-title {
+  font-size: 26rpx;
+  font-weight: 600;
+  color: #007aff;
+}
+
+.connections-sheet__tutorial-desc,
+.connections-sheet__tip,
+.connections-tutorial__link {
+  font-size: 22rpx;
+  color: #6e6e73;
+}
+
+.connections-sheet__tabs {
+  margin-bottom: 18rpx;
+}
+
+.connections-sheet__form,
+.connections-sheet__scan {
+  padding-bottom: 8rpx;
+}
+
+.connections-sheet__actions {
+  margin-top: 24rpx;
+}
+
+.connections-sheet__tip {
+  margin-top: 12rpx;
+}
+
+.connections-tutorial {
+  width: 640rpx;
+  max-width: calc(100vw - 48rpx);
+  padding: 26rpx;
+  background: #ffffff;
+}
+
+.connections-tutorial__steps {
   display: flex;
   flex-direction: column;
-  gap: 24rpx;
-}
-
-.tutorial-step {
-  display: flex;
-  align-items: flex-start;
   gap: 18rpx;
 }
 
-.tutorial-step__index {
-  width: 40rpx;
-  height: 40rpx;
-  border-radius: 999rpx;
-  background-color: var(--mcode-primary);
-  color: #ffffff;
-  font-size: 24rpx;
-  font-weight: 600;
-  line-height: 40rpx;
-  text-align: center;
-  flex-shrink: 0;
+.connections-tutorial__step {
+  display: flex;
+  gap: 16rpx;
+  padding: 20rpx;
+  border-radius: 24rpx;
+  background: #f2f2f7;
 }
 
-.tutorial-step__body {
-  flex: 1;
-  min-width: 0;
+.connections-tutorial__index {
+  width: 52rpx;
+  height: 52rpx;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: #007aff;
+  color: #ffffff;
+  font-size: 24rpx;
+  font-weight: 700;
+}
+
+.connections-tutorial__body {
   display: flex;
   flex-direction: column;
   gap: 8rpx;
+  min-width: 0;
 }
 
-.tutorial-step__title {
-  font-size: 28rpx;
-  line-height: 1.6;
-  color: var(--mcode-text-primary);
+.connections-tutorial__step-title {
+  font-size: 26rpx;
+  line-height: 1.5;
+  font-weight: 600;
+  color: #1d1d1f;
 }
 
-.tutorial-step__desc {
-  font-size: 24rpx;
-  line-height: 1.6;
-  color: var(--mcode-text-secondary);
-}
-
-.tutorial-step__link {
-  font-size: 24rpx;
-  line-height: 1.6;
-  color: var(--mcode-primary);
+.connections-tutorial__link {
   word-break: break-all;
 }
 
-.form-container {
-  margin-top: 40rpx;
-}
+@media (max-width: 750rpx) {
+  .connections-shell {
+    padding: 16rpx 16rpx 32rpx;
+  }
 
-.form-actions {
-  margin-top: 60rpx;
-  padding-bottom: 20rpx;
-}
+  .connections-topbar {
+    padding: 10rpx 4rpx 16rpx;
+  }
 
-.scan-container {
-  padding: 100rpx 0;
-}
+  .connections-brand__title {
+    font-size: 38rpx;
+  }
 
-.tip-text {
-  font-size: 28rpx;
-  color: var(--mcode-text-tertiary);
+  .connections-hero {
+    align-items: flex-start;
+    padding: 24rpx;
+  }
+
+  .connections-hero__art {
+    width: 180rpx;
+    opacity: 0.88;
+  }
+
+  .connection-card,
+  .connections-add-card,
+  .connections-guide-card {
+    padding: 20rpx;
+  }
+
+  .connections-tutorial {
+    width: 100%;
+    padding: 22rpx;
+  }
 }
 </style>
