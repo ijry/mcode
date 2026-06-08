@@ -1,29 +1,31 @@
 <template>
   <view class="page conversations-page" :style="[upThemeVars, upThemePageStyle, { backgroundColor: '#f5f5f7' }]">
     <view class="conversations-shell">
-      <view class="conversations-header">
-        <text class="conversations-header__title">会话</text>
-        <view class="conversations-header__action" @click="createConversation()">
-          <up-icon name="plus" size="16" color="#2f7cf6"></up-icon>
+      <up-sticky class="conversations-sticky" :offset-top="0" :custom-nav-height="0" bg-color="#f5f5f7" z-index="20">
+        <view class="conversations-header">
+          <text class="conversations-header__title">会话</text>
+          <view class="conversations-header__action" @click="createConversation()">
+            <up-icon name="plus" size="16" color="#2f7cf6"></up-icon>
+          </view>
         </view>
-      </view>
 
-      <view class="conversations-searchbar">
-        <up-search
-          v-model="searchKeyword"
-          placeholder="搜索会话..."
-          :show-action="false"
-          shape="round"
-          bgColor="#e9eaee"
-          borderColor="transparent"
-          color="#1a1b1f"
-          placeholderColor="#9ca3af"
-          searchIconColor="#8b93a5"
-          :height="44"
-          @search="() => {}"
-          @clear="() => {}"
-        ></up-search>
-      </view>
+        <view class="conversations-searchbar">
+          <up-search
+            v-model="searchKeyword"
+            placeholder="搜索会话..."
+            :show-action="false"
+            shape="round"
+            bgColor="#e9eaee"
+            borderColor="transparent"
+            color="#1a1b1f"
+            placeholderColor="#9ca3af"
+            searchIconColor="#8b93a5"
+            :height="44"
+            @search="() => {}"
+            @clear="() => {}"
+          ></up-search>
+        </view>
+      </up-sticky>
 
       <!-- 无连接 -->
       <view v-if="!hasActiveConnection" class="empty-fullpage conversations-empty-fullpage">
@@ -160,41 +162,56 @@
           </view>
 
           <scroll-view v-else class="history-scroll" scroll-y enhanced>
-            <view
-              v-for="section in historyProjectSections"
-              :key="section.projectId"
-              class="history-section"
+            <up-collapse
+              class="history-collapse"
+              :value="activeHistoryProjectId"
+              accordion
+              :border="false"
+              @open="handleHistoryCollapseOpen"
+              @close="handleHistoryCollapseClose"
             >
-              <view class="history-section__header">
-                <text class="history-section__title u-line-1">{{ section.title }}</text>
-                <text class="history-section__count">{{ section.count }}</text>
-              </view>
-              <text v-if="section.path" class="history-section__path u-line-1">{{ section.path }}</text>
-
-              <view class="conv-list conv-list--history">
-                <view
-                  v-for="conv in section.conversations"
-                  :key="conv.id"
-                  class="conv-card conv-card--history"
-                  :style="upThemeCardStyle"
-                  @click="openConversation(conv, historyGroupKey)"
-                >
-                  <view class="conv-card__icon">
-                    <up-icon name="chat-fill" size="17" color="#2979ff"></up-icon>
-                  </view>
-                  <view class="conv-card__body">
-                    <text class="conv-card__title u-line-1">{{ conv.title || "未命名会话" }}</text>
-                    <text class="conv-card__subtitle u-line-1">{{ getHistoryConversationMeta(conv) }}</text>
-                  </view>
-                  <view class="conv-card__actions">
-                    <view class="conv-card__menu" @click.stop="showConversationMenu(conv)">
-                      <up-icon name="more-dot-fill" size="16" :color="upThemeVar('--up-tips-color', '#909193')"></up-icon>
+              <up-collapse-item
+                v-for="section in historyProjectSections"
+                :key="section.projectId"
+                class="history-collapse-item"
+                :name="section.projectId"
+                :border="false"
+              >
+                <template #title>
+                  <view class="history-section__header">
+                    <view class="history-section__text">
+                      <text class="history-section__title u-line-1">{{ section.title }}</text>
+                      <text v-if="section.path" class="history-section__path u-line-1">{{ section.path }}</text>
                     </view>
-                    <up-icon name="arrow-right" size="12" :color="upThemeVar('--up-light-color', '#c0c4cc')"></up-icon>
+                    <text class="history-section__count">{{ section.count }}</text>
+                  </view>
+                </template>
+
+                <view class="conv-list conv-list--history">
+                  <view
+                    v-for="conv in section.conversations"
+                    :key="conv.id"
+                    class="conv-card conv-card--history"
+                    :style="upThemeCardStyle"
+                    @click="openConversation(conv, historyGroupKey)"
+                  >
+                    <view class="conv-card__icon">
+                      <up-icon name="chat-fill" size="17" color="#2979ff"></up-icon>
+                    </view>
+                    <view class="conv-card__body">
+                      <text class="conv-card__title u-line-1">{{ conv.title || "未命名会话" }}</text>
+                      <text class="conv-card__subtitle u-line-1">{{ getHistoryConversationMeta(conv) }}</text>
+                    </view>
+                    <view class="conv-card__actions">
+                      <view class="conv-card__menu" @click.stop="showConversationMenu(conv)">
+                        <up-icon name="more-dot-fill" size="16" :color="upThemeVar('--up-tips-color', '#909193')"></up-icon>
+                      </view>
+                      <up-icon name="arrow-right" size="12" :color="upThemeVar('--up-light-color', '#c0c4cc')"></up-icon>
+                    </view>
                   </view>
                 </view>
-              </view>
-            </view>
+              </up-collapse-item>
+            </up-collapse>
             <view class="safe-bottom"></view>
           </scroll-view>
         </view>
@@ -494,6 +511,7 @@ const showHistoryPanel = ref(false)
 const historyGroupKey = ref("")
 const historyGroupTitle = ref("")
 const historyLoading = ref(false)
+const activeHistoryProjectId = ref<string | number>("")
 let overviewLoadPromise: Promise<void> | null = null
 let lastOverviewLoadedAt = 0
 const historyLoadPromiseMap = new Map<string, Promise<void>>()
@@ -640,6 +658,22 @@ const canCreateInHistory = computed(() => {
 
 const historyProjectSections = computed(() =>
   buildHistoryProjectSections(projects.value, searchKeyword.value)
+)
+watch(
+  historyProjectSections,
+  (sections) => {
+    if (sections.length === 0) {
+      activeHistoryProjectId.value = ""
+      return
+    }
+    const hasActiveProject = sections.some(
+      (section) => section.projectId === activeHistoryProjectId.value
+    )
+    if (!hasActiveProject) {
+      activeHistoryProjectId.value = sections[0].projectId
+    }
+  },
+  { immediate: true }
 )
 
 watch(
@@ -1711,6 +1745,15 @@ function loadData() {
 }
 
 
+function handleHistoryCollapseOpen(name: string | number) {
+  activeHistoryProjectId.value = name
+}
+
+function handleHistoryCollapseClose(name: string | number) {
+  if (activeHistoryProjectId.value === name) {
+    activeHistoryProjectId.value = ""
+  }
+}
 function getHistoryConversationMeta(conversation: Conversation): string {
   return formatHistoryConversationMeta(conversation, formatAgentType, formatTime)
 }
@@ -2112,7 +2155,17 @@ function formatTime(time?: string): string {
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  padding: 28rpx 24rpx 40rpx;
+  padding: 0 24rpx 40rpx;
+}
+
+.conversations-sticky {
+  position: relative;
+  z-index: 20;
+}
+
+.conversations-sticky :deep(.u-sticky__content) {
+  padding-top: 28rpx;
+  background: #f5f5f7;
 }
 
 .conversations-header {
@@ -2444,6 +2497,37 @@ function formatTime(time?: string): string {
 .history-scroll {
   flex: 1;
   min-height: 0;
+  height: calc(100vh - 390rpx - env(safe-area-inset-bottom));
+  max-height: calc(100vh - 390rpx - env(safe-area-inset-bottom));
+}
+
+.history-collapse {
+  display: flex;
+  flex-direction: column;
+  gap: 18rpx;
+  padding-top: 20rpx;
+}
+
+.history-collapse-item {
+  overflow: hidden;
+  border-radius: 22rpx;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 10rpx 26rpx rgba(15, 23, 42, 0.06);
+}
+
+.history-collapse-item :deep(.u-cell) {
+  background: transparent !important;
+  box-shadow: 0 0.3125rem 0.8125rem rgba(15, 23, 42, 0.06);
+}
+
+.history-collapse-item :deep(.u-cell__body) {
+  align-items: center;
+}
+
+.history-collapse-item :deep(.u-collapse-item__content__text) {
+  margin: 0;
+  padding: 24rpx 16rpx 16rpx !important;
+  background: transparent;
 }
 
 .history-mode-bar {
@@ -2500,25 +2584,23 @@ function formatTime(time?: string): string {
   color: var(--mcode-primary);
 }
 
-.history-section {
-  margin-top: 24rpx;
-}
-
 .history-section__header {
+  width: 100%;
   display: flex;
   align-items: center;
-  gap: 10rpx;
-  padding: 0 8rpx;
+  gap: 12rpx;
+}
+
+.history-section__text {
+  flex: 1;
+  min-width: 0;
 }
 
 .history-section__title {
   display: block;
-  max-width: 560rpx;
-  font-size: 22rpx;
+  font-size: 28rpx;
   font-weight: 700;
-  color: #7d8596;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  color: #1f2937;
 }
 
 .history-section__count {
@@ -2536,7 +2618,6 @@ function formatTime(time?: string): string {
 .history-section__path {
   display: block;
   margin-top: 6rpx;
-  padding: 0 8rpx 12rpx;
   font-size: 20rpx;
   color: #a0a5b3;
 }
