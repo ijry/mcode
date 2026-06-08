@@ -39,6 +39,14 @@
       }
     },
     {
+      "path": "pages/circles/index",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "圈子",
+        "enablePullDownRefresh": false
+      }
+    },
+    {
       "path": "pages/profile/index",
       "style": {
         "navigationBarTitleText": "我的",
@@ -85,6 +93,12 @@
         "text": "待办",
         "iconPath": "static/tabbar/todos.png",
         "selectedIconPath": "static/tabbar/todos-active.png"
+      },
+      {
+        "pagePath": "pages/circles/index",
+        "text": "圈子",
+        "iconPath": "static/tabbar/circles.png",
+        "selectedIconPath": "static/tabbar/circles-active.png"
       },
       {
         "pagePath": "pages/profile/index",
