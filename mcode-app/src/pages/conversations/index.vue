@@ -1998,21 +1998,11 @@ async function confirmCreate() {
       sessionId: resolveConnectedSessionId(connectionInfo),
     })
 
-    let sidebarRefreshTriggered = false
     await gateway.call("open_folder_by_id", {
       folderId: selectedProjectId.value,
     }).catch((error) => {
       console.warn("open folder by id skipped:", error)
     })
-    if (selectedProject.path) {
-      await gateway.call("open_folder_in_workspace", {
-        path: selectedProject.path,
-      }).then(() => {
-        sidebarRefreshTriggered = true
-      }).catch((error) => {
-        console.warn("open folder in workspace skipped:", error)
-      })
-    }
 
     uni.showToast({ title: "创建成功", icon: "success" })
     showCreateDialog.value = false
@@ -2022,13 +2012,6 @@ async function confirmCreate() {
     selectedAgentType.value = "claude_code"
     createAgentOptions.value = DEFAULT_CREATE_AGENT_OPTIONS
     markConversationListDirty()
-    if (!sidebarRefreshTriggered) {
-      uni.showToast({
-        title: "会话已创建，codeg 刷新可能延迟",
-        icon: "none",
-        duration: 2500,
-      })
-    }
     await loadOverviewData({ force: true })
     openConversation(
       { id: newConversationId, folder_id: selectedProjectId.value },
