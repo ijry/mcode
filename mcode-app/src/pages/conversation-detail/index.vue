@@ -346,12 +346,7 @@
                 size="18"
                 color="#f56c6c"
               ></up-loading-icon>
-              <up-icon
-                v-else
-                name="close-circle"
-                size="22"
-                color="#f56c6c"
-              ></up-icon>
+              <view v-else class="input-tool-btn__stop-mark"></view>
             </view>
           </view>
         </view>
@@ -4224,7 +4219,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 
 .input-box {
   flex: 1;
-  background-color: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
+  background-color: color-mix(in srgb, var(--up-page-bg-color, var(--up-bg-color, #f5f6f8)) 72%, var(--up-card-bg-color, #ffffff) 28%);
   border-radius: 24rpx;
   padding: 14rpx 20rpx;
   min-height: 72rpx;
@@ -4310,10 +4305,6 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
     pointer-events: none;
   }
 
-  &--stop {
-    flex: 0 0 64rpx;
-    width: 64rpx;
-  }
 }
 
 .input-tool-btn__icon {
@@ -4323,7 +4314,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
+  background: color-mix(in srgb, var(--up-page-bg-color, var(--up-bg-color, #f5f6f8)) 72%, var(--up-card-bg-color, #ffffff) 28%);
   transition: background-color 0.2s ease, transform 0.2s ease;
 }
 
@@ -4339,10 +4330,17 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 }
 
 .input-tool-btn__icon--stop {
-  width: 64rpx;
-  height: 64rpx;
-  border-radius: 20rpx;
-  background: color-mix(in srgb, #f56c6c 12%, var(--up-card-bg-color, #ffffff) 88%);
+  width: 56rpx;
+  height: 56rpx;
+  border-radius: 18rpx;
+  background: color-mix(in srgb, var(--up-page-bg-color, var(--up-bg-color, #f5f6f8)) 72%, var(--up-card-bg-color, #ffffff) 28%);
+}
+
+.input-tool-btn__stop-mark {
+  width: 20rpx;
+  height: 20rpx;
+  border-radius: 4rpx;
+  background: #f56c6c;
 }
 
 .composer-panel {
