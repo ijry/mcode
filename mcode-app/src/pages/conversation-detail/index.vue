@@ -333,6 +333,27 @@
               <image class="input-tool-btn__glyph" src="/static/icons/composer-config.svg" mode="aspectFit"></image>
             </view>
           </view>
+
+          <view
+            v-if="canStopSession"
+            :class="['input-tool-btn', 'input-tool-btn--stop', stoppingSession && 'input-tool-btn--disabled']"
+            @click="confirmStopSession()"
+          >
+            <view class="input-tool-btn__icon input-tool-btn__icon--stop">
+              <up-loading-icon
+                v-if="stoppingSession"
+                mode="circle"
+                size="18"
+                color="#f56c6c"
+              ></up-loading-icon>
+              <up-icon
+                v-else
+                name="close-circle"
+                size="22"
+                color="#f56c6c"
+              ></up-icon>
+            </view>
+          </view>
         </view>
 
         <view v-if="showComposerPanel" class="composer-panel" :style="upThemeCardStyle">
@@ -673,6 +694,7 @@ const INITIAL_TURN_EXPAND_BATCH = 30
 const INITIAL_TURN_MAX_BATCH = 200
 const INITIAL_USER_TURN_TARGET = 8
 const PROMPT_START_TIMEOUT_MS = 4000
+const STUCK_PROMPT_TIMEOUT_MS = 3 * 60 * 1000
 const quickReplyItems: QuickReplyItem[] = [
   { label: "yes", value: "yes" },
   { label: "继续", value: "继续" },
@@ -685,6 +707,7 @@ const quickReplyItems: QuickReplyItem[] = [
 
 const loading = ref(false)
 const sending = ref(false)
+const stoppingSession = ref(false)
 const processingQueue = ref(false)
 const sequence = ref(0)
 const conversationId = ref<number>(0)
@@ -724,6 +747,9 @@ const HISTORY_LOADING_MIN_MS = 200
 const permissionSubmitting = ref(false)
 const pendingPermissionSubmittingOptionId = ref("")
 let detailAgentProbeToken = 0
+let stuckPromptTimer: ReturnType<typeof setTimeout> | null = null
+let lastLiveActivitySignature = ""
+let stuckPromptShownForSignature = false
 
 function detailDebugLog(stage: string, payload?: Record<string, unknown>) {
   if (!conversationId.value) return
@@ -849,6 +875,20 @@ const historyStatusText = computed(() => {
 })
 
 const runtimeStatus = computed<string>(() => String(session.value?.status || "idle"))
+const canStopSession = computed(() => isStoppableRuntimeStatus(runtimeStatus.value))
+const liveActivitySignature = computed(() =>
+  buildLiveActivitySignature(session.value?.liveMessage?.content || [])
+)
+const conversationActivitySignature = computed(() => {
+  const latest = renderMessageItems.value[renderMessageItems.value.length - 1]
+  return JSON.stringify({
+    live: liveActivitySignature.value,
+    count: renderMessageItems.value.length,
+    latestId: latest?.anchorId || "",
+    latestStatus: latest?.message.status || "",
+    latestContent: JSON.stringify(latest?.message.content || []),
+  })
+})
 const pendingPermissionCard = computed<PermissionRequest | null>(() => session.value?.pendingPermission || null)
 const pendingPermissionDescription = computed(() => {
   return pendingPermissionCard.value?.description || "智能体请求继续当前操作"
@@ -1115,10 +1155,13 @@ onShow(() => {
     syncAuthByConnectionKey(routeConnectionKey.value)
   }
   void loadDetailProjectEntries()
-  loadConversation()
+  void loadConversation().then(() => {
+    resumeStuckPromptDetection()
+  })
 })
 
 onHide(() => {
+  clearStuckPromptTimer()
   persistDetailRuntimeState()
   needsResumeRefresh.value = true
   if (conversationId.value) {
@@ -1127,6 +1170,7 @@ onHide(() => {
 })
 
 onUnload(() => {
+  clearStuckPromptTimer()
   persistDetailRuntimeState()
   if (conversationId.value) {
     markConversationListDirty()
@@ -1174,6 +1218,14 @@ watch(
       void processDraftQueue()
     }
   }
+)
+
+watch(
+  () => [runtimeStatus.value, conversationActivitySignature.value, session.value?.connectionId || ""] as const,
+  ([status, signature]) => {
+    handleLiveActivityChange(status, signature)
+  },
+  { immediate: true }
 )
 
 watch(
@@ -1451,6 +1503,132 @@ function refreshConversation() {
       uni.showToast({ title: "会话已刷新", icon: "none" })
     })
     .catch(() => {})
+}
+
+function confirmStopSession(options: { refreshAfterStop?: boolean } = {}) {
+  if (!canStopSession.value || stoppingSession.value) return
+  uni.showModal({
+    title: "停止当前会话？",
+    content: "当前回复会被中断，停止后仍可继续发送消息。",
+    confirmText: "停止会话",
+    cancelText: "继续等待",
+    success: (result) => {
+      if (!result.confirm) return
+      void stopCurrentSession(options)
+    },
+  })
+}
+
+async function stopCurrentSession(options: { refreshAfterStop?: boolean } = {}) {
+  const conn = session.value?.connectionId
+  if (stoppingSession.value) return
+  if (!conn) {
+    uni.showToast({ title: "当前会话连接不可用，无法停止", icon: "none" })
+    return
+  }
+
+  stoppingSession.value = true
+  clearStuckPromptTimer()
+  try {
+    await acpApi.acpCancel(conn)
+    uni.showToast({ title: "已停止", icon: "success" })
+    if (options.refreshAfterStop) {
+      await loadConversation()
+    }
+  } catch (error) {
+    uni.showToast({
+      title: toErrorMessage(error, "停止失败"),
+      icon: "none",
+    })
+  } finally {
+    stoppingSession.value = false
+  }
+}
+
+function handleLiveActivityChange(status: string, signature: string) {
+  if (!isStoppableRuntimeStatus(status) || !session.value?.connectionId) {
+    clearStuckPromptTimer()
+    lastLiveActivitySignature = ""
+    stuckPromptShownForSignature = false
+    return
+  }
+
+  if (signature !== lastLiveActivitySignature) {
+    lastLiveActivitySignature = signature
+    stuckPromptShownForSignature = false
+  }
+
+  scheduleStuckPromptTimer()
+}
+
+function scheduleStuckPromptTimer() {
+  clearStuckPromptTimer()
+  if (stuckPromptShownForSignature || !canStopSession.value) return
+
+  stuckPromptTimer = setTimeout(() => {
+    stuckPromptTimer = null
+    if (stuckPromptShownForSignature || !canStopSession.value) return
+    stuckPromptShownForSignature = true
+    showStuckSessionPrompt()
+  }, STUCK_PROMPT_TIMEOUT_MS)
+}
+
+function clearStuckPromptTimer() {
+  if (!stuckPromptTimer) return
+  clearTimeout(stuckPromptTimer)
+  stuckPromptTimer = null
+}
+
+function showStuckSessionPrompt() {
+  uni.showModal({
+    title: "会话可能卡住了",
+    content: "当前会话较长时间没有新输出，可能暂时卡住。是否停止当前回复并刷新会话后重试？",
+    confirmText: "停止并刷新",
+    cancelText: "继续等待",
+    success: (result) => {
+      if (result.confirm) {
+        void stopCurrentSession({ refreshAfterStop: true })
+      }
+    },
+  })
+}
+
+function resumeStuckPromptDetection() {
+  handleLiveActivityChange(runtimeStatus.value, conversationActivitySignature.value)
+}
+
+function isStoppableRuntimeStatus(status: string) {
+  return status === "thinking" || status === "running_tool" || status === "waiting_permission"
+}
+
+function buildLiveActivitySignature(parts: ContentPart[]): string {
+  return JSON.stringify((parts || []).map((part) => {
+    if (part.type === "text") return ["text", part.text || ""]
+    if (part.type === "thinking") return ["thinking", part.thinking || ""]
+    if (part.type === "tool_call") {
+      const toolCall = part.tool_call
+      return [
+        "tool_call",
+        toolCall?.id || "",
+        toolCall?.name || "",
+        toolCall?.status || "",
+        JSON.stringify(toolCall?.input || {}),
+        toolCall?.output || "",
+        toolCall?.error || "",
+      ]
+    }
+    if (part.type === "tool_result") {
+      const toolResult = part.tool_result
+      return [
+        "tool_result",
+        toolResult?.tool_call_id || "",
+        toolResult?.output || "",
+        toolResult?.is_error ? "1" : "0",
+      ]
+    }
+    if (part.type === "plan") return ["plan", JSON.stringify(part.plan || {})]
+    return [part.type]
+  }))
 }
 
 async function refreshSessionTurnsFromDb(
@@ -4126,6 +4304,16 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   &--active {
     background: transparent;
   }
+
+  &--disabled {
+    opacity: 0.6;
+    pointer-events: none;
+  }
+
+  &--stop {
+    flex: 0 0 64rpx;
+    width: 64rpx;
+  }
 }
 
 .input-tool-btn__icon {
@@ -4148,6 +4336,13 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 .input-tool-btn--active .input-tool-btn__icon {
   background: color-mix(in srgb, var(--up-primary, #2979ff) 12%, var(--up-card-bg-color, #ffffff) 88%);
   transform: translateY(-1rpx);
+}
+
+.input-tool-btn__icon--stop {
+  width: 64rpx;
+  height: 64rpx;
+  border-radius: 20rpx;
+  background: color-mix(in srgb, #f56c6c 12%, var(--up-card-bg-color, #ffffff) 88%);
 }
 
 .composer-panel {
