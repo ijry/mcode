@@ -16,7 +16,7 @@
                     "xxxhdpi" : "unpackage/res/icons/192x192.png"
                 },
                 "ios" : {
-					"bundleidentifier" : "net.lingyun.mcode",
+                    "bundleidentifier" : "net.lingyun.mcode",
                     "appstore" : "unpackage/res/icons/1024x1024.png",
                     "ipad" : {
                         "app" : "unpackage/res/icons/76x76.png",
@@ -43,6 +43,9 @@
             },
             "splashscreen" : {
                 "useOriginalMsgbox" : true
+            },
+            "ios" : {
+                "dSYMs" : false
             }
         },
         "modules" : {

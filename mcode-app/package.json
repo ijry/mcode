@@ -55,32 +55,33 @@
     "@dcloudio/uni-mp-weixin": "3.0.0-5000720260410001",
     "@dcloudio/uni-mp-xhs": "3.0.0-5000720260410001",
     "@dcloudio/uni-quickapp-webview": "3.0.0-5000720260410001",
-    "vue": "^3.4.21",
-    "vue-i18n": "^9.1.9",
     "@vue/runtime-core": "3.4.21",
     "@vue/runtime-dom": "3.4.21",
     "pinia": "^3.0.4",
     "pinia-plugin-persistedstate": "^4.7.1",
     "sql.js": "^1.14.1",
-    "uview-plus": "^3.8.41"
+    "uview-plus": "^3.8.41",
+    "vue": "^3.4.21",
+    "vue-i18n": "^9.1.9"
   },
   "devDependencies": {
     "@dcloudio/types": "^3.4.8",
     "@dcloudio/uni-automator": "3.0.0-5000720260410001",
     "@dcloudio/uni-cli-shared": "3.0.0-5000720260410001",
     "@dcloudio/uni-stacktracey": "3.0.0-5000720260410001",
+    "@dcloudio/uni-uts-v1": "3.0.0-5000720260410001",
     "@dcloudio/vite-plugin-uni": "3.0.0-5000720260410001",
-    "@vue/runtime-core": "^3.4.21",
-    "vite": "5.2.8",
     "@iconify/json": "^2.2.481",
     "@types/node": "^22.13.10",
     "@unocss/transformer-directives": "^0.58.9",
     "@vue/compiler-sfc": "^3.4.21",
+    "@vue/runtime-core": "^3.4.21",
     "@vue/tsconfig": "^0.7.0",
     "sass": "^1.83.4",
     "typescript": "^5.7.3",
     "unocss": "^0.58.9",
     "unocss-preset-weapp": "^0.58.9",
+    "vite": "5.2.8",
     "vue-tsc": "^2.2.2"
   }
 }
