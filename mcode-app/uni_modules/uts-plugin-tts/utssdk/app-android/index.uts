@@ -1,4 +1,5 @@
 import TextToSpeech from 'android.speech.tts.TextToSpeech'
+import OnInitListener from 'android.speech.tts.TextToSpeech.OnInitListener'
 import Locale from 'java.util.Locale'
 import UtteranceProgressListener from 'android.speech.tts.UtteranceProgressListener'
 import Bundle from 'android.os.Bundle'
@@ -8,6 +9,46 @@ import { TTSOptions, TTSCallbacks, TTSVoice } from "../interface/index.uts"
 let ttsInstance: TextToSpeech | null = null
 let currentCallbacks: TTSCallbacks | null = null
 let isInitialized: Boolean = false
+
+class TTSProgressListener extends UtteranceProgressListener {
+  constructor() {
+    super()
+  }
+
+  override onStart(utteranceId: String | null) {
+    currentCallbacks?.onStart?.invoke()
+  }
+
+  override onDone(utteranceId: String | null) {
+    currentCallbacks?.onComplete?.invoke()
+    currentCallbacks = null
+  }
+
+  override onError(utteranceId: String | null) {
+    currentCallbacks?.onError?.invoke("TTS error occurred")
+    currentCallbacks = null
+  }
+
+  override onRangeStart(utteranceId: String | null, start: Int, end: Int, frame: Int) {
+    const total = start + end
+    if (total > 0) {
+      const progress = start.toFloat() / total.toFloat()
+      currentCallbacks?.onProgress?.invoke(progress.toDouble())
+    }
+  }
+}
+
+class TTSInitListener implements OnInitListener {
+  override onInit(status: Int): void {
+    if (status == TextToSpeech.SUCCESS) {
+      isInitialized = true
+      ttsInstance?.setLanguage(Locale.CHINESE)
+      ttsInstance?.setOnUtteranceProgressListener(new TTSProgressListener())
+    } else {
+      isInitialized = false
+    }
+  }
+}
 
 /**
  * 初始化TTS引擎
@@ -22,40 +63,7 @@ function initTTS(): void {
     return
   }
 
-  ttsInstance = new TextToSpeech(context, new TextToSpeech.OnInitListener() {
-    override fun onInit(status: Int) {
-      if (status == TextToSpeech.SUCCESS) {
-        isInitialized = true
-        ttsInstance?.setLanguage(Locale.CHINESE)
-
-        ttsInstance?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-          override fun onStart(utteranceId: String?) {
-            currentCallbacks?.onStart?.invoke()
-          }
-
-          override fun onDone(utteranceId: String?) {
-            currentCallbacks?.onComplete?.invoke()
-            currentCallbacks = null
-          }
-
-          override fun onError(utteranceId: String?) {
-            currentCallbacks?.onError?.invoke("TTS error occurred")
-            currentCallbacks = null
-          }
-
-          override fun onRangeStart(utteranceId: String?, start: Int, end: Int, frame: Int) {
-            val total = start + end
-            if (total > 0) {
-              val progress = start.toFloat() / total.toFloat()
-              currentCallbacks?.onProgress?.invoke(progress.toDouble())
-            }
-          }
-        })
-      } else {
-        isInitialized = false
-      }
-    }
-  })
+  ttsInstance = new TextToSpeech(context, new TTSInitListener())
 }
 
 /**
@@ -93,7 +101,7 @@ export const TTSModule = {
 
     // 创建参数Bundle
     const params = Bundle()
-    const volume = options.volume?.toFloat() ?? 1.0f
+    const volume = options.volume?.toFloat() ?? 1.0
     params.putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, volume)
     params.putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "tts_utterance")
 
@@ -142,10 +150,12 @@ export const TTSModule = {
 
     if (availableVoices != null) {
       for (voice in availableVoices) {
-        const quality = when (voice.getQuality()) {
-          Voice.QUALITY_VERY_HIGH, Voice.QUALITY_HIGH -> "high"
-          Voice.QUALITY_NORMAL -> "normal"
-          else -> "low"
+        let quality = "low"
+        const voiceQuality = voice.getQuality()
+        if (voiceQuality == Voice.QUALITY_VERY_HIGH || voiceQuality == Voice.QUALITY_HIGH) {
+          quality = "high"
+        } else if (voiceQuality == Voice.QUALITY_NORMAL) {
+          quality = "normal"
         }
 
         voices.push({

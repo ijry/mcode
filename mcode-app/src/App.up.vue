@@ -10,13 +10,13 @@
 
 <script setup lang="ts">
 import { shallowRef, onMounted } from 'vue'
+import PetFloat from './components/pet/PetFloat.vue'
 
 const petComp = shallowRef<any>(null)
 const petReady = shallowRef(false)
 
 onMounted(async () => {
-  const mod = await import('./components/pet/PetFloat.vue')
-  petComp.value = mod.default
+  petComp.value = PetFloat
   petReady.value = true
 })
 </script>
