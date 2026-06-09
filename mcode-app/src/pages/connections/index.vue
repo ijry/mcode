@@ -135,6 +135,44 @@
       @close="showActionSheet = false"
     ></u-action-sheet>
 
+    <u-popup v-model:show="showConfigCodePopup" mode="center" :round="24">
+      <view class="connections-config-code" :style="upThemeCardStyle">
+        <view class="connections-config-code__header">
+          <view class="connections-config-code__heading">
+            <text class="connections-config-code__title">手表配置码</text>
+            <text class="connections-config-code__subtitle">
+              在 Wear OS 版中扫码或粘贴配置码即可导入连接。
+            </text>
+          </view>
+          <u-icon name="close" size="22" @click="closeConfigCodePopup"></u-icon>
+        </view>
+
+        <view class="connections-config-code__connection">
+          <text class="connections-config-code__name">{{ configCodeConnectionName }}</text>
+          <text class="connections-config-code__meta">{{ configCodeConnectionMeta }}</text>
+        </view>
+
+        <view v-if="configCodeValue" class="connections-config-code__qr">
+          <up-qrcode
+            cid="mcode-watch-config-qrcode"
+            :val="configCodeValue"
+            :size="220"
+            :quiet-zone="8"
+            foreground="#111827"
+            background="#ffffff"
+          ></up-qrcode>
+        </view>
+
+        <view class="connections-config-code__text">
+          <text>{{ configCodeValue }}</text>
+        </view>
+
+        <view class="connections-config-code__actions">
+          <u-button type="primary" block @click="copyConfigCode">复制配置码</u-button>
+        </view>
+      </view>
+    </u-popup>
+
     <u-popup :show="showAddPopup" mode="bottom" :round="28" @close="closeAddPopup">
       <view class="connections-sheet" :style="upThemeCardStyle">
         <view class="connections-sheet__handle"></view>
@@ -284,6 +322,7 @@ import { useAuthStore } from "@/stores/auth"
 import { createGateway } from "@/services/gateway"
 import type { RelaySessionInfo } from "@/services/gateway"
 import { buildWebSocketProtocols } from "@/services/gateway/wsProtocol"
+import { buildConnectionConfigCode } from "./connectionConfigCode"
 
 declare const plus: any
 
@@ -296,8 +335,12 @@ const showTutorialPopup = ref(false)
 const subsectionIndex = ref(0)
 const loading = ref(false)
 const showActionSheet = ref(false)
+const showConfigCodePopup = ref(false)
 const currentConnectionIndex = ref(-1)
 const editingConnectionKey = ref("")
+const configCodeValue = ref("")
+const configCodeConnectionName = ref("")
+const configCodeConnectionMeta = ref("")
 const connectedMap = ref<Record<string, boolean>>({})
 const onlineMap = ref<Record<string, boolean>>({})
 type StatusSocket = Pick<UniApp.SocketTask, "onOpen" | "onClose" | "onError" | "close">
@@ -336,6 +379,7 @@ const connectionActions = computed(() => {
   return [
     { name: "连接", color: "#2979ff", disabled: isConnected },
     { name: "断开连接", color: "#fa8c16", disabled: !isLinked },
+    { name: "配置码", color: "#8b5cf6" },
     { name: "编辑", color: "#19be6b" },
     { name: "删除", color: "#fa3534" },
   ]
@@ -558,6 +602,8 @@ function handleActionSelect(e: any) {
     switchConnection(conn)
   } else if (action === "断开连接") {
     disconnectConnection(conn)
+  } else if (action === "配置码") {
+    openConfigCodePopup(conn)
   } else if (action === "编辑") {
     editConnection(conn, currentConnectionIndex.value)
   } else if (action === "删除") {
@@ -565,6 +611,43 @@ function handleActionSelect(e: any) {
   }
 
   showActionSheet.value = false
+}
+
+function openConfigCodePopup(conn: ConnectionItem) {
+  try {
+    const code = buildConnectionConfigCode(conn)
+    configCodeValue.value = code
+    configCodeConnectionName.value = conn.name
+    configCodeConnectionMeta.value = getConnectionSubtitle(conn.mode, conn.url)
+    showConfigCodePopup.value = true
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    uni.showToast({
+      title: message || "配置码生成失败",
+      icon: "none",
+      duration: 2500,
+    })
+  }
+}
+
+function closeConfigCodePopup() {
+  showConfigCodePopup.value = false
+  configCodeValue.value = ""
+  configCodeConnectionName.value = ""
+  configCodeConnectionMeta.value = ""
+}
+
+function copyConfigCode() {
+  if (!configCodeValue.value) return
+  uni.setClipboardData({
+    data: configCodeValue.value,
+    success: () => {
+      uni.showToast({ title: "已复制配置码", icon: "success" })
+    },
+    fail: () => {
+      uni.showToast({ title: "复制失败", icon: "none" })
+    },
+  })
 }
 
 async function activateConnection(conn: ConnectionItem) {
@@ -1122,6 +1205,7 @@ function persistConnectedMap() {
 .connection-card,
 .connections-add-card,
 .connections-guide-card,
+.connections-config-code,
 .connections-sheet,
 .connections-tutorial {
   border-radius: 32rpx;
@@ -1446,6 +1530,84 @@ function persistConnectedMap() {
   color: #ffffff;
 }
 
+.connections-config-code {
+  width: 660rpx;
+  max-width: calc(100vw - 48rpx);
+  padding: 28rpx;
+  background: var(--up-card-bg-color, #ffffff);
+}
+
+.connections-config-code__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18rpx;
+  margin-bottom: 22rpx;
+}
+
+.connections-config-code__heading {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+  min-width: 0;
+}
+
+.connections-config-code__title {
+  font-size: 34rpx;
+  font-weight: 700;
+  color: var(--up-main-color, #303133);
+}
+
+.connections-config-code__subtitle,
+.connections-config-code__meta {
+  font-size: 24rpx;
+  line-height: 1.6;
+  color: var(--up-content-color, #606266);
+}
+
+.connections-config-code__connection {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+  margin-bottom: 22rpx;
+  padding: 20rpx;
+  border-radius: 24rpx;
+  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
+  border: 1rpx solid var(--up-border-color, #dadbde);
+}
+
+.connections-config-code__name {
+  font-size: 28rpx;
+  font-weight: 700;
+  color: var(--up-main-color, #303133);
+}
+
+.connections-config-code__qr {
+  display: flex;
+  justify-content: center;
+  margin: 20rpx auto 24rpx;
+  padding: 24rpx;
+  border-radius: 28rpx;
+  background: #ffffff;
+  border: 1rpx solid var(--up-border-color, #dadbde);
+}
+
+.connections-config-code__text {
+  max-height: 180rpx;
+  padding: 18rpx;
+  border-radius: 20rpx;
+  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
+  color: var(--up-content-color, #606266);
+  font-size: 20rpx;
+  line-height: 1.5;
+  word-break: break-all;
+  overflow: hidden;
+}
+
+.connections-config-code__actions {
+  margin-top: 22rpx;
+}
+
 .connections-sheet {
   padding: 18rpx 24rpx 28rpx;
   background: var(--up-card-bg-color, #ffffff);
@@ -1599,6 +1761,11 @@ function persistConnectedMap() {
   .connections-tutorial {
     width: 100%;
     padding: 22rpx;
+  }
+
+  .connections-config-code {
+    width: 100%;
+    padding: 24rpx;
   }
 }
 </style>
