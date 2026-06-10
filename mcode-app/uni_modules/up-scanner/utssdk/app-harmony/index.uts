@@ -1,0 +1,218 @@
+import { ScanOptions, ScanResult, ScanFailResult } from '../interface.uts';
+import { ScanCodeErrorCodeMap, UniErrorSubject } from '../unierror.uts';
+import camera from '@ohos.multimedia.camera';
+import image from '@ohos.multimedia.image';
+import scanBarcode from '@ohos.scanBarcode';
+import Permissions from '@ohos.abilityAccessCtrl';
+import common from '@ohos.app.ability.common';
+import window from '@ohos.window';
+
+/**
+ * 扫码实现 - HarmonyOS Next
+ */
+export function scanCode(options: ScanOptions) {
+	// 检查相机权限
+	checkCameraPermission().then((granted: boolean) => {
+		if (granted) {
+			startScan(options);
+		} else {
+			const error: ScanFailResult = {
+				errSubject: UniErrorSubject,
+				errCode: 10002,
+				errMsg: ScanCodeErrorCodeMap.get(10002)!
+			};
+			options.fail?.(error);
+			options.complete?.(error);
+		}
+	}).catch((err: Error) => {
+		const error: ScanFailResult = {
+			errSubject: UniErrorSubject,
+			errCode: 10002,
+			errMsg: ScanCodeErrorCodeMap.get(10002)! + ": " + err.message
+		};
+		options.fail?.(error);
+		options.complete?.(error);
+	});
+}
+
+/**
+ * 检查相机权限
+ */
+async function checkCameraPermission(): Promise<boolean> {
+	try {
+		const context = getContext(this) as common.UIAbilityContext;
+		const atManager = Permissions.createAtManager();
+
+		// 检查权限
+		const result = await atManager.checkAccessToken(
+			context.applicationInfo.accessTokenId,
+			'ohos.permission.CAMERA'
+		);
+
+		if (result === Permissions.GrantStatus.PERMISSION_GRANTED) {
+			return true;
+		}
+
+		// 请求权限
+		const permissions: Array<Permissions.Permissions> = ['ohos.permission.CAMERA'];
+		const requestResult = await atManager.requestPermissionsFromUser(context, permissions);
+
+		return requestResult.authResults[0] === Permissions.GrantStatus.PERMISSION_GRANTED;
+	} catch (err) {
+		console.error('检查相机权限失败:', err);
+		return false;
+	}
+}
+
+/**
+ * 启动扫码
+ */
+async function startScan(options: ScanOptions) {
+	try {
+		const context = getContext(this) as common.UIAbilityContext;
+
+		// 创建相机管理器
+		const cameraManager = camera.getCameraManager(context);
+		const cameras = cameraManager.getSupportedCameras();
+
+		if (cameras.length === 0) {
+			throw new Error('没有可用的相机');
+		}
+
+		// 使用后置摄像头
+		const backCamera = cameras.find((cam: camera.CameraDevice) =>
+			cam.cameraPosition === camera.CameraPosition.CAMERA_POSITION_BACK
+		) || cameras[0];
+
+		// 创建相机输入
+		const cameraInput = cameraManager.createCameraInput(backCamera);
+		await cameraInput.open();
+
+		// 创建预览输出
+		const previewProfile = cameraManager.getSupportedPreviewProfiles(backCamera)[0];
+		const previewOutput = cameraManager.createPreviewOutput(previewProfile);
+
+		// 创建照片输出用于扫码
+		const photoProfile = cameraManager.getSupportedPhotoProfiles(backCamera)[0];
+		const photoOutput = cameraManager.createPhotoOutput(photoProfile);
+
+		// 创建会话
+		const captureSession = cameraManager.createCaptureSession();
+		captureSession.beginConfig();
+		captureSession.addInput(cameraInput);
+		captureSession.addOutput(previewOutput);
+		captureSession.addOutput(photoOutput);
+		await captureSession.commitConfig();
+		await captureSession.start();
+
+		// 设置照片回调
+		photoOutput.on('photoAvailable', async (errCode: number, photo: image.Photo) => {
+			if (errCode === 0 && photo) {
+				try {
+					// 获取图像数据
+					const imageData = await photo.getComponent(image.ComponentType.JPEG);
+
+					// 使用扫码服务识别
+					const scanTypes = getScanTypes(options.scanType);
+					const scanResult = await scanBarcode.decode(imageData.byteBuffer, scanTypes);
+
+					if (scanResult && scanResult.length > 0) {
+						const result: ScanResult = {
+							content: scanResult[0].originalValue,
+							scanType: getBarcodeTypeName(scanResult[0].scanType)
+						};
+
+						options.success?.(result);
+						options.complete?.(result);
+
+						// 停止会话
+						await captureSession.stop();
+						await captureSession.release();
+						await cameraInput.close();
+					} else {
+						// 继续扫描
+						await photoOutput.capture();
+					}
+				} catch (err) {
+					console.error('扫码识别失败:', err);
+					// 继续扫描
+					await photoOutput.capture();
+				}
+			}
+		});
+
+		// 开始拍照扫码
+		await photoOutput.capture();
+
+	} catch (err) {
+		const error: ScanFailResult = {
+			errSubject: UniErrorSubject,
+			errCode: 10003,
+			errMsg: ScanCodeErrorCodeMap.get(10003)! + ": " + (err as Error).message
+		};
+		options.fail?.(error);
+		options.complete?.(error);
+	}
+}
+
+/**
+ * 获取扫码类型
+ */
+function getScanTypes(scanTypes?: Array<string>): Array<scanBarcode.ScanType> {
+	const types: Array<scanBarcode.ScanType> = [];
+	const defaultTypes = scanTypes || ['qrCode', 'barCode'];
+
+	for (const type of defaultTypes) {
+		if (type === 'qrCode') {
+			types.push(scanBarcode.ScanType.QR_CODE);
+		} else if (type === 'barCode') {
+			types.push(scanBarcode.ScanType.EAN_13);
+			types.push(scanBarcode.ScanType.EAN_8);
+			types.push(scanBarcode.ScanType.CODE_128);
+			types.push(scanBarcode.ScanType.CODE_39);
+			types.push(scanBarcode.ScanType.CODE_93);
+			types.push(scanBarcode.ScanType.UPC_A);
+			types.push(scanBarcode.ScanType.UPC_E);
+		} else if (type === 'datamatrix') {
+			types.push(scanBarcode.ScanType.DATA_MATRIX);
+		} else if (type === 'pdf417') {
+			types.push(scanBarcode.ScanType.PDF_417);
+		}
+	}
+
+	if (types.length === 0) {
+		types.push(scanBarcode.ScanType.QR_CODE);
+	}
+
+	return types;
+}
+
+/**
+ * 获取条码类型名称
+ */
+function getBarcodeTypeName(scanType: scanBarcode.ScanType): string {
+	switch (scanType) {
+		case scanBarcode.ScanType.QR_CODE:
+			return 'QR_CODE';
+		case scanBarcode.ScanType.EAN_13:
+			return 'EAN_13';
+		case scanBarcode.ScanType.EAN_8:
+			return 'EAN_8';
+		case scanBarcode.ScanType.CODE_128:
+			return 'CODE_128';
+		case scanBarcode.ScanType.CODE_39:
+			return 'CODE_39';
+		case scanBarcode.ScanType.CODE_93:
+			return 'CODE_93';
+		case scanBarcode.ScanType.UPC_A:
+			return 'UPC_A';
+		case scanBarcode.ScanType.UPC_E:
+			return 'UPC_E';
+		case scanBarcode.ScanType.PDF_417:
+			return 'PDF_417';
+		case scanBarcode.ScanType.DATA_MATRIX:
+			return 'DATA_MATRIX';
+		default:
+			return 'UNKNOWN';
+	}
+}

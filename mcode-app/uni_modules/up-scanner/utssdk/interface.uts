@@ -1,0 +1,76 @@
+/**
+ * 扫码结果
+ */
+export type ScanResult = {
+	/**
+	 * 扫描到的内容
+	 */
+	content: string;
+	/**
+	 * 二维码类型
+	 */
+	scanType: string;
+	/**
+	 * 字符集
+	 */
+	charSet?: string;
+}
+
+/**
+ * 扫码失败错误码
+ */
+export type ScanErrorCode =
+	| 10001  // 用户取消
+	| 10002  // 相机权限被拒绝
+	| 10003  // 相机初始化失败
+	| 10004  // 扫码失败
+	| 10005  // 不支持的平台
+
+/**
+ * 扫码失败回调参数
+ */
+export interface ScanFailResult extends IUniError {
+	errCode: ScanErrorCode;
+}
+
+/**
+ * 扫码配置选项
+ */
+export type ScanOptions = {
+	/**
+	 * 是否只识别相册中的二维码，不打开相机
+	 * @defaultValue false
+	 */
+	onlyFromCamera?: boolean;
+	/**
+	 * 扫码类型，支持的类型：
+	 * - qrCode: 二维码
+	 * - barCode: 条形码
+	 * - datamatrix: Data Matrix码
+	 * - pdf417: PDF417码
+	 * @defaultValue ['qrCode', 'barCode']
+	 */
+	scanType?: Array<string>;
+	/**
+	 * 是否开启闪光灯
+	 * @defaultValue false
+	 */
+	autoZoom?: boolean;
+	/**
+	 * 成功回调
+	 */
+	success?: (res: ScanResult) => void;
+	/**
+	 * 失败回调
+	 */
+	fail?: (res: ScanFailResult) => void;
+	/**
+	 * 完成回调
+	 */
+	complete?: (res: any) => void;
+}
+
+/**
+ * 扫码 API
+ */
+export type ScanCode = (options: ScanOptions) => void;

@@ -259,11 +259,22 @@
         </view>
 
         <view v-else class="connections-sheet__scan">
-          <u-empty mode="coupon" text="扫码功能暂未支持">
-            <template #bottom>
-              <text class="connections-sheet__tip">敬请期待</text>
-            </template>
-          </u-empty>
+          <view class="connections-sheet__scan-panel">
+            <view class="connections-sheet__scan-copy">
+              <text class="connections-sheet__scan-title">扫码导入已有连接</text>
+              <text class="connections-sheet__scan-desc">
+                支持扫描当前连接配置码，自动导入直连或中继配置。
+              </text>
+            </view>
+
+            <u-button type="primary" block :loading="scanImporting" @click="startScanImport">
+              扫码导入连接
+            </u-button>
+
+            <text class="connections-sheet__tip">
+              H5 暂不支持扫码，请使用 App 端。
+            </text>
+          </view>
         </view>
       </view>
     </u-popup>
@@ -322,7 +333,8 @@ import { useAuthStore } from "@/stores/auth"
 import { createGateway } from "@/services/gateway"
 import type { RelaySessionInfo } from "@/services/gateway"
 import { buildWebSocketProtocols } from "@/services/gateway/wsProtocol"
-import { buildConnectionConfigCode } from "./connectionConfigCode"
+import { scanCode } from "@/../uni_modules/up-scanner"
+import { buildConnectionConfigCode, parseConnectionConfigCodeToConnection } from "./connectionConfigCode"
 
 declare const plus: any
 
@@ -334,6 +346,7 @@ const showAddPopup = ref(false)
 const showTutorialPopup = ref(false)
 const subsectionIndex = ref(0)
 const loading = ref(false)
+const scanImporting = ref(false)
 const showActionSheet = ref(false)
 const showConfigCodePopup = ref(false)
 const currentConnectionIndex = ref(-1)
@@ -553,6 +566,7 @@ function showConnectionMenu(conn: ConnectionItem, index: number) {
 
 function openAddPopup() {
   resetForm()
+  subsectionIndex.value = 0
   showAddPopup.value = true
 }
 
@@ -684,28 +698,13 @@ async function switchConnection(conn: ConnectionItem) {
 
       auth.setDirectMode(conn.url, conn.directToken)
     } else {
-      if (!conn.pairCode || !conn.pairSecret) {
+      const session = await ensureRelaySession(conn)
+      if (!session?.accessToken) {
         uni.showToast({ title: "连接信息不完整", icon: "none" })
         return
       }
 
-      const gateway = createGateway({
-        mode: "relay",
-        relayUrl: conn.url,
-        session: { accessToken: "" },
-      })
-
-      const session = await gateway.pair({
-        relayUrl: conn.url,
-        code: conn.pairCode,
-        secret: conn.pairSecret,
-      })
-
-      if (session) {
-        conn.relaySession = session
-        saveConnection(conn)
-        auth.setRelayMode(conn.url, session)
-      }
+      auth.setRelayMode(conn.url, session)
     }
 
     setConnectionConnected(conn, true)
@@ -781,6 +780,7 @@ function deleteConnection(index: number) {
 
 function resetForm() {
   editingConnectionKey.value = ""
+  subsectionIndex.value = 0
   form.value = {
     name: "",
     mode: "direct",
@@ -790,6 +790,59 @@ function resetForm() {
     pairCode: "",
     pairSecret: "",
   }
+}
+
+function canUseScanner() {
+  // #ifdef APP-PLUS
+  return true
+  // #endif
+  return false
+}
+
+function startScanImport() {
+  if (scanImporting.value) return
+  if (!canUseScanner()) {
+    uni.showToast({ title: "当前平台暂不支持扫码", icon: "none" })
+    return
+  }
+
+  scanImporting.value = true
+  scanCode({
+    scanType: ["qrCode"],
+    autoZoom: true,
+    success: (res) => {
+      try {
+        const imported = parseConnectionConfigCodeToConnection(res.content || "")
+        const nextConnection: ConnectionItem = {
+          ...imported,
+          active: true,
+        }
+        saveConnection(nextConnection)
+        loadConnections()
+        closeAddPopup()
+        uni.showToast({ title: "连接已导入", icon: "success" })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        uni.showToast({
+          title: message || "配置码无效",
+          icon: "none",
+          duration: 2500,
+        })
+      }
+    },
+    fail: (error) => {
+      const errCode = Number(error?.errCode || 0)
+      if (errCode === 10001) return
+      uni.showToast({
+        title: error?.errMsg || "扫码失败",
+        icon: "none",
+        duration: 2500,
+      })
+    },
+    complete: () => {
+      scanImporting.value = false
+    },
+  })
 }
 
 function normalizeBaseUrl(url: string): string {
@@ -1665,6 +1718,34 @@ function persistConnectedMap() {
 .connections-sheet__form,
 .connections-sheet__scan {
   padding-bottom: 8rpx;
+}
+
+.connections-sheet__scan-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 20rpx;
+  padding: 24rpx;
+  border-radius: 24rpx;
+  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
+  border: 1rpx solid var(--up-border-color, #dadbde);
+}
+
+.connections-sheet__scan-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 10rpx;
+}
+
+.connections-sheet__scan-title {
+  font-size: 28rpx;
+  font-weight: 700;
+  color: var(--up-main-color, #303133);
+}
+
+.connections-sheet__scan-desc {
+  font-size: 24rpx;
+  line-height: 1.6;
+  color: var(--up-content-color, #606266);
 }
 
 .connections-sheet__actions {

@@ -1,0 +1,17 @@
+import { ScanErrorCode } from "./interface.uts"
+
+/**
+ * 错误主题
+ */
+export const UniErrorSubject = 'up-scanner';
+
+/**
+ * 错误信息映射表
+ */
+export const ScanCodeErrorCodeMap : Map<ScanErrorCode, string> = new Map([
+	[10001, '用户取消扫码'],
+	[10002, '相机权限被拒绝'],
+	[10003, '相机初始化失败'],
+	[10004, '扫码失败'],
+	[10005, '不支持的平台']
+]);
