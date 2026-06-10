@@ -1,6 +1,6 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { usePetStore } from '@/stores/pet'
-import * as ttsModule from '@/../uni_modules/uts-plugin-tts'
+import * as ttsModule from '@/uni_modules/up-tts'
 import { isPetSpeechAvailable, speakPetText, stopPetSpeech } from '@/services/petVoice'
 
 type TtsMock = typeof ttsModule & {
@@ -31,8 +31,11 @@ describe('pet voice service', () => {
     expect(speakPetText('这次做得不错。')).toBe(true)
     expect(tts.stop).toHaveBeenCalledTimes(1)
     expect(tts.speak).toHaveBeenCalledWith(
-      expect.objectContaining({ text: '这次做得不错。', language: 'zh-CN' }),
-      expect.objectContaining({ onError: expect.any(Function) }),
+      expect.objectContaining({
+        text: '这次做得不错。',
+        language: 'zh-CN',
+        onError: expect.any(Function),
+      }),
     )
   })
 

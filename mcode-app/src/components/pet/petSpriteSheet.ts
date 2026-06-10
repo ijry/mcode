@@ -1,0 +1,148 @@
+export const petSpriteSheet = `<svg xmlns="http://www.w3.org/2000/svg" style="display:none">
+  <!-- FOX -->
+  <symbol id="fox-idle" viewBox="0 0 48 48">
+    <circle cx="24" cy="28" r="16" fill="#FF6B35"/>
+    <polygon points="12,16 8,4 18,14" fill="#FF6B35"/>
+    <polygon points="36,16 40,4 30,14" fill="#FF6B35"/>
+    <circle cx="18" cy="26" r="2.5" fill="#fff"/>
+    <circle cx="30" cy="26" r="2.5" fill="#fff"/>
+    <circle cx="18" cy="26" r="1.5" fill="#333"/>
+    <circle cx="30" cy="26" r="1.5" fill="#333"/>
+    <ellipse cx="24" cy="33" rx="3" ry="2" fill="#E65100"/>
+  </symbol>
+  <symbol id="fox-sleeping" viewBox="0 0 48 48">
+    <circle cx="24" cy="28" r="16" fill="#FF6B35"/>
+    <polygon points="12,16 8,4 18,14" fill="#FF6B35"/>
+    <polygon points="36,16 40,4 30,14" fill="#FF6B35"/>
+    <line x1="15" y1="26" x2="21" y2="26" stroke="#333" stroke-width="2" stroke-linecap="round"/>
+    <line x1="27" y1="26" x2="33" y2="26" stroke="#333" stroke-width="2" stroke-linecap="round"/>
+    <ellipse cx="24" cy="33" rx="2" ry="1.5" fill="#E65100"/>
+    <text x="38" y="18" font-size="8" fill="#666">z</text>
+    <text x="42" y="12" font-size="6" fill="#999">z</text>
+  </symbol>
+  <symbol id="fox-curious" viewBox="0 0 48 48">
+    <circle cx="24" cy="28" r="16" fill="#FF6B35"/>
+    <polygon points="12,16 8,4 18,14" fill="#FF6B35"/>
+    <polygon points="36,16 40,4 30,14" fill="#FF6B35"/>
+    <circle cx="18" cy="25" r="3" fill="#fff"/>
+    <circle cx="30" cy="25" r="3" fill="#fff"/>
+    <circle cx="19" cy="25" r="1.5" fill="#333"/>
+    <circle cx="31" cy="25" r="1.5" fill="#333"/>
+    <ellipse cx="24" cy="34" rx="2" ry="1" fill="#E65100"/>
+    <text x="20" y="14" font-size="10" fill="#FFB300">?</text>
+  </symbol>
+  <symbol id="fox-busy" viewBox="0 0 48 48">
+    <circle cx="24" cy="28" r="16" fill="#FF6B35"/>
+    <polygon points="12,16 8,4 18,14" fill="#FF6B35"/>
+    <polygon points="36,16 40,4 30,14" fill="#FF6B35"/>
+    <circle cx="18" cy="26" r="2" fill="#fff"/>
+    <circle cx="30" cy="26" r="2" fill="#fff"/>
+    <circle cx="18" cy="26" r="1" fill="#333"/>
+    <circle cx="30" cy="26" r="1" fill="#333"/>
+    <line x1="20" y1="33" x2="28" y2="33" stroke="#E65100" stroke-width="2" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="fox-alert" viewBox="0 0 48 48">
+    <circle cx="24" cy="28" r="16" fill="#FF6B35"/>
+    <polygon points="12,16 8,2 18,14" fill="#FF6B35"/>
+    <polygon points="36,16 40,2 30,14" fill="#FF6B35"/>
+    <circle cx="18" cy="25" r="3.5" fill="#fff"/>
+    <circle cx="30" cy="25" r="3.5" fill="#fff"/>
+    <circle cx="18" cy="25" r="2" fill="#333"/>
+    <circle cx="30" cy="25" r="2" fill="#333"/>
+    <ellipse cx="24" cy="34" rx="3" ry="2" fill="#E65100"/>
+    <text x="20" y="12" font-size="12" fill="#F44336" font-weight="bold">!</text>
+  </symbol>
+  <symbol id="fox-happy" viewBox="0 0 48 48">
+    <circle cx="24" cy="28" r="16" fill="#FF6B35"/>
+    <polygon points="12,16 8,4 18,14" fill="#FF6B35"/>
+    <polygon points="36,16 40,4 30,14" fill="#FF6B35"/>
+    <path d="M15,25 Q18,22 21,25" stroke="#333" stroke-width="2" fill="none" stroke-linecap="round"/>
+    <path d="M27,25 Q30,22 33,25" stroke="#333" stroke-width="2" fill="none" stroke-linecap="round"/>
+    <path d="M18,32 Q24,38 30,32" stroke="#E65100" stroke-width="2" fill="none" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="fox-sad" viewBox="0 0 48 48">
+    <circle cx="24" cy="28" r="16" fill="#FF6B35"/>
+    <polygon points="12,16 8,4 18,14" fill="#FF6B35"/>
+    <polygon points="36,16 40,4 30,14" fill="#FF6B35"/>
+    <circle cx="18" cy="26" r="2.5" fill="#fff"/>
+    <circle cx="30" cy="26" r="2.5" fill="#fff"/>
+    <circle cx="18" cy="27" r="1.5" fill="#333"/>
+    <circle cx="30" cy="27" r="1.5" fill="#333"/>
+    <path d="M19,34 Q24,30 29,34" stroke="#E65100" stroke-width="2" fill="none" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="fox-excited" viewBox="0 0 48 48">
+    <circle cx="24" cy="28" r="16" fill="#FF6B35"/>
+    <polygon points="12,16 8,4 18,14" fill="#FF6B35"/>
+    <polygon points="36,16 40,4 30,14" fill="#FF6B35"/>
+    <path d="M15,24 Q18,21 21,24" stroke="#333" stroke-width="2" fill="none" stroke-linecap="round"/>
+    <path d="M27,24 Q30,21 33,24" stroke="#333" stroke-width="2" fill="none" stroke-linecap="round"/>
+    <path d="M18,32 Q24,39 30,32" stroke="#E65100" stroke-width="2" fill="#FFE0B2" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="fox-bored" viewBox="0 0 48 48">
+    <circle cx="24" cy="28" r="16" fill="#FF6B35"/>
+    <polygon points="12,16 8,4 18,14" fill="#FF6B35"/>
+    <polygon points="36,16 40,4 30,14" fill="#FF6B35"/>
+    <circle cx="18" cy="26" r="2" fill="#fff"/>
+    <circle cx="30" cy="26" r="2" fill="#fff"/>
+    <circle cx="18" cy="26" r="1" fill="#333"/>
+    <circle cx="30" cy="26" r="1" fill="#333"/>
+    <ellipse cx="24" cy="34" rx="3" ry="2.5" fill="#E65100"/>
+  </symbol>
+
+  <!-- OWL -->
+  <symbol id="owl-idle" viewBox="0 0 48 48">
+    <circle cx="24" cy="28" r="16" fill="#795548"/>
+    <circle cx="18" cy="24" r="6" fill="#D7CCC8"/>
+    <circle cx="30" cy="24" r="6" fill="#D7CCC8"/>
+    <circle cx="18" cy="24" r="3" fill="#3E2723"/>
+    <circle cx="30" cy="24" r="3" fill="#3E2723"/>
+    <polygon points="24,30 22,34 26,34" fill="#FF8F00"/>
+  </symbol>
+
+  <!-- OTTER -->
+  <symbol id="otter-idle" viewBox="0 0 48 48">
+    <ellipse cx="24" cy="28" rx="16" ry="14" fill="#8D6E63"/>
+    <ellipse cx="24" cy="32" rx="10" ry="8" fill="#BCAAA4"/>
+    <circle cx="18" cy="24" r="2.5" fill="#fff"/>
+    <circle cx="30" cy="24" r="2.5" fill="#fff"/>
+    <circle cx="18" cy="24" r="1.5" fill="#4E342E"/>
+    <circle cx="30" cy="24" r="1.5" fill="#4E342E"/>
+    <ellipse cx="24" cy="30" rx="2" ry="1.5" fill="#4E342E"/>
+  </symbol>
+
+  <!-- OCTOPUS -->
+  <symbol id="octopus-idle" viewBox="0 0 48 48">
+    <ellipse cx="24" cy="22" rx="14" ry="12" fill="#E040FB"/>
+    <circle cx="19" cy="20" r="3" fill="#fff"/>
+    <circle cx="29" cy="20" r="3" fill="#fff"/>
+    <circle cx="19" cy="20" r="1.5" fill="#7B1FA2"/>
+    <circle cx="29" cy="20" r="1.5" fill="#7B1FA2"/>
+    <path d="M10,32 Q12,40 16,34" stroke="#E040FB" stroke-width="3" fill="none" stroke-linecap="round"/>
+    <path d="M16,34 Q20,42 24,34" stroke="#E040FB" stroke-width="3" fill="none" stroke-linecap="round"/>
+    <path d="M24,34 Q28,42 32,34" stroke="#E040FB" stroke-width="3" fill="none" stroke-linecap="round"/>
+    <path d="M32,34 Q36,40 38,32" stroke="#E040FB" stroke-width="3" fill="none" stroke-linecap="round"/>
+  </symbol>
+
+  <!-- CACTUS -->
+  <symbol id="cactus-idle" viewBox="0 0 48 48">
+    <rect x="18" y="12" width="12" height="28" rx="6" fill="#66BB6A"/>
+    <rect x="6" y="20" width="10" height="6" rx="3" fill="#66BB6A"/>
+    <rect x="32" y="16" width="10" height="6" rx="3" fill="#66BB6A"/>
+    <line x1="6" y1="23" x2="18" y2="23" stroke="#66BB6A" stroke-width="4"/>
+    <line x1="30" y1="19" x2="42" y2="19" stroke="#66BB6A" stroke-width="4"/>
+    <circle cx="21" cy="22" r="1.5" fill="#2E7D32"/>
+    <circle cx="27" cy="22" r="1.5" fill="#2E7D32"/>
+    <path d="M22,27 Q24,29 26,27" stroke="#2E7D32" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+  </symbol>
+
+  <!-- GHOST -->
+  <symbol id="ghost-idle" viewBox="0 0 48 48">
+    <path d="M12,38 L12,22 Q12,8 24,8 Q36,8 36,22 L36,38 L32,34 L28,38 L24,34 L20,38 L16,34 Z" fill="#B0BEC5"/>
+    <circle cx="19" cy="22" r="3" fill="#fff"/>
+    <circle cx="29" cy="22" r="3" fill="#fff"/>
+    <circle cx="19" cy="22" r="1.5" fill="#546E7A"/>
+    <circle cx="29" cy="22" r="1.5" fill="#546E7A"/>
+    <ellipse cx="24" cy="28" rx="2" ry="1.5" fill="#546E7A"/>
+  </symbol>
+</svg>
+`

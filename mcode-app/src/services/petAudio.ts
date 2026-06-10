@@ -2,6 +2,29 @@ const PET_TAP_AUDIO_SRC = '/static/pets/pet-tap.wav'
 
 let tapAudioContext: UniApp.InnerAudioContext | null = null
 
+function canSetObeyMuteSwitch(context: UniApp.InnerAudioContext): boolean {
+  let target: object | null = context as object
+
+  while (target) {
+    const descriptor = Object.getOwnPropertyDescriptor(target, 'obeyMuteSwitch')
+    if (descriptor) {
+      return descriptor.writable === true || typeof descriptor.set === 'function'
+    }
+
+    target = Object.getPrototypeOf(target)
+  }
+
+  return false
+}
+
+function tryDisableMuteSwitch(context: UniApp.InnerAudioContext): void {
+  if (!canSetObeyMuteSwitch(context)) {
+    return
+  }
+
+  context.obeyMuteSwitch = false
+}
+
 function getTapAudioContext(): UniApp.InnerAudioContext | null {
   if (tapAudioContext) {
     return tapAudioContext
@@ -13,7 +36,7 @@ function getTapAudioContext(): UniApp.InnerAudioContext | null {
 
   const context = uni.createInnerAudioContext()
   context.autoplay = false
-  context.obeyMuteSwitch = false
+  tryDisableMuteSwitch(context)
   context.src = PET_TAP_AUDIO_SRC
   context.onError((error) => {
     console.warn('[petAudio] tap sound failed', error)

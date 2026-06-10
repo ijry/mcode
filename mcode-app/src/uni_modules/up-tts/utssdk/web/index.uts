@@ -1,0 +1,122 @@
+import { TTSOptions, TTSVoice, Speak, Stop, Pause, Resume, IsSpeaking, GetVoices, SetVoice, IsAvailable } from "../interface.uts"
+
+function invokeCallback(callback: any, arg?: any): void {
+  if (callback == null) return
+  if (typeof callback === "function") {
+    if (arg == null) {
+      callback()
+    } else {
+      callback(arg)
+    }
+    return
+  }
+  if (typeof callback.invoke === "function") {
+    if (arg == null) {
+      callback.invoke()
+    } else {
+      callback.invoke(arg)
+    }
+  }
+}
+
+export const speak: Speak = function (options: TTSOptions): void {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+    invokeCallback(options.onError, "Web Speech API not supported")
+    return
+  }
+
+  window.speechSynthesis.cancel()
+
+  const utterance = new SpeechSynthesisUtterance(options.text)
+
+  if (options.rate != null) {
+    utterance.rate = options.rate * 2
+  }
+
+  if (options.pitch != null) {
+    utterance.pitch = options.pitch
+  }
+
+  if (options.volume != null) {
+    utterance.volume = options.volume
+  }
+
+  if (options.language != null) {
+    utterance.lang = options.language
+  } else {
+    utterance.lang = 'zh-CN'
+  }
+
+  utterance.onstart = () => {
+    invokeCallback(options.onStart)
+  }
+
+  utterance.onend = () => {
+    invokeCallback(options.onComplete)
+  }
+
+  utterance.onerror = (event) => {
+    invokeCallback(options.onError, "TTS error: " + event.error)
+  }
+
+  utterance.onboundary = (event) => {
+    if (event.charIndex != null && options.text.length > 0) {
+      const progress = event.charIndex / options.text.length
+      invokeCallback(options.onProgress, progress)
+    }
+  }
+
+  window.speechSynthesis.speak(utterance)
+}
+
+export const stop: Stop = function (): void {
+  if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+    window.speechSynthesis.cancel()
+  }
+}
+
+export const pause: Pause = function (): void {
+  if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+    window.speechSynthesis.pause()
+  }
+}
+
+export const resume: Resume = function (): void {
+  if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+    window.speechSynthesis.resume()
+  }
+}
+
+export const isSpeaking: IsSpeaking = function (): boolean {
+  if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+    return window.speechSynthesis.speaking
+  }
+  return false
+}
+
+export const getVoices: GetVoices = function (): TTSVoice[] {
+  const voices: TTSVoice[] = []
+
+  if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+    const availableVoices = window.speechSynthesis.getVoices()
+
+    for (const voice of availableVoices) {
+      voices.push({
+        identifier: voice.voiceURI,
+        name: voice.name,
+        language: voice.lang,
+        quality: voice.localService ? "high" : "normal"
+      } as TTSVoice)
+    }
+  }
+
+  return voices
+}
+
+export const setVoice: SetVoice = function (identifier: string): void {
+  // Web平台在speak时设置voice
+}
+
+export const isAvailable: IsAvailable = function (): boolean {
+  return typeof window !== 'undefined' && 'speechSynthesis' in window
+}

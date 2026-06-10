@@ -52,11 +52,20 @@ function clearAllTimers() {
 function showBubble(trigger: string) {
   const petStore = usePetStore()
   const message = pickBubbleMessage(trigger)
-  if (!message) return null
+  if (!message) {
+    console.warn('[petEngine] no bubble message for trigger', trigger)
+    return null
+  }
 
   if (bubbleTimer) clearTimeout(bubbleTimer)
 
   currentBubble.value = petStore.bubbleMuted ? null : message
+  console.log('[petEngine] showBubble', {
+    trigger,
+    text: message.text,
+    bubbleMuted: petStore.bubbleMuted,
+    voiceEnabled: petStore.voiceEnabled,
+  })
 
   if (petStore.voiceEnabled) {
     speakPetText(message.text)

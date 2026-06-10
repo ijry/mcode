@@ -1,4 +1,4 @@
-# UTS TTS 语音合成插件
+# up-tts 语音合成插件
 
 跨平台TTS（Text-to-Speech）语音合成插件，支持iOS、Android和鸿蒙系统。基于各平台原生TTS API开发，提供统一的调用接口，完全本地化，无需联网。
 
@@ -31,14 +31,14 @@
 3. 选择"导入插件"，选择下载的插件包
 
 ### 方式二：手动安装
-将本插件复制到项目的`uni_modules/uts-plugin-tts`目录下
+将本插件复制到项目的`uni_modules/up-tts`目录下
 
 ## 快速开始
 
 ### 基础用法
 
 ```typescript
-import { speak, stop } from '@/uni_modules/uts-plugin-tts'
+import { speak, stop } from '@/uni_modules/up-tts'
 
 // 简单朗读
 speak({
@@ -70,6 +70,23 @@ speak({
 // 停止朗读
 stop()
 ```
+
+### 推荐入口整理
+
+为了让业务代码稳定使用：
+
+```ts
+import { speak, stop, isAvailable } from '@/uni_modules/up-tts'
+```
+
+建议在项目里补一个桥接文件：
+
+```ts
+// src/uni_modules/up-tts.ts
+export * from '@uni_modules/up-tts'
+```
+
+并为 `@uni_modules/up-tts` 配置路径别名到 `uni_modules/up-tts`。这样插件可以保持独立复用，业务侧导入路径也固定。
 
 ### 完整示例
 
@@ -128,8 +145,8 @@ stop()
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import { speak, stop, pause, resume, isSpeaking, getVoices, isAvailable } from '@/uni_modules/uts-plugin-tts'
-import type { TTSOptions } from '@/uni_modules/uts-plugin-tts'
+import { speak, stop, pause, resume, isSpeaking, getVoices, isAvailable } from '@/uni_modules/up-tts'
+import type { TTSOptions } from '@/uni_modules/up-tts'
 
 const text = ref('你好，这是一个语音合成测试。')
 const rate = ref(0.5)
@@ -252,7 +269,7 @@ const onVolumeChange = (e: any) => {
 **示例:**
 
 ```typescript
-import { speak } from '@/uni_modules/uts-plugin-tts'
+import { speak } from '@/uni_modules/up-tts'
 
 speak({
   text: '你好世界',
@@ -273,7 +290,7 @@ speak({
 停止朗读
 
 ```typescript
-import { stop } from '@/uni_modules/uts-plugin-tts'
+import { stop } from '@/uni_modules/up-tts'
 
 stop()
 ```
@@ -285,7 +302,7 @@ stop()
 **注意:** Android和HarmonyOS不支持真正的暂停，会直接停止
 
 ```typescript
-import { pause } from '@/uni_modules/uts-plugin-tts'
+import { pause } from '@/uni_modules/up-tts'
 
 pause()
 ```
@@ -297,7 +314,7 @@ pause()
 **注意:** Android和HarmonyOS不支持继续，需要重新调用speak
 
 ```typescript
-import { resume } from '@/uni_modules/uts-plugin-tts'
+import { resume } from '@/uni_modules/up-tts'
 
 resume()
 ```
@@ -309,7 +326,7 @@ resume()
 **返回:** `boolean`
 
 ```typescript
-import { isSpeaking } from '@/uni_modules/uts-plugin-tts'
+import { isSpeaking } from '@/uni_modules/up-tts'
 
 if (isSpeaking()) {
   console.log('正在朗读')
@@ -323,7 +340,7 @@ if (isSpeaking()) {
 **返回:** `TTSVoice[]`
 
 ```typescript
-import { getVoices } from '@/uni_modules/uts-plugin-tts'
+import { getVoices } from '@/uni_modules/up-tts'
 
 const voices = getVoices()
 voices.forEach(voice => {
@@ -338,7 +355,7 @@ voices.forEach(voice => {
 **参数:** `identifier: string` - 语音标识符（从getVoices()获取）
 
 ```typescript
-import { getVoices, setVoice } from '@/uni_modules/uts-plugin-tts'
+import { getVoices, setVoice } from '@/uni_modules/up-tts'
 
 const voices = getVoices()
 if (voices.length > 0) {
@@ -353,7 +370,7 @@ if (voices.length > 0) {
 **返回:** `boolean`
 
 ```typescript
-import { isAvailable } from '@/uni_modules/uts-plugin-tts'
+import { isAvailable } from '@/uni_modules/up-tts'
 
 if (!isAvailable()) {
   console.error('TTS不可用')
@@ -483,7 +500,6 @@ A: Android和HarmonyOS不支持真正的暂停/继续，需要保存当前位置
 完整示例代码请查看 `examples` 目录：
 - `basic.vue` - 基础功能示例
 - `multilang.vue` - 多语言示例
-- `continuous.vue` - 连续朗读示例
 
 ## 更新日志
 

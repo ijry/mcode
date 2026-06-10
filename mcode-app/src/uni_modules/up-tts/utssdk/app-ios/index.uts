@@ -1,0 +1,139 @@
+import AVSpeechSynthesizer from 'AVFoundation.AVSpeechSynthesizer'
+import AVSpeechUtterance from 'AVFoundation.AVSpeechUtterance'
+import AVSpeechSynthesisVoice from 'AVFoundation.AVSpeechSynthesisVoice'
+import AVSpeechSynthesizerDelegate from 'AVFoundation.AVSpeechSynthesizerDelegate'
+import AVSpeechBoundary from 'AVFoundation.AVSpeechBoundary'
+import NSRange from 'Foundation.NSRange'
+import { TTSOptions, TTSVoice, Speak, Stop, Pause, Resume, IsSpeaking, GetVoices, SetVoice, IsAvailable } from "../interface.uts"
+
+let synthesizer: AVSpeechSynthesizer | null = null
+let currentCallbacks: TTSOptions | null = null
+let currentUtterance: AVSpeechUtterance | null = null
+
+class TTSSynthesizerDelegate implements AVSpeechSynthesizerDelegate {
+  speechSynthesizer(synthesizer: AVSpeechSynthesizer, @argumentLabel("didStart") utterance: AVSpeechUtterance) {
+    currentCallbacks?.onStart?.invoke()
+  }
+
+  speechSynthesizer(synthesizer: AVSpeechSynthesizer, @argumentLabel("didFinish") utterance: AVSpeechUtterance) {
+    currentCallbacks?.onComplete?.invoke()
+    currentCallbacks = null
+  }
+
+  speechSynthesizer(synthesizer: AVSpeechSynthesizer, @argumentLabel("didCancel") utterance: AVSpeechUtterance) {
+    currentCallbacks?.onError?.invoke("TTS cancelled")
+    currentCallbacks = null
+  }
+
+  speechSynthesizer(
+    synthesizer: AVSpeechSynthesizer,
+    @argumentLabel("willSpeakRangeOfSpeechString") characterRange: NSRange,
+    @argumentLabel("") utterance: AVSpeechUtterance
+  ) {
+    const total = utterance.speechString.count
+    if (total > 0) {
+      const progress = Number(characterRange.location) / Number(total)
+      currentCallbacks?.onProgress?.invoke(progress)
+    }
+  }
+}
+
+/**
+ * 初始化TTS引擎
+ */
+function initTTS(): void {
+  if (synthesizer != null) {
+    return
+  }
+
+  synthesizer = AVSpeechSynthesizer()
+  if (synthesizer != null) {
+    synthesizer.delegate = new TTSSynthesizerDelegate()
+  }
+}
+
+export const speak: Speak = function (options: TTSOptions): void {
+  initTTS()
+
+  if (synthesizer == null) {
+    options.onError?.invoke("TTS not initialized")
+    return
+  }
+
+  currentCallbacks = options
+
+  const utterance = AVSpeechUtterance(options.text)
+  currentUtterance = utterance
+
+  if (options.rate != null) {
+    utterance.rate = options.rate!!.toFloat() * AVSpeechUtteranceDefaultSpeechRate
+  } else {
+    utterance.rate = AVSpeechUtteranceDefaultSpeechRate
+  }
+
+  if (options.pitch != null) {
+    utterance.pitchMultiplier = options.pitch!!.toFloat()
+  }
+
+  if (options.volume != null) {
+    utterance.volume = options.volume!!.toFloat()
+  }
+
+  if (options.language != null) {
+    const voice = AVSpeechSynthesisVoice(options.language!!)
+    if (voice != null) {
+      utterance.voice = voice
+    }
+  } else {
+    const voice = AVSpeechSynthesisVoice("zh-CN")
+    if (voice != null) {
+      utterance.voice = voice
+    }
+  }
+
+  synthesizer?.speak(utterance)
+}
+
+export const stop: Stop = function (): void {
+  synthesizer?.stopSpeaking(AVSpeechBoundary.immediate)
+  currentCallbacks = null
+}
+
+export const pause: Pause = function (): void {
+  synthesizer?.pauseSpeaking(AVSpeechBoundary.immediate)
+}
+
+export const resume: Resume = function (): void {
+  synthesizer?.continueSpeaking()
+}
+
+export const isSpeaking: IsSpeaking = function (): boolean {
+  return synthesizer?.isSpeaking ?? false
+}
+
+export const getVoices: GetVoices = function (): TTSVoice[] {
+  const voices: TTSVoice[] = []
+  const availableVoices = AVSpeechSynthesisVoice.speechVoices()
+
+  for (voice in availableVoices) {
+    const quality = "normal"
+
+    voices.push({
+      identifier: voice.identifier,
+      name: voice.name,
+      language: voice.language,
+      quality: quality
+    } as TTSVoice)
+  }
+
+  return voices
+}
+
+export const setVoice: SetVoice = function (identifier: string): void {
+  // iOS在speak时设置voice
+}
+
+export const isAvailable: IsAvailable = function (): boolean {
+  initTTS()
+  return synthesizer != null
+}

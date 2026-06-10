@@ -1,12 +1,5 @@
-import * as ttsModule from '@/../uni_modules/uts-plugin-tts'
+import { speak, stop, isSpeaking, isAvailable } from '@/uni_modules/up-tts'
 import { usePetStore } from '@/stores/pet'
-
-type TtsApi = {
-  speak?: (options: typeof DEFAULT_OPTIONS & { text: string }, callbacks?: { onError?: (error: string) => void }) => void
-  stop?: () => void
-  isSpeaking?: () => boolean
-  isAvailable?: () => boolean
-}
 
 const DEFAULT_OPTIONS = {
   rate: 0.46,
@@ -15,33 +8,28 @@ const DEFAULT_OPTIONS = {
   language: 'zh-CN',
 }
 
-function resolveTtsApi(): TtsApi {
-  const moduleApi = ttsModule as TtsApi & { TTSModule?: TtsApi }
-  if (typeof moduleApi.speak === 'function') {
-    return moduleApi
-  }
-  if (moduleApi.TTSModule && typeof moduleApi.TTSModule.speak === 'function') {
-    return moduleApi.TTSModule
-  }
-  return {}
-}
+let ttsInitErrorLogged = false
 
 function safeIsAvailable(): boolean {
   try {
-    const api = resolveTtsApi()
-    return typeof api.isAvailable === 'function' && api.isAvailable()
+    return isAvailable()
   } catch (error) {
-    console.warn('[petVoice] availability check failed', error)
+    if (!ttsInitErrorLogged) {
+      ttsInitErrorLogged = true
+      console.warn('[petVoice] availability check failed', error)
+    }
     return false
   }
 }
 
 function safeIsSpeaking(): boolean {
   try {
-    const api = resolveTtsApi()
-    return typeof api.isSpeaking === 'function' && api.isSpeaking()
+    return isSpeaking()
   } catch (error) {
-    console.warn('[petVoice] speaking check failed', error)
+    if (!ttsInitErrorLogged) {
+      ttsInitErrorLogged = true
+      console.warn('[petVoice] speaking check failed', error)
+    }
     return false
   }
 }
@@ -52,9 +40,12 @@ export function isPetSpeechAvailable(): boolean {
 
 export function stopPetSpeech(): void {
   try {
-    resolveTtsApi().stop?.()
+    stop()
   } catch (error) {
-    console.warn('[petVoice] stop failed', error)
+    if (!ttsInitErrorLogged) {
+      ttsInitErrorLogged = true
+      console.warn('[petVoice] stop failed', error)
+    }
   }
 }
 
@@ -62,26 +53,34 @@ export function speakPetText(text: string): boolean {
   const petStore = usePetStore()
   const trimmed = text.trim()
 
-  if (!trimmed || !petStore.voiceEnabled || !safeIsAvailable()) {
+  if (!trimmed || !petStore.voiceEnabled) {
+    console.log('[petVoice] skipped before speak', {
+      hasText: Boolean(trimmed),
+      voiceEnabled: petStore.voiceEnabled,
+    })
     return false
   }
 
   try {
-    const api = resolveTtsApi()
-    if (typeof api.speak !== 'function') {
-      return false
-    }
+    console.log('[petVoice] speak request', {
+      text: trimmed,
+      available: safeIsAvailable(),
+    })
 
     if (safeIsSpeaking()) {
-      api.stop?.()
+      stop()
     }
 
-    api.speak(
+    speak(
       {
         text: trimmed,
         ...DEFAULT_OPTIONS,
-      },
-      {
+        onStart: () => {
+          console.log('[petVoice] onStart')
+        },
+        onComplete: () => {
+          console.log('[petVoice] onComplete')
+        },
         onError: (error) => {
           console.warn('[petVoice] speak failed', error)
         },
@@ -89,7 +88,10 @@ export function speakPetText(text: string): boolean {
     )
     return true
   } catch (error) {
-    console.warn('[petVoice] unexpected speak error', error)
+    if (!ttsInitErrorLogged) {
+      ttsInitErrorLogged = true
+      console.warn('[petVoice] unexpected speak error', error)
+    }
     return false
   }
 }

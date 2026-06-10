@@ -1,8 +1,12 @@
 {
-  "name": "uts-plugin-tts",
+  "id": "up-tts",
+  "name": "up-tts",
+  "displayName": "UP TTS",
   "version": "1.0.0",
   "description": "跨平台TTS语音合成插件，支持iOS、Android和鸿蒙系统",
-  "main": "index.uts",
+  "engines": {
+    "HBuilderX": "^3.6.0"
+  },
   "keywords": [
     "tts",
     "text-to-speech",
@@ -12,6 +16,26 @@
   ],
   "author": "",
   "license": "MIT",
+  "dcloudext": {
+    "type": "uts",
+    "sale": {
+      "regular": {
+        "price": "0.00"
+      },
+      "sourcecode": {
+        "price": "0.00"
+      }
+    },
+    "contact": {
+      "qq": ""
+    },
+    "declaration": {
+      "ads": "无",
+      "data": "插件不采集任何数据",
+      "permissions": "无"
+    },
+    "npmurl": ""
+  },
   "uni_modules": {
     "dependencies": [],
     "encrypt": [],
@@ -22,9 +46,8 @@
       },
       "client": {
         "App": {
-          "app-android": "y",
-          "app-ios": "y",
-          "app-harmony": "y"
+          "app-vue": "y",
+          "app-nvue": "y"
         },
         "H5-mobile": {
           "Safari": "y",

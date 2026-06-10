@@ -15,7 +15,7 @@ module.exports = {
     ],
   },
   moduleNameMapper: {
-    '^@/\\.\\./uni_modules/uts-plugin-tts$': '<rootDir>/tests/mocks/uts-plugin-tts.cjs',
+    '^@/uni_modules/up-tts$': '<rootDir>/tests/mocks/up-tts.cjs',
     '^@/(.*)$': '<rootDir>/src/$1',
   },
   moduleFileExtensions: ['ts', 'js', 'json'],

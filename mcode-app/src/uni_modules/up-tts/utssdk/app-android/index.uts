@@ -1,0 +1,136 @@
+import TextToSpeech from 'android.speech.tts.TextToSpeech'
+import OnInitListener from 'android.speech.tts.TextToSpeech.OnInitListener'
+import Locale from 'java.util.Locale'
+import { TTSOptions, TTSVoice, Speak, Stop, Pause, Resume, IsSpeaking, GetVoices, SetVoice, IsAvailable } from "../interface.uts"
+
+let ttsInstance: TextToSpeech | null = null
+let initialized = false
+let initializing = false
+let pendingOptions: TTSOptions | null = null
+
+function invokeError(options: TTSOptions | null, message: string): void {
+  options?.onError?.invoke(message)
+}
+
+function applyOptions(options: TTSOptions): void {
+  if (ttsInstance == null) {
+    return
+  }
+
+  if (options.rate != null) {
+    ttsInstance!.setSpeechRate(options.rate!.toFloat())
+  }
+
+  if (options.pitch != null) {
+    ttsInstance!.setPitch(options.pitch!.toFloat())
+  }
+
+  if (options.language != null) {
+    ttsInstance!.setLanguage(Locale.forLanguageTag(options.language!))
+  }
+}
+
+function speakNow(options: TTSOptions): void {
+  if (!initialized || ttsInstance == null) {
+    pendingOptions = options
+    return
+  }
+
+  applyOptions(options)
+  options.onStart?.invoke()
+
+  const result = ttsInstance!.speak(
+    options.text,
+    TextToSpeech.QUEUE_FLUSH,
+    null,
+    "up_tts"
+  )
+
+  if (result == TextToSpeech.ERROR) {
+    invokeError(options, "TextToSpeech speak returned ERROR")
+  }
+}
+
+function flushPendingSpeak(): void {
+  if (!initialized || pendingOptions == null) {
+    return
+  }
+
+  const options = pendingOptions!
+  pendingOptions = null
+  speakNow(options)
+}
+
+class TTSInitListener implements OnInitListener {
+  override onInit(status: Int): void {
+    initializing = false
+
+    if (status == TextToSpeech.SUCCESS) {
+      initialized = true
+      ttsInstance?.setLanguage(Locale.forLanguageTag("zh-CN"))
+      flushPendingSpeak()
+      return
+    }
+
+    initialized = false
+    const options = pendingOptions
+    pendingOptions = null
+    invokeError(options, "TextToSpeech init failed")
+  }
+}
+
+function initTTS(): void {
+  if (ttsInstance != null || initializing) {
+    return
+  }
+
+  const context = UTSAndroid.getAppContext()
+  if (context == null) {
+    return
+  }
+
+  initializing = true
+  ttsInstance = new TextToSpeech(context, new TTSInitListener())
+
+  // Android may invoke onInit before the constructor assignment is visible here.
+  flushPendingSpeak()
+}
+
+export const speak: Speak = function (options: TTSOptions): void {
+  pendingOptions = options
+  initTTS()
+
+  if (!initialized) {
+    return
+  }
+
+  speakNow(options)
+}
+
+export const stop: Stop = function (): void {
+  ttsInstance?.stop()
+  pendingOptions = null
+}
+
+export const pause: Pause = function (): void {
+  ttsInstance?.stop()
+}
+
+export const resume: Resume = function (): void {
+}
+
+export const isSpeaking: IsSpeaking = function (): boolean {
+  return ttsInstance?.isSpeaking() ?? false
+}
+
+export const getVoices: GetVoices = function (): TTSVoice[] {
+  return []
+}
+
+export const setVoice: SetVoice = function (_identifier: string): void {
+}
+
+export const isAvailable: IsAvailable = function (): boolean {
+  initTTS()
+  return UTSAndroid.getAppContext() != null
+}

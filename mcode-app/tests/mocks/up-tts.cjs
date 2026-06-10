@@ -2,10 +2,10 @@ let available = true
 let speaking = false
 
 const api = {
-  speak: jest.fn((options, callbacks) => {
+  speak: jest.fn((options) => {
     speaking = true
-    callbacks?.onStart?.()
-    callbacks?.onComplete?.()
+    options?.onStart?.()
+    options?.onComplete?.()
     speaking = false
   }),
   stop: jest.fn(() => {

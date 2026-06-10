@@ -40,14 +40,14 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import TTS from '@/uni_modules/uts-plugin-tts'
+import { speak, stop, pause, resume, isSpeaking, isAvailable } from '@/uni_modules/up-tts'
 
 const status = ref('就绪')
 const ttsStatus = ref('')
 
 // 1. 简单朗读
 const simpleSpeak = () => {
-  TTS.speak({
+  speak({
     text: '你好世界'
   })
 }
@@ -56,7 +56,7 @@ const simpleSpeak = () => {
 const speakWithCallbacks = () => {
   status.value = '准备中...'
 
-  TTS.speak({
+  speak({
     text: '这是一个带回调的语音合成示例，你可以看到朗读的各个状态。'
   }, {
     onStart: () => {
@@ -76,7 +76,7 @@ const speakWithCallbacks = () => {
 
 // 3. 自定义参数朗读
 const speakWithOptions = () => {
-  TTS.speak({
+  speak({
     text: '这是一段快速高音的朗读',
     rate: 0.8,      // 较快语速
     pitch: 1.5,     // 较高音调
@@ -87,27 +87,27 @@ const speakWithOptions = () => {
 
 // 4. 控制朗读
 const startSpeak = () => {
-  TTS.speak({
+  speak({
     text: '这是一段可以控制的朗读内容。你可以暂停、继续或停止它。这段文字比较长，方便测试暂停和继续功能。'
   })
 }
 
 const pauseSpeak = () => {
-  TTS.pause()
+  pause()
 }
 
 const resumeSpeak = () => {
-  TTS.resume()
+  resume()
 }
 
 const stopSpeak = () => {
-  TTS.stop()
+  stop()
 }
 
 // 5. 检查状态
 const checkStatus = () => {
-  const available = TTS.isAvailable()
-  const speaking = TTS.isSpeaking()
+  const available = isAvailable()
+  const speaking = isSpeaking()
 
   ttsStatus.value = `TTS可用: ${available ? '是' : '否'}\n正在朗读: ${speaking ? '是' : '否'}`
 }
