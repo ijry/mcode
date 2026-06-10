@@ -7,6 +7,7 @@ import type {
   ConversationDetail,
   AgentOptionsSnapshot,
   AcpAgentInfo,
+  QuestionAnswer,
 } from "@/types/acp"
 import { useAuthStore } from "@/stores/auth"
 import { createGateway } from "@/services/gateway"
@@ -165,6 +166,21 @@ class AcpApiClient {
       connectionId,
       requestId,
       optionId,
+    })
+  }
+
+  /**
+   * 响应智能体的多选/单选问题
+   */
+  async acpAnswerQuestion(
+    connectionId: string,
+    questionId: string,
+    answer: QuestionAnswer
+  ): Promise<void> {
+    await this.request("/acp_answer_question", {
+      connectionId,
+      questionId,
+      answer,
     })
   }
 
@@ -814,6 +830,32 @@ class AcpApiClient {
             requestId: firstString(record.request_id, record.requestId),
           },
         }
+      case "question_request":
+        {
+          const source = toRecord(record.data) ?? record
+          return {
+            connectionId,
+            type: "question_request",
+            data: {
+              questionId: firstString(source.question_id, source.questionId),
+              questions: Array.isArray(source.questions) ? source.questions : [],
+              createdAt:
+                firstString(source.created_at, source.createdAt) ||
+                new Date().toISOString(),
+            },
+          }
+        }
+      case "question_resolved":
+        {
+          const source = toRecord(record.data) ?? record
+          return {
+            connectionId,
+            type: "question_resolved",
+            data: {
+              questionId: firstString(source.question_id, source.questionId),
+            },
+          }
+        }
       case "claude_sdk_message": {
         const message = toRecord(record.message)
         if (
@@ -895,6 +937,10 @@ function extractErrorText(rawOutput: unknown) {
 
 function mapConnectionStatus(status: string) {
   switch (status) {
+    case "waiting_question":
+      return "waiting_question"
+    case "waiting_permission":
+      return "waiting_permission"
     case "prompting":
       return "thinking"
     case "error":

@@ -10,6 +10,7 @@ import type {
   ContentPart,
   PermissionRequest,
   PermissionOption,
+  PendingQuestionState,
   ApiRetryEvent,
   RuntimeErrorEvent,
 } from "@/types/acp"
@@ -61,6 +62,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         inputErrorMessage: null,
         apiRetry: null,
         pendingPermission: null,
+        pendingQuestion: null,
         lastAppliedSeq: null,
         externalTurnBackfillInFlight: false,
         externalTurnBackfillLastAttemptAt: 0,
@@ -258,6 +260,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       session.liveMessage = normalizedLiveMessage
     }
     session.pendingPermission = normalizePendingPermission(snapshot?.pending_permission)
+    session.pendingQuestion = normalizePendingQuestion(snapshot?.pending_question)
     session.status = deriveRuntimeStatus(snapshot, normalizedLiveMessage ?? session.liveMessage)
     session.inputErrorMessage = deriveRuntimeError(snapshot)
     session.apiRetry = null
@@ -313,6 +316,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     } else {
       session.liveMessage = null
       session.pendingPermission = null
+      session.pendingQuestion = null
       try {
         await calibrateAfterReplayGap(conversationId)
         session.localTurns = await reloadLocalTurns(session)
@@ -329,6 +333,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
 
     session.status = "idle"
     session.pendingPermission = null
+    session.pendingQuestion = null
     session.stats.turnCount++
   }
 
@@ -350,6 +355,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         session.inputErrorMessage = null
         session.apiRetry = null
         session.pendingPermission = null
+        session.pendingQuestion = null
         appendLiveContent(
           session.conversationId,
           event.data.delta,
@@ -363,6 +369,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         session.inputErrorMessage = null
         session.apiRetry = null
         session.pendingPermission = null
+        session.pendingQuestion = null
         const currentLiveMessage = session.liveMessage?.isPlaceholderThinking
           ? clearPlaceholderLiveMessage(session) ?? createLiveMessage()
           : session.liveMessage ?? createLiveMessage()
@@ -388,6 +395,9 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
 
       case "tool_call_update": {
         session.pendingPermission = null
+        if (event.data.status === "completed" || event.data.status === "error") {
+          session.pendingQuestion = null
+        }
         if (event.data.status === "error") {
           session.status = "error"
         } else {
@@ -425,7 +435,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
             session.status = "error"
             session.inputErrorMessage =
               firstString(event.data.message) || session.inputErrorMessage || "会话运行失败"
-          } else if (event.data.status === "idle" && !session.liveMessage && !session.pendingPermission) {
+          } else if (event.data.status === "idle" && !session.liveMessage && !session.pendingPermission && !session.pendingQuestion) {
             session.status = session.connectionId ? "connected" : "idle"
             session.inputErrorMessage = null
             session.apiRetry = null
@@ -451,6 +461,9 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         if (event.data.status !== "waiting_permission") {
           session.pendingPermission = null
         }
+        if (event.data.status !== "waiting_question") {
+          session.pendingQuestion = null
+        }
         maybeBackfillExternalUserTurn(session, "status_changed")
         syncManagedSendPermission(session.conversationId)
         break
@@ -459,7 +472,17 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         session.status = "waiting_permission"
         session.inputErrorMessage = null
         session.pendingPermission = normalizePermissionRequest(event.data)
+        session.pendingQuestion = null
         maybeBackfillExternalUserTurn(session, "permission_request")
+        syncManagedSendPermission(session.conversationId)
+        break
+
+      case "question_request":
+        session.status = "waiting_question"
+        session.inputErrorMessage = null
+        session.pendingPermission = null
+        session.pendingQuestion = normalizeQuestionRequest(event.data)
+        maybeBackfillExternalUserTurn(session, "question_request")
         syncManagedSendPermission(session.conversationId)
         break
 
@@ -477,6 +500,11 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
 
       case "permission_resolved":
         clearPendingPermission(session.conversationId, firstString(event.data?.requestId))
+        syncManagedSendPermission(session.conversationId)
+        break
+
+      case "question_resolved":
+        clearPendingQuestion(session.conversationId, firstString(event.data?.questionId))
         syncManagedSendPermission(session.conversationId)
         break
 
@@ -612,6 +640,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       session.inputErrorMessage = null
       session.apiRetry = null
       session.pendingPermission = null
+      session.pendingQuestion = null
     }
   }
 
@@ -631,6 +660,20 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     if (requestId && session.pendingPermission.id !== requestId) return
     session.pendingPermission = null
     if (session.status === "waiting_permission") {
+      session.status = session.liveMessage
+        ? "thinking"
+        : session.connectionId
+          ? "connected"
+          : "idle"
+    }
+  }
+
+  function clearPendingQuestion(conversationId: number, questionId?: string | null) {
+    const session = sessions.value.get(conversationId)
+    if (!session?.pendingQuestion) return
+    if (questionId && session.pendingQuestion.question_id !== questionId) return
+    session.pendingQuestion = null
+    if (session.status === "waiting_question") {
       session.status = session.liveMessage
         ? "thinking"
         : session.connectionId
@@ -665,6 +708,8 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     session.status = "connected"
     session.inputErrorMessage = null
     session.apiRetry = null
+    session.pendingPermission = null
+    session.pendingQuestion = null
     session.lastAppliedSeq = 0
     connections.value.set(managed.connectionId, managed.connection)
     syncManagedSendPermission(input.conversationId)
@@ -712,6 +757,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     disconnect,
     clearSession,
     clearPendingPermission,
+    clearPendingQuestion,
     bindCreatedConversationRuntime,
     setSessionError,
     canSend,
@@ -726,10 +772,11 @@ interface RuntimeSession {
   liveMessage: LiveMessage | null
   connectionId: string | null
   instanceKey: string
-  status: "idle" | "connecting" | "connected" | "thinking" | "running_tool" | "waiting_permission" | "error"
+  status: "idle" | "connecting" | "connected" | "thinking" | "running_tool" | "waiting_permission" | "waiting_question" | "error"
   inputErrorMessage: string | null
   apiRetry: ApiRetryEvent | null
   pendingPermission: PermissionRequest | null
+  pendingQuestion: PendingQuestionState | null
   lastAppliedSeq: number | null
   externalTurnBackfillInFlight: boolean
   externalTurnBackfillLastAttemptAt: number
@@ -757,7 +804,8 @@ function isSharedInProgressStatus(status: RuntimeSession["status"]) {
   return (
     status === "thinking" ||
     status === "running_tool" ||
-    status === "waiting_permission"
+    status === "waiting_permission" ||
+    status === "waiting_question"
   )
 }
 
@@ -794,16 +842,18 @@ async function reloadLocalTurns(session: RuntimeSession) {
 
 function maybeBackfillExternalUserTurn(
   session: RuntimeSession,
-  reason: "snapshot" | "status_changed" | "stream_batch" | "tool_call" | "tool_call_update" | "permission_request"
+  reason: "snapshot" | "status_changed" | "stream_batch" | "tool_call" | "tool_call_update" | "permission_request" | "question_request"
 ) {
   if (session.optimisticTurns.length > 0) return
 
   const hasInFlightRemoteTurn =
     session.liveMessage != null ||
     session.pendingPermission != null ||
+    session.pendingQuestion != null ||
     session.status === "thinking" ||
     session.status === "running_tool" ||
-    session.status === "waiting_permission"
+    session.status === "waiting_permission" ||
+    session.status === "waiting_question"
   if (!hasInFlightRemoteTurn) return
 
   const now = Date.now()
@@ -980,6 +1030,7 @@ function buildToolCallPart(entry: any): ContentPart | null {
 
 function deriveRuntimeStatus(snapshot: any, liveMessage: LiveMessage | null) {
   if (snapshot?.pending_permission) return "waiting_permission"
+  if (snapshot?.pending_question) return "waiting_question"
   const activeToolCalls = Array.isArray(snapshot?.active_tool_calls) ? snapshot.active_tool_calls : []
   if (activeToolCalls.some((entry: any) => mapToolCallStatus(entry?.status) === "running")) {
     return "running_tool"
@@ -1026,6 +1077,72 @@ function normalizeRuntimeErrorEvent(raw: any): RuntimeErrorEvent | null {
     code: firstString(raw.code) || undefined,
     agentType: firstString(raw.agentType, raw.agent_type) || undefined,
   }
+}
+
+function normalizePendingQuestion(raw: any): PendingQuestionState | null {
+  if (!raw || typeof raw !== "object") return null
+  const questionId = firstString(raw.question_id, raw.questionId, raw.id)
+  const questions = normalizeQuestionSpecs(raw.questions)
+  if (!questionId || questions.length === 0) return null
+  return {
+    question_id: questionId,
+    questions,
+    created_at:
+      firstString(raw.created_at, raw.createdAt) ||
+      new Date().toISOString(),
+  }
+}
+
+function normalizeQuestionRequest(raw: any): PendingQuestionState | null {
+  if (!raw || typeof raw !== "object") return null
+  const questionId = firstString(raw.questionId, raw.question_id, raw.id)
+  const questions = normalizeQuestionSpecs(raw.questions)
+  if (!questionId || questions.length === 0) return null
+  return {
+    question_id: questionId,
+    questions,
+    created_at:
+      firstString(raw.createdAt, raw.created_at) ||
+      new Date().toISOString(),
+  }
+}
+
+function normalizeQuestionSpecs(rawQuestions: unknown): PendingQuestionState["questions"] {
+  if (!Array.isArray(rawQuestions)) return []
+  const normalized: PendingQuestionState["questions"] = []
+  rawQuestions.forEach((raw, index) => {
+    if (!raw || typeof raw !== "object") return
+    const record = raw as Record<string, unknown>
+    const question = firstString(record.question)
+    const options = normalizeQuestionOptions(record.options)
+    if (!question || options.length < 2) return
+    normalized.push({
+      id:
+        firstString(record.id, record.question_id, record.questionId) ||
+        `q-${index}`,
+      question,
+      header: firstString(record.header) || `问题${index + 1}`,
+      multi_select: record.multi_select === true || record.multiSelect === true,
+      options,
+    })
+  })
+  return normalized
+}
+
+function normalizeQuestionOptions(rawOptions: unknown): PendingQuestionState["questions"][number]["options"] {
+  if (!Array.isArray(rawOptions)) return []
+  const normalized: PendingQuestionState["questions"][number]["options"] = []
+  rawOptions.forEach((raw) => {
+    if (!raw || typeof raw !== "object") return
+    const record = raw as Record<string, unknown>
+    const label = firstString(record.label)
+    if (!label) return
+    normalized.push({
+      label,
+      description: firstString(record.description),
+    })
+  })
+  return normalized
 }
 
 function normalizePendingPermission(raw: any): PermissionRequest | null {

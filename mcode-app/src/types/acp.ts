@@ -152,6 +152,8 @@ export interface EventEnvelope {
     | "usage_update"
     | "permission_request"
     | "permission_resolved"
+    | "question_request"
+    | "question_resolved"
     | "api_retry"
     | "error"
   connectionId: string
@@ -201,7 +203,7 @@ export interface ToolCallUpdateEvent {
 }
 
 export interface StatusChangedEvent {
-  status: "idle" | "connecting" | "connected" | "thinking" | "running_tool" | "waiting_permission" | "error"
+  status: "idle" | "connecting" | "connected" | "thinking" | "running_tool" | "waiting_permission" | "waiting_question" | "error"
   message?: string
   scope?: "connection" | "conversation"
 }
@@ -249,6 +251,35 @@ export interface PermissionOption {
   id: string
   label: string
   description?: string
+}
+
+export interface QuestionOption {
+  label: string
+  description: string
+}
+
+export interface QuestionSpec {
+  id: string
+  question: string
+  header: string
+  multi_select: boolean
+  options: QuestionOption[]
+}
+
+export interface PendingQuestionState {
+  question_id: string
+  questions: QuestionSpec[]
+  created_at: string
+}
+
+export interface QuestionAnswerItem {
+  questionId: string
+  labels: string[]
+}
+
+export interface QuestionAnswer {
+  answers: QuestionAnswerItem[]
+  declined: boolean
 }
 
 export interface UploadAttachmentResult {

@@ -173,6 +173,115 @@
           <text v-else class="permission-card__empty">当前授权请求没有可用选项</text>
         </view>
 
+        <view v-if="pendingQuestionCard" class="ask-question-card">
+          <view class="ask-question-card__header">
+            <view class="ask-question-card__badge">?</view>
+            <view class="ask-question-card__heading">
+              <text class="ask-question-card__title">智能体需要你的选择</text>
+              <text class="ask-question-card__subtitle">选择后点击提交，也可以跳过让智能体自行判断</text>
+            </view>
+            <text
+              v-if="pendingQuestionCard.questions.length > 1"
+              class="ask-question-card__counter"
+            >
+              {{ questionAnsweredCount }}/{{ pendingQuestionCard.questions.length }}
+            </text>
+          </view>
+
+          <view
+            v-for="question in pendingQuestionCard.questions"
+            :key="question.id"
+            class="ask-question-card__question"
+          >
+            <view class="ask-question-card__question-head">
+              <text class="ask-question-card__chip">{{ question.multi_select ? "多选" : "单选" }}</text>
+              <text class="ask-question-card__header-text">{{ question.header }}</text>
+            </view>
+            <text class="ask-question-card__prompt">{{ question.question }}</text>
+
+            <view class="ask-question-card__options">
+              <view
+                v-for="option in question.options"
+                :key="option.label"
+                :class="[
+                  'ask-question-option',
+                  isQuestionOptionSelected(question.id, option.label) && 'ask-question-option--active',
+                  questionSubmitting && 'ask-question-option--disabled',
+                ]"
+                @click="!questionSubmitting && toggleQuestionOption(question, option.label)"
+              >
+                <view class="ask-question-option__control">
+                  <view
+                    :class="[
+                      question.multi_select ? 'ask-question-option__checkbox' : 'ask-question-option__radio',
+                      isQuestionOptionSelected(question.id, option.label) && 'ask-question-option__control--active',
+                    ]"
+                  >
+                    <text v-if="isQuestionOptionSelected(question.id, option.label)" class="ask-question-option__mark">✓</text>
+                  </view>
+                </view>
+                <view class="ask-question-option__body">
+                  <view class="ask-question-option__title-row">
+                    <text class="ask-question-option__title">{{ questionLabelText(option.label) }}</text>
+                    <text v-if="isQuestionRecommended(option.label)" class="ask-question-option__recommended">推荐</text>
+                  </view>
+                  <text v-if="option.description" class="ask-question-option__desc">{{ option.description }}</text>
+                </view>
+              </view>
+
+              <view
+                :class="[
+                  'ask-question-option',
+                  isQuestionOtherActive(question.id) && 'ask-question-option--active',
+                  questionSubmitting && 'ask-question-option--disabled',
+                ]"
+                @click="!questionSubmitting && toggleQuestionOther(question)"
+              >
+                <view class="ask-question-option__control">
+                  <view
+                    :class="[
+                      question.multi_select ? 'ask-question-option__checkbox' : 'ask-question-option__radio',
+                      isQuestionOtherActive(question.id) && 'ask-question-option__control--active',
+                    ]"
+                  >
+                    <text v-if="isQuestionOtherActive(question.id)" class="ask-question-option__mark">✓</text>
+                  </view>
+                </view>
+                <view class="ask-question-option__body">
+                  <text class="ask-question-option__title">其他</text>
+                </view>
+              </view>
+
+              <input
+                v-if="isQuestionOtherActive(question.id)"
+                class="ask-question-card__other-input"
+                :value="questionSelection(question.id).otherText"
+                :disabled="questionSubmitting"
+                placeholder="输入其他答案"
+                @input="setQuestionOtherText(question.id, $event)"
+              />
+            </view>
+          </view>
+
+          <view class="ask-question-card__footer">
+            <button
+              class="ask-question-card__skip"
+              :disabled="questionSubmitting"
+              @click="answerAskQuestion(true)"
+            >
+              跳过
+            </button>
+            <button
+              class="ask-question-card__submit"
+              :class="{ 'ask-question-card__submit--disabled': !questionSubmitReady || questionSubmitting }"
+              :disabled="!questionSubmitReady || questionSubmitting"
+              @click="answerAskQuestion(false)"
+            >
+              {{ questionSubmitting ? "提交中..." : "提交" }}
+            </button>
+          </view>
+        </view>
+
         <view
           v-if="slashState.visible && filteredSlashCommands.length > 0"
           class="slash-panel"
@@ -603,6 +712,8 @@ import type {
   ContentPart,
   MessageTurn,
   PermissionRequest,
+  PendingQuestionState,
+  QuestionAnswer,
 } from "@/types/acp"
 import type { RelaySessionInfo } from "@/services/gateway"
 import type { RemoteInstanceDescriptor } from "@/services/realtime/types"
@@ -681,6 +792,12 @@ interface QuickReplyItem {
   value: string
 }
 
+interface QuestionSelectionState {
+  selected: string[]
+  otherActive: boolean
+  otherText: string
+}
+
 const auth = useAuthStore()
 const cacheStore = useConversationCacheStore()
 const runtime = useConversationRuntimeStore()
@@ -741,6 +858,8 @@ const hasRestoredDraftState = ref(false)
 const HISTORY_LOADING_MIN_MS = 200
 const permissionSubmitting = ref(false)
 const pendingPermissionSubmittingOptionId = ref("")
+const questionSubmitting = ref(false)
+const askQuestionSelections = ref<Record<string, QuestionSelectionState>>({})
 let detailAgentProbeToken = 0
 let stuckPromptTimer: ReturnType<typeof setTimeout> | null = null
 let lastLiveActivitySignature = ""
@@ -893,6 +1012,16 @@ const pendingPermissionDescriptionParts = computed(() =>
 )
 const pendingPermissionTextParts = computed(() => pendingPermissionDescriptionParts.value.textParts)
 const pendingPermissionCommandBlock = computed(() => pendingPermissionDescriptionParts.value.commandBlock)
+const pendingQuestionCard = computed<PendingQuestionState | null>(() => session.value?.pendingQuestion || null)
+const questionAnsweredCount = computed(() => {
+  const pending = pendingQuestionCard.value
+  if (!pending) return 0
+  return pending.questions.filter((question) => isQuestionAnswered(question.id)).length
+})
+const questionSubmitReady = computed(() => {
+  const pending = pendingQuestionCard.value
+  return Boolean(pending && pending.questions.length > 0 && questionAnsweredCount.value === pending.questions.length)
+})
 const detailConfigProjection = computed(() =>
   projectDetailConfigOptions(detailAgentConfig.value.configOptions)
 )
@@ -981,13 +1110,15 @@ const isBusyForSend = computed(
     sending.value ||
     runtimeStatus.value === "thinking" ||
     runtimeStatus.value === "running_tool" ||
-    runtimeStatus.value === "waiting_permission"
+    runtimeStatus.value === "waiting_permission" ||
+    runtimeStatus.value === "waiting_question"
 )
 
 const runtimeStatusLabel = computed(() => {
   if (runtimeStatus.value === "thinking") return "思考中"
   if (runtimeStatus.value === "running_tool") return "运行命令中"
   if (runtimeStatus.value === "waiting_permission") return "等待授权"
+  if (runtimeStatus.value === "waiting_question") return "等待选择"
   if (runtimeStatus.value === "error") return "运行异常"
   if (runtimeStatus.value === "connected") return "已连接"
   if (runtimeStatus.value === "connecting") return "连接中"
@@ -996,7 +1127,7 @@ const runtimeStatusLabel = computed(() => {
 
 const runtimeStatusClass = computed(() => {
   if (runtimeStatus.value === "thinking" || runtimeStatus.value === "running_tool") return "running"
-  if (runtimeStatus.value === "waiting_permission") return "pending"
+  if (runtimeStatus.value === "waiting_permission" || runtimeStatus.value === "waiting_question") return "pending"
   if (runtimeStatus.value === "error") return "error"
   if (runtimeStatus.value === "connected") return "online"
   return "idle"
@@ -1216,6 +1347,15 @@ watch(
 )
 
 watch(
+  () => pendingQuestionCard.value?.question_id || "",
+  () => {
+    resetQuestionSelections()
+    if (!hasInitialBottomScroll.value) return
+    scheduleViewportSync()
+  }
+)
+
+watch(
   () => [runtimeStatus.value, conversationActivitySignature.value, session.value?.connectionId || ""] as const,
   ([status, signature]) => {
     handleLiveActivityChange(status, signature)
@@ -1246,6 +1386,9 @@ watch(
     uploadQueue.value.length,
     draftQueue.value.length,
     queueExpanded.value,
+    pendingPermissionCard.value?.id || "",
+    pendingQuestionCard.value?.question_id || "",
+    JSON.stringify(askQuestionSelections.value),
     slashState.value.visible,
     filteredSlashCommands.value.length,
     composerPanelMode.value,
@@ -1593,7 +1736,12 @@ function resumeStuckPromptDetection() {
 }
 
 function isStoppableRuntimeStatus(status: string) {
-  return status === "thinking" || status === "running_tool" || status === "waiting_permission"
+  return (
+    status === "thinking" ||
+    status === "running_tool" ||
+    status === "waiting_permission" ||
+    status === "waiting_question"
+  )
 }
 
 function buildLiveActivitySignature(parts: ContentPart[]): string {
@@ -2506,7 +2654,8 @@ function hasPromptActuallyStarted() {
   return (
     currentSession.status === "thinking" ||
     currentSession.status === "running_tool" ||
-    currentSession.status === "waiting_permission"
+    currentSession.status === "waiting_permission" ||
+    currentSession.status === "waiting_question"
   )
 }
 
@@ -3029,6 +3178,158 @@ function buildOptimisticText(text: string, files: UploadedAttachment[]): string 
 function createLocalId(prefix: string): string {
   sequence.value += 1
   return `${prefix}-${Date.now()}-${sequence.value}`
+}
+
+function resetQuestionSelections() {
+  const pending = pendingQuestionCard.value
+  const next: Record<string, QuestionSelectionState> = {}
+  for (const question of pending?.questions || []) {
+    next[question.id] = {
+      selected: [],
+      otherActive: false,
+      otherText: "",
+    }
+  }
+  askQuestionSelections.value = next
+}
+
+function questionSelection(questionId: string): QuestionSelectionState {
+  const current = askQuestionSelections.value[questionId]
+  if (current) return current
+  const next = {
+    selected: [],
+    otherActive: false,
+    otherText: "",
+  }
+  askQuestionSelections.value = {
+    ...askQuestionSelections.value,
+    [questionId]: next,
+  }
+  return next
+}
+
+function isQuestionOptionSelected(questionId: string, label: string) {
+  return questionSelection(questionId).selected.includes(label)
+}
+
+function isQuestionOtherActive(questionId: string) {
+  return questionSelection(questionId).otherActive
+}
+
+function isQuestionAnswered(questionId: string) {
+  const selection = questionSelection(questionId)
+  return (
+    selection.selected.length > 0 ||
+    (selection.otherActive && Boolean(selection.otherText.trim()))
+  )
+}
+
+function toggleQuestionOption(question: PendingQuestionState["questions"][number], label: string) {
+  const current = questionSelection(question.id)
+  const selected = current.selected.includes(label)
+  const nextSelected = question.multi_select
+    ? selected
+      ? current.selected.filter((item) => item !== label)
+      : [...current.selected, label]
+    : selected
+      ? []
+      : [label]
+  askQuestionSelections.value = {
+    ...askQuestionSelections.value,
+    [question.id]: {
+      ...current,
+      selected: nextSelected,
+      otherActive: question.multi_select ? current.otherActive : false,
+    },
+  }
+}
+
+function toggleQuestionOther(question: PendingQuestionState["questions"][number]) {
+  const current = questionSelection(question.id)
+  const nextActive = !current.otherActive
+  askQuestionSelections.value = {
+    ...askQuestionSelections.value,
+    [question.id]: {
+      ...current,
+      selected: question.multi_select ? current.selected : [],
+      otherActive: nextActive,
+    },
+  }
+}
+
+function setQuestionOtherText(questionId: string, event: unknown) {
+  const value =
+    typeof event === "string"
+      ? event
+      : firstString((event as any)?.detail?.value, (event as any)?.target?.value) || ""
+  const current = questionSelection(questionId)
+  askQuestionSelections.value = {
+    ...askQuestionSelections.value,
+    [questionId]: {
+      ...current,
+      otherActive: true,
+      otherText: value,
+    },
+  }
+}
+
+function questionLabelText(label: string) {
+  return String(label || "").replace(/\s*\(recommended\)\s*$/i, "").trim() || label
+}
+
+function isQuestionRecommended(label: string) {
+  return /\s*\(recommended\)\s*$/i.test(String(label || "")) && Boolean(questionLabelText(label))
+}
+
+function buildQuestionAnswer(declined: boolean): QuestionAnswer {
+  if (declined) {
+    return { answers: [], declined: true }
+  }
+  const pending = pendingQuestionCard.value
+  return {
+    declined: false,
+    answers: (pending?.questions || []).map((question) => {
+      const selection = questionSelection(question.id)
+      const labels = [...selection.selected]
+      const otherText = selection.otherText.trim()
+      if (selection.otherActive && otherText) {
+        labels.push(otherText)
+      }
+      return {
+        questionId: question.id,
+        labels,
+      }
+    }),
+  }
+}
+
+async function answerAskQuestion(declined: boolean) {
+  if (questionSubmitting.value) return
+  const pending = pendingQuestionCard.value
+  const conn = session.value?.connectionId
+  if (!pending?.question_id || !conn) {
+    uni.showToast({ title: "问题请求信息不完整", icon: "none" })
+    return
+  }
+  if (!declined && !questionSubmitReady.value) {
+    uni.showToast({ title: "请先完成所有问题", icon: "none" })
+    return
+  }
+
+  questionSubmitting.value = true
+  try {
+    await acpApi.acpAnswerQuestion(conn, pending.question_id, buildQuestionAnswer(declined))
+    runtime.clearPendingQuestion(conversationId.value, pending.question_id)
+    usePetStore().addExp('user', declined ? 2 : 8)
+    uni.showToast({ title: declined ? "已跳过选择" : "已提交选择", icon: "success" })
+  } catch (error) {
+    uni.showToast({
+      title: toErrorMessage(error, "提交选择失败"),
+      icon: "none",
+    })
+  } finally {
+    questionSubmitting.value = false
+  }
 }
 
 async function respondToPermission(optionId: string) {
@@ -3907,6 +4208,265 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   font-size: 22rpx;
   color: var(--up-tips-color, #909193);
   word-break: break-all;
+}
+
+.ask-question-card {
+  display: flex;
+  flex-direction: column;
+  gap: 18rpx;
+  width: 100%;
+  min-width: 0;
+  margin-bottom: 16rpx;
+  padding: 22rpx 24rpx;
+  border-radius: 24rpx;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--up-primary, #2979ff) 10%, var(--up-card-bg-color, #ffffff) 90%) 0%, var(--up-card-bg-color, #ffffff) 100%);
+  border: 1rpx solid color-mix(in srgb, var(--up-primary, #2979ff) 24%, transparent);
+  box-shadow: 0 12rpx 30rpx rgba(41, 121, 255, 0.08);
+  box-sizing: border-box;
+}
+
+.ask-question-card__header {
+  display: flex;
+  align-items: flex-start;
+  gap: 14rpx;
+  min-width: 0;
+}
+
+.ask-question-card__badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42rpx;
+  height: 42rpx;
+  flex-shrink: 0;
+  border-radius: 16rpx;
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 16%, var(--up-card-bg-color, #ffffff) 84%);
+  color: var(--up-primary, #2979ff);
+  font-size: 26rpx;
+  font-weight: 700;
+}
+
+.ask-question-card__heading {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4rpx;
+}
+
+.ask-question-card__title {
+  font-size: 27rpx;
+  font-weight: 650;
+  color: var(--up-main-color, #303133);
+}
+
+.ask-question-card__subtitle {
+  font-size: 22rpx;
+  line-height: 1.45;
+  color: var(--up-tips-color, #909193);
+}
+
+.ask-question-card__counter {
+  flex-shrink: 0;
+  font-size: 22rpx;
+  color: var(--up-tips-color, #909193);
+}
+
+.ask-question-card__question {
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+  min-width: 0;
+}
+
+.ask-question-card__question + .ask-question-card__question {
+  padding-top: 16rpx;
+  border-top: 1rpx solid var(--up-border-color, #dadbde);
+}
+
+.ask-question-card__question-head {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  min-width: 0;
+}
+
+.ask-question-card__chip {
+  flex-shrink: 0;
+  padding: 4rpx 10rpx;
+  border-radius: 999rpx;
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 12%, var(--up-card-bg-color, #ffffff) 88%);
+  color: var(--up-primary, #2979ff);
+  font-size: 20rpx;
+  font-weight: 600;
+}
+
+.ask-question-card__header-text {
+  min-width: 0;
+  font-size: 22rpx;
+  color: var(--up-tips-color, #909193);
+}
+
+.ask-question-card__prompt {
+  font-size: 25rpx;
+  line-height: 1.55;
+  color: var(--up-main-color, #303133);
+  word-break: break-word;
+}
+
+.ask-question-card__options {
+  display: flex;
+  flex-direction: column;
+  gap: 10rpx;
+}
+
+.ask-question-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 14rpx;
+  padding: 18rpx;
+  border-radius: 18rpx;
+  border: 1rpx solid var(--up-border-color, #dadbde);
+  background: var(--up-card-bg-color, #ffffff);
+  box-sizing: border-box;
+}
+
+.ask-question-option--active {
+  border-color: color-mix(in srgb, var(--up-primary, #2979ff) 62%, var(--up-border-color, #dadbde) 38%);
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 9%, var(--up-card-bg-color, #ffffff) 91%);
+}
+
+.ask-question-option--disabled {
+  opacity: 0.72;
+}
+
+.ask-question-option__control {
+  padding-top: 4rpx;
+  flex-shrink: 0;
+}
+
+.ask-question-option__radio,
+.ask-question-option__checkbox {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30rpx;
+  height: 30rpx;
+  border: 2rpx solid var(--up-border-color, #dadbde);
+  background: var(--up-card-bg-color, #ffffff);
+  box-sizing: border-box;
+}
+
+.ask-question-option__radio {
+  border-radius: 999rpx;
+}
+
+.ask-question-option__checkbox {
+  border-radius: 8rpx;
+}
+
+.ask-question-option__control--active {
+  border-color: var(--up-primary, #2979ff);
+  background: var(--up-primary, #2979ff);
+}
+
+.ask-question-option__mark {
+  font-size: 19rpx;
+  line-height: 1;
+  color: #ffffff;
+}
+
+.ask-question-option__body {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 5rpx;
+}
+
+.ask-question-option__title-row {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  min-width: 0;
+}
+
+.ask-question-option__title {
+  min-width: 0;
+  font-size: 24rpx;
+  font-weight: 600;
+  color: var(--up-main-color, #303133);
+  word-break: break-word;
+}
+
+.ask-question-option__recommended {
+  flex-shrink: 0;
+  padding: 2rpx 8rpx;
+  border-radius: 999rpx;
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 14%, var(--up-card-bg-color, #ffffff) 86%);
+  color: var(--up-primary, #2979ff);
+  font-size: 18rpx;
+  font-weight: 600;
+}
+
+.ask-question-option__desc {
+  font-size: 22rpx;
+  line-height: 1.45;
+  color: var(--up-tips-color, #909193);
+  word-break: break-word;
+}
+
+.ask-question-card__other-input {
+  height: 70rpx;
+  padding: 0 18rpx;
+  border-radius: 16rpx;
+  border: 1rpx solid var(--up-border-color, #dadbde);
+  background: var(--up-card-bg-color, #ffffff);
+  color: var(--up-main-color, #303133);
+  font-size: 24rpx;
+  box-sizing: border-box;
+}
+
+.ask-question-card__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+}
+
+.ask-question-card__skip,
+.ask-question-card__submit {
+  min-width: 132rpx;
+  height: 66rpx;
+  margin: 0;
+  padding: 0 24rpx;
+  border: none;
+  border-radius: 999rpx;
+  font-size: 24rpx;
+  font-weight: 600;
+  line-height: 66rpx;
+}
+
+.ask-question-card__skip::after,
+.ask-question-card__submit::after {
+  border: none;
+}
+
+.ask-question-card__skip {
+  background: transparent;
+  color: var(--up-content-color, #606266);
+}
+
+.ask-question-card__submit {
+  margin-left: auto;
+  background: var(--up-primary, #2979ff);
+  color: #ffffff;
+}
+
+.ask-question-card__submit--disabled,
+.ask-question-card__submit[disabled],
+.ask-question-card__skip[disabled] {
+  opacity: 0.58;
 }
 
 .input-feedback {
