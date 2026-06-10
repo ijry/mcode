@@ -1,1 +1,0 @@
-export { scanCode } from './app-android/index.uts'

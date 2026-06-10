@@ -333,7 +333,6 @@ import { useAuthStore } from "@/stores/auth"
 import { createGateway } from "@/services/gateway"
 import type { RelaySessionInfo } from "@/services/gateway"
 import { buildWebSocketProtocols } from "@/services/gateway/wsProtocol"
-import { scanCode } from "@/../uni_modules/up-scanner"
 import { buildConnectionConfigCode, parseConnectionConfigCodeToConnection } from "./connectionConfigCode"
 
 declare const plus: any
@@ -815,43 +814,68 @@ function startScanImport() {
     return
   }
 
+  // #ifdef APP-PLUS
   scanImporting.value = true
-  scanCode({
-    scanType: ["qrCode"],
-    autoZoom: true,
-    success: (res) => {
-      try {
-        const imported = parseConnectionConfigCodeToConnection(res.content || "")
-        const nextConnection: ConnectionItem = {
-          ...imported,
-          active: true,
+  let scanFinished = false
+  const finishScanImport = () => {
+    if (scanFinished) return
+    scanFinished = true
+    scanImporting.value = false
+  }
+
+  try {
+    uni.scanCode({
+      scanType: ["qrCode"],
+      autoZoom: true,
+      success: (res) => {
+        try {
+          const imported = parseConnectionConfigCodeToConnection(res.result || "")
+          const nextConnection: ConnectionItem = {
+            ...imported,
+            active: true,
+          }
+          saveConnection(nextConnection)
+          loadConnections()
+          closeAddPopup()
+          uni.showToast({ title: "连接已导入", icon: "success" })
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          uni.showToast({
+            title: message || "配置码无效",
+            icon: "none",
+            duration: 2500,
+          })
+        } finally {
+          finishScanImport()
         }
-        saveConnection(nextConnection)
-        loadConnections()
-        closeAddPopup()
-        uni.showToast({ title: "连接已导入", icon: "success" })
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        uni.showToast({
-          title: message || "配置码无效",
-          icon: "none",
-          duration: 2500,
-        })
-      }
-    },
-    fail: (error) => {
-      const errCode = Number(error?.errCode || 0)
-      if (errCode === 10001) return
-      uni.showToast({
-        title: error?.errMsg || "扫码失败",
-        icon: "none",
-        duration: 2500,
-      })
-    },
-    complete: () => {
-      scanImporting.value = false
-    },
-  })
+      },
+      fail: (error) => {
+        try {
+          const errCode = Number(error?.errCode || 0)
+          if (errCode === 10001) return
+          uni.showToast({
+            title: error?.errMsg || "扫码失败",
+            icon: "none",
+            duration: 2500,
+          })
+        } finally {
+          finishScanImport()
+        }
+      },
+      complete: () => {
+        finishScanImport()
+      },
+    })
+  } catch (error) {
+    finishScanImport()
+    const message = error instanceof Error ? error.message : String(error)
+    uni.showToast({
+      title: message || "扫码启动失败",
+      icon: "none",
+      duration: 2500,
+    })
+  }
+  // #endif
 }
 
 function normalizeBaseUrl(url: string): string {

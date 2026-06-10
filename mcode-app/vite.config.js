@@ -19,6 +19,8 @@ export default defineConfig({
   css: {
     preprocessorOptions: {
       scss: {
+        // 取消sass废弃API的报警
+        silenceDeprecations: ['legacy-js-api', 'color-functions', 'import'],  
         additionalData: '@import "uview-plus/theme.scss";',
       },
     },

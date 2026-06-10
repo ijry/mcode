@@ -1,4 +1,0 @@
-{
-  "frameworks": ["AVFoundation", "UIKit", "CoreGraphics"],
-  "deploymentTarget": "12.0"
-}
