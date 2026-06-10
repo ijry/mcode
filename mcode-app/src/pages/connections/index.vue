@@ -209,7 +209,7 @@
             </u-form-item>
 
             <u-form-item label="连接模式" prop="mode" required>
-              <u-radio-group v-model="form.mode" placement="row">
+              <u-radio-group :modelValue="form.mode" placement="row" @change="handleModeChange">
                 <u-radio name="direct" label="直连模式"></u-radio>
                 <u-radio name="relay" label="中继模式"></u-radio>
               </u-radio-group>
@@ -429,6 +429,15 @@ function loadConnections() {
 
 function subsectionChange(index: number) {
   subsectionIndex.value = index
+}
+
+function handleModeChange(value: string) {
+  if (value === "relay") {
+    uni.showToast({ title: "中继模式即将推出", icon: "none" })
+    form.value.mode = "direct"
+    return
+  }
+  form.value.mode = "direct"
 }
 
 function openTutorialPopup() {
