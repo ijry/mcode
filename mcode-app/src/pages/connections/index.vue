@@ -329,6 +329,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from "vue"
+import { onShow } from "@dcloudio/uni-app"
 import { useAuthStore } from "@/stores/auth"
 import { createGateway } from "@/services/gateway"
 import type { RelaySessionInfo } from "@/services/gateway"
@@ -346,6 +347,7 @@ const showTutorialPopup = ref(false)
 const subsectionIndex = ref(0)
 const loading = ref(false)
 const scanImporting = ref(false)
+let scanReturnFallbackTimer: ReturnType<typeof setTimeout> | null = null
 const showActionSheet = ref(false)
 const showConfigCodePopup = ref(false)
 const currentConnectionIndex = ref(-1)
@@ -412,6 +414,10 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  if (scanReturnFallbackTimer) {
+    clearTimeout(scanReturnFallbackTimer)
+    scanReturnFallbackTimer = null
+  }
   cleanupOnlineWatchers()
 })
 
@@ -877,6 +883,19 @@ function startScanImport() {
   }
   // #endif
 }
+
+onShow(() => {
+  if (!scanImporting.value) return
+  if (scanReturnFallbackTimer) {
+    clearTimeout(scanReturnFallbackTimer)
+  }
+  scanReturnFallbackTimer = setTimeout(() => {
+    if (scanImporting.value) {
+      scanImporting.value = false
+    }
+    scanReturnFallbackTimer = null
+  }, 500)
+})
 
 function normalizeBaseUrl(url: string): string {
   return String(url || "").trim().replace(/\/+$/, "")
