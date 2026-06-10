@@ -5,6 +5,7 @@ export type AgentType =
   | "gemini"
   | "open_claw"
   | "cline"
+  | "hermes"
 
 export type AppErrorCode =
   | "invalid_input"
@@ -152,6 +153,17 @@ export type ContentBlock =
       agent_stats?: AgentExecutionStats | null
     }
   | { type: "thinking"; text: string }
+  /**
+   * Frontend-only, LIVE-stream synthetic block. It is NEVER persisted and
+   * NEVER emitted by the Rust JSONL parsers — the persisted plan path is a
+   * `TodoWrite` tool_use block. It exists purely so a live plan can survive
+   * `buildStreamingTurnsFromLiveMessage` → `adaptContentBlock` without being
+   * down-converted into a `thinking`/reasoning block. Mirrors the reducer's
+   * `LiveContentBlock` plan variant in `acp-connections-context.tsx` (NOT the
+   * `kind`-tagged snapshot type lower in this file). Because it is live-only,
+   * persistence/export switches over `ContentBlock` never receive it.
+   */
+  | { type: "plan"; entries: PlanEntryInfo[] }
 
 export type TurnRole = "user" | "assistant" | "system"
 
@@ -254,6 +266,9 @@ export interface DbConversationSummary {
   id: number
   folder_id: number
   title: string | null
+  /** True once the user renamed this conversation by hand; the backend then
+   *  stops auto-deriving its title from the session file. */
+  title_locked: boolean
   agent_type: AgentType
   status: string
   model: string | null
@@ -316,6 +331,7 @@ export interface SaveTabsOutcome {
 
 export interface ImportResult {
   imported: number
+  updated: number
   skipped: number
 }
 
@@ -367,6 +383,7 @@ export const AGENT_DISPLAY_ORDER: AgentType[] = [
   "gemini",
   "open_claw",
   "cline",
+  "hermes",
 ]
 
 const AGENT_DISPLAY_ORDER_INDEX = new Map(
@@ -386,6 +403,7 @@ export const ALL_AGENT_TYPES: AgentType[] = [
   "gemini",
   "open_claw",
   "cline",
+  "hermes",
 ]
 
 export const MODEL_PROVIDER_AGENT_TYPES: AgentType[] = [
@@ -394,6 +412,277 @@ export const MODEL_PROVIDER_AGENT_TYPES: AgentType[] = [
   "gemini",
 ]
 
+/**
+ * How a Hermes provider's credentials are supplied:
+ * - `apiKey`: codeg writes the key to `~/.hermes/.env`.
+ * - `oauth`: set through the terminal `--setup` flow (no API-key field).
+ * - `aws`: resolved from the AWS SDK credential chain (no API-key field).
+ */
+export type HermesProviderKind = "apiKey" | "oauth" | "aws"
+
+/**
+ * Curated Hermes providers the settings panel edits via structured fields.
+ * Mirrors the backend `HERMES_PROVIDERS` table (commands/acp.rs), whose ids and
+ * `.env` key vars come from Hermes' own `hermes_cli/auth.py` PROVIDER_REGISTRY.
+ * The provider choice drives the linkage between the API key (~/.hermes/.env)
+ * and the general config (~/.hermes/config.yaml `model.provider`/`base_url`).
+ */
+export interface HermesProviderOption {
+  /** Canonical `model.provider` id written to config.yaml. */
+  id: string
+  /** Brand display name shown in the provider dropdown (not localized). */
+  label: string
+  /** Whether the provider takes a user-supplied base URL (OpenAI-compatible). */
+  needsBaseUrl: boolean
+  kind: HermesProviderKind
+}
+
+export const HERMES_PROVIDERS: HermesProviderOption[] = [
+  // API-key providers — codeg writes the key var to ~/.hermes/.env.
+  {
+    id: "openrouter",
+    label: "OpenRouter",
+    needsBaseUrl: false,
+    kind: "apiKey",
+  },
+  {
+    id: "openai-api",
+    label: "OpenAI / Compatible",
+    needsBaseUrl: true,
+    kind: "apiKey",
+  },
+  // Hermes' built-in `custom` provider: a user-supplied OpenAI-compatible
+  // endpoint. Unlike `openai-api` (key in ~/.hermes/.env), `custom` stores its
+  // key + endpoint INLINE in config.yaml (`model.api_key`/`model.base_url`);
+  // the backend routes them there. Shows both API Key + API URL fields.
+  {
+    id: "custom",
+    label: "Custom (OpenAI-compatible)",
+    needsBaseUrl: true,
+    kind: "apiKey",
+  },
+  {
+    id: "anthropic",
+    label: "Anthropic",
+    needsBaseUrl: false,
+    kind: "apiKey",
+  },
+  {
+    id: "gemini",
+    label: "Google AI Studio",
+    needsBaseUrl: false,
+    kind: "apiKey",
+  },
+  {
+    id: "deepseek",
+    label: "DeepSeek",
+    needsBaseUrl: false,
+    kind: "apiKey",
+  },
+  {
+    id: "xai",
+    label: "xAI Grok",
+    needsBaseUrl: false,
+    kind: "apiKey",
+  },
+  {
+    id: "zai",
+    label: "Z.AI / GLM",
+    needsBaseUrl: false,
+    kind: "apiKey",
+  },
+  {
+    id: "minimax",
+    label: "MiniMax",
+    needsBaseUrl: false,
+    kind: "apiKey",
+  },
+  {
+    id: "minimax-cn",
+    label: "MiniMax (China)",
+    needsBaseUrl: false,
+    kind: "apiKey",
+  },
+  {
+    id: "kimi-coding",
+    label: "Kimi / Moonshot",
+    needsBaseUrl: false,
+    kind: "apiKey",
+  },
+  {
+    id: "kimi-coding-cn",
+    label: "Kimi / Moonshot (China)",
+    needsBaseUrl: false,
+    kind: "apiKey",
+  },
+  {
+    id: "nvidia",
+    label: "NVIDIA NIM",
+    needsBaseUrl: false,
+    kind: "apiKey",
+  },
+  {
+    id: "alibaba",
+    label: "Qwen (DashScope)",
+    needsBaseUrl: false,
+    kind: "apiKey",
+  },
+  {
+    id: "alibaba-coding-plan",
+    label: "Alibaba Coding Plan",
+    needsBaseUrl: false,
+    kind: "apiKey",
+  },
+  {
+    id: "copilot",
+    label: "GitHub Copilot",
+    needsBaseUrl: false,
+    kind: "apiKey",
+  },
+  {
+    id: "lmstudio",
+    label: "LM Studio",
+    needsBaseUrl: true,
+    kind: "apiKey",
+  },
+  {
+    id: "azure-foundry",
+    label: "Azure Foundry",
+    needsBaseUrl: true,
+    kind: "apiKey",
+  },
+  {
+    id: "stepfun",
+    label: "StepFun",
+    needsBaseUrl: false,
+    kind: "apiKey",
+  },
+  {
+    id: "arcee",
+    label: "Arcee AI",
+    needsBaseUrl: false,
+    kind: "apiKey",
+  },
+  {
+    id: "gmi",
+    label: "GMI Cloud",
+    needsBaseUrl: false,
+    kind: "apiKey",
+  },
+  {
+    id: "huggingface",
+    label: "Hugging Face",
+    needsBaseUrl: false,
+    kind: "apiKey",
+  },
+  {
+    id: "kilocode",
+    label: "Kilo Code",
+    needsBaseUrl: false,
+    kind: "apiKey",
+  },
+  {
+    id: "opencode-zen",
+    label: "OpenCode Zen",
+    needsBaseUrl: false,
+    kind: "apiKey",
+  },
+  {
+    id: "opencode-go",
+    label: "OpenCode Go",
+    needsBaseUrl: false,
+    kind: "apiKey",
+  },
+  {
+    id: "xiaomi",
+    label: "Xiaomi MiMo",
+    needsBaseUrl: false,
+    kind: "apiKey",
+  },
+  {
+    id: "tencent-tokenhub",
+    label: "Tencent TokenHub",
+    needsBaseUrl: false,
+    kind: "apiKey",
+  },
+  {
+    id: "ollama-cloud",
+    label: "Ollama Cloud",
+    needsBaseUrl: false,
+    kind: "apiKey",
+  },
+  {
+    id: "novita",
+    label: "Novita AI",
+    needsBaseUrl: false,
+    kind: "apiKey",
+  },
+  // OAuth / external providers — credentials set via the terminal `--setup` flow.
+  {
+    id: "nous",
+    label: "Nous Portal",
+    needsBaseUrl: false,
+    kind: "oauth",
+  },
+  {
+    id: "openai-codex",
+    label: "OpenAI Codex",
+    needsBaseUrl: false,
+    kind: "oauth",
+  },
+  {
+    id: "minimax-oauth",
+    label: "MiniMax",
+    needsBaseUrl: false,
+    kind: "oauth",
+  },
+  {
+    id: "xai-oauth",
+    label: "xAI Grok",
+    needsBaseUrl: false,
+    kind: "oauth",
+  },
+  {
+    id: "qwen-oauth",
+    label: "Qwen",
+    needsBaseUrl: false,
+    kind: "oauth",
+  },
+  {
+    id: "google-gemini-cli",
+    label: "Gemini CLI",
+    needsBaseUrl: false,
+    kind: "oauth",
+  },
+  {
+    id: "copilot-acp",
+    label: "GitHub Copilot ACP",
+    needsBaseUrl: false,
+    kind: "oauth",
+  },
+  // AWS Bedrock — credentials from the AWS SDK chain.
+  {
+    id: "bedrock",
+    label: "AWS Bedrock",
+    needsBaseUrl: false,
+    kind: "aws",
+  },
+]
+
+/**
+ * Normalized Hermes config projection returned in `AcpAgentInfo.config_json`
+ * for `agent_type === "hermes"` (parsed from ~/.hermes/.env + config.yaml).
+ */
+export interface HermesLocalConfig {
+  provider?: string
+  model?: string
+  baseUrl?: string
+  apiKey?: string
+  hermesHome?: string
+  setupCommand?: string
+  modelCommand?: string
+}
+
 export const AGENT_LABELS: Record<AgentType, string> = {
   claude_code: "Claude Code",
   codex: "Codex",
@@ -401,6 +690,7 @@ export const AGENT_LABELS: Record<AgentType, string> = {
   gemini: "Gemini CLI",
   open_claw: "OpenClaw",
   cline: "Cline",
+  hermes: "Hermes Agent",
 }
 
 export const AGENT_COLORS: Record<AgentType, string> = {
@@ -410,6 +700,7 @@ export const AGENT_COLORS: Record<AgentType, string> = {
   gemini: "bg-[#3186FF]",
   open_claw: "bg-emerald-600",
   cline: "bg-purple-500",
+  hermes: "bg-amber-500",
 }
 
 // ACP connection status (matches Rust ConnectionStatus)
@@ -459,6 +750,45 @@ export interface PermissionOptionInfo {
   option_id: string
   name: string
   kind: string
+}
+
+// --- ask_user_question (mirror of Rust `crate::acp::question`) ---
+
+/** One selectable choice in an `ask_user_question` (mirror of `QuestionOption`). */
+export interface QuestionOption {
+  label: string
+  description: string
+}
+
+/** A single multiple-choice question (mirror of Rust `QuestionSpec`). `id` is
+ *  the backend-minted correlation key the answer is submitted against. */
+export interface QuestionSpec {
+  id: string
+  question: string
+  header: string
+  multi_select: boolean
+  options: QuestionOption[]
+}
+
+/** Awaiting-answer question set on the session (mirror of `PendingQuestionState`). */
+export interface PendingQuestionState {
+  question_id: string
+  questions: QuestionSpec[]
+  created_at: string
+}
+
+/** One question's answer submitted to `acp_answer_question`. `labels` carries
+ *  the selected option labels plus any free-text "Other" the user typed. */
+export interface QuestionAnswerItem {
+  questionId: string
+  labels: string[]
+}
+
+/** The full submission to `acp_answer_question`. `declined` is set when the
+ *  user dismissed the card without choosing. */
+export interface QuestionAnswer {
+  answers: QuestionAnswerItem[]
+  declined: boolean
 }
 
 export interface SessionModeInfo {
@@ -730,6 +1060,41 @@ export type AcpEvent =
       ids: string[]
       delivered_at: string
     }
+  /**
+   * An agent called `ask_user_question`: a blocking multiple-choice prompt the
+   * user must answer. Broadcast so every client renders the interactive card
+   * above the input box; also captured in the snapshot for mid-turn attach.
+   */
+  | {
+      type: "question_request"
+      question_id: string
+      questions: QuestionSpec[]
+    }
+  /**
+   * A pending question was answered (from any client) or canceled (tool call
+   * aborted / connection drained). Clients clear the matching card.
+   */
+  | {
+      type: "question_resolved"
+      question_id: string
+    }
+  /**
+   * The agent's effective settings (env vars / model provider / native config)
+   * changed AFTER this connection spawned, so the running process is still on
+   * its launch-time config. The frontend shows a "restart to apply" banner.
+   * `stale: false` means a prior drift was reverted (the setting was changed
+   * back) and the banner should clear. Mirrored into `LiveSessionSnapshot` so a
+   * snapshot attach (reconnect, refresh, new tile) recovers the state.
+   */
+  | {
+      type: "session_config_stale"
+      stale: boolean
+      kind: ConfigStaleKind
+    }
+
+/** Which settings surface drifted (mirror of Rust `ConfigStaleKind`), used to
+ *  word the "restart to apply" banner. */
+export type ConfigStaleKind = "agent_config" | "model_provider"
 
 /** A block of a broadcast user prompt (mirror of Rust `UserMessageBlock`).
  *  Narrower than the persisted `ContentBlock`: only what a viewer needs to
@@ -879,6 +1244,9 @@ export interface LiveSessionSnapshot {
   live_message: LiveMessage | null
   active_tool_calls: ToolCallState[]
   pending_permission: PendingPermissionState | null
+  /** Awaiting-answer `ask_user_question`, recoverable on mid-turn attach.
+   *  Absent (omitted) when no question is pending. */
+  pending_question?: PendingQuestionState | null
   /** In-flight user prompt for the current turn — lets a client attaching
    *  mid-turn render the user turn. Absent (omitted) when no turn is in flight. */
   pending_user_message?: {
@@ -903,6 +1271,11 @@ export interface LiveSessionSnapshot {
   fork_supported: boolean
   available_commands: AvailableCommandInfo[]
   selectors_ready: boolean
+  /** Whether the running session is on stale (launch-time) config after a later
+   *  settings save. Absent on older server payloads (then treated as `false`). */
+  config_stale?: boolean
+  /** Which settings surface drifted; present only while `config_stale`. */
+  config_stale_kind?: ConfigStaleKind | null
   event_seq: number
 }
 
@@ -942,6 +1315,8 @@ export interface AcpAgentInfo {
   codex_auth_json: string | null
   codex_config_toml: string | null
   cline_secrets_json: string | null
+  /** Raw ~/.hermes/config.yaml text, for the Hermes panel's advanced editor. */
+  hermes_config_yaml: string | null
   model_provider_id: number | null
 }
 
@@ -1125,6 +1500,7 @@ export type McpAppType =
   | "open_claw"
   | "open_code"
   | "cline"
+  | "hermes"
 
 export interface LocalMcpServer {
   id: string
@@ -1443,6 +1819,7 @@ export type FixActionKind =
   | "retry_connection"
   | "open_agents_settings"
   | "install_opencode_plugins"
+  | "install_uv"
 
 export interface FixAction {
   label: string
@@ -1563,6 +1940,15 @@ export interface ModelProviderInfo {
   model: string | null
   created_at: string
   updated_at: string
+}
+
+/** Result of `updateModelProvider` (mirror of Rust `UpdateModelProviderResult`):
+ *  the updated provider plus how many running sessions the credential/model
+ *  cascade left on stale (launch-time) config — for the settings-side
+ *  "N sessions need restart" toast. */
+export interface UpdateModelProviderResult {
+  provider: ModelProviderInfo
+  affectedRunningSessions: number
 }
 
 export interface ClaudeProviderModel {

@@ -91,6 +91,22 @@
       "placeholder": "Select zoom level",
       "default": "Default",
       "current": "Current zoom: {zoom}%"
+    },
+    "fonts": {
+      "sectionTitle": "Fonts",
+      "sectionDescription": "Choose fonts for the interface, code editor, and terminal. Bundled fonts load on demand; pick “Custom…” to use any font installed on your system.",
+      "interface": "Interface",
+      "editor": "Editor",
+      "terminal": "Terminal",
+      "groupSans": "Sans-serif",
+      "groupMono": "Monospace",
+      "custom": "Custom…",
+      "customPlaceholder": "Font family, e.g. Fira Code",
+      "fontSize": "Font size",
+      "ligatures": "Enable font ligatures",
+      "ligaturesUnavailable": "This font has no ligatures",
+      "terminalLigaturesHint": "Terminal ligatures apply only to bundled coding fonts.",
+      "preview": "Preview"
     }
   },
   "SystemSettings": {
@@ -557,6 +573,7 @@
       "confirmDelete": "Confirm Delete",
       "confirmUninstall": "Confirm Uninstall",
       "saveClineConfig": "Save Cline Config",
+      "saveHermesConfig": "Save Hermes Config",
       "customInstall": "Custom install"
     },
     "status": {
@@ -652,6 +669,30 @@
       "gatewayTokenHint": "Use token-file instead of plain token when possible; configure via openclaw CLI.",
       "sessionKeyHint": "Optional. Specify gateway session key; leave empty to auto-assign isolated session."
     },
+    "hermes": {
+      "configManagement": "Hermes Configuration",
+      "configDescription": "Hermes manages its own credentials in ~/.hermes/.env and settings in ~/.hermes/config.yaml. Pick a provider, then set the API key and model — codeg writes both files for you.",
+      "providerLabel": "Provider",
+      "providerHint": "The provider selects which API key variable and model.provider Hermes uses. OAuth providers are configured through the terminal setup below.",
+      "groupApiKey": "API key providers",
+      "groupOauth": "OAuth providers",
+      "groupAws": "AWS",
+      "apiKeyHint": "Saved to ~/.hermes/.env. It is never injected into the process — Hermes reads it from its own config.",
+      "modelName": "Model",
+      "oauthHint": "This provider uses OAuth. Run the setup below to authenticate in your terminal.",
+      "awsHint": "Bedrock uses your AWS credentials (environment or shared config). Set the model id above and configure AWS access in your environment.",
+      "unsupportedProvider": "This provider isn't editable with structured fields. Use the raw config.yaml editor below or the terminal setup.",
+      "setupTitle": "Self-managed setup",
+      "setupHint": "Hermes's interactive setup needs a terminal. Launch it below, or copy the command to run it yourself.",
+      "runSetup": "Run Hermes setup",
+      "configureModel": "Configure model",
+      "openConfigFolder": "Open ~/.hermes",
+      "copyCommand": "Copy command",
+      "commandCopied": "Command copied to clipboard",
+      "advancedTitle": "Advanced: edit config.yaml",
+      "rawConfigHint": "Edit ~/.hermes/config.yaml directly. Saving here overwrites the file verbatim.",
+      "saveRawConfig": "Save config.yaml"
+    },
     "authModeOfficialSubscription": "Official Subscription",
     "authModeCustomEndpoint": "Custom Endpoint",
     "authModeCustomEndpointHint": "Manually configure API URL and API Key for a custom endpoint.",
@@ -734,13 +775,17 @@
       "saveConfigManagementFailed": "Failed to save config management",
       "clineSaved": "Cline config saved",
       "saveClineFailed": "Failed to save Cline config",
-      "modelProviderRequired": "Please select a model provider before saving."
+      "hermesSaved": "Hermes config saved",
+      "saveHermesFailed": "Failed to save Hermes config",
+      "modelProviderRequired": "Please select a model provider before saving.",
+      "affectedRunningSessions": "{count, plural, one {# running session needs to reconnect to apply the change} other {# running sessions need to reconnect to apply the change}}"
     },
     "version": {
       "statusLabel": "Version Status",
       "notInstalled": "Not installed",
       "remoteLocal": "Remote: {remoteVersion} · Local: {localVersion}",
       "platformUnsupported": "{versionText}. Current platform does not support this agent.",
+      "uvxNotReady": "{versionText}. The uv runtime isn't installed — install it from the uv check below to use this agent.",
       "clickInstall": "{versionText}. Click Install on the right.",
       "localUnrecognized": "{versionText}. Local version is not comparable; try upgrade to overwrite install.",
       "upgradeAvailable": "{versionText}. Upgrade available.",
@@ -891,6 +936,8 @@
       "completing": "Completing...",
       "toasts": {
         "importedSessions": "Imported {imported, plural, one {# session} other {# sessions}}, skipped {skipped}",
+        "importedAndUpdated": "Imported {imported, plural, one {# session} other {# sessions}}, updated {updated, plural, one {# title} other {# titles}}, skipped {skipped}",
+        "updatedTitles": "Updated {updated, plural, one {# title} other {# titles}}, skipped {skipped}",
         "noNewSessionsFound": "No new sessions found (skipped {skipped})",
         "importFailed": "Import failed: {message}",
         "reviewCompleted": "Marked {count, plural, one {# review session} other {# review sessions}} as completed",
@@ -1798,8 +1845,7 @@
       "subAgentOverlay": {
         "title": "Sub-agents",
         "collapsedSummary": "Sub-agents {count}",
-        "collapseAria": "Collapse sub-agents",
-        "expandAria": "Expand sub-agents"
+        "collapseAria": "Collapse sub-agents"
       },
       "agentPlanOverlay": {
         "title": "Agent Plan",
@@ -2080,6 +2126,43 @@
         "fileCount": "{count, plural, one {# file} other {# files}}",
         "remove": "Remove",
         "noDiffDataAvailable": "No diff data available for {filePath}"
+      },
+      "askQuestion": {
+        "title": "The agent needs your input",
+        "subtitle": "Answer below, then submit. You can skip anytime.",
+        "recommended": "Recommended",
+        "other": "Other",
+        "otherPlaceholder": "Type your answer…",
+        "singleSelect": "Single",
+        "multiSelect": "Multiple",
+        "skip": "Skip",
+        "next": "Next",
+        "submit": "Submit",
+        "submitError": "Couldn't submit. Please try again."
+      },
+      "feedbackCheckResult": {
+        "count": "{count, plural, =1 {1 feedback note} other {# feedback notes}}",
+        "expand": "Show all feedback",
+        "collapse": "Collapse",
+        "errorTitle": "Feedback check failed"
+      },
+      "askQuestionResult": {
+        "title": "Question",
+        "answeredLabel": "Q&A:",
+        "awaiting": "Waiting for your answer…",
+        "declined": "You dismissed this — the agent used its own judgment.",
+        "noSelection": "No selection"
+      },
+      "configStale": {
+        "agentConfigTitle": "Agent settings updated",
+        "modelProviderTitle": "Model provider updated",
+        "description": "This session is still using its previous configuration. Reconnect to apply — your conversation history is kept.",
+        "reconnect": "Reconnect to apply",
+        "reconnecting": "Reconnecting…",
+        "reconnectDisabledDuringTurn": "Available once the current turn finishes",
+        "dismiss": "Dismiss",
+        "reconnectFailed": "Failed to reconnect session",
+        "applied": "New configuration applied"
       }
     },
     "diffPreview": {
@@ -2432,7 +2515,8 @@
     "cancel": "Cancel",
     "delete": "Delete",
     "create": "Create",
-    "save": "Save"
+    "save": "Save",
+    "affectedRunningSessions": "{count, plural, one {# running session needs to reconnect to apply the change} other {# running sessions need to reconnect to apply the change}}"
   },
   "ExpertsSettings": {
     "title": "Expert Skills",
@@ -2761,7 +2845,7 @@
     "title": "Live Feedback",
     "description": "Send notes and corrections to an agent while it's working. When enabled, the agent gets a tool to check for your mid-task feedback, and conversations show a note input. Tip: agents typically only check for feedback when you mention it in your prompt — for example, add \"check my live feedback regularly\" to your message so the agent knows to look.",
     "enable": "Enable live feedback",
-    "enableHint": "Adds a check-for-feedback tool to agents started after this is turned on. Off by default.",
+    "enableHint": "Adds a check-for-feedback tool to agents started after this is turned on.",
     "save": "Save",
     "saving": "Saving…",
     "saved": "Feedback settings saved",
@@ -2784,5 +2868,16 @@
     "turnEndedResent": "The turn ended — sent as a new message instead.",
     "turnEnded": "The turn already ended.",
     "submitFailed": "Couldn't send your note"
+  },
+  "AskQuestionSettings": {
+    "title": "Ask user question",
+    "description": "Let agents pause and ask you a multiple-choice question that appears above the conversation input box. The agent waits until you answer (or skip).",
+    "enable": "Enable ask user question",
+    "enableHint": "Adds the ask_user_question tool to agents started after this is turned on.",
+    "save": "Save",
+    "saving": "Saving…",
+    "saved": "Question settings saved",
+    "saveFailed": "Failed to save question settings",
+    "loadFailed": "Failed to load: {detail}"
   }
 }

@@ -48,7 +48,8 @@ mod tauri_app {
         experts as experts_commands, feedback as feedback_commands, file_io, folder_commands,
         folders, mcp as mcp_commands,
         model_provider as model_provider_commands, notification, pet as pet_commands, project_boot,
-        quick_messages as quick_messages_commands, remote_proxy as remote_proxy_commands,
+        question as question_commands, quick_messages as quick_messages_commands,
+        remote_proxy as remote_proxy_commands,
         remote_workspace as remote_workspace_commands, system_settings, terminal as terminal_commands,
         version_control, windows, workspace_state as workspace_state_commands,
     };
@@ -410,7 +411,7 @@ mod tauri_app {
                 let broker_for_lifecycle = {
                     let cm_state = app.state::<ConnectionManager>();
                     let db_conn = app.state::<db::AppDatabase>().conn.clone();
-                    let (broker, tokens, socket_path, feedback_config) =
+                    let (broker, tokens, socket_path, feedback_config, question_config) =
                         crate::app_state::build_delegation_stack(
                             &cm_state,
                             db_conn.clone(),
@@ -419,15 +420,17 @@ mod tauri_app {
                     app.manage(broker.clone());
                     app.manage(tokens.clone());
                     app.manage(feedback_config.clone());
+                    app.manage(question_config.clone());
                     app.manage(crate::commands::delegation::DelegationSocketPath(
                         socket_path.clone(),
                     ));
 
-                    // Push persisted settings into the broker + feedback config
-                    // before listener accept.
+                    // Push persisted settings into the broker + feedback + question
+                    // config before listener accept.
                     let broker_for_init = broker.clone();
                     let db_for_init = db_conn.clone();
                     let feedback_for_init = feedback_config.clone();
+                    let question_for_init = question_config.clone();
                     tauri::async_runtime::block_on(async move {
                         delegation_commands::apply_persisted_config(
                             &db_for_init,
@@ -437,6 +440,11 @@ mod tauri_app {
                         crate::commands::feedback::apply_persisted_feedback_config(
                             &db_for_init,
                             &feedback_for_init,
+                        )
+                        .await;
+                        crate::commands::question::apply_persisted_question_config(
+                            &db_for_init,
+                            &question_for_init,
                         )
                         .await;
                     });
@@ -452,6 +460,11 @@ mod tauri_app {
                         ),
                         std::sync::Arc::new(
                             crate::acp::manager::ConnectionManagerFeedbackLookup {
+                                manager: std::sync::Arc::new(cm_state.clone_ref()),
+                            },
+                        ),
+                        std::sync::Arc::new(
+                            crate::acp::manager::ConnectionManagerQuestionLookup {
                                 manager: std::sync::Arc::new(cm_state.clone_ref()),
                             },
                         ),
@@ -886,6 +899,8 @@ mod tauri_app {
                 feedback_commands::get_feedback_settings,
                 feedback_commands::set_feedback_settings,
                 feedback_commands::submit_session_feedback,
+                question_commands::get_question_settings,
+                question_commands::set_question_settings,
                 version_control::detect_git,
                 version_control::test_git_path,
                 version_control::get_git_settings,
@@ -905,6 +920,7 @@ mod tauri_app {
                 acp_commands::acp_cancel,
                 acp_commands::acp_fork,
                 acp_commands::acp_respond_permission,
+                acp_commands::acp_answer_question,
                 acp_commands::acp_disconnect,
                 acp_commands::acp_touch_connection,
                 acp_commands::acp_list_connections,
@@ -915,12 +931,16 @@ mod tauri_app {
                 acp_commands::acp_get_agent_status,
                 acp_commands::acp_clear_binary_cache,
                 acp_commands::acp_download_agent_binary,
+                acp_commands::acp_install_uv_tool,
                 acp_commands::acp_detect_agent_local_version,
                 acp_commands::acp_prepare_npx_agent,
                 acp_commands::acp_uninstall_agent,
                 acp_commands::acp_update_agent_preferences,
                 acp_commands::acp_update_agent_env,
                 acp_commands::acp_update_agent_config,
+                acp_commands::acp_update_hermes_config,
+                acp_commands::acp_open_hermes_setup_terminal,
+                acp_commands::acp_reveal_hermes_home,
                 acp_commands::acp_reorder_agents,
                 acp_commands::acp_list_agent_skills,
                 acp_commands::acp_read_agent_skill,

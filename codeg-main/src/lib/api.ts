@@ -25,6 +25,7 @@ import type {
   ConversationConnectionInfo,
   LiveSessionSnapshot,
   FeedbackItem,
+  QuestionAnswer,
   AcpAgentInfo,
   AcpAgentStatus,
   AgentSkillScope,
@@ -89,6 +90,7 @@ import type {
   ChatChannelMessageLog,
   WebhookConfig,
   ModelProviderInfo,
+  UpdateModelProviderResult,
   PluginCheckSummary,
   QuickMessage,
 } from "./types"
@@ -218,6 +220,24 @@ export async function acpRespondPermission(
   })
 }
 
+/**
+ * Submit the user's answer to a blocking `ask_user_question`. Resolves the
+ * parked tool call on the backend (and clears the card on every client via the
+ * `question_resolved` event). Idempotent: answering an already-resolved /
+ * unknown `questionId` is a no-op success.
+ */
+export async function acpAnswerQuestion(
+  connectionId: string,
+  questionId: string,
+  answer: QuestionAnswer
+): Promise<void> {
+  return getTransport().call("acp_answer_question", {
+    connectionId,
+    questionId,
+    answer,
+  })
+}
+
 export async function acpDisconnect(connectionId: string): Promise<void> {
   return getTransport().call("acp_disconnect", { connectionId })
 }
@@ -284,6 +304,17 @@ export async function acpDownloadAgentBinary(
   })
 }
 
+export async function acpInstallUvTool(taskId: string): Promise<void> {
+  // uv install downloads + extracts the toolchain from GitHub; allow well
+  // beyond the default 60s web-call timeout so slow networks don't surface a
+  // spurious timeout while the backend is still streaming progress.
+  return getTransport().call(
+    "acp_install_uv_tool",
+    { taskId },
+    { timeoutMs: 600_000 }
+  )
+}
+
 export async function acpDetectAgentLocalVersion(
   agentType: AgentType
 ): Promise<string | null> {
@@ -323,7 +354,7 @@ export async function acpUpdateAgentPreferences(
     codex_auth_json?: string | null
     codex_config_toml?: string | null
   }
-): Promise<void> {
+): Promise<number> {
   return getTransport().call("acp_update_agent_preferences", {
     agentType,
     enabled: params.enabled,
@@ -335,6 +366,8 @@ export async function acpUpdateAgentPreferences(
   })
 }
 
+/** Returns the number of running sessions left on stale config by this save
+ *  (for the settings-side "N sessions need restart" toast). */
 export async function acpUpdateAgentEnv(
   agentType: AgentType,
   params: {
@@ -342,7 +375,7 @@ export async function acpUpdateAgentEnv(
     env: Record<string, string>
     modelProviderId?: number | null
   }
-): Promise<void> {
+): Promise<number> {
   return getTransport().call("acp_update_agent_env", {
     agentType,
     enabled: params.enabled,
@@ -351,6 +384,8 @@ export async function acpUpdateAgentEnv(
   })
 }
 
+/** Returns the number of running sessions left on stale config by this save
+ *  (for the settings-side "N sessions need restart" toast). */
 export async function acpUpdateAgentConfig(
   agentType: AgentType,
   params: {
@@ -359,7 +394,7 @@ export async function acpUpdateAgentConfig(
     codex_auth_json?: string | null
     codex_config_toml?: string | null
   }
-): Promise<void> {
+): Promise<number> {
   return getTransport().call("acp_update_agent_config", {
     agentType,
     configJson: params.config_json ?? null,
@@ -367,6 +402,44 @@ export async function acpUpdateAgentConfig(
     codexAuthJson: params.codex_auth_json ?? null,
     codexConfigToml: params.codex_config_toml ?? null,
   })
+}
+
+/**
+ * Persist a Hermes config update. Writes the active provider's API key to
+ * ~/.hermes/.env and the model/provider/base_url to ~/.hermes/config.yaml.
+ * When `rawConfigYaml` is given, config.yaml is written verbatim (advanced
+ * mode), bypassing the structured merge.
+ */
+export async function acpUpdateHermesConfig(params: {
+  provider: string
+  apiKey?: string | null
+  model?: string | null
+  baseUrl?: string | null
+  rawConfigYaml?: string | null
+}): Promise<void> {
+  return getTransport().call("acp_update_hermes_config", {
+    provider: params.provider,
+    apiKey: params.apiKey ?? null,
+    model: params.model ?? null,
+    baseUrl: params.baseUrl ?? null,
+    rawConfigYaml: params.rawConfigYaml ?? null,
+  })
+}
+
+/**
+ * Launch Hermes's interactive setup in the OS terminal (desktop only). `kind`
+ * picks the flow; the backend constructs the exact command from the registry
+ * recipe (no arbitrary shell text crosses the boundary).
+ */
+export async function acpOpenHermesSetupTerminal(
+  kind: "setup" | "model"
+): Promise<void> {
+  return getTransport().call("acp_open_hermes_setup_terminal", { kind })
+}
+
+/** Ensure ~/.hermes exists and reveal it in the system file manager (desktop). */
+export async function acpRevealHermesHome(): Promise<void> {
+  return getTransport().call("acp_reveal_hermes_home", {})
 }
 
 export async function acpReorderAgents(agentTypes: AgentType[]): Promise<void> {
@@ -2575,7 +2648,7 @@ export async function updateModelProvider(params: {
   apiKey?: string | null
   agentType?: string | null
   model?: string | null
-}): Promise<ModelProviderInfo> {
+}): Promise<UpdateModelProviderResult> {
   return getTransport().call("update_model_provider", {
     id: params.id,
     name: params.name ?? null,
@@ -2644,6 +2717,23 @@ export async function submitSessionFeedback(
     connectionId,
     text,
   })
+}
+
+// ─── Ask-user-question settings ────────────────────────────────────────────
+
+/** Mirror of Rust `QuestionSettings` (default ON). */
+export interface QuestionSettings {
+  enabled: boolean
+}
+
+export async function getQuestionSettings(): Promise<QuestionSettings> {
+  return getTransport().call("get_question_settings")
+}
+
+export async function setQuestionSettings(
+  settings: QuestionSettings
+): Promise<QuestionSettings> {
+  return getTransport().call("set_question_settings", { settings })
 }
 
 /** Live probe — opens a transient ACP connection to `agent_type`, reads what

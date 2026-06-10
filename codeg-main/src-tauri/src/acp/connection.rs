@@ -159,6 +159,19 @@ pub struct AgentConnection {
     /// conversation rows or a confused agent that received two prompts
     /// in the same turn.
     pub prompt_lock: Arc<tokio::sync::Mutex<()>>,
+
+    /// Canonical fingerprint of the agent's effective config (env vars + model
+    /// provider creds + native config file content) captured at spawn. The
+    /// running process is locked to THIS config; comparing it against a freshly
+    /// recomputed fingerprint after a settings save tells us whether the session
+    /// has drifted onto stale config. Immutable for the connection's lifetime.
+    pub config_fingerprint: String,
+    /// The most recent fingerprint seen by `refresh_connection_staleness`.
+    /// Tracks "did anything change since we last looked" so a second settings
+    /// save re-emits `SessionConfigStale` (re-showing a dismissed banner) while a
+    /// no-op save (identical values) stays silent. Starts equal to
+    /// `config_fingerprint`.
+    pub last_observed_fingerprint: String,
 }
 
 impl AgentConnection {
@@ -364,6 +377,72 @@ async fn build_agent(
                 ),
             )
         }
+        AgentDistribution::Uvx {
+            package,
+            cmd,
+            args,
+            env,
+            python,
+            system_cmd,
+            ..
+        } => {
+            let merged_env = merge_agent_env(env, runtime_env);
+            let mut parts: Vec<String> = Vec::new();
+            for (k, v) in &merged_env {
+                parts.push(format!("{k}={v}"));
+            }
+            if let Some(uvx_path) = crate::commands::acp::resolve_uvx_command() {
+                // Primary: `uvx [--python <ver>] --from <pinned package> <entry
+                // script>`. uvx fetches + caches the pinned package on first use;
+                // the `--python` pin keeps it on an interpreter the agent
+                // supports (see the registry `python` field).
+                parts.push(uvx_path.to_string_lossy().to_string());
+                parts.extend(crate::commands::acp::uvx_python_args(python));
+                parts.push("--from".into());
+                parts.push(package.to_string());
+                parts.push(cmd.to_string());
+                for a in args {
+                    parts.push((*a).into());
+                }
+            } else if let Some((sys_path, sys_args)) = system_cmd.and_then(|(c, a)| {
+                crate::commands::acp::resolve_command_on_path(c).map(|path| (path, a))
+            }) {
+                // Fallback: the agent's own CLI is already on PATH (e.g.
+                // `hermes acp`), installed via its official installer rather
+                // than provisioned through uvx.
+                eprintln!(
+                    "[ACP][{}] uvx unavailable; falling back to system command {:?}",
+                    meta.name, sys_path
+                );
+                // `system_cmd` is a complete launch recipe for the PATH binary;
+                // the uvx entry-script `args` don't necessarily apply to it
+                // (for Hermes both are empty / `["acp"]`, so this is exact).
+                parts.push(sys_path.to_string_lossy().to_string());
+                for a in sys_args {
+                    parts.push((*a).into());
+                }
+            } else {
+                // INVARIANT: the substring "is not installed" is matched
+                // verbatim by the frontend catch block in
+                // `src/contexts/acp-connections-context.tsx` to surface a
+                // localized install prompt. Do not change the wording.
+                return Err(AcpError::SdkNotInstalled(format!(
+                    "{} is not installed. Please install it in Agent Settings.",
+                    meta.name
+                )));
+            }
+            let refs: Vec<&str> = parts.iter().map(|s| s.as_str()).collect();
+            let agent_name = meta.name.to_string();
+            AcpAgent::from_args(&refs)
+                .map(|a| {
+                    a.with_debug(move |line, dir| {
+                        if dir == sacp_tokio::LineDirection::Stderr {
+                            eprintln!("[ACP][{agent_name}][stderr] {line}");
+                        }
+                    })
+                })
+                .map_err(|e| AcpError::SpawnFailed(e.to_string()))
+        }
     }
 }
 
@@ -416,6 +495,13 @@ pub async fn spawn_agent_connection(
     )
     .await;
 
+    // Align ~/.hermes/.env's base-URL var with config.yaml's model.base_url so
+    // Hermes' auxiliary tasks (title generation, compression, …) resolve the
+    // same endpoint as the main conversation. Best-effort; never blocks launch.
+    if agent_type == AgentType::Hermes {
+        crate::commands::acp::reconcile_hermes_runtime_env(&runtime_env);
+    }
+
     let agent = build_agent(agent_type, &runtime_env).await?;
 
     // Forward only the codeg git credential helper keys into the terminal
@@ -437,6 +523,13 @@ pub async fn spawn_agent_connection(
     let cleanup_connection_id = connection_id.clone();
     let state_clone = Arc::clone(&session_state);
 
+    // Canonical config fingerprint of what this process is launching with.
+    // Derived from the same `runtime_env` we hand the agent (minus per-launch
+    // volatile keys) plus the agent's native config file content, so a later
+    // settings save can be compared against it to detect a stale running session.
+    let config_fingerprint =
+        crate::commands::acp::fingerprint_config(agent_type, &runtime_env);
+
     // Insert the entry BEFORE spawning the background task so that a
     // fast-failing `run_connection` can never remove it before it was
     // inserted (would otherwise leak the entry).
@@ -451,6 +544,8 @@ pub async fn spawn_agent_connection(
             state: Arc::clone(&session_state),
             emitter: emitter.clone(),
             prompt_lock: Arc::new(tokio::sync::Mutex::new(())),
+            last_observed_fingerprint: config_fingerprint.clone(),
+            config_fingerprint,
         },
     );
 
@@ -480,9 +575,9 @@ pub async fn spawn_agent_connection(
         .await;
 
         // Revoke the per-launch token + cascade cancel any still-pending
-        // delegations owned by this parent connection. Both are best-effort:
-        // a missing token entry is a no-op, and `cancel_by_parent` is safe
-        // to call on an empty pending map.
+        // delegations AND questions owned by this parent connection. All are
+        // best-effort: a missing token entry is a no-op, and both
+        // `cancel_by_parent` calls are safe on an empty pending map.
         if let Some(inj) = delegation_for_cleanup {
             let token = {
                 let snap = state_clone.read().await;
@@ -492,6 +587,10 @@ pub async fn spawn_agent_connection(
                 inj.tokens.revoke(&tok).await;
             }
             inj.broker.cancel_by_parent(&conn_id).await;
+            // Reclaim a parked `ask_user_question` instead of waiting for the
+            // companion's ask socket to close (which a reparented/hard-killed
+            // agent may never do); the dropped sender declines the tool cleanly.
+            inj.questions.cancel_questions_by_parent(&conn_id).await;
         }
 
         if let Err(e) = result {
@@ -822,6 +921,14 @@ fn build_load_session_request(
 /// ACP wire format. Errors and unsupported entries are logged and skipped so
 /// a single malformed entry never blocks a session from starting.
 fn load_mcp_servers_for_agent(agent_type: AgentType) -> Vec<McpServer> {
+    // Hermes reads its own `~/.hermes/config.yaml` `mcp_servers` natively at
+    // launch (registering each as an `mcp-<name>` toolset). codeg manages that
+    // section directly via the MCP settings UI, so forwarding the same servers
+    // over the ACP wire here would double-register them — skip it. (The built-in
+    // `codeg-mcp` companion is injected separately by `inject_codeg_mcp`.)
+    if agent_type == AgentType::Hermes {
+        return Vec::new();
+    }
     let entries = match crate::commands::mcp::read_servers_for_agent_type(agent_type) {
         Ok(map) => map,
         Err(err) => {
@@ -864,6 +971,17 @@ pub struct DelegationInjection {
     /// EITHER feature is on, and the companion is told which tool groups to
     /// expose. Shares the same `tokens` registry and UDS socket as delegation.
     pub feedback: crate::acp::feedback::FeedbackRuntimeConfig,
+    /// Hot-swappable "is ask-user-question enabled?" flag. Read at injection
+    /// time alongside delegation + feedback so `codeg-mcp` is injected when ANY
+    /// of the three is on, and the companion's `--features` lists `ask` to expose
+    /// the `ask_user_question` tool.
+    pub ask: crate::acp::question::QuestionRuntimeConfig,
+    /// Question registry handle for the teardown cascade. The `run_connection`
+    /// cleanup guard calls `cancel_questions_by_parent` through this so a pending
+    /// `ask_user_question` is reclaimed synchronously on disconnect, mirroring
+    /// the delegation `broker.cancel_by_parent` cleanup. Shares the same backing
+    /// `ConnectionManager` as the listener's question lookup.
+    pub questions: Arc<dyn crate::acp::question::SessionQuestionAccess>,
 }
 
 /// Locate the `codeg-mcp` companion binary across the supported deployment
@@ -946,12 +1064,16 @@ fn is_executable_file(path: &Path) -> bool {
 /// delegate tool silently. Skipping leaves the agent fully functional minus
 /// `delegate_to_agent`, which is the right degradation when codeg-mcp didn't
 /// make it into the install.
-/// The `--features` value for a companion launch given the two feature flags,
-/// or `None` when neither is enabled (the companion isn't injected at all).
+/// The `--features` value for a companion launch given the three feature flags,
+/// or `None` when none is enabled (the companion isn't injected at all).
 /// Pulled out as a pure function so the inject/skip decision is unit-testable
 /// without a real binary on disk or a live broker.
-fn companion_features_arg(delegation_enabled: bool, feedback_enabled: bool) -> Option<String> {
-    if !delegation_enabled && !feedback_enabled {
+fn companion_features_arg(
+    delegation_enabled: bool,
+    feedback_enabled: bool,
+    ask_enabled: bool,
+) -> Option<String> {
+    if !delegation_enabled && !feedback_enabled && !ask_enabled {
         return None;
     }
     let mut features: Vec<&str> = Vec::new();
@@ -960,6 +1082,9 @@ fn companion_features_arg(delegation_enabled: bool, feedback_enabled: bool) -> O
     }
     if feedback_enabled {
         features.push("feedback");
+    }
+    if ask_enabled {
+        features.push("ask");
     }
     Some(features.join(","))
 }
@@ -984,14 +1109,16 @@ async fn inject_codeg_mcp(
     // surface to the LLM. (Historically this was gated on delegation alone.)
     let delegation_enabled = injection.broker.config_snapshot().await.enabled;
     let feedback_enabled = injection.feedback.is_enabled().await;
-    // `None` (neither feature enabled) short-circuits the whole injection.
-    let features_arg = companion_features_arg(delegation_enabled, feedback_enabled)?;
+    let ask_enabled = injection.ask.is_enabled().await;
+    // `None` (no feature enabled) short-circuits the whole injection.
+    let features_arg =
+        companion_features_arg(delegation_enabled, feedback_enabled, ask_enabled)?;
     let Some(binary_path) = locate_codeg_mcp_binary() else {
         eprintln!(
             "[delegation][WARN] codeg-mcp companion binary not found (checked CODEG_MCP_BIN, \
-             exe sibling, and PATH); skipping delegate_to_agent / check_user_feedback tool \
-             injection for connection {parent_connection_id}. Reinstall codeg or set \
-             CODEG_MCP_BIN to fix."
+             exe sibling, and PATH); skipping delegate_to_agent / check_user_feedback / \
+             ask_user_question tool injection for connection {parent_connection_id}. Reinstall \
+             codeg or set CODEG_MCP_BIN to fix."
         );
         return None;
     };
@@ -4435,11 +4562,27 @@ mod tests {
         // exact state a fresh install reaches before the user touches the
         // settings panel. Feedback is likewise disabled by default, so with
         // BOTH features off the companion isn't injected at all.
+        struct NoQuestions;
+        #[async_trait::async_trait]
+        impl crate::acp::question::SessionQuestionAccess for NoQuestions {
+            async fn register_question(
+                &self,
+                _parent_connection_id: &str,
+                _questions: Vec<crate::acp::question::QuestionSpec>,
+            ) -> Option<crate::acp::question::RegisteredQuestion> {
+                None
+            }
+            async fn cancel_question(&self, _parent_connection_id: &str, _question_id: &str) {}
+            async fn cancel_questions_by_parent(&self, _parent_connection_id: &str) {}
+        }
         let injection = DelegationInjection {
             broker,
             tokens: Arc::new(TokenRegistry::default()),
             socket_path: std::path::PathBuf::from("/tmp/codeg-mcp.sock"),
             feedback: crate::acp::feedback::FeedbackRuntimeConfig::new(),
+            ask: crate::acp::question::QuestionRuntimeConfig::new(),
+            questions: Arc::new(NoQuestions)
+                as Arc<dyn crate::acp::question::SessionQuestionAccess>,
         };
 
         let mut servers: Vec<McpServer> = Vec::new();
@@ -4473,23 +4616,28 @@ mod tests {
     // have skipped it).
     #[test]
     fn companion_features_arg_inject_skip_decision() {
-        // Both off → no companion at all.
-        assert_eq!(companion_features_arg(false, false), None);
+        // All off → no companion at all.
+        assert_eq!(companion_features_arg(false, false, false), None);
         // Delegation only.
         assert_eq!(
-            companion_features_arg(true, false),
+            companion_features_arg(true, false, false),
             Some("delegation".to_string())
         );
         // Feedback only — the decoupling: companion injected for feedback even
         // when delegation is off.
         assert_eq!(
-            companion_features_arg(false, true),
+            companion_features_arg(false, true, false),
             Some("feedback".to_string())
         );
-        // Both on → comma-joined, delegation first.
+        // Ask only — likewise injects the companion on its own.
         assert_eq!(
-            companion_features_arg(true, true),
-            Some("delegation,feedback".to_string())
+            companion_features_arg(false, false, true),
+            Some("ask".to_string())
+        );
+        // All on → comma-joined, in declaration order.
+        assert_eq!(
+            companion_features_arg(true, true, true),
+            Some("delegation,feedback,ask".to_string())
         );
     }
 }

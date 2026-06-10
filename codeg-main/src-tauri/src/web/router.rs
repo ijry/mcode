@@ -77,6 +77,14 @@ pub fn build_router(
             post(handlers::feedback::submit_session_feedback),
         )
         .route(
+            "/get_question_settings",
+            post(handlers::question::get_question_settings),
+        )
+        .route(
+            "/set_question_settings",
+            post(handlers::question::set_question_settings),
+        )
+        .route(
             "/get_folder_conversation",
             post(handlers::conversations::get_folder_conversation),
         )
@@ -549,6 +557,10 @@ pub fn build_router(
             post(handlers::acp::acp_respond_permission),
         )
         .route(
+            "/acp_answer_question",
+            post(handlers::acp::acp_answer_question),
+        )
+        .route(
             "/acp_list_connections",
             post(handlers::acp::acp_list_connections),
         )
@@ -581,8 +593,16 @@ pub fn build_router(
             post(handlers::acp::acp_update_agent_config),
         )
         .route(
+            "/acp_update_hermes_config",
+            post(handlers::acp::acp_update_hermes_config),
+        )
+        .route(
             "/acp_download_agent_binary",
             post(handlers::acp::acp_download_agent_binary),
+        )
+        .route(
+            "/acp_install_uv_tool",
+            post(handlers::acp::acp_install_uv_tool),
         )
         .route(
             "/acp_detect_agent_local_version",
