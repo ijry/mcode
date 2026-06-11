@@ -654,6 +654,25 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     sessions.value.delete(conversationId)
   }
 
+  function clearCachedSessionState() {
+    for (const session of sessions.value.values()) {
+      if (isSharedInProgressStatus(session.status) || session.liveMessage || session.optimisticTurns.length > 0) {
+        continue
+      }
+      session.localTurns = []
+      session.optimisticTurns = []
+      session.liveMessage = null
+      session.inputErrorMessage = null
+      session.apiRetry = null
+      session.pendingPermission = null
+      session.pendingQuestion = null
+      session.lastAppliedSeq = null
+      session.externalTurnBackfillInFlight = false
+      session.externalTurnBackfillLastAttemptAt = 0
+      session.status = session.connectionId ? "connected" : "idle"
+    }
+  }
+
   function clearPendingPermission(conversationId: number, requestId?: string | null) {
     const session = sessions.value.get(conversationId)
     if (!session?.pendingPermission) return
@@ -756,6 +775,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     connect,
     disconnect,
     clearSession,
+    clearCachedSessionState,
     clearPendingPermission,
     clearPendingQuestion,
     bindCreatedConversationRuntime,

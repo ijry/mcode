@@ -118,6 +118,11 @@ import { usePetStore } from "@/stores/pet"
 import { usePetEngine } from "@/services/petEngine"
 import PetPanel from "@/components/pet/PetPanel.vue"
 import { useAccountStore } from "@/stores/account"
+import {
+  clearInspectableCache,
+  inspectClearableCache,
+  type CacheInventoryItem,
+} from "@/services/cache/cacheManager"
 
 const petStore = usePetStore()
 const account = useAccountStore()
@@ -190,34 +195,65 @@ function openPetManager() {
   showPetPanel.value = true
 }
 
-function clearCache() {
+async function clearCache() {
+  uni.showLoading({ title: "检查缓存..." })
+  let inventory
+  try {
+    inventory = await inspectClearableCache()
+  } catch (error) {
+    console.warn("inspect cache failed", error)
+    uni.hideLoading()
+    uni.showToast({ title: "缓存检查失败", icon: "none" })
+    return
+  }
+  uni.hideLoading()
+
+  if (inventory.blockedReason) {
+    uni.showModal({
+      title: "暂不能清除缓存",
+      content: inventory.blockedReason,
+      showCancel: false,
+      confirmText: "知道了",
+    })
+    return
+  }
+
   uni.showModal({
     title: "清除缓存",
-    content: "确定要清除所有缓存数据吗？",
-    success: (res) => {
+    content: buildClearCacheConfirmContent(inventory.items),
+    confirmText: "确认清除",
+    cancelText: "取消",
+    success: async (res) => {
       if (res.confirm) {
         try {
-          // 保留用户信息和主题设置
-          const user = uni.getStorageSync("mcode_user_info")
-          const token = uni.getStorageSync("mcode_user_token")
-          const savedThemePreference = uni.getStorageSync("mcode_theme_preference")
-
-          uni.clearStorageSync()
-
-          // 恢复保留的数据
-          if (user) uni.setStorageSync("mcode_user_info", user)
-          if (token) uni.setStorageSync("mcode_user_token", token)
-          if (savedThemePreference !== undefined && savedThemePreference !== "") {
-            uni.setStorageSync("mcode_theme_preference", savedThemePreference)
-          }
-
+          uni.showLoading({ title: "清除中..." })
+          await clearInspectableCache()
+          uni.hideLoading()
           uni.showToast({ title: "缓存已清除", icon: "success" })
         } catch (error) {
+          console.warn("clear cache failed", error)
+          uni.hideLoading()
           uni.showToast({ title: "清除失败", icon: "none" })
         }
       }
     },
   })
+}
+
+function buildClearCacheConfirmContent(items: CacheInventoryItem[]) {
+  const lines = items.map((item) => `- ${item.title}：${formatCacheCount(item.count)}`)
+  return [
+    "当前可清除缓存：",
+    ...lines,
+    "",
+    "风险：无服务端数据风险。对话数据清除后，下次进入会从当前连接重新拉取。",
+    "不会清除登录状态、主题设置、连接配置和宠物数据。",
+  ].join("\n")
+}
+
+function formatCacheCount(count: number) {
+  if (!Number.isFinite(count) || count <= 0) return "无缓存"
+  return `${Math.floor(count)} 项`
 }
 
 function checkUpdate() {

@@ -132,6 +132,24 @@ export async function clearRuntime(instanceKey: string, conversationId: number) 
   )
 }
 
+export async function countCachedRuntimeData() {
+  const [runtimeRows, cursorRows] = await Promise.all([
+    sqliteDriver.query<{ total?: number }>(`SELECT COUNT(*) as total FROM conversation_runtime`),
+    sqliteDriver.query<{ total?: number }>(`SELECT COUNT(*) as total FROM sync_cursors`),
+  ])
+  return {
+    runtimes: Number(runtimeRows[0]?.total || 0),
+    cursors: Number(cursorRows[0]?.total || 0),
+  }
+}
+
+export async function clearCachedRuntimeData() {
+  await sqliteDriver.transaction(async () => {
+    await sqliteDriver.execute(`DELETE FROM conversation_runtime`)
+    await sqliteDriver.execute(`DELETE FROM sync_cursors`)
+  })
+}
+
 export async function saveCursor(input: SyncCursorRecord) {
   await sqliteDriver.execute(
     `

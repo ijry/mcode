@@ -165,12 +165,14 @@ export async function countConversationTurns(conversationId: number) {
 }
 
 export async function countCachedConversationData() {
-  const [summaryRows, turnRows, partRows] = await Promise.all([
+  const [folderRows, summaryRows, turnRows, partRows] = await Promise.all([
+    sqliteDriver.query<{ total?: number }>(`SELECT COUNT(*) as total FROM folders`),
     sqliteDriver.query<{ total?: number }>(`SELECT COUNT(*) as total FROM conversations`),
     sqliteDriver.query<{ total?: number }>(`SELECT COUNT(*) as total FROM conversation_turns`),
     sqliteDriver.query<{ total?: number }>(`SELECT COUNT(*) as total FROM conversation_parts`),
   ])
   return {
+    folders: Number(folderRows[0]?.total || 0),
     conversations: Number(summaryRows[0]?.total || 0),
     turns: Number(turnRows[0]?.total || 0),
     parts: Number(partRows[0]?.total || 0),
@@ -182,6 +184,7 @@ export async function clearCachedConversationData() {
     await sqliteDriver.execute(`DELETE FROM conversation_parts`)
     await sqliteDriver.execute(`DELETE FROM conversation_turns`)
     await sqliteDriver.execute(`DELETE FROM conversations`)
+    await sqliteDriver.execute(`DELETE FROM folders`)
   })
 }
 

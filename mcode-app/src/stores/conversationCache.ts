@@ -29,5 +29,8 @@ export const useConversationCacheStore = defineStore("conversationCache", {
     clear(conversationId: number) {
       delete this.byConversationId[conversationId]
     },
+    clearAll() {
+      this.byConversationId = {}
+    },
   },
 })
