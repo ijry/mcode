@@ -384,6 +384,21 @@ class AcpApiClient {
     return this.buildBridgeHealth(descriptor.instanceKey, bridge)
   }
 
+  reconnectRealtimeBridge(instanceKey?: string) {
+    const descriptor = this.resolveDescriptor(instanceKey)
+    const bridge = this.bridgeStates.get(descriptor.instanceKey)
+    if (!bridge) {
+      return this.ensureRealtimeBridge(descriptor.instanceKey)
+    }
+    if (bridge.reconnectTimer) {
+      clearTimeout(bridge.reconnectTimer)
+      bridge.reconnectTimer = null
+    }
+    bridge.connection?.close()
+    bridge.connection = null
+    return this.ensureRealtimeBridge(descriptor.instanceKey)
+  }
+
   private async connectEventSource(instanceKey?: string) {
     try {
       await this.ensureRealtimeBridge(instanceKey)

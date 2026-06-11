@@ -90,6 +90,13 @@
           :color="detailStatusBanner.iconColor"
         ></up-icon>
         <text class="detail-status-banner__text">{{ detailStatusBanner.text }}</text>
+        <view
+          v-if="detailStatusBanner.actionLabel"
+          class="detail-status-banner__action"
+          @click.stop="handleDetailStatusAction(detailStatusBanner.actionKey)"
+        >
+          <text class="detail-status-banner__action-text">{{ detailStatusBanner.actionLabel }}</text>
+        </view>
       </view>
 
       <view
@@ -1156,6 +1163,8 @@ const detailStatusBanner = computed<{
   icon: string
   iconColor: string
   loading: boolean
+  actionKey?: "reconnect" | "inspect"
+  actionLabel?: string
 } | null>(() => {
   const health = bridgeHealth.value
   if (showBridgeRecoveredBanner.value) {
@@ -1177,6 +1186,8 @@ const detailStatusBanner = computed<{
       icon: "reload",
       iconColor: upThemeVar("--up-error", "#fa3534"),
       loading: true,
+      actionKey: "reconnect",
+      actionLabel: "立即重试",
     }
   }
   if (health?.state === "error") {
@@ -1186,6 +1197,8 @@ const detailStatusBanner = computed<{
       icon: "close-circle-fill",
       iconColor: upThemeVar("--up-error", "#fa3534"),
       loading: false,
+      actionKey: "reconnect",
+      actionLabel: "立即重试",
     }
   }
   if (runtimeErrorText.value) {
@@ -1243,6 +1256,8 @@ const detailStatusBanner = computed<{
       icon: "clock",
       iconColor: upThemeVar("--up-primary", "#2979ff"),
       loading: false,
+      actionKey: "inspect",
+      actionLabel: planTasks.value.length > 0 ? "查看计划" : "查看最近一步",
     }
   }
   if (runtimeStatus.value === "thinking") {
@@ -1552,6 +1567,29 @@ function clearBridgeRecoveryTimer() {
   if (!bridgeRecoveryTimer) return
   clearTimeout(bridgeRecoveryTimer)
   bridgeRecoveryTimer = null
+}
+
+function handleDetailStatusAction(actionKey?: "reconnect" | "inspect") {
+  if (!actionKey) return
+  if (actionKey === "reconnect") {
+    const instanceKey = resolveDetailInstanceKey()
+    if (!instanceKey) return
+    void acpApi.reconnectRealtimeBridge(instanceKey).catch((error) => {
+      uni.showToast({
+        title: toErrorMessage(error, "重连失败"),
+        icon: "none",
+        duration: 2500,
+      })
+    })
+    return
+  }
+  if (actionKey === "inspect") {
+    if (planTasks.value.length > 0) {
+      showPlanDrawer.value = true
+      return
+    }
+    handleScrollToBottomFab()
+  }
 }
 
 onBackPress(() => {
@@ -4374,6 +4412,19 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 .detail-status-banner__text {
   font-size: 23rpx;
   font-weight: 500;
+  color: var(--up-main-color, #303133);
+}
+
+.detail-status-banner__action {
+  margin-left: auto;
+  padding: 8rpx 16rpx;
+  border-radius: 999rpx;
+  background-color: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 82%, var(--up-main-color, #303133) 18%);
+}
+
+.detail-status-banner__action-text {
+  font-size: 21rpx;
+  font-weight: 600;
   color: var(--up-main-color, #303133);
 }
 
