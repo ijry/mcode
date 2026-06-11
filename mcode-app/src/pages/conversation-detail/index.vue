@@ -9,7 +9,7 @@
         :autoBack="false"
         :fixed="true"
         :placeholder="true"
-        :border="false"
+        :border="true"
         left-icon="arrow-left"
         height="45px"
         :bgColor="upThemeVar('--up-card-bg-color', '#ffffff')"
@@ -30,16 +30,31 @@
               </view>
               <text class="detail-navbar__title u-line-1">{{ conversationTitle }}</text>
             </view>
-            <view class="detail-navbar__meta-row">
-              <view class="runtime-dot" :class="`runtime-dot--${runtimeStatusClass}`"></view>
-              <text class="detail-navbar__meta-text">{{ runtimeStatusLabel }}</text>
-            </view>
           </view>
         </template>
-        <template #right>
+      </up-navbar>
+
+      <view class="detail-toolbar" :style="upThemeCardStyle">
+        <view class="detail-toolbar__status" :data-status="toolbarStatusText">
+          <view class="runtime-dot" :class="`runtime-dot--${runtimeStatusClass}`"></view>
+          <view class="detail-toolbar__status-copy">
+            <text class="detail-toolbar__status-text">{{ toolbarStatusText }}</text>
+          </view>
+        </view>
+        <view class="detail-toolbar__actions">
           <view
-            class="detail-navbar__refresh"
-            :class="{ 'detail-navbar__refresh--disabled': loading }"
+            v-if="planTasks.length > 0"
+            class="detail-toolbar__action detail-toolbar__action--plan"
+            @click.stop="showPlanDrawer = true"
+          >
+            <up-icon name="list" size="16" :color="upThemeVar('--up-primary', '#2979ff')"></up-icon>
+            <text class="detail-toolbar__action-text detail-toolbar__action-text--plan">
+              计划 {{ completedTaskCount }}/{{ planTasks.length }}
+            </text>
+          </view>
+          <view
+            class="detail-toolbar__icon-action"
+            :class="{ 'detail-toolbar__icon-action--disabled': loading }"
             @click.stop="refreshConversation"
           >
             <up-loading-icon
@@ -55,44 +70,27 @@
               :color="upThemeVar('--up-content-color', '#606266')"
             ></up-icon>
           </view>
-        </template>
-      </up-navbar>
+          <view
+            class="detail-toolbar__icon-action detail-toolbar__icon-action--danger"
+            :class="{ 'detail-toolbar__icon-action--disabled': !canStopSession || stoppingSession }"
+            @click.stop="confirmStopSession()"
+          >
+            <up-loading-icon
+              v-if="stoppingSession"
+              mode="circle"
+              size="16"
+              color="#f56c6c"
+            ></up-loading-icon>
+            <view v-else class="detail-toolbar__stop-mark"></view>
+          </view>
+        </view>
+      </view>
 
       <view
         v-if="sharedLiveHint"
         :class="['shared-live-hint', planTasks.length > 0 && 'shared-live-hint--with-plan']"
       >
         <text class="shared-live-hint__text">{{ sharedLiveHint }}</text>
-      </view>
-
-      <view
-        v-if="detailStatusBanner"
-        :class="[
-          'detail-status-banner',
-          `detail-status-banner--${detailStatusBanner.tone}`,
-          planTasks.length > 0 && 'detail-status-banner--with-plan',
-        ]"
-      >
-        <up-loading-icon
-          v-if="detailStatusBanner.loading"
-          mode="circle"
-          size="16"
-          :color="detailStatusBanner.iconColor"
-        ></up-loading-icon>
-        <up-icon
-          v-else
-          :name="detailStatusBanner.icon"
-          size="16"
-          :color="detailStatusBanner.iconColor"
-        ></up-icon>
-        <text class="detail-status-banner__text">{{ detailStatusBanner.text }}</text>
-        <view
-          v-if="detailStatusBanner.actionLabel"
-          class="detail-status-banner__action"
-          @click.stop="handleDetailStatusAction(detailStatusBanner.actionKey)"
-        >
-          <text class="detail-status-banner__action-text">{{ detailStatusBanner.actionLabel }}</text>
-        </view>
       </view>
 
       <view
@@ -478,21 +476,6 @@
             </view>
           </view>
 
-          <view
-            v-if="canStopSession"
-            :class="['input-tool-btn', 'input-tool-btn--stop', stoppingSession && 'input-tool-btn--disabled']"
-            @click="confirmStopSession()"
-          >
-            <view class="input-tool-btn__icon input-tool-btn__icon--stop">
-              <up-loading-icon
-                v-if="stoppingSession"
-                mode="circle"
-                size="18"
-                color="#f56c6c"
-              ></up-loading-icon>
-              <view v-else class="input-tool-btn__stop-mark"></view>
-            </view>
-          </view>
         </view>
 
         <view v-if="showComposerPanel" class="composer-panel" :style="upThemeCardStyle">
@@ -620,14 +603,6 @@
         <view v-if="hasUnreadBelow" class="scroll-bottom-fab__dot"></view>
       </view>
 
-      <view
-        v-if="planTasks.length > 0"
-        class="plan-fab"
-        @click="showPlanDrawer = true"
-      >
-        <up-icon name="list" size="18" color="#ffffff"></up-icon>
-        <text class="plan-fab__text">计划 {{ completedTaskCount }}/{{ planTasks.length }}</text>
-      </view>
     </view>
 
     <up-popup v-model:show="showPlanDrawer" mode="bottom" :round="20">
@@ -693,7 +668,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, watch } from "vue"
+import { ref, computed, getCurrentInstance, nextTick, watch } from "vue"
 import { onBackPress, onHide, onLoad, onShow, onUnload } from "@dcloudio/uni-app"
 import { useAuthStore } from "@/stores/auth"
 import { useConversationCacheStore } from "@/stores/conversationCache"
@@ -712,6 +687,7 @@ import {
   type PersistedTurnWithParts,
 } from "@/services/db/repositories/conversationRepository"
 import {
+  clearRuntime,
   getRuntime,
   saveDraftState,
   type ConversationRuntimeRecord,
@@ -854,6 +830,7 @@ interface QuickReplyItem {
   value: string
 }
 
+
 interface QuestionSelectionState {
   selected: string[]
   otherActive: boolean
@@ -868,6 +845,13 @@ interface HistoryPageCursor {
 const auth = useAuthStore()
 const cacheStore = useConversationCacheStore()
 const runtime = useConversationRuntimeStore()
+const currentInstance = getCurrentInstance()
+const upThemeVars = computed(() => currentInstance?.proxy?.upThemeVars || {})
+const upThemePageStyle = computed(() => currentInstance?.proxy?.upThemePageStyle || {})
+const upThemeCardStyle = computed(() => currentInstance?.proxy?.upThemeCardStyle || {})
+const upThemeVar = (varName: string, fallbackColor?: string) =>
+  currentInstance?.proxy?.upThemeVar?.(varName, fallbackColor) ?? (fallbackColor || "")
+
 const INITIAL_TURN_BATCH = 20
 const INITIAL_TURN_EXPAND_BATCH = 30
 const INITIAL_TURN_MAX_BATCH = 200
@@ -888,6 +872,8 @@ const loading = ref(false)
 const sending = ref(false)
 const stoppingSession = ref(false)
 const processingQueue = ref(false)
+const refreshTapCount = ref(0)
+const refreshTapTimer = ref<ReturnType<typeof setTimeout> | null>(null)
 const sequence = ref(0)
 const conversationId = ref<number>(0)
 const folderId = ref<number>(0)
@@ -1351,6 +1337,12 @@ const runtimeStatusLabel = computed(() => {
   if (runtimeStatus.value === "connected") return "已连接"
   if (runtimeStatus.value === "connecting") return "连接中"
   return "空闲"
+})
+
+const toolbarStatusText = computed(() => {
+  const bannerText = String(detailStatusBanner.value?.text || "").trim()
+  if (bannerText) return bannerText
+  return runtimeStatusLabel.value
 })
 
 const runtimeStatusClass = computed(() => {
@@ -1977,11 +1969,68 @@ function syncConversationTitle(title?: string | null) {
 
 function refreshConversation() {
   if (!conversationId.value || loading.value) return
+  if (registerRefreshTap()) return
   loadConversation()
     .then(() => {
       uni.showToast({ title: "会话已刷新", icon: "none" })
     })
     .catch(() => {})
+}
+
+function registerRefreshTap() {
+  if (refreshTapTimer.value) {
+    clearTimeout(refreshTapTimer.value)
+  }
+  refreshTapCount.value += 1
+  if (refreshTapCount.value >= 3) {
+    refreshTapCount.value = 0
+    refreshTapTimer.value = null
+    promptHardRefreshConversation()
+    return true
+  }
+  refreshTapTimer.value = setTimeout(() => {
+    refreshTapCount.value = 0
+    refreshTapTimer.value = null
+  }, 800)
+  return false
+}
+
+function promptHardRefreshConversation() {
+  uni.showModal({
+    title: "彻底刷新当前会话？",
+    content: "这会清除当前会话的本地缓存并重新加载，通常可以修复会话显示不全等意外情况。",
+    confirmText: "清除并刷新",
+    cancelText: "取消",
+    success: (result) => {
+      if (!result.confirm) return
+      void hardRefreshConversation()
+    },
+  })
+}
+
+async function hardRefreshConversation() {
+  const currentConversationId = conversationId.value
+  if (!currentConversationId || loading.value) return
+  const currentInstanceKey = detailConnectionKey.value
+  try {
+    cacheStore.clear(currentConversationId)
+    runtime.clearSession(currentConversationId)
+    if (currentInstanceKey) {
+      await clearRuntime(currentInstanceKey, currentConversationId)
+    }
+    await loadConversation()
+    uni.showToast({
+      title: "已清除当前会话缓存并刷新",
+      icon: "none",
+      duration: 2600,
+    })
+  } catch (error) {
+    uni.showToast({
+      title: toErrorMessage(error, "彻底刷新失败"),
+      icon: "none",
+      duration: 2600,
+    })
+  }
 }
 
 function confirmStopSession(options: { refreshAfterStop?: boolean } = {}) {
@@ -4275,10 +4324,8 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   max-width: calc(100vw - 220rpx);
   flex-shrink: 0;
   display: flex;
-  flex-direction: column;
   align-items: flex-start;
   justify-content: center;
-  gap: 4rpx;
   box-sizing: border-box;
 }
 
@@ -4319,23 +4366,119 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   color: var(--up-main-color, #303133);
 }
 
-.detail-navbar__meta-row {
+.detail-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+  flex-shrink: 0;
+  padding: 14rpx 24rpx;
+  border-bottom: 1rpx solid var(--up-border-color, #dadbde);
+  background: var(--up-card-bg-color, #ffffff);
+  box-sizing: border-box;
+}
+
+.detail-toolbar__status {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8rpx;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.detail-toolbar__status-copy {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.detail-toolbar__status-text {
+  display: block;
+  min-width: 0;
+  flex: 1;
+  font-size: 22rpx;
+  line-height: 1.3;
+  color: var(--up-tips-color, #909193);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.detail-toolbar__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12rpx;
+  flex-shrink: 0;
+}
+
+.detail-toolbar__action {
   display: flex;
   align-items: center;
   gap: 8rpx;
+  flex-shrink: 0;
+  min-height: 56rpx;
+  padding: 0 18rpx;
+  border-radius: 999rpx;
+  background: color-mix(in srgb, var(--up-page-bg-color, var(--up-bg-color, #f5f6f8)) 72%, var(--up-card-bg-color, #ffffff) 28%);
+  box-sizing: border-box;
 }
 
-.detail-navbar__meta-text {
-  font-size: 20rpx;
-  line-height: 1.2;
-  color: var(--up-tips-color, #909193);
+.detail-toolbar__action--plan {
+  max-width: 360rpx;
+  border: 1rpx solid color-mix(in srgb, var(--up-primary, #2979ff) 18%, var(--up-border-color, #dadbde) 82%);
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 8%, var(--up-card-bg-color, #ffffff) 92%);
+}
+
+.detail-toolbar__action--disabled {
+  opacity: 0.6;
+}
+
+.detail-toolbar__action-text {
+  font-size: 22rpx;
+  color: var(--up-content-color, #606266);
+}
+
+.detail-toolbar__action-text--plan {
+  min-width: 0;
+  color: var(--up-primary, #2979ff);
+}
+
+.detail-toolbar__icon-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56rpx;
+  height: 56rpx;
+  flex-shrink: 0;
+  border-radius: 999rpx;
+  background: color-mix(in srgb, var(--up-page-bg-color, var(--up-bg-color, #f5f6f8)) 72%, var(--up-card-bg-color, #ffffff) 28%);
+  box-sizing: border-box;
+}
+
+.detail-toolbar__icon-action--danger {
+  background: color-mix(in srgb, #f56c6c 10%, var(--up-card-bg-color, #ffffff) 90%);
+}
+
+.detail-toolbar__icon-action--disabled {
+  opacity: 0.6;
+}
+
+.detail-toolbar__stop-mark {
+  width: 18rpx;
+  height: 18rpx;
+  border-radius: 4rpx;
+  background: #f56c6c;
 }
 
 .runtime-dot {
-  width: 12rpx;
-  height: 12rpx;
+  width: 16rpx;
+  height: 16rpx;
   border-radius: 50%;
   background-color: var(--up-border-color, #dadbde);
+  box-shadow: 0 0 0 3rpx color-mix(in srgb, var(--up-card-bg-color, #ffffff) 55%, transparent);
 
   &--online {
     background-color: #19be6b;
@@ -4359,25 +4502,6 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   0% { transform: scale(1); opacity: 1; }
   50% { transform: scale(1.2); opacity: 0.6; }
   100% { transform: scale(1); opacity: 1; }
-}
-
-.detail-navbar__refresh {
-  width: 64rpx;
-  height: 64rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 16rpx;
-  background-color: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
-  box-sizing: border-box;
-
-  &:active {
-    background-color: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
-  }
-}
-
-.detail-navbar__refresh--disabled {
-  opacity: 0.6;
 }
 
 .message-list {
@@ -4433,58 +4557,6 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   font-size: 22rpx;
   color: var(--up-tips-color, #909193);
   text-align: center;
-}
-
-.detail-status-banner {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10rpx;
-  flex-shrink: 0;
-  padding: 14rpx 24rpx;
-  border-top: 1rpx solid transparent;
-  border-bottom: 1rpx solid transparent;
-}
-
-.detail-status-banner--with-plan {
-  padding-right: 220rpx;
-}
-
-.detail-status-banner--info {
-  background-color: color-mix(in srgb, var(--up-primary, #2979ff) 10%, var(--up-card-bg-color, #ffffff) 90%);
-  border-top-color: color-mix(in srgb, var(--up-primary, #2979ff) 18%, transparent);
-  border-bottom-color: color-mix(in srgb, var(--up-primary, #2979ff) 18%, transparent);
-}
-
-.detail-status-banner--warning {
-  background-color: color-mix(in srgb, var(--up-warning, #f9ae3d) 12%, var(--up-card-bg-color, #ffffff) 88%);
-  border-top-color: color-mix(in srgb, var(--up-warning, #f9ae3d) 22%, transparent);
-  border-bottom-color: color-mix(in srgb, var(--up-warning, #f9ae3d) 22%, transparent);
-}
-
-.detail-status-banner--error {
-  background-color: color-mix(in srgb, var(--up-error, #fa3534) 10%, var(--up-card-bg-color, #ffffff) 90%);
-  border-top-color: color-mix(in srgb, var(--up-error, #fa3534) 22%, transparent);
-  border-bottom-color: color-mix(in srgb, var(--up-error, #fa3534) 22%, transparent);
-}
-
-.detail-status-banner__text {
-  font-size: 23rpx;
-  font-weight: 500;
-  color: var(--up-main-color, #303133);
-}
-
-.detail-status-banner__action {
-  margin-left: auto;
-  padding: 8rpx 16rpx;
-  border-radius: 999rpx;
-  background-color: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 82%, var(--up-main-color, #303133) 18%);
-}
-
-.detail-status-banner__action-text {
-  font-size: 21rpx;
-  font-weight: 600;
-  color: var(--up-main-color, #303133);
 }
 
 .history-status {
@@ -5346,20 +5418,6 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 .input-tool-btn--active .input-tool-btn__icon {
   background: color-mix(in srgb, var(--up-primary, #2979ff) 12%, var(--up-card-bg-color, #ffffff) 88%);
   transform: translateY(-1rpx);
-}
-
-.input-tool-btn__icon--stop {
-  width: 56rpx;
-  height: 56rpx;
-  border-radius: 18rpx;
-  background: color-mix(in srgb, var(--up-page-bg-color, var(--up-bg-color, #f5f6f8)) 72%, var(--up-card-bg-color, #ffffff) 28%);
-}
-
-.input-tool-btn__stop-mark {
-  width: 20rpx;
-  height: 20rpx;
-  border-radius: 4rpx;
-  background: #f56c6c;
 }
 
 .composer-panel {
