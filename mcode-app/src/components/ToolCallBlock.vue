@@ -1,5 +1,7 @@
 <template>
-  <view class="tool-block">
+  <AskQuestionResultBlock v-if="isAskQuestion" :toolCall="toolCall" />
+
+  <view v-else class="tool-block">
     <!-- 头部 -->
     <view class="tool-hd" @click="toggleExpanded">
       <view class="tool-hd__left">
@@ -65,12 +67,16 @@
 <script setup lang="ts">
 import { ref, computed } from "vue"
 import type { ToolCall } from "@/types/acp"
+import AskQuestionResultBlock from "./AskQuestionResultBlock.vue"
+import { isAskQuestionToolCall } from "@/services/conversation/askQuestionResult"
 
 const props = defineProps<{
   toolCall: ToolCall
 }>()
 
 const expanded = ref(false)
+
+const isAskQuestion = computed(() => isAskQuestionToolCall(props.toolCall))
 
 const iconColor = computed(() => {
   const map: Record<string, string> = {
