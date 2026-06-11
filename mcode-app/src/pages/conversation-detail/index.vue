@@ -70,6 +70,18 @@
       </view>
 
       <view
+        v-if="showConnectingIndicator"
+        :class="['connecting-status', planTasks.length > 0 && 'connecting-status--with-plan']"
+      >
+        <up-loading-icon
+          mode="circle"
+          size="16"
+          :color="upThemeVar('--up-primary', '#2979ff')"
+        ></up-loading-icon>
+        <text class="connecting-status__text">正在连接智能体...</text>
+      </view>
+
+      <view
         v-if="historyStatusText"
         :class="['history-status', planTasks.length > 0 && 'history-status--with-plan']"
       >
@@ -995,6 +1007,7 @@ const historyStatusText = computed(() => {
 })
 
 const runtimeStatus = computed<string>(() => String(session.value?.status || "idle"))
+const showConnectingIndicator = computed(() => runtimeStatus.value === "connecting")
 const canStopSession = computed(() => isStoppableRuntimeStatus(runtimeStatus.value))
 const liveActivitySignature = computed(() =>
   buildLiveActivitySignature(session.value?.liveMessage?.content || [])
@@ -4089,6 +4102,28 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   font-size: 22rpx;
   color: var(--up-tips-color, #909193);
   text-align: center;
+}
+
+.connecting-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10rpx;
+  flex-shrink: 0;
+  padding: 14rpx 24rpx;
+  background-color: color-mix(in srgb, var(--up-primary, #2979ff) 10%, var(--up-card-bg-color, #ffffff) 90%);
+  border-top: 1rpx solid color-mix(in srgb, var(--up-primary, #2979ff) 18%, transparent);
+  border-bottom: 1rpx solid color-mix(in srgb, var(--up-primary, #2979ff) 18%, transparent);
+}
+
+.connecting-status--with-plan {
+  padding-right: 220rpx;
+}
+
+.connecting-status__text {
+  font-size: 23rpx;
+  font-weight: 500;
+  color: var(--up-primary, #2979ff);
 }
 
 .history-status {
