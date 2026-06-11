@@ -798,6 +798,11 @@ interface QuestionSelectionState {
   otherText: string
 }
 
+interface HistoryPageCursor {
+  sortKey: number
+  id: string
+}
+
 const auth = useAuthStore()
 const cacheStore = useConversationCacheStore()
 const runtime = useConversationRuntimeStore()
@@ -840,7 +845,7 @@ const shouldAutoFollowBottom = ref(true)
 const hasUnreadBelow = ref(false)
 const loadingOlder = ref(false)
 const hasMoreHistory = ref(false)
-const oldestLoadedCursor = ref<number | null>(null)
+const oldestLoadedCursor = ref<HistoryPageCursor | null>(null)
 const attachments = ref<UploadedAttachment[]>([])
 const uploadQueue = ref<UploadQueueItem[]>([])
 const draftQueue = ref<QueuedDraft[]>([])
@@ -860,6 +865,7 @@ const permissionSubmitting = ref(false)
 const pendingPermissionSubmittingOptionId = ref("")
 const questionSubmitting = ref(false)
 const askQuestionSelections = ref<Record<string, QuestionSelectionState>>({})
+const cachedOldestLoadedSortKey = ref<number | null>(null)
 let detailAgentProbeToken = 0
 let stuckPromptTimer: ReturnType<typeof setTimeout> | null = null
 let lastLiveActivitySignature = ""
@@ -1423,6 +1429,7 @@ async function loadConversation() {
   restoredInitialScroll.value = false
   hasRestoredDraftState.value = false
   const cachedViewState = cacheStore.restore(conversationId.value)
+  cachedOldestLoadedSortKey.value = Number(cachedViewState?.oldestLoadedSeq || 0) || null
   let persistedRuntime: ConversationRuntimeRecord | null = null
   let initialLoadFinished = false
   const finishInitialLoad = (
@@ -1505,7 +1512,8 @@ async function loadConversation() {
     }
 
     if (hasHotRuntime) {
-      oldestLoadedCursor.value = cachedViewState?.oldestLoadedSeq ?? oldestLoadedCursor.value
+      oldestLoadedCursor.value =
+        restoreHistoryCursorFromCache(cachedViewState) ?? oldestLoadedCursor.value
       hasMoreHistory.value = cachedViewState?.hasMoreHistory ?? hasMoreHistory.value
       finishInitialLoad(cachedViewState, persistedRuntime)
     } else if (localTurns.length > 0) {
@@ -2057,7 +2065,7 @@ function persistDetailRuntimeState() {
   cacheStore.persistViewState({
     conversationId: conversationId.value,
     loadedTurnCount: messages.value.length,
-    oldestLoadedSeq: oldestLoadedCursor.value ?? undefined,
+    oldestLoadedSeq: oldestLoadedCursor.value?.sortKey ?? undefined,
     hasMoreHistory: hasMoreHistory.value,
     scrollAnchor: scrollIntoView.value || undefined,
     scrollTop: lastMeasuredScrollTop.value || scrollTop.value || 0,
@@ -2142,7 +2150,27 @@ function mapPersistedPartToContent(part: PersistedTurnPartRow): ContentPart | nu
 function getOldestCursorFromPersistedTurns(turns: PersistedTurnWithParts[]) {
   if (turns.length === 0) return null
   const tail = turns[turns.length - 1]
-  return Number(tail.seq ?? tail.createdAt ?? 0) || null
+  const sortKey = Number(tail.sortKey ?? tail.seq ?? tail.createdAt ?? 0)
+  if (!sortKey || !tail.id) return null
+  return { sortKey, id: tail.id }
+}
+
+function restoreHistoryCursorFromCache(
+  cachedViewState: ReturnType<typeof cacheStore.restore>
+): HistoryPageCursor | null {
+  const sortKey = Number(cachedViewState?.oldestLoadedSeq ?? 0)
+  if (!sortKey) return null
+  const firstMessageId = messages.value[0]?.id || ""
+  if (!firstMessageId) return null
+  return { sortKey, id: firstMessageId }
+}
+
+function ensureHistoryCursorFromLoadedMessages() {
+  if (oldestLoadedCursor.value) return
+  const sortKey = cachedOldestLoadedSortKey.value
+  const firstMessageId = messages.value[0]?.id || ""
+  if (!sortKey || !firstMessageId) return
+  oldestLoadedCursor.value = { sortKey, id: firstMessageId }
 }
 
 function measureMessageListHeight() {
@@ -2202,6 +2230,7 @@ function handleMessageReachTop() {
 }
 
 async function loadOlderTurns() {
+  ensureHistoryCursorFromLoadedMessages()
   if (loadingOlder.value || !hasMoreHistory.value || oldestLoadedCursor.value == null) return
   const startedAt = Date.now()
   loadingOlder.value = true
@@ -2218,7 +2247,8 @@ async function loadOlderTurns() {
       ...runtimeSession.localTurns,
     ]
     oldestLoadedCursor.value = getOldestCursorFromPersistedTurns(older)
-    hasMoreHistory.value = older.length >= 20
+    const totalTurnCount = await countConversationTurns(conversationId.value)
+    hasMoreHistory.value = totalTurnCount > runtimeSession.localTurns.length
     if (firstVisibleMessageId) {
       nextTick(() => {
         setProgrammaticAnchor(firstVisibleMessageId)

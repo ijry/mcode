@@ -50,6 +50,7 @@ export interface PersistedTurnRow {
   role: string
   createdAt: number
   seq?: number | null
+  sortKey: number
   status?: string | null
   version: number
 }
@@ -138,11 +139,12 @@ export async function getNewestTurns(conversationId: number, limit: number) {
         role,
         created_at as createdAt,
         seq,
+        COALESCE(seq, created_at) as sortKey,
         status,
         version
       FROM conversation_turns
       WHERE conversation_id = ?
-      ORDER BY COALESCE(seq, created_at) DESC
+      ORDER BY COALESCE(seq, created_at) DESC, id DESC
       LIMIT ?
     `,
     [conversationId, limit]
@@ -162,9 +164,30 @@ export async function countConversationTurns(conversationId: number) {
   return Number(rows[0]?.total || 0)
 }
 
+export async function countCachedConversationData() {
+  const [summaryRows, turnRows, partRows] = await Promise.all([
+    sqliteDriver.query<{ total?: number }>(`SELECT COUNT(*) as total FROM conversations`),
+    sqliteDriver.query<{ total?: number }>(`SELECT COUNT(*) as total FROM conversation_turns`),
+    sqliteDriver.query<{ total?: number }>(`SELECT COUNT(*) as total FROM conversation_parts`),
+  ])
+  return {
+    conversations: Number(summaryRows[0]?.total || 0),
+    turns: Number(turnRows[0]?.total || 0),
+    parts: Number(partRows[0]?.total || 0),
+  }
+}
+
+export async function clearCachedConversationData() {
+  await sqliteDriver.transaction(async () => {
+    await sqliteDriver.execute(`DELETE FROM conversation_parts`)
+    await sqliteDriver.execute(`DELETE FROM conversation_turns`)
+    await sqliteDriver.execute(`DELETE FROM conversations`)
+  })
+}
+
 export async function getOlderTurns(
   conversationId: number,
-  beforeSeq: number,
+  before: { sortKey: number; id: string },
   limit = 20
 ) {
   const turns = await sqliteDriver.query<PersistedTurnRow>(
@@ -177,14 +200,19 @@ export async function getOlderTurns(
         role,
         created_at as createdAt,
         seq,
+        COALESCE(seq, created_at) as sortKey,
         status,
         version
       FROM conversation_turns
-      WHERE conversation_id = ? AND COALESCE(seq, created_at) < ?
-      ORDER BY COALESCE(seq, created_at) DESC
+      WHERE conversation_id = ?
+        AND (
+          COALESCE(seq, created_at) < ?
+          OR (COALESCE(seq, created_at) = ? AND id < ?)
+        )
+      ORDER BY COALESCE(seq, created_at) DESC, id DESC
       LIMIT ?
     `,
-    [conversationId, beforeSeq, limit]
+    [conversationId, before.sortKey, before.sortKey, before.id, limit]
   )
   return await hydrateTurnsWithParts(turns)
 }
