@@ -282,9 +282,9 @@
             </view>
           </scroll-view>
           <text
-            v-if="!loadingCreateAgents && createAgentOptions.length === 0"
+            v-if="createAgentListHelperText"
             class="form-helper-text"
-          >未读取到可用智能体</text>
+          >{{ createAgentListHelperText }}</text>
         </view>
 
         <view class="form-group">
@@ -334,7 +334,7 @@
         <up-button
           type="primary"
           :loading="creating"
-          :disabled="creating || !selectedProjectId || !selectedConnectionKey"
+          :disabled="createSubmitDisabled"
           shape="circle"
           @click="confirmCreate"
           customStyle="margin-top:16rpx"
@@ -519,6 +519,7 @@ const overviewRefreshPromiseMap = new Map<string, Promise<void>>()
 const connectionFolderSnapshotMap = new Map<string, Project[]>()
 const connectionTabSnapshotMap = new Map<string, OpenedTabItem[]>()
 const loadingCreateAgents = ref(false)
+const createAgentListError = ref("")
 let createAgentProbeToken = 0
 let createAgentListToken = 0
 let disposeOverviewInvalidation: (() => void) | null = null
@@ -757,14 +758,28 @@ const createConfigSummary = computed(() => {
   return parts.join(" · ")
 })
 
-const DEFAULT_CREATE_AGENT_OPTIONS: CreateAgentOption[] = [
-  { label: "Claude Code", value: "claude_code" },
-  { label: "Codex CLI", value: "codex" },
-  { label: "OpenCode", value: "open_code" },
-  { label: "Gemini CLI", value: "gemini" },
-  { label: "OpenClaw", value: "open_claw" },
-  { label: "Cline", value: "cline" },
-]
+const selectedCreateAgentAvailable = computed(() =>
+  createAgentOptions.value.some((item) => item.value === selectedAgentType.value)
+)
+
+const createSubmitDisabled = computed(
+  () =>
+    creating.value ||
+    loadingCreateAgents.value ||
+    !selectedProjectId.value ||
+    !selectedConnectionKey.value ||
+    !selectedAgentType.value ||
+    !selectedCreateAgentAvailable.value ||
+    Boolean(createAgentListError.value)
+)
+
+const createAgentListHelperText = computed(() => {
+  if (createAgentListError.value) return createAgentListError.value
+  if (!loadingCreateAgents.value && createAgentOptions.value.length === 0) {
+    return "未读取到可用智能体，请检查远端智能体设置后重试"
+  }
+  return ""
+})
 
 const AGENT_LABELS: Record<string, string> = {
   claude_code: "Claude Code",
@@ -921,7 +936,7 @@ function applyCreateAgentSnapshot(snapshot: AgentOptionsSnapshot, contextKey: st
 
 function normalizeCreateAgentOptions(raw: unknown): CreateAgentOption[] {
   const list = normalizeList(raw) as AcpAgentInfo[]
-  const normalized = list
+  return list
     .filter((item) => item && item.enabled !== false && item.available !== false)
     .map((item) => {
       const value = normalizeAgentType(item.agent_type)
@@ -938,8 +953,6 @@ function normalizeCreateAgentOptions(raw: unknown): CreateAgentOption[] {
       return a.label.localeCompare(b.label)
     })
     .map(({ sortOrder: _sortOrder, ...item }) => item)
-
-  return normalized.length > 0 ? normalized : DEFAULT_CREATE_AGENT_OPTIONS
 }
 
 async function loadCreateAgents() {
@@ -948,12 +961,14 @@ async function loadCreateAgents() {
     (item) => connectionKey(item) === selectedConnectionKey.value
   )
   if (!targetConn) {
-    createAgentOptions.value = DEFAULT_CREATE_AGENT_OPTIONS
+    createAgentOptions.value = []
+    createAgentListError.value = "连接不可用，无法读取智能体"
     return
   }
 
   const token = ++createAgentListToken
   loadingCreateAgents.value = true
+  createAgentListError.value = ""
   try {
     const cachedOptions = readFreshCreateAgentListCache(selectedConnectionKey.value)
     if (cachedOptions && cachedOptions.length > 0) {
@@ -985,7 +1000,8 @@ async function loadCreateAgents() {
   } catch (error) {
     if (token !== createAgentListToken) return
     console.warn("load create agents failed:", error)
-    createAgentOptions.value = DEFAULT_CREATE_AGENT_OPTIONS
+    createAgentOptions.value = []
+    createAgentListError.value = `读取智能体失败：${toErrorMessage(error)}`
   } finally {
     if (token === createAgentListToken) {
       loadingCreateAgents.value = false
@@ -1691,7 +1707,8 @@ function applySelectedConnection(connectionKeyValue: string) {
     selectedConnectionName.value = ""
     selectedProjectId.value = 0
     selectedProjectName.value = ""
-    createAgentOptions.value = DEFAULT_CREATE_AGENT_OPTIONS
+    createAgentOptions.value = []
+    createAgentListError.value = ""
     selectedAgentType.value = "claude_code"
     return
   }
@@ -1704,8 +1721,10 @@ function applySelectedConnection(connectionKeyValue: string) {
   const cachedOptions = readFreshCreateAgentListCache(group.key)
   if (cachedOptions && cachedOptions.length > 0) {
     createAgentOptions.value = cachedOptions
+    createAgentListError.value = ""
   } else {
-    createAgentOptions.value = DEFAULT_CREATE_AGENT_OPTIONS
+    createAgentOptions.value = []
+    createAgentListError.value = ""
   }
   const persistedAgentType = readPersistedSelectedAgentType(group.key)
   selectedAgentType.value = persistedAgentType || "claude_code"
@@ -1859,7 +1878,8 @@ function createConversation(projectId?: number) {
   const cachedOptions = readFreshCreateAgentListCache(selectedConnectionKey.value)
   createAgentOptions.value = cachedOptions && cachedOptions.length > 0
     ? cachedOptions
-    : DEFAULT_CREATE_AGENT_OPTIONS
+    : []
+  createAgentListError.value = ""
   if (!createAgentOptions.value.some((item) => item.value === selectedAgentType.value)) {
     selectedAgentType.value = createAgentOptions.value[0]?.value || "claude_code"
   }
@@ -1961,8 +1981,27 @@ async function confirmCreate() {
     return
   }
 
+  const agentType = selectedAgentType.value
+  if (loadingCreateAgents.value) {
+    uni.showToast({ title: "正在读取智能体，请稍后", icon: "none" })
+    creating.value = false
+    return
+  }
+
+  if (createAgentListError.value) {
+    uni.showToast({ title: createAgentListError.value, icon: "none", duration: 3000 })
+    creating.value = false
+    return
+  }
+
+  if (!agentType || !createAgentOptions.value.some((item) => item.value === agentType)) {
+    uni.showToast({ title: "请选择可用智能体", icon: "none" })
+    creating.value = false
+    return
+  }
+
   try {
-    persistSelectedAgentType(selectedConnectionKey.value, selectedAgentType.value)
+    persistSelectedAgentType(selectedConnectionKey.value, agentType)
     persistCurrentCreateAgentConfigSelection()
     const targetConn = getConnectedConnections().find(
       (item) => connectionKey(item) === selectedConnectionKey.value
@@ -1981,7 +2020,7 @@ async function confirmCreate() {
     }
 
     const connectionInfo = await gateway.call<ConnectionInfo>("acp_connect", {
-      agentType: selectedAgentType.value,
+      agentType,
       workingDir: selectedProject.path || undefined,
       preferredModeId: createAgentConfig.value.selectedModeId || undefined,
     })
@@ -1994,10 +2033,10 @@ async function confirmCreate() {
 
     await applyCreateAgentConfig(gateway, connectionId)
 
-    const clientRequestId = resolveCreateRequestId()
+    resolveCreateRequestId()
     const createResult = await gateway.call<any>("create_conversation", {
       folderId: selectedProjectId.value,
-      agentType: selectedAgentType.value,
+      agentType,
       title: newConversationTitle.value || undefined,
     })
     const newConversationId = parseConversationId(createResult)
@@ -2012,7 +2051,7 @@ async function confirmCreate() {
       conversationId: newConversationId,
       folderId: selectedProjectId.value,
       title: newConversationTitle.value,
-      agentType: selectedAgentType.value,
+      agentType,
       hasTaskContent: Boolean(taskContent),
     })
 
@@ -2036,7 +2075,7 @@ async function confirmCreate() {
     runtime.bindCreatedConversationRuntime({
       conversationId: newConversationId,
       folderId: selectedProjectId.value,
-      agentType: selectedAgentType.value,
+      agentType,
       connectionId,
       instanceKey: gateway.getRemoteInstanceDescriptor().instanceKey,
       sessionId: resolveConnectedSessionId(connectionInfo),
@@ -2055,7 +2094,8 @@ async function confirmCreate() {
     newTaskContent.value = ""
     resetCreateAgentConfig("")
     selectedAgentType.value = "claude_code"
-    createAgentOptions.value = DEFAULT_CREATE_AGENT_OPTIONS
+    createAgentOptions.value = []
+    createAgentListError.value = ""
     markConversationListDirty()
     await loadOverviewData({ force: true })
     openConversation(
