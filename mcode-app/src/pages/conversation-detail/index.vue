@@ -1,10 +1,6 @@
 <template>
   <view class="page" :style="[upThemeVars, upThemePageStyle]">
-    <view v-if="loading" class="loading-container">
-      <up-loading-page :loading="loading" loading-text="加载中..."></up-loading-page>
-    </view>
-
-    <view v-else-if="!conversationId" class="empty-container">
+    <view v-if="!conversationId" class="empty-container">
       <up-empty mode="data" text="会话不存在"></up-empty>
     </view>
 
@@ -119,7 +115,16 @@
         @scroll="handleMessageScroll"
       >
         <view class="message-list__content">
-          <view v-if="renderMessageItems.length === 0" class="empty-messages">
+          <view v-if="loading && renderMessageItems.length === 0" class="empty-messages empty-messages--loading">
+            <up-loading-icon
+              mode="circle"
+              size="24"
+              :color="upThemeVar('--up-primary', '#2979ff')"
+            ></up-loading-icon>
+            <text class="empty-messages__loading-text">加载会话中...</text>
+          </view>
+
+          <view v-else-if="renderMessageItems.length === 0" class="empty-messages">
             <up-empty mode="message" text="开始新的对话吧"></up-empty>
           </view>
 
@@ -4396,6 +4401,19 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 
 .empty-messages {
   padding-top: 48rpx;
+}
+
+.empty-messages--loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12rpx;
+  min-height: 220rpx;
+}
+
+.empty-messages__loading-text {
+  font-size: 24rpx;
+  color: var(--up-content-color, #606266);
 }
 
 .shared-live-hint {
