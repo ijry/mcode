@@ -229,6 +229,15 @@ export interface ApiRetryEvent {
   retryDelayMs?: number | null
 }
 
+export interface RealtimeBridgeHealth {
+  instanceKey: string
+  state: "idle" | "connected" | "reconnecting" | "error" | "polling"
+  reason?: "close" | "error"
+  reconnectAttempt: number
+  nextRetryDelayMs?: number | null
+  updatedAt: number
+}
+
 export interface RuntimeErrorEvent {
   message: string
   code?: string

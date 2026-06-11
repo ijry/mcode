@@ -70,15 +70,26 @@
       </view>
 
       <view
-        v-if="showConnectingIndicator"
-        :class="['connecting-status', planTasks.length > 0 && 'connecting-status--with-plan']"
+        v-if="detailStatusBanner"
+        :class="[
+          'detail-status-banner',
+          `detail-status-banner--${detailStatusBanner.tone}`,
+          planTasks.length > 0 && 'detail-status-banner--with-plan',
+        ]"
       >
         <up-loading-icon
+          v-if="detailStatusBanner.loading"
           mode="circle"
           size="16"
-          :color="upThemeVar('--up-primary', '#2979ff')"
+          :color="detailStatusBanner.iconColor"
         ></up-loading-icon>
-        <text class="connecting-status__text">正在连接智能体...</text>
+        <up-icon
+          v-else
+          :name="detailStatusBanner.icon"
+          size="16"
+          :color="detailStatusBanner.iconColor"
+        ></up-icon>
+        <text class="detail-status-banner__text">{{ detailStatusBanner.text }}</text>
       </view>
 
       <view
@@ -720,6 +731,7 @@ import {
 import type {
   AgentOptionsSnapshot,
   PromptInputBlock,
+  RealtimeBridgeHealth,
   ToolCall,
   ContentPart,
   MessageTurn,
@@ -778,6 +790,8 @@ interface SlashCommandItem {
   desc: string
   hint?: string
 }
+
+type DetailBannerTone = "info" | "warning" | "error"
 
 interface PickedLocalFile {
   path: string
@@ -842,6 +856,7 @@ const sequence = ref(0)
 const conversationId = ref<number>(0)
 const folderId = ref<number>(0)
 const routeConnectionKey = ref("")
+const bridgeHealth = ref<RealtimeBridgeHealth | null>(null)
 const conversationTitle = ref("未命名会话")
 const inputText = ref("")
 const scrollIntoView = ref("")
@@ -865,6 +880,10 @@ const queueExpanded = ref(false)
 const uploadingCount = ref(0)
 const showPlanDrawer = ref(false)
 const composerPanelMode = ref<ComposerPanelMode>("")
+const longWaitTick = ref(0)
+const longWaitStartedAt = ref(0)
+let detailBridgeHealthUnsubscribe: (() => void) | null = null
+let longWaitTimer: ReturnType<typeof setInterval> | null = null
 const expandedConfigKey = ref<ComposerConfigKey>("")
 const detailAgentConfig = ref<DetailAgentConfigState>(createEmptyDetailAgentConfigState())
 const currentAgentType = ref("claude_code")
@@ -1007,7 +1026,6 @@ const historyStatusText = computed(() => {
 })
 
 const runtimeStatus = computed<string>(() => String(session.value?.status || "idle"))
-const showConnectingIndicator = computed(() => runtimeStatus.value === "connecting")
 const canStopSession = computed(() => isStoppableRuntimeStatus(runtimeStatus.value))
 const liveActivitySignature = computed(() =>
   buildLiveActivitySignature(session.value?.liveMessage?.content || [])
@@ -1101,6 +1119,11 @@ const sharedLiveHint = computed(() => {
   }
   return "当前会话正在多端共享"
 })
+const longWaitElapsedMs = computed(() => {
+  void longWaitTick.value
+  if (!longWaitStartedAt.value) return 0
+  return Math.max(0, Date.now() - longWaitStartedAt.value)
+})
 const runtimeErrorText = computed(() => firstString(session.value?.inputErrorMessage) || "")
 const runtimeRetryText = computed(() => {
   const retry = session.value?.apiRetry
@@ -1120,6 +1143,112 @@ const runtimeRetryText = computed(() => {
     pieces.push(`${(retry.retryDelayMs / 1000).toFixed(1)}s 后继续`)
   }
   return pieces.filter(Boolean).join(" · ")
+})
+const detailStatusBanner = computed<{
+  tone: DetailBannerTone
+  text: string
+  icon: string
+  iconColor: string
+  loading: boolean
+} | null>(() => {
+  const health = bridgeHealth.value
+  if (health?.state === "reconnecting") {
+    const retrySuffix = health.nextRetryDelayMs && health.nextRetryDelayMs > 0
+      ? `，${(health.nextRetryDelayMs / 1000).toFixed(1)}s 后重试`
+      : ""
+    return {
+      tone: "error",
+      text: `实时连接已断开，正在重连第 ${Math.max(1, health.reconnectAttempt)} 次${retrySuffix}`,
+      icon: "reload",
+      iconColor: upThemeVar("--up-error", "#fa3534"),
+      loading: true,
+    }
+  }
+  if (health?.state === "error") {
+    return {
+      tone: "error",
+      text: "实时连接异常，正在尝试恢复",
+      icon: "close-circle-fill",
+      iconColor: upThemeVar("--up-error", "#fa3534"),
+      loading: false,
+    }
+  }
+  if (runtimeErrorText.value) {
+    return {
+      tone: "error",
+      text: runtimeErrorText.value,
+      icon: "close-circle-fill",
+      iconColor: upThemeVar("--up-error", "#fa3534"),
+      loading: false,
+    }
+  }
+  if (runtimeRetryText.value) {
+    return {
+      tone: "warning",
+      text: runtimeRetryText.value,
+      icon: "reload",
+      iconColor: upThemeVar("--up-warning", "#f9ae3d"),
+      loading: true,
+    }
+  }
+  if (runtimeStatus.value === "waiting_permission") {
+    return {
+      tone: "warning",
+      text: "智能体正在等待你的授权",
+      icon: "alert-circle",
+      iconColor: upThemeVar("--up-warning", "#f9ae3d"),
+      loading: false,
+    }
+  }
+  if (runtimeStatus.value === "waiting_question") {
+    return {
+      tone: "warning",
+      text: "智能体正在等待你的选择",
+      icon: "question-circle",
+      iconColor: upThemeVar("--up-warning", "#f9ae3d"),
+      loading: false,
+    }
+  }
+  if (runtimeStatus.value === "connecting") {
+    return {
+      tone: "info",
+      text: "正在连接智能体...",
+      icon: "reload",
+      iconColor: upThemeVar("--up-primary", "#2979ff"),
+      loading: true,
+    }
+  }
+  if (
+    (runtimeStatus.value === "thinking" || runtimeStatus.value === "running_tool")
+    && longWaitElapsedMs.value >= 20_000
+  ) {
+    return {
+      tone: "info",
+      text: "远端仍在处理，请保持页面打开",
+      icon: "clock",
+      iconColor: upThemeVar("--up-primary", "#2979ff"),
+      loading: false,
+    }
+  }
+  if (runtimeStatus.value === "thinking") {
+    return {
+      tone: "info",
+      text: "智能体思考中",
+      icon: "reload",
+      iconColor: upThemeVar("--up-primary", "#2979ff"),
+      loading: true,
+    }
+  }
+  if (runtimeStatus.value === "running_tool") {
+    return {
+      tone: "info",
+      text: "智能体正在执行命令",
+      icon: "reload",
+      iconColor: upThemeVar("--up-primary", "#2979ff"),
+      loading: true,
+    }
+  }
+  return null
 })
 
 const canSend = computed(() => Boolean(inputText.value.trim() || attachments.value.length > 0))
@@ -1296,6 +1425,8 @@ onShow(() => {
   if (!hasLoadedOnce.value || !conversationId.value || loading.value) return
   if (!needsResumeRefresh.value) return
   needsResumeRefresh.value = false
+  syncDetailBridgeHealth()
+  syncLongWaitState()
   if (routeConnectionKey.value) {
     syncAuthByConnectionKey(routeConnectionKey.value)
   }
@@ -1306,6 +1437,8 @@ onShow(() => {
 })
 
 onHide(() => {
+  teardownDetailBridgeHealth()
+  clearLongWaitTimer()
   clearStuckPromptTimer()
   persistDetailRuntimeState()
   needsResumeRefresh.value = true
@@ -1315,6 +1448,8 @@ onHide(() => {
 })
 
 onUnload(() => {
+  teardownDetailBridgeHealth()
+  clearLongWaitTimer()
   clearStuckPromptTimer()
   persistDetailRuntimeState()
   if (conversationId.value) {
@@ -1327,6 +1462,49 @@ function handleBackNavigation() {
   uni.switchTab({
     url: "/pages/conversations/index",
   })
+}
+
+function syncDetailBridgeHealth() {
+  teardownDetailBridgeHealth()
+  const instanceKey = resolveDetailInstanceKey()
+  if (!instanceKey) {
+    bridgeHealth.value = null
+    return
+  }
+  bridgeHealth.value = acpApi.getRealtimeBridgeHealth(instanceKey)
+  detailBridgeHealthUnsubscribe = acpApi.subscribeRealtimeBridgeHealth((health) => {
+    bridgeHealth.value = health
+  }, instanceKey)
+}
+
+function teardownDetailBridgeHealth() {
+  detailBridgeHealthUnsubscribe?.()
+  detailBridgeHealthUnsubscribe = null
+}
+
+function syncLongWaitState() {
+  const shouldTrack =
+    runtimeStatus.value === "thinking" ||
+    runtimeStatus.value === "running_tool" ||
+    runtimeStatus.value === "connecting"
+  if (!shouldTrack) {
+    longWaitStartedAt.value = 0
+    clearLongWaitTimer()
+    return
+  }
+  if (!longWaitStartedAt.value) {
+    longWaitStartedAt.value = Date.now()
+  }
+  if (longWaitTimer) return
+  longWaitTimer = setInterval(() => {
+    longWaitTick.value = Date.now()
+  }, 1000)
+}
+
+function clearLongWaitTimer() {
+  if (!longWaitTimer) return
+  clearInterval(longWaitTimer)
+  longWaitTimer = null
 }
 
 onBackPress(() => {
@@ -1362,7 +1540,16 @@ watch(
     if (!isBusyForSend.value) {
       void processDraftQueue()
     }
+    syncLongWaitState()
   }
+)
+
+watch(
+  () => detailConnectionKey.value,
+  () => {
+    syncDetailBridgeHealth()
+  },
+  { immediate: true }
 )
 
 watch(
@@ -4104,26 +4291,43 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   text-align: center;
 }
 
-.connecting-status {
+.detail-status-banner {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 10rpx;
   flex-shrink: 0;
   padding: 14rpx 24rpx;
-  background-color: color-mix(in srgb, var(--up-primary, #2979ff) 10%, var(--up-card-bg-color, #ffffff) 90%);
-  border-top: 1rpx solid color-mix(in srgb, var(--up-primary, #2979ff) 18%, transparent);
-  border-bottom: 1rpx solid color-mix(in srgb, var(--up-primary, #2979ff) 18%, transparent);
+  border-top: 1rpx solid transparent;
+  border-bottom: 1rpx solid transparent;
 }
 
-.connecting-status--with-plan {
+.detail-status-banner--with-plan {
   padding-right: 220rpx;
 }
 
-.connecting-status__text {
+.detail-status-banner--info {
+  background-color: color-mix(in srgb, var(--up-primary, #2979ff) 10%, var(--up-card-bg-color, #ffffff) 90%);
+  border-top-color: color-mix(in srgb, var(--up-primary, #2979ff) 18%, transparent);
+  border-bottom-color: color-mix(in srgb, var(--up-primary, #2979ff) 18%, transparent);
+}
+
+.detail-status-banner--warning {
+  background-color: color-mix(in srgb, var(--up-warning, #f9ae3d) 12%, var(--up-card-bg-color, #ffffff) 88%);
+  border-top-color: color-mix(in srgb, var(--up-warning, #f9ae3d) 22%, transparent);
+  border-bottom-color: color-mix(in srgb, var(--up-warning, #f9ae3d) 22%, transparent);
+}
+
+.detail-status-banner--error {
+  background-color: color-mix(in srgb, var(--up-error, #fa3534) 10%, var(--up-card-bg-color, #ffffff) 90%);
+  border-top-color: color-mix(in srgb, var(--up-error, #fa3534) 22%, transparent);
+  border-bottom-color: color-mix(in srgb, var(--up-error, #fa3534) 22%, transparent);
+}
+
+.detail-status-banner__text {
   font-size: 23rpx;
   font-weight: 500;
-  color: var(--up-primary, #2979ff);
+  color: var(--up-main-color, #303133);
 }
 
 .history-status {

@@ -3,6 +3,7 @@ import type {
   ConnectionInfo,
   ConversationConnectionInfo,
   EventEnvelope,
+  RealtimeBridgeHealth,
   UploadAttachmentResult,
   ConversationDetail,
   AgentOptionsSnapshot,
@@ -37,6 +38,7 @@ class AcpApiClient {
   private baseUrl: string
   private eventListeners: Map<string, Set<(event: EventEnvelope) => void>>
   private globalListeners: Map<string, Map<string, Set<(payload: unknown) => void>>>
+  private bridgeHealthListeners: Map<string, Set<(health: RealtimeBridgeHealth) => void>>
   private pollingStarted = false
   private pollingInstanceKey: string | null = null
   private ensureBridgePromises = new Map<string, Promise<BridgeState>>()
@@ -46,6 +48,7 @@ class AcpApiClient {
     this.baseUrl = baseUrl
     this.eventListeners = new Map()
     this.globalListeners = new Map()
+    this.bridgeHealthListeners = new Map()
   }
 
   /**
@@ -343,11 +346,56 @@ class AcpApiClient {
     }
   }
 
+  subscribeRealtimeBridgeHealth(
+    callback: (health: RealtimeBridgeHealth) => void,
+    instanceKey?: string
+  ) {
+    const targetKey = this.resolveDescriptor(instanceKey).instanceKey
+    if (!this.bridgeHealthListeners.has(targetKey)) {
+      this.bridgeHealthListeners.set(targetKey, new Set())
+    }
+    this.bridgeHealthListeners.get(targetKey)!.add(callback)
+    callback(this.getRealtimeBridgeHealth(targetKey))
+
+    void this.connectEventSource(targetKey)
+
+    return () => {
+      const listeners = this.bridgeHealthListeners.get(targetKey)
+      if (!listeners) return
+      listeners.delete(callback)
+      if (listeners.size === 0) {
+        this.bridgeHealthListeners.delete(targetKey)
+      }
+    }
+  }
+
+  getRealtimeBridgeHealth(instanceKey?: string): RealtimeBridgeHealth {
+    const descriptor = this.resolveDescriptor(instanceKey)
+    const bridge = this.bridgeStates.get(descriptor.instanceKey)
+    if (!bridge) {
+      return {
+        instanceKey: descriptor.instanceKey,
+        state: "idle",
+        reconnectAttempt: 0,
+        nextRetryDelayMs: null,
+        updatedAt: Date.now(),
+      }
+    }
+    return this.buildBridgeHealth(descriptor.instanceKey, bridge)
+  }
+
   private async connectEventSource(instanceKey?: string) {
     try {
       await this.ensureRealtimeBridge(instanceKey)
     } catch (error) {
       console.warn("建立实时桥接失败，回退到轮询:", error)
+      this.emitBridgeHealth(this.resolveDescriptor(instanceKey).instanceKey, {
+        instanceKey: this.resolveDescriptor(instanceKey).instanceKey,
+        state: "polling",
+        reconnectAttempt: 0,
+        nextRetryDelayMs: null,
+        updatedAt: Date.now(),
+      })
       this.startPolling(instanceKey)
     }
   }
@@ -485,6 +533,7 @@ class AcpApiClient {
     bridge.detachClose = null
     bridge.detachError = null
     this.bridgeStates.set(targetKey, bridge)
+    this.emitBridgeHealth(targetKey, this.buildBridgeHealth(targetKey, bridge))
 
     eventConnection = await gateway.connectEvents((raw) => {
       if (this.isAttachFrame(raw)) {
@@ -504,6 +553,7 @@ class AcpApiClient {
     bridge.connection = eventConnection
     bridge.detachReady = eventConnection.onReady(() => {
       bridge.reconnectAttempt = 0
+      this.emitBridgeHealth(targetKey, this.buildBridgeHealth(targetKey, bridge))
       readyCallbacks.forEach((callback) => {
         try {
           callback()
@@ -521,6 +571,7 @@ class AcpApiClient {
     })
     if (eventConnection.isOpen()) {
       bridge.reconnectAttempt = 0
+      this.emitBridgeHealth(targetKey, this.buildBridgeHealth(targetKey, bridge))
       readyCallbacks.forEach((callback) => {
         try {
           callback()
@@ -596,6 +647,7 @@ class AcpApiClient {
     bridge.detachClose = null
     bridge.detachError = null
     bridge.connection = null
+    this.emitBridgeHealth(instanceKey, this.buildBridgeHealth(instanceKey, bridge, reason))
     this.scheduleReconnect(instanceKey, reason)
   }
 
@@ -605,6 +657,14 @@ class AcpApiClient {
 
     const delay = Math.min(30_000, 1000 * 2 ** bridge.reconnectAttempt)
     bridge.reconnectAttempt += 1
+    this.emitBridgeHealth(instanceKey, {
+      instanceKey,
+      state: "reconnecting",
+      reason,
+      reconnectAttempt: bridge.reconnectAttempt,
+      nextRetryDelayMs: delay,
+      updatedAt: Date.now(),
+    })
     bridge.reconnectTimer = setTimeout(() => {
       const active = this.bridgeStates.get(instanceKey)
       if (!active) return
@@ -616,9 +676,42 @@ class AcpApiClient {
           reason,
           error,
         })
+        this.emitBridgeHealth(instanceKey, {
+          instanceKey,
+          state: "error",
+          reason,
+          reconnectAttempt: active.reconnectAttempt,
+          nextRetryDelayMs: null,
+          updatedAt: Date.now(),
+        })
         this.scheduleReconnect(instanceKey, reason)
       })
     }, delay)
+  }
+
+  private emitBridgeHealth(instanceKey: string, health: RealtimeBridgeHealth) {
+    const listeners = this.bridgeHealthListeners.get(instanceKey)
+    if (!listeners) return
+    listeners.forEach((callback) => callback(health))
+  }
+
+  private buildBridgeHealth(
+    instanceKey: string,
+    bridge: BridgeState,
+    reason?: "close" | "error"
+  ): RealtimeBridgeHealth {
+    return {
+      instanceKey,
+      state: bridge.connection?.isOpen()
+        ? "connected"
+        : bridge.reconnectTimer
+          ? "reconnecting"
+          : "error",
+      reason,
+      reconnectAttempt: bridge.reconnectAttempt,
+      nextRetryDelayMs: null,
+      updatedAt: Date.now(),
+    }
   }
 
   private normalizeEventEnvelope(event: EventEnvelope | Record<string, unknown> | null | undefined) {
