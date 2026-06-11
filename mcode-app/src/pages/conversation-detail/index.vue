@@ -986,13 +986,13 @@ const renderMessageItems = computed<RenderMessageItem[]>(() => {
     const last = assistantBuffer[assistantBuffer.length - 1]
     result.push({
       key: `merged-${first.id}-${last.id}`,
-      anchorId: first.id,
+      anchorId: last.id,
       sourceIds: assistantBuffer.map((item) => item.id),
       message: {
         ...last,
         id: last.id,
         content: assistantBuffer.flatMap((item) => cloneRenderContentParts(item.content || [])),
-        timestamp: first.timestamp,
+        timestamp: last.timestamp,
       },
     })
     assistantBuffer = []
