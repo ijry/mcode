@@ -407,6 +407,30 @@
       </view>
     </up-popup>
 
+    <up-popup
+      :show="creating"
+      mode="center"
+      :round="28"
+      :close-on-click-overlay="false"
+      :safe-area-inset-bottom="false"
+    >
+      <view class="create-progress-dialog" :style="upThemeCardStyle">
+        <view class="create-progress-dialog__visual" aria-hidden="true">
+          <view class="create-progress-dialog__ring"></view>
+          <view class="create-progress-dialog__ring create-progress-dialog__ring--delay"></view>
+          <view class="create-progress-dialog__core">
+            <up-loading-icon mode="circle" size="28" :color="upThemeVar('--up-primary', '#2979ff')"></up-loading-icon>
+          </view>
+        </view>
+        <text class="create-progress-dialog__title">正在创建会话</text>
+        <text class="create-progress-dialog__desc">正在连接智能体并初始化会话，请不要关闭页面。</text>
+        <view class="create-progress-dialog__stage">
+          <view class="create-progress-dialog__stage-dot"></view>
+          <text class="create-progress-dialog__stage-text">{{ createProgressText }}</text>
+        </view>
+      </view>
+    </up-popup>
+
     <!-- 项目 Picker -->
     <up-picker
       :show="showConnectionPicker"
@@ -512,6 +536,7 @@ const historyGroupKey = ref("")
 const historyGroupTitle = ref("")
 const historyLoading = ref(false)
 const activeHistoryProjectId = ref<string | number>("")
+const createProgressStageIndex = ref(0)
 let overviewLoadPromise: Promise<void> | null = null
 let lastOverviewLoadedAt = 0
 const historyLoadPromiseMap = new Map<string, Promise<void>>()
@@ -527,6 +552,7 @@ let activeCreateRequestId = ""
 let activeCreateRequestFingerprint = ""
 let activeCreateConversationId = 0
 let activeCreatePromptAttempted = false
+let createProgressTimer: ReturnType<typeof setInterval> | null = null
 
 interface CreateAgentOption {
   label: string
@@ -565,6 +591,13 @@ const createAgentConfig = ref<CreateAgentConfigState>({
 const CREATE_AGENT_CACHE_TTL_MS = 24 * 60 * 60 * 1000
 const CREATE_AGENT_LIST_CACHE_STORAGE_KEY = "mcode_create_agent_list_cache_v1"
 const CREATE_AGENT_SELECTION_STORAGE_KEY = "mcode_create_agent_selection_v1"
+const CREATE_PROGRESS_STAGES = [
+  "准备连接信息",
+  "拉起智能体会话",
+  "应用会话配置",
+  "写入会话记录",
+  "打开新会话",
+]
 
 type Project = ConversationOverviewProject
 type Conversation = ConversationOverviewConversation
@@ -781,6 +814,18 @@ const createAgentListHelperText = computed(() => {
   return ""
 })
 
+const createProgressText = computed(() => {
+  return CREATE_PROGRESS_STAGES[createProgressStageIndex.value] || CREATE_PROGRESS_STAGES[0]
+})
+
+watch(creating, (active) => {
+  if (active) {
+    startCreateProgressTimer()
+  } else {
+    stopCreateProgressTimer()
+  }
+})
+
 const AGENT_LABELS: Record<string, string> = {
   claude_code: "Claude Code",
   codex:       "Codex CLI",
@@ -810,6 +855,23 @@ function clearPendingCreateRequest() {
   activeCreateRequestFingerprint = ""
   activeCreateConversationId = 0
   activeCreatePromptAttempted = false
+}
+
+function startCreateProgressTimer() {
+  stopCreateProgressTimer()
+  createProgressStageIndex.value = 0
+  createProgressTimer = setInterval(() => {
+    createProgressStageIndex.value =
+      (createProgressStageIndex.value + 1) % CREATE_PROGRESS_STAGES.length
+  }, 1800)
+}
+
+function stopCreateProgressTimer() {
+  if (createProgressTimer) {
+    clearInterval(createProgressTimer)
+    createProgressTimer = null
+  }
+  createProgressStageIndex.value = 0
 }
 
 function createConversationRequestFingerprint() {
@@ -1104,6 +1166,7 @@ onMounted(() => {
 onUnload(() => {
   disposeOverviewInvalidation?.()
   disposeOverviewInvalidation = null
+  stopCreateProgressTimer()
 })
 
 onPullDownRefresh(() => {
@@ -1916,10 +1979,12 @@ function selectAgent(agentType: string) {
 
 async function applyCreateAgentConfig(
   gateway: Awaited<ReturnType<typeof createConnectionGateway>>,
-  connectionId: string
+  connectionId: string,
+  configOptions: SessionConfigOptionInfo[],
+  selectedValues: Record<string, string>
 ) {
-  for (const option of createAgentConfig.value.configOptions) {
-    const selectedValueId = createAgentConfig.value.selectedValues[option.id]
+  for (const option of configOptions) {
+    const selectedValueId = selectedValues[option.id]
     if (!selectedValueId) continue
     await gateway.call("acp_set_config_option", {
       connectionId,
@@ -2001,8 +2066,13 @@ async function confirmCreate() {
   }
 
   try {
+    const preferredModeId = createAgentConfig.value.selectedModeId || undefined
+    const preferredConfigValues = { ...createAgentConfig.value.selectedValues }
+    const configOptions = [...createAgentConfig.value.configOptions]
     persistSelectedAgentType(selectedConnectionKey.value, agentType)
     persistCurrentCreateAgentConfigSelection()
+    showCreateDialog.value = false
+    showCreateConfigDialog.value = false
     const targetConn = getConnectedConnections().find(
       (item) => connectionKey(item) === selectedConnectionKey.value
     )
@@ -2019,11 +2089,10 @@ async function confirmCreate() {
       throw new Error("项目不存在或列表已过期，请刷新后重试")
     }
 
-    const preferredConfigValues = { ...createAgentConfig.value.selectedValues }
     const connectionInfo = await gateway.call<ConnectionInfo>("acp_connect", {
       agentType,
       workingDir: selectedProject.path || undefined,
-      preferredModeId: createAgentConfig.value.selectedModeId || undefined,
+      preferredModeId,
       preferredConfigValues,
     })
     const connectionId = typeof connectionInfo === "string"
@@ -2033,7 +2102,7 @@ async function confirmCreate() {
       throw new Error("智能体连接失败：返回数据异常")
     }
 
-    await applyCreateAgentConfig(gateway, connectionId)
+    await applyCreateAgentConfig(gateway, connectionId, configOptions, preferredConfigValues)
 
     resolveCreateRequestId()
     const createResult = await gateway.call<any>("create_conversation", {
@@ -2977,6 +3046,123 @@ function formatTime(time?: string): string {
 .config-chip__title {
   font-size: 24rpx;
   color: var(--up-main-color, #303133);
+}
+
+.create-progress-dialog {
+  width: 560rpx;
+  max-width: 82vw;
+  padding: 44rpx 36rpx 36rpx;
+  border-radius: 28rpx;
+  background: var(--up-card-bg-color, #ffffff);
+  border: 1rpx solid var(--up-border-color, #dadbde);
+  box-shadow: 0 24rpx 80rpx rgba(15, 23, 42, 0.18);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.create-progress-dialog__visual {
+  position: relative;
+  width: 136rpx;
+  height: 136rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 28rpx;
+}
+
+.create-progress-dialog__ring {
+  position: absolute;
+  inset: 12rpx;
+  border-radius: 50%;
+  border: 3rpx solid var(--up-primary, #2979ff);
+  opacity: 0.26;
+  animation: createProgressPulse 1.8s ease-out infinite;
+}
+
+.create-progress-dialog__ring--delay {
+  animation-delay: 0.55s;
+}
+
+.create-progress-dialog__core {
+  width: 84rpx;
+  height: 84rpx;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 10%, var(--up-card-bg-color, #ffffff) 90%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: inset 0 0 0 1rpx color-mix(in srgb, var(--up-primary, #2979ff) 24%, transparent 76%);
+}
+
+.create-progress-dialog__title {
+  font-size: 32rpx;
+  line-height: 1.35;
+  font-weight: 700;
+  color: var(--up-main-color, #303133);
+  text-align: center;
+}
+
+.create-progress-dialog__desc {
+  display: block;
+  margin-top: 12rpx;
+  font-size: 24rpx;
+  line-height: 1.5;
+  color: var(--up-content-color, #606266);
+  text-align: center;
+}
+
+.create-progress-dialog__stage {
+  margin-top: 28rpx;
+  min-height: 56rpx;
+  padding: 0 22rpx;
+  border-radius: 999rpx;
+  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10rpx;
+}
+
+.create-progress-dialog__stage-dot {
+  width: 10rpx;
+  height: 10rpx;
+  border-radius: 50%;
+  background: var(--up-primary, #2979ff);
+  animation: createProgressDot 1.2s ease-in-out infinite;
+}
+
+.create-progress-dialog__stage-text {
+  font-size: 22rpx;
+  line-height: 1.3;
+  color: var(--up-content-color, #606266);
+}
+
+@keyframes createProgressPulse {
+  0% {
+    transform: scale(0.72);
+    opacity: 0.28;
+  }
+  80% {
+    transform: scale(1.25);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1.25);
+    opacity: 0;
+  }
+}
+
+@keyframes createProgressDot {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.86);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .safe-bottom {
