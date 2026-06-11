@@ -799,6 +799,30 @@ interface SlashCommandItem {
 }
 
 type DetailBannerTone = "info" | "warning" | "error"
+type DetailStatusCode =
+  | "bridge_recovered"
+  | "bridge_reconnecting"
+  | "bridge_error"
+  | "runtime_error"
+  | "api_retry"
+  | "waiting_permission"
+  | "waiting_question"
+  | "connecting"
+  | "long_wait"
+  | "thinking"
+  | "running_tool"
+  | "idle"
+
+interface DetailStatusState {
+  code: DetailStatusCode
+  severity: DetailBannerTone
+  text: string
+  icon: string
+  iconColor: string
+  loading: boolean
+  actionKey?: "reconnect" | "inspect"
+  actionLabel?: string
+}
 
 interface PickedLocalFile {
   path: string
@@ -1157,19 +1181,12 @@ const showBridgeRecoveredBanner = computed(() => {
   if (!bridgeRecoveredAt.value) return false
   return Date.now() - bridgeRecoveredAt.value < 3000
 })
-const detailStatusBanner = computed<{
-  tone: DetailBannerTone
-  text: string
-  icon: string
-  iconColor: string
-  loading: boolean
-  actionKey?: "reconnect" | "inspect"
-  actionLabel?: string
-} | null>(() => {
+const detailStatusState = computed<DetailStatusState>(() => {
   const health = bridgeHealth.value
   if (showBridgeRecoveredBanner.value) {
     return {
-      tone: "info",
+      code: "bridge_recovered",
+      severity: "info",
       text: "实时连接已恢复",
       icon: "checkmark-circle-fill",
       iconColor: upThemeVar("--up-success", "#19be6b"),
@@ -1181,7 +1198,8 @@ const detailStatusBanner = computed<{
       ? `，${(health.nextRetryDelayMs / 1000).toFixed(1)}s 后重试`
       : ""
     return {
-      tone: "error",
+      code: "bridge_reconnecting",
+      severity: "error",
       text: `实时连接已断开，正在重连第 ${Math.max(1, health.reconnectAttempt)} 次${retrySuffix}`,
       icon: "reload",
       iconColor: upThemeVar("--up-error", "#fa3534"),
@@ -1192,7 +1210,8 @@ const detailStatusBanner = computed<{
   }
   if (health?.state === "error") {
     return {
-      tone: "error",
+      code: "bridge_error",
+      severity: "error",
       text: "实时连接异常，正在尝试恢复",
       icon: "close-circle-fill",
       iconColor: upThemeVar("--up-error", "#fa3534"),
@@ -1203,7 +1222,8 @@ const detailStatusBanner = computed<{
   }
   if (runtimeErrorText.value) {
     return {
-      tone: "error",
+      code: "runtime_error",
+      severity: "error",
       text: runtimeErrorText.value,
       icon: "close-circle-fill",
       iconColor: upThemeVar("--up-error", "#fa3534"),
@@ -1212,7 +1232,8 @@ const detailStatusBanner = computed<{
   }
   if (runtimeRetryText.value) {
     return {
-      tone: "warning",
+      code: "api_retry",
+      severity: "warning",
       text: runtimeRetryText.value,
       icon: "reload",
       iconColor: upThemeVar("--up-warning", "#f9ae3d"),
@@ -1221,7 +1242,8 @@ const detailStatusBanner = computed<{
   }
   if (runtimeStatus.value === "waiting_permission") {
     return {
-      tone: "warning",
+      code: "waiting_permission",
+      severity: "warning",
       text: "智能体正在等待你的授权",
       icon: "alert-circle",
       iconColor: upThemeVar("--up-warning", "#f9ae3d"),
@@ -1230,7 +1252,8 @@ const detailStatusBanner = computed<{
   }
   if (runtimeStatus.value === "waiting_question") {
     return {
-      tone: "warning",
+      code: "waiting_question",
+      severity: "warning",
       text: "智能体正在等待你的选择",
       icon: "question-circle",
       iconColor: upThemeVar("--up-warning", "#f9ae3d"),
@@ -1239,7 +1262,8 @@ const detailStatusBanner = computed<{
   }
   if (runtimeStatus.value === "connecting") {
     return {
-      tone: "info",
+      code: "connecting",
+      severity: "info",
       text: "正在连接智能体...",
       icon: "reload",
       iconColor: upThemeVar("--up-primary", "#2979ff"),
@@ -1251,7 +1275,8 @@ const detailStatusBanner = computed<{
     && longWaitElapsedMs.value >= 20_000
   ) {
     return {
-      tone: "info",
+      code: "long_wait",
+      severity: "info",
       text: "远端仍在处理，请保持页面打开",
       icon: "clock",
       iconColor: upThemeVar("--up-primary", "#2979ff"),
@@ -1262,7 +1287,8 @@ const detailStatusBanner = computed<{
   }
   if (runtimeStatus.value === "thinking") {
     return {
-      tone: "info",
+      code: "thinking",
+      severity: "info",
       text: "智能体思考中",
       icon: "reload",
       iconColor: upThemeVar("--up-primary", "#2979ff"),
@@ -1271,20 +1297,31 @@ const detailStatusBanner = computed<{
   }
   if (runtimeStatus.value === "running_tool") {
     return {
-      tone: "info",
+      code: "running_tool",
+      severity: "info",
       text: "智能体正在执行命令",
       icon: "reload",
       iconColor: upThemeVar("--up-primary", "#2979ff"),
       loading: true,
     }
   }
-  return null
+  return {
+    code: "idle",
+    severity: "info",
+    text: "",
+    icon: "info-circle",
+    iconColor: upThemeVar("--up-primary", "#2979ff"),
+    loading: false,
+  }
 })
+const detailStatusBanner = computed(() =>
+  detailStatusState.value.code === "idle" ? null : detailStatusState.value
+)
 const showRuntimeRetryFeedback = computed(() =>
-  Boolean(runtimeRetryText.value) && detailStatusBanner.value?.text !== runtimeRetryText.value
+  Boolean(runtimeRetryText.value) && detailStatusState.value.code !== "api_retry"
 )
 const showRuntimeErrorFeedback = computed(() =>
-  Boolean(runtimeErrorText.value) && detailStatusBanner.value?.text !== runtimeErrorText.value
+  Boolean(runtimeErrorText.value) && detailStatusState.value.code !== "runtime_error"
 )
 
 const canSend = computed(() => Boolean(inputText.value.trim() || attachments.value.length > 0))
@@ -1299,6 +1336,8 @@ const isBusyForSend = computed(
 )
 
 const runtimeStatusLabel = computed(() => {
+  if (detailStatusState.value.code === "bridge_reconnecting") return "重连中"
+  if (detailStatusState.value.code === "bridge_error") return "连接异常"
   if (runtimeStatus.value === "thinking") return "思考中"
   if (runtimeStatus.value === "running_tool") return "运行命令中"
   if (runtimeStatus.value === "waiting_permission") return "等待授权"
@@ -1310,6 +1349,8 @@ const runtimeStatusLabel = computed(() => {
 })
 
 const runtimeStatusClass = computed(() => {
+  if (detailStatusState.value.code === "bridge_reconnecting") return "error"
+  if (detailStatusState.value.code === "bridge_error") return "error"
   if (runtimeStatus.value === "thinking" || runtimeStatus.value === "running_tool") return "running"
   if (runtimeStatus.value === "waiting_permission" || runtimeStatus.value === "waiting_question") return "pending"
   if (runtimeStatus.value === "error") return "error"
