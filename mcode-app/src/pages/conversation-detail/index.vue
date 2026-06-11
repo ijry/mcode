@@ -1454,7 +1454,7 @@ async function loadConversation() {
       await ensureConversationSchema()
       localSummary = await getConversationSummaryById(instanceKey, conversationId.value)
       syncConversationTitle(localSummary?.title)
-      persistedRuntime = await getRuntime(conversationId.value)
+      persistedRuntime = await getRuntime(instanceKey, conversationId.value)
       if (!hasHotRuntime) {
         localTurns = await getNewestTurns(
           conversationId.value,
@@ -1477,7 +1477,7 @@ async function loadConversation() {
     const hydrateRemoteMetadata = async () => {
       if (managed || resumeSessionId || remoteDetail) return
       try {
-        const gateway = await getDetailGateway()
+        const gateway = await getDetailGateway({ refreshAuth: true })
         remoteDetail = await gateway.call<any>("get_folder_conversation", {
           conversationId: conversationId.value,
         })
@@ -1520,7 +1520,7 @@ async function loadConversation() {
       void reconcileRemoteTurnsAfterLocalHydrate(runtimeSession, cachedViewState, initialTurnLimit)
     } else {
       await hydrateRemoteMetadata()
-      const gateway = await getDetailGateway()
+      const gateway = await getDetailGateway({ refreshAuth: true })
       const result = remoteDetail || await gateway.call<any>("get_folder_conversation", {
         conversationId: conversationId.value,
       })
@@ -1559,6 +1559,7 @@ async function loadConversation() {
       persistedRuntime?.lastAppliedSeq ?? runtimeSession.lastAppliedSeq ?? undefined,
       instanceKey
     )
+    persistDetailRuntimeState()
 
     let snapshot: any = null
     let snapshotFromConversation = false
@@ -1603,6 +1604,7 @@ async function loadConversation() {
         }
       }
       runtime.hydrateLiveSnapshot(conversationId.value, snapshot)
+      persistDetailRuntimeState()
     }
     await loadDetailAgentConfig()
     const availableCommands = Array.isArray(snapshot?.available_commands)
@@ -3086,7 +3088,7 @@ function buildDescriptorFromStoredConnection(
   }
 }
 
-async function getDetailGateway() {
+async function getDetailGateway(options: { refreshAuth?: boolean } = {}) {
   const descriptor = resolveDetailDescriptor()
   if (descriptor.mode === "direct") {
     const gateway = createGateway({
@@ -3108,11 +3110,42 @@ async function getDetailGateway() {
     refreshToken: descriptor.refreshToken,
     targetId: descriptor.principal,
   }
-  return createGateway({
+  const gateway = createGateway({
     mode: "relay",
     relayUrl: descriptor.baseUrl,
     session,
   })
+  if (options.refreshAuth && session.refreshToken) {
+    try {
+      await gateway.refreshAuth()
+      auth.setRelayMode(descriptor.baseUrl, session)
+      persistRelaySessionForDescriptor(descriptor, session)
+    } catch (error) {
+      console.warn("relay auth refresh skipped", error)
+    }
+  }
+  return gateway
+}
+
+function persistRelaySessionForDescriptor(
+  descriptor: RemoteInstanceDescriptor,
+  session: RelaySessionInfo
+) {
+  const connKey = buildConnectionKey("relay", descriptor.baseUrl)
+  const saved = (Array.isArray(uni.getStorageSync("mcode_connections"))
+    ? uni.getStorageSync("mcode_connections")
+    : []) as StoredConnectionItem[]
+  const index = saved.findIndex((item) => buildConnectionKey(item.mode, item.url) === connKey)
+  if (index < 0) return
+  saved[index] = {
+    ...saved[index],
+    relaySession: {
+      accessToken: session.accessToken,
+      refreshToken: session.refreshToken,
+      targetId: session.targetId,
+    },
+  }
+  uni.setStorageSync("mcode_connections", saved)
 }
 
 function removeAttachment(index: number) {

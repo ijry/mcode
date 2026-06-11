@@ -65,7 +65,7 @@ export const TABLE_SQL = {
   `,
   conversationRuntime: `
     CREATE TABLE IF NOT EXISTS conversation_runtime (
-      conversation_id INTEGER PRIMARY KEY,
+      conversation_id INTEGER NOT NULL,
       instance_key TEXT NOT NULL,
       connection_id TEXT,
       live_message_json TEXT,
@@ -76,7 +76,8 @@ export const TABLE_SQL = {
       composer_text TEXT,
       last_applied_seq INTEGER,
       last_snapshot_at INTEGER,
-      is_active INTEGER NOT NULL DEFAULT 0
+      is_active INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (instance_key, conversation_id)
     )
   `,
   syncCursors: `

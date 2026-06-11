@@ -29,6 +29,7 @@ async function ensureConversationSchemaInternal() {
   await ensureConversationTurnDedupeColumn()
   await sqliteDriver.execute(TABLE_SQL.conversationParts)
   await sqliteDriver.execute(TABLE_SQL.conversationRuntime)
+  await ensureConversationRuntimeCompositeKey()
   await sqliteDriver.execute(TABLE_SQL.syncCursors)
   for (const sql of TABLE_SQL.indexes) {
     await sqliteDriver.execute(sql)
@@ -52,4 +53,51 @@ async function ensureConversationTurnDedupeColumn() {
       `
     )
   }
+}
+
+async function ensureConversationRuntimeCompositeKey() {
+  const columns = await sqliteDriver.query<{ name?: string; pk?: number }>(
+    `PRAGMA table_info(conversation_runtime)`
+  )
+  const conversationPk = columns.find((column) => column.name === "conversation_id")?.pk ?? 0
+  const instancePk = columns.find((column) => column.name === "instance_key")?.pk ?? 0
+  if (conversationPk > 0 && instancePk > 0) return
+
+  await sqliteDriver.transaction(async () => {
+    await sqliteDriver.execute(`ALTER TABLE conversation_runtime RENAME TO conversation_runtime_legacy`)
+    await sqliteDriver.execute(TABLE_SQL.conversationRuntime)
+    await sqliteDriver.execute(
+      `
+        INSERT OR REPLACE INTO conversation_runtime (
+          conversation_id,
+          instance_key,
+          connection_id,
+          live_message_json,
+          optimistic_json,
+          draft_queue_json,
+          attachments_json,
+          scroll_anchor,
+          composer_text,
+          last_applied_seq,
+          last_snapshot_at,
+          is_active
+        )
+        SELECT
+          conversation_id,
+          COALESCE(NULLIF(instance_key, ''), 'legacy:unknown') AS instance_key,
+          connection_id,
+          live_message_json,
+          optimistic_json,
+          draft_queue_json,
+          attachments_json,
+          scroll_anchor,
+          composer_text,
+          last_applied_seq,
+          last_snapshot_at,
+          is_active
+        FROM conversation_runtime_legacy
+      `
+    )
+    await sqliteDriver.execute(`DROP TABLE conversation_runtime_legacy`)
+  })
 }

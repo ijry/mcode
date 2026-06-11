@@ -23,7 +23,8 @@ export interface SyncCursorRecord {
   lastSyncAt: number
 }
 
-export async function getRuntime(conversationId: number) {
+export async function getRuntime(instanceKey: string, conversationId: number) {
+  if (!instanceKey) return null
   const rows = await sqliteDriver.query<ConversationRuntimeRecord>(
     `
       SELECT
@@ -40,10 +41,10 @@ export async function getRuntime(conversationId: number) {
         last_snapshot_at as lastSnapshotAt,
         is_active as isActive
       FROM conversation_runtime
-      WHERE conversation_id = ?
+      WHERE instance_key = ? AND conversation_id = ?
       LIMIT 1
     `,
-    [conversationId]
+    [instanceKey, conversationId]
   )
   return rows[0] ?? null
 }
@@ -65,8 +66,7 @@ export async function saveRuntime(input: ConversationRuntimeRecord) {
         last_snapshot_at,
         is_active
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(conversation_id) DO UPDATE SET
-        instance_key = excluded.instance_key,
+      ON CONFLICT(instance_key, conversation_id) DO UPDATE SET
         connection_id = excluded.connection_id,
         live_message_json = excluded.live_message_json,
         optimistic_json = excluded.optimistic_json,
@@ -108,7 +108,7 @@ export async function saveDraftState(input: {
   lastAppliedSeq?: number | null
   isActive?: boolean
 }) {
-  const current = await getRuntime(input.conversationId)
+  const current = await getRuntime(input.instanceKey, input.conversationId)
   await saveRuntime({
     conversationId: input.conversationId,
     instanceKey: input.instanceKey || current?.instanceKey || "",
@@ -125,10 +125,10 @@ export async function saveDraftState(input: {
   })
 }
 
-export async function clearRuntime(conversationId: number) {
+export async function clearRuntime(instanceKey: string, conversationId: number) {
   await sqliteDriver.execute(
-    `DELETE FROM conversation_runtime WHERE conversation_id = ?`,
-    [conversationId]
+    `DELETE FROM conversation_runtime WHERE instance_key = ? AND conversation_id = ?`,
+    [instanceKey, conversationId]
   )
 }
 
