@@ -588,12 +588,12 @@
           </scroll-view>
         </view>
 
-        <view v-if="runtimeRetryText" class="input-feedback input-feedback--retry">
+        <view v-if="showRuntimeRetryFeedback" class="input-feedback input-feedback--retry">
           <up-loading-icon mode="circle" size="14" color="#fa8c16"></up-loading-icon>
           <text class="input-feedback__text">{{ runtimeRetryText }}</text>
         </view>
 
-        <view v-if="runtimeErrorText" class="input-feedback input-feedback--error">
+        <view v-if="showRuntimeErrorFeedback" class="input-feedback input-feedback--error">
           <up-icon name="close-circle-fill" size="14" color="#fa3534"></up-icon>
           <text class="input-feedback__text">{{ runtimeErrorText }}</text>
         </view>
@@ -857,6 +857,7 @@ const conversationId = ref<number>(0)
 const folderId = ref<number>(0)
 const routeConnectionKey = ref("")
 const bridgeHealth = ref<RealtimeBridgeHealth | null>(null)
+const bridgeRecoveredAt = ref(0)
 const conversationTitle = ref("未命名会话")
 const inputText = ref("")
 const scrollIntoView = ref("")
@@ -884,6 +885,7 @@ const longWaitTick = ref(0)
 const longWaitStartedAt = ref(0)
 let detailBridgeHealthUnsubscribe: (() => void) | null = null
 let longWaitTimer: ReturnType<typeof setInterval> | null = null
+let bridgeRecoveryTimer: ReturnType<typeof setTimeout> | null = null
 const expandedConfigKey = ref<ComposerConfigKey>("")
 const detailAgentConfig = ref<DetailAgentConfigState>(createEmptyDetailAgentConfigState())
 const currentAgentType = ref("claude_code")
@@ -1144,6 +1146,10 @@ const runtimeRetryText = computed(() => {
   }
   return pieces.filter(Boolean).join(" · ")
 })
+const showBridgeRecoveredBanner = computed(() => {
+  if (!bridgeRecoveredAt.value) return false
+  return Date.now() - bridgeRecoveredAt.value < 3000
+})
 const detailStatusBanner = computed<{
   tone: DetailBannerTone
   text: string
@@ -1152,6 +1158,15 @@ const detailStatusBanner = computed<{
   loading: boolean
 } | null>(() => {
   const health = bridgeHealth.value
+  if (showBridgeRecoveredBanner.value) {
+    return {
+      tone: "info",
+      text: "实时连接已恢复",
+      icon: "checkmark-circle-fill",
+      iconColor: upThemeVar("--up-success", "#19be6b"),
+      loading: false,
+    }
+  }
   if (health?.state === "reconnecting") {
     const retrySuffix = health.nextRetryDelayMs && health.nextRetryDelayMs > 0
       ? `，${(health.nextRetryDelayMs / 1000).toFixed(1)}s 后重试`
@@ -1250,6 +1265,12 @@ const detailStatusBanner = computed<{
   }
   return null
 })
+const showRuntimeRetryFeedback = computed(() =>
+  Boolean(runtimeRetryText.value) && detailStatusBanner.value?.text !== runtimeRetryText.value
+)
+const showRuntimeErrorFeedback = computed(() =>
+  Boolean(runtimeErrorText.value) && detailStatusBanner.value?.text !== runtimeErrorText.value
+)
 
 const canSend = computed(() => Boolean(inputText.value.trim() || attachments.value.length > 0))
 
@@ -1439,6 +1460,7 @@ onShow(() => {
 onHide(() => {
   teardownDetailBridgeHealth()
   clearLongWaitTimer()
+  clearBridgeRecoveryTimer()
   clearStuckPromptTimer()
   persistDetailRuntimeState()
   needsResumeRefresh.value = true
@@ -1450,6 +1472,7 @@ onHide(() => {
 onUnload(() => {
   teardownDetailBridgeHealth()
   clearLongWaitTimer()
+  clearBridgeRecoveryTimer()
   clearStuckPromptTimer()
   persistDetailRuntimeState()
   if (conversationId.value) {
@@ -1473,7 +1496,16 @@ function syncDetailBridgeHealth() {
   }
   bridgeHealth.value = acpApi.getRealtimeBridgeHealth(instanceKey)
   detailBridgeHealthUnsubscribe = acpApi.subscribeRealtimeBridgeHealth((health) => {
+    const previousState = bridgeHealth.value?.state
     bridgeHealth.value = health
+    if (
+      health.state === "connected" &&
+      previousState &&
+      previousState !== "connected" &&
+      previousState !== "idle"
+    ) {
+      markBridgeRecovered()
+    }
   }, instanceKey)
 }
 
@@ -1505,6 +1537,21 @@ function clearLongWaitTimer() {
   if (!longWaitTimer) return
   clearInterval(longWaitTimer)
   longWaitTimer = null
+}
+
+function markBridgeRecovered() {
+  bridgeRecoveredAt.value = Date.now()
+  clearBridgeRecoveryTimer()
+  bridgeRecoveryTimer = setTimeout(() => {
+    bridgeRecoveredAt.value = 0
+    bridgeRecoveryTimer = null
+  }, 3000)
+}
+
+function clearBridgeRecoveryTimer() {
+  if (!bridgeRecoveryTimer) return
+  clearTimeout(bridgeRecoveryTimer)
+  bridgeRecoveryTimer = null
 }
 
 onBackPress(() => {
