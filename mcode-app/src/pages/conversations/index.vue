@@ -2019,10 +2019,12 @@ async function confirmCreate() {
       throw new Error("项目不存在或列表已过期，请刷新后重试")
     }
 
+    const preferredConfigValues = { ...createAgentConfig.value.selectedValues }
     const connectionInfo = await gateway.call<ConnectionInfo>("acp_connect", {
       agentType,
       workingDir: selectedProject.path || undefined,
       preferredModeId: createAgentConfig.value.selectedModeId || undefined,
+      preferredConfigValues,
     })
     const connectionId = typeof connectionInfo === "string"
       ? connectionInfo

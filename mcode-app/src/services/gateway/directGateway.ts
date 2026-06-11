@@ -5,6 +5,10 @@ import { buildRemoteInstanceKey } from "@/services/realtime/instance-key"
 import { decodeSocketPayload } from "./socketPayload"
 import { buildWebSocketProtocols } from "./wsProtocol"
 
+const COMMAND_TIMEOUT_MS: Record<string, number> = {
+  acp_describe_agent_options: 70_000,
+}
+
 function getBaseUrl(baseUrl: string): string {
   return normalizeDirectBaseUrl(baseUrl)
 }
@@ -49,6 +53,7 @@ export class DirectGateway implements CodegGateway {
         url: `${getBaseUrl(this.baseUrl)}/api/${command}`,
         method: "POST",
         data: payload ?? {},
+        timeout: COMMAND_TIMEOUT_MS[command],
         header: {
           "content-type": "application/json",
           authorization: `Bearer ${this.getToken()}`,

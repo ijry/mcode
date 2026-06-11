@@ -4,6 +4,10 @@ import { buildRemoteInstanceKey } from "@/services/realtime/instance-key"
 import { decodeSocketPayload } from "./socketPayload"
 import { buildWebSocketProtocols } from "./wsProtocol"
 
+const COMMAND_TIMEOUT_MS: Record<string, number> = {
+  acp_describe_agent_options: 70_000,
+}
+
 function getHeaders(session?: RelaySessionInfo | null): HeadersInit {
   const headers: Record<string, string> = {
     "content-type": "application/json",
@@ -67,6 +71,7 @@ export class RelayGateway implements CodegGateway {
         url: `${this.relayUrl.replace(/\/$/, "")}/v1/proxy/${command}`,
         method: "POST",
         data: payload ?? {},
+        timeout: COMMAND_TIMEOUT_MS[command],
         header: getHeaders(this.session),
       })
       const statusCode = Number((res as any).statusCode || 0)

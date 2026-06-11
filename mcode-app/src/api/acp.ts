@@ -58,13 +58,15 @@ class AcpApiClient {
     agentType: string,
     workingDir?: string,
     sessionId?: string,
-    preferredModeId?: string
+    preferredModeId?: string,
+    preferredConfigValues?: Record<string, string>
   ): Promise<ConnectionInfo> {
     const response = await this.request("/acp_connect", {
       agentType,
       workingDir,
       sessionId,
       preferredModeId,
+      preferredConfigValues,
     })
 
     if (typeof response === "string" && response.trim()) {

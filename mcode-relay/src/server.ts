@@ -212,7 +212,13 @@ export async function buildRelayApp(context = createRelayContext()): Promise<Fas
     }
     const payload = req.body ?? {}
     try {
-      const result = await context.hub.sendProxyRequest(claims.targetId, command, payload)
+      const timeoutMs = command === "acp_describe_agent_options" ? 70_000 : undefined
+      const result = await context.hub.sendProxyRequest(
+        claims.targetId,
+        command,
+        payload,
+        timeoutMs
+      )
       const response = result as { status?: number; body?: unknown }
       return reply.status(response.status ?? 200).send(response.body ?? null)
     } catch (error) {
