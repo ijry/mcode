@@ -34,11 +34,27 @@
         </template>
       </up-navbar>
 
-      <view class="detail-toolbar" :style="upThemeCardStyle">
-        <view class="detail-toolbar__status" :data-status="toolbarStatusText">
+      <view class="detail-toolbar" :style="[upThemeCardStyle, detailToolbarStyle]">
+        <view class="detail-toolbar__status">
           <view class="runtime-dot" :class="`runtime-dot--${runtimeStatusClass}`"></view>
           <view class="detail-toolbar__status-copy">
-            <text class="detail-toolbar__status-text">{{ toolbarStatusText }}</text>
+            <swiper
+              class="detail-toolbar__status-swiper"
+              vertical
+              circular
+              autoplay
+              :interval="2800"
+              :duration="280"
+              :disable-touch="toolbarNoticeItems.length <= 1"
+            >
+              <swiper-item
+                v-for="item in toolbarNoticeItems"
+                :key="item.key"
+                class="detail-toolbar__status-swiper-item"
+              >
+                <text class="detail-toolbar__status-text">{{ item.text }}</text>
+              </swiper-item>
+            </swiper>
           </view>
         </view>
         <view class="detail-toolbar__actions">
@@ -87,30 +103,17 @@
       </view>
 
       <view
-        v-if="sharedLiveHint"
-        :class="['shared-live-hint', planTasks.length > 0 && 'shared-live-hint--with-plan']"
-      >
-        <text class="shared-live-hint__text">{{ sharedLiveHint }}</text>
-      </view>
-
-      <view
         v-if="historyStatusText"
+        :style="historyStatusStyle"
         :class="['history-status', planTasks.length > 0 && 'history-status--with-plan']"
       >
         <up-loading-icon v-if="loadingOlder" mode="circle" size="16" :color="upThemeVar('--up-tips-color', '#909193')"></up-loading-icon>
         <text class="history-status__text">{{ historyStatusText }}</text>
       </view>
 
-      <scroll-view
+      <view
         class="message-list"
-        scroll-y
-        :style="messageListStyle"
-        :upper-threshold="120"
-        :scroll-into-view="scrollIntoView"
-        :scroll-top="scrollTop"
-        :scroll-with-animation="true"
-        @scrolltoupper="handleMessageReachTop"
-        @scroll="handleMessageScroll"
+        :style="messageListPageStyle"
       >
         <view class="message-list__content">
           <view v-if="loading && renderMessageItems.length === 0" class="empty-messages empty-messages--loading">
@@ -143,13 +146,13 @@
           <view v-if="stats.totalTokens > 0" class="stats-bar">
             <up-icon name="file-text" size="14" :color="upThemeVar('--up-light-color', '#c0c4cc')"></up-icon>
             <text class="stats-text">
-              {{ stats.inputTokens }} / {{ stats.outputTokens }} / {{ stats.totalTokens }} tokens
+              输入 {{ formatTokenCountK(stats.inputTokens) }} / 输出 {{ formatTokenCountK(stats.outputTokens) }} / 总计 {{ formatTokenCountK(stats.totalTokens) }}
             </text>
           </view>
 
           <view id="message-list-bottom" class="list-bottom"></view>
         </view>
-      </scroll-view>
+      </view>
 
     <view class="input-wrap" :style="upThemeCardStyle">
         <view v-if="pendingPermissionCard" class="permission-card">
@@ -669,7 +672,7 @@
 
 <script setup lang="ts">
 import { ref, computed, getCurrentInstance, nextTick, watch } from "vue"
-import { onBackPress, onHide, onLoad, onShow, onUnload } from "@dcloudio/uni-app"
+import { onBackPress, onHide, onLoad, onPageScroll, onShow, onUnload } from "@dcloudio/uni-app"
 import { useAuthStore } from "@/stores/auth"
 import { useConversationCacheStore } from "@/stores/conversationCache"
 import { useConversationRuntimeStore } from "@/stores/conversationRuntime"
@@ -882,10 +885,12 @@ const bridgeHealth = ref<RealtimeBridgeHealth | null>(null)
 const bridgeRecoveredAt = ref(0)
 const conversationTitle = ref("未命名会话")
 const inputText = ref("")
-const scrollIntoView = ref("")
-const scrollTop = ref(0)
-const messageListHeight = ref(0)
-const messageListViewportHeight = ref(0)
+const pageScrollTop = ref(0)
+const topChromeHeight = ref(0)
+const bottomComposerHeight = ref(0)
+const viewportHeight = ref(0)
+const toolbarHeight = ref(0)
+const sharedHintHeight = ref(0)
 const hasInitialBottomScroll = ref(false)
 const isRestoringScroll = ref(false)
 const restoredInitialScroll = ref(false)
@@ -905,6 +910,7 @@ const showPlanDrawer = ref(false)
 const composerPanelMode = ref<ComposerPanelMode>("")
 const longWaitTick = ref(0)
 const longWaitStartedAt = ref(0)
+const measuredPageHeight = ref(0)
 let detailBridgeHealthUnsubscribe: (() => void) | null = null
 let longWaitTimer: ReturnType<typeof setInterval> | null = null
 let bridgeRecoveryTimer: ReturnType<typeof setTimeout> | null = null
@@ -915,7 +921,7 @@ const detailProjectEntries = ref<DetailProjectEntry[]>([])
 const hasLoadedOnce = ref(false)
 const needsResumeRefresh = ref(false)
 const hasRestoredDraftState = ref(false)
-const HISTORY_LOADING_MIN_MS = 200
+const HISTORY_LOADING_MIN_MS = 480
 const permissionSubmitting = ref(false)
 const pendingPermissionSubmittingOptionId = ref("")
 const questionSubmitting = ref(false)
@@ -1016,12 +1022,21 @@ const managedConversation = computed(() => {
   if (!conversationId.value) return null
   return runtime.getManagedConversation(conversationId.value)
 })
-const messageListStyle = computed(() => {
-  if (messageListViewportHeight.value <= 0) return undefined
+const messageListPageStyle = computed(() => {
+  const minHeight = Math.max(0, viewportHeight.value - topChromeHeight.value - bottomComposerHeight.value)
+  if (topChromeHeight.value <= 0 && bottomComposerHeight.value <= 0 && minHeight <= 0) return undefined
   return {
-    height: `${messageListViewportHeight.value}px`,
+    paddingTop: `${topChromeHeight.value}px`,
+    paddingBottom: `${bottomComposerHeight.value}px`,
+    minHeight: `${minHeight}px`,
   }
 })
+const detailToolbarStyle = computed(() => ({
+  top: `${getNavbarHeight()}px`,
+}))
+const historyStatusStyle = computed(() => ({
+  top: `${getNavbarHeight() + toolbarHeight.value}px`,
+}))
 
 const detailConnectionKey = computed(() => {
   if (routeConnectionKey.value) {
@@ -1047,6 +1062,28 @@ const historyStatusText = computed(() => {
   if (loadingOlder.value) return "历史加载中..."
   if (messages.value.length > 0 && !hasMoreHistory.value) return "没有更多历史了"
   return ""
+})
+const toolbarNoticeItems = computed(() => {
+  const items: Array<{ key: string; text: string }> = []
+  if (sharedLiveHint.value) {
+    items.push({
+      key: "shared",
+      text: sharedLiveHint.value,
+    })
+  }
+  if (toolbarStatusText.value) {
+    items.push({
+      key: "status",
+      text: toolbarStatusText.value,
+    })
+  }
+  if (items.length === 0) {
+    items.push({
+      key: "idle",
+      text: "空闲",
+    })
+  }
+  return items
 })
 
 const runtimeStatus = computed<string>(() => String(session.value?.status || "idle"))
@@ -1130,6 +1167,37 @@ const stats = computed(() => session.value?.stats || {
   totalTokens: 0,
   turnCount: 0,
 })
+
+function formatTokenCountK(value: number) {
+  const normalized = Number(value || 0)
+  if (!Number.isFinite(normalized) || normalized <= 0) return "0"
+  if (normalized < 1000) return "<1K"
+  const kiloValue = normalized / 1000
+  if (kiloValue >= 100) return `${Math.round(kiloValue)}K`
+  if (kiloValue >= 10) return `${kiloValue.toFixed(1).replace(/\.0$/, "")}K`
+  return `${kiloValue.toFixed(2).replace(/\.?0+$/, "")}K`
+}
+
+function getViewportHeight() {
+  const windowInfo = typeof uni.getWindowInfo === "function" ? uni.getWindowInfo() : uni.getSystemInfoSync?.()
+  return Number(windowInfo?.windowHeight || 0)
+}
+
+function getNavbarHeight() {
+  const menuButtonRect = typeof uni.getMenuButtonBoundingClientRect === "function"
+    ? uni.getMenuButtonBoundingClientRect()
+    : null
+  const statusBarHeight = Number(
+    (typeof uni.getWindowInfo === "function" ? uni.getWindowInfo()?.statusBarHeight : 0)
+      || uni.getSystemInfoSync?.()?.statusBarHeight
+      || 0
+  )
+  if (menuButtonRect?.height && menuButtonRect?.top) {
+    const verticalGap = Math.max(0, menuButtonRect.top - statusBarHeight)
+    return statusBarHeight + verticalGap * 2 + menuButtonRect.height
+  }
+  return statusBarHeight + 44
+}
 
 const isViewerMode = computed(() => managedConversation.value?.role === "viewer")
 const isSharedLive = computed(() => managedConversation.value?.sharedLive === true)
@@ -1510,6 +1578,26 @@ onShow(() => {
   })
 })
 
+onPageScroll((event) => {
+  const scrollTopValue = Math.max(0, Number(event?.scrollTop || 0))
+  pageScrollTop.value = scrollTopValue
+  lastMeasuredScrollTop.value = scrollTopValue
+  const currentViewportHeight = viewportHeight.value || getViewportHeight()
+  const pageHeight = measuredPageHeight.value
+  if (currentViewportHeight > 0 && pageHeight > 0) {
+    const distanceToBottom = Math.max(0, pageHeight - (scrollTopValue + currentViewportHeight))
+    shouldAutoFollowBottom.value = distanceToBottom <= 72
+    if (shouldAutoFollowBottom.value) {
+      hasUnreadBelow.value = false
+      const tail = renderMessageItems.value[renderMessageItems.value.length - 1]
+      anchorMessageId.value = tail?.anchorId || ""
+    }
+  }
+  if (scrollTopValue <= 120) {
+    void loadOlderTurns()
+  }
+})
+
 onHide(() => {
   teardownDetailBridgeHealth()
   clearLongWaitTimer()
@@ -1747,7 +1835,6 @@ async function loadConversation() {
     syncAuthByConnectionKey(routeConnectionKey.value)
   }
   loading.value = true
-  scrollIntoView.value = ""
   isRestoringScroll.value = false
   restoredInitialScroll.value = false
   hasRestoredDraftState.value = false
@@ -2447,8 +2534,8 @@ function persistDetailRuntimeState() {
     loadedTurnCount: messages.value.length,
     oldestLoadedSeq: oldestLoadedCursor.value?.sortKey ?? undefined,
     hasMoreHistory: hasMoreHistory.value,
-    scrollAnchor: scrollIntoView.value || undefined,
-    scrollTop: lastMeasuredScrollTop.value || scrollTop.value || 0,
+    scrollAnchor: anchorMessageId.value || undefined,
+    scrollTop: lastMeasuredScrollTop.value || pageScrollTop.value || 0,
     nearBottom: shouldAutoFollowBottom.value,
     anchorMessageId: anchorMessageId.value || undefined,
     composerText: inputText.value,
@@ -2464,7 +2551,7 @@ function persistDetailRuntimeState() {
     composerText: inputText.value,
     draftQueueJson: JSON.stringify(draftQueue.value),
     attachmentsJson: JSON.stringify(attachments.value),
-    scrollAnchor: scrollIntoView.value || null,
+    scrollAnchor: anchorMessageId.value || null,
     liveMessageJson: currentSession?.liveMessage ? JSON.stringify(currentSession.liveMessage) : null,
     optimisticJson: JSON.stringify(currentSession?.optimisticTurns || []),
     lastAppliedSeq: currentSession?.lastAppliedSeq ?? null,
@@ -2554,59 +2641,55 @@ function ensureHistoryCursorFromLoadedMessages() {
 }
 
 function measureMessageListHeight() {
-  const query = uni.createSelectorQuery()
+  const windowHeight = getViewportHeight()
+  viewportHeight.value = windowHeight
+  const navbarHeight = getNavbarHeight()
+  const query = uni.createSelectorQuery().in(getCurrentInstance()?.proxy)
   query
-    .select(".message-list")
+    .select(".detail-toolbar")
+    .boundingClientRect()
+    .select(".shared-live-hint")
+    .boundingClientRect()
+    .select(".history-status")
+    .boundingClientRect()
+    .select(".input-wrap")
+    .boundingClientRect()
+    .select(".message-list__content")
     .boundingClientRect()
     .exec((rects: any[]) => {
-      const listRect = rects?.[0]
-      const height = Math.max(0, Number(listRect?.height || 0))
-      if (height > 0) {
-        messageListViewportHeight.value = height
-        messageListHeight.value = height
+      const toolbarRect = rects?.[0]
+      const sharedHintRect = rects?.[1]
+      const historyStatusRect = rects?.[2]
+      const inputWrapRect = rects?.[3]
+      const contentRect = rects?.[4]
+      const topHeight =
+        navbarHeight +
+        Math.max(0, Number(toolbarRect?.height || 0)) +
+        Math.max(0, Number(sharedHintRect?.height || 0)) +
+        Math.max(0, Number(historyStatusRect?.height || 0))
+      const bottomHeight = Math.max(0, Number(inputWrapRect?.height || 0))
+      if (topHeight > 0) {
+        topChromeHeight.value = topHeight
+      }
+      toolbarHeight.value = Math.max(0, Number(toolbarRect?.height || 0))
+      sharedHintHeight.value = 0
+      if (bottomHeight > 0) {
+        bottomComposerHeight.value = bottomHeight
+      }
+      const contentHeight = Math.max(0, Number(contentRect?.height || 0))
+      const availableHeight = Math.max(0, windowHeight - topHeight - bottomHeight)
+      measuredPageHeight.value = Math.max(windowHeight, topHeight + bottomHeight + Math.max(contentHeight, availableHeight))
+      if (availableHeight > 0) {
         detailDebugLog("message-list-height", {
-          height,
+          windowHeight,
+          navbarHeight,
+          topHeight,
+          bottomHeight,
+          contentHeight,
+          availableHeight,
         })
       }
     })
-}
-
-function handleMessageScroll(event: any) {
-  const scrollTopValue = Number(event?.detail?.scrollTop || 0)
-  const scrollHeight = Number(event?.detail?.scrollHeight || 0)
-  const viewportHeight = Number(messageListHeight.value || 0)
-  lastMeasuredScrollTop.value = scrollTopValue
-  scrollTop.value = scrollTopValue
-  if (!scrollHeight || !viewportHeight) return
-  const distanceToBottom = Math.max(0, scrollHeight - (scrollTopValue + viewportHeight))
-  shouldAutoFollowBottom.value = distanceToBottom <= 72
-  if (shouldAutoFollowBottom.value) {
-    hasUnreadBelow.value = false
-  }
-  if (shouldAutoFollowBottom.value) {
-    const tail = renderMessageItems.value[renderMessageItems.value.length - 1]
-    anchorMessageId.value = tail?.anchorId || ""
-  }
-  if (scrollTopValue <= 120) {
-    detailDebugLog("scroll-near-top", {
-      scrollTop: scrollTopValue,
-      scrollHeight,
-      viewportHeight,
-      hasMoreHistory: hasMoreHistory.value,
-      oldestLoadedCursor: oldestLoadedCursor.value,
-      loadingOlder: loadingOlder.value,
-    })
-    void loadOlderTurns()
-  }
-}
-
-function handleMessageReachTop() {
-  detailDebugLog("scrolltoupper", {
-    hasMoreHistory: hasMoreHistory.value,
-    oldestLoadedCursor: oldestLoadedCursor.value,
-    loadingOlder: loadingOlder.value,
-  })
-  void loadOlderTurns()
 }
 
 async function loadOlderTurns() {
@@ -2652,11 +2735,18 @@ function scrollToBottom(force = false) {
   shouldAutoFollowBottom.value = true
   hasUnreadBelow.value = false
   anchorMessageId.value = ""
-  const targetId = getBottomAnchorId()
-  scrollIntoView.value = ""
-  scrollTop.value += 100000
   nextTick(() => {
-    scrollIntoView.value = targetId
+    const query = uni.createSelectorQuery().in(getCurrentInstance()?.proxy)
+    query.select("#message-list-bottom").boundingClientRect()
+    query.exec((rects: any[]) => {
+      const rect = rects?.[0]
+      const top = Number(rect?.top || 0)
+      if (!Number.isFinite(top)) return
+      uni.pageScrollTo({
+        scrollTop: Math.max(0, pageScrollTop.value + top - (viewportHeight.value || getViewportHeight()) + bottomComposerHeight.value + 16),
+        duration: force ? 0 : 200,
+      })
+    })
   })
 }
 
@@ -2677,9 +2767,18 @@ function getBottomAnchorId() {
 
 function setProgrammaticAnchor(messageId: string) {
   anchorMessageId.value = messageId
-  scrollIntoView.value = ""
   nextTick(() => {
-    scrollIntoView.value = messageAnchorId(messageId)
+    const query = uni.createSelectorQuery().in(getCurrentInstance()?.proxy)
+    query.select(`#${messageAnchorId(messageId)}`).boundingClientRect()
+    query.exec((rects: any[]) => {
+      const rect = rects?.[0]
+      const top = Number(rect?.top || 0)
+      if (!Number.isFinite(top)) return
+      uni.pageScrollTo({
+        scrollTop: Math.max(0, pageScrollTop.value + top - topChromeHeight.value),
+        duration: 0,
+      })
+    })
   })
 }
 
@@ -2708,15 +2807,17 @@ function restoreScrollState(
   shouldAutoFollowBottom.value = false
 
   if (typeof cachedScrollTop === "number" && cachedScrollTop > 0) {
-    scrollIntoView.value = ""
-    scrollTop.value = cachedScrollTop
     lastMeasuredScrollTop.value = cachedScrollTop
+    nextTick(() => {
+      uni.pageScrollTo({
+        scrollTop: cachedScrollTop,
+        duration: 0,
+      })
+    })
   } else if (cachedAnchorMessageId) {
-    scrollIntoView.value = ""
-    scrollIntoView.value = messageAnchorId(resolveRenderAnchorId(cachedAnchorMessageId))
+    setProgrammaticAnchor(resolveRenderAnchorId(cachedAnchorMessageId))
   } else if (persistedAnchor) {
-    scrollIntoView.value = ""
-    scrollIntoView.value = persistedAnchor
+    setProgrammaticAnchor(resolveRenderAnchorId(persistedAnchor))
   } else {
     scrollToBottom(true)
   }
@@ -2735,7 +2836,12 @@ function scheduleViewportSync(forceBottom = false) {
       scrollToBottom(true)
       return
     }
-    scrollTop.value = lastMeasuredScrollTop.value
+    if (lastMeasuredScrollTop.value > 0) {
+      uni.pageScrollTo({
+        scrollTop: lastMeasuredScrollTop.value,
+        duration: 0,
+      })
+    }
   })
 }
 
@@ -4295,12 +4401,12 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 
 <style scoped lang="scss">
 .page {
-  height: 100vh;
+  min-height: 100%;
   padding: 0 !important;
   display: flex;
   flex-direction: column;
   background-color: var(--up-page-bg-color, var(--up-bg-color, #f3f4f6));
-  overflow: hidden;
+  overflow: visible;
 }
 
 .loading-container,
@@ -4367,12 +4473,17 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 }
 
 .detail-toolbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  z-index: 20;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16rpx;
   flex-shrink: 0;
   padding: 14rpx 24rpx;
+  border-top: 1rpx solid var(--up-border-color, #dadbde);
   border-bottom: 1rpx solid var(--up-border-color, #dadbde);
   background: var(--up-card-bg-color, #ffffff);
   box-sizing: border-box;
@@ -4392,6 +4503,16 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   flex: 1;
   min-width: 0;
   overflow: hidden;
+}
+
+.detail-toolbar__status-swiper {
+  width: 100%;
+  height: 34rpx;
+}
+
+.detail-toolbar__status-swiper-item {
+  display: flex;
+  align-items: center;
 }
 
 .detail-toolbar__status-text {
@@ -4505,10 +4626,9 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 }
 
 .message-list {
-  flex: 1;
-  min-height: 0;
-  padding: 0;
   box-sizing: border-box;
+  padding-left: 0;
+  padding-right: 0;
 }
 
 .message-list__content {
@@ -4540,25 +4660,6 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   color: var(--up-content-color, #606266);
 }
 
-.shared-live-hint {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  padding: 10rpx 24rpx;
-  background-color: var(--up-page-bg-color, var(--up-bg-color, #f3f4f6));
-}
-
-.shared-live-hint--with-plan {
-  padding-right: 220rpx;
-}
-
-.shared-live-hint__text {
-  font-size: 22rpx;
-  color: var(--up-tips-color, #909193);
-  text-align: center;
-}
-
 .history-status {
   display: flex;
   align-items: center;
@@ -4567,6 +4668,10 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   flex-shrink: 0;
   padding: 12rpx 24rpx;
   background-color: var(--up-page-bg-color, var(--up-bg-color, #f3f4f6));
+  position: fixed;
+  left: 0;
+  right: 0;
+  z-index: 18;
 }
 
 .history-status--with-plan {
@@ -4596,8 +4701,10 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 }
 
 .input-wrap {
-  position: relative;
-  flex-shrink: 0;
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
   z-index: 30;
   background-color: var(--up-card-bg-color, #ffffff);
   border-top: 1rpx solid var(--up-border-color, #dadbde);
