@@ -116,13 +116,38 @@
         :style="messageListPageStyle"
       >
         <view class="message-list__content">
-          <view v-if="loading && renderMessageItems.length === 0" class="empty-messages empty-messages--loading">
+          <view v-if="showInitialConversationLoading" class="empty-messages empty-messages--loading">
             <up-loading-icon
               mode="circle"
               size="24"
               :color="upThemeVar('--up-primary', '#2979ff')"
             ></up-loading-icon>
             <text class="empty-messages__loading-text">加载会话中...</text>
+          </view>
+
+          <view v-else-if="showWaitingResponseState" class="empty-messages empty-messages--pending">
+            <view class="pending-response-card">
+              <view class="pending-response-card__pulse"></view>
+              <view class="pending-response-card__badge">
+                <view class="pending-response-card__badge-dot"></view>
+                <text class="pending-response-card__badge-text">{{ waitingStateBadgeText }}</text>
+              </view>
+              <text class="pending-response-card__title">{{ waitingStateTitle }}</text>
+              <text class="pending-response-card__desc">{{ waitingStateDescription }}</text>
+              <view class="pending-response-card__bubble">
+                <view class="pending-response-card__bubble-line pending-response-card__bubble-line--strong"></view>
+                <view class="pending-response-card__bubble-line"></view>
+                <view class="pending-response-card__bubble-line pending-response-card__bubble-line--short"></view>
+                <view class="pending-response-card__typing">
+                  <view class="pending-response-card__typing-dot"></view>
+                  <view class="pending-response-card__typing-dot"></view>
+                  <view class="pending-response-card__typing-dot"></view>
+                </view>
+              </view>
+              <text v-if="waitingStateFootnote" class="pending-response-card__footnote">
+                {{ waitingStateFootnote }}
+              </text>
+            </view>
           </view>
 
           <view v-else-if="renderMessageItems.length === 0" class="empty-messages">
@@ -1149,6 +1174,15 @@ const permissionSummary = computed(() => {
     || detailAgentConfig.value.message
     || "远端未提供"
 })
+const activeModelStatusLabel = computed(() => {
+  const modelName = String(modelSummary.value || "").trim()
+  if (!modelName || modelName === "加载中" || modelName === "远端未提供") {
+    return ""
+  }
+  if (runtimeStatus.value === "thinking") return `${modelName} 思考中`
+  if (runtimeStatus.value === "running_tool") return `${modelName} 执行命令中`
+  return modelName
+})
 const detailProjectPath = computed(() => {
   const matched = detailProjectEntries.value.find((item) => Number(item?.id || 0) === folderId.value)
   return String(matched?.path || "").trim()
@@ -1348,7 +1382,7 @@ const detailStatusState = computed<DetailStatusState>(() => {
     return {
       code: "thinking",
       severity: "info",
-      text: "智能体思考中",
+      text: activeModelStatusLabel.value || "思考中",
       icon: "reload",
       iconColor: upThemeVar("--up-primary", "#2979ff"),
       loading: true,
@@ -1358,7 +1392,7 @@ const detailStatusState = computed<DetailStatusState>(() => {
     return {
       code: "running_tool",
       severity: "info",
-      text: "智能体正在执行命令",
+      text: activeModelStatusLabel.value || "执行命令中",
       icon: "reload",
       iconColor: upThemeVar("--up-primary", "#2979ff"),
       loading: true,
@@ -1382,6 +1416,72 @@ const showRuntimeRetryFeedback = computed(() =>
 const showRuntimeErrorFeedback = computed(() =>
   Boolean(runtimeErrorText.value) && detailStatusState.value.code !== "runtime_error"
 )
+const hasRenderedMessages = computed(() => renderMessageItems.value.length > 0)
+const hasPendingInteraction = computed(() =>
+  Boolean(pendingPermissionCard.value || pendingQuestionCard.value)
+)
+const isActiveWaitingRuntime = computed(() =>
+  runtimeStatus.value === "connecting" ||
+  runtimeStatus.value === "thinking" ||
+  runtimeStatus.value === "running_tool" ||
+  runtimeStatus.value === "waiting_permission" ||
+  runtimeStatus.value === "waiting_question"
+)
+const showInitialConversationLoading = computed(() =>
+  loading.value && !hasRenderedMessages.value && !isActiveWaitingRuntime.value
+)
+const showWaitingResponseState = computed(() =>
+  !loading.value &&
+  !hasRenderedMessages.value &&
+  (isActiveWaitingRuntime.value || hasPendingInteraction.value)
+)
+const waitingStateBadgeText = computed(() => {
+  if (runtimeStatus.value === "waiting_permission") return "等待授权"
+  if (runtimeStatus.value === "waiting_question") return "等待选择"
+  if (runtimeStatus.value === "running_tool") return "执行中"
+  if (runtimeStatus.value === "thinking") return "思考中"
+  if (runtimeStatus.value === "connecting") return "连接中"
+  return "处理中"
+})
+const waitingStateTitle = computed(() => {
+  if (runtimeStatus.value === "waiting_permission") return "智能体需要你确认下一步"
+  if (runtimeStatus.value === "waiting_question") return "智能体需要你补一个选择"
+  if (runtimeStatus.value === "running_tool") return "任务已发出，正在执行操作"
+  if (runtimeStatus.value === "thinking") return "任务已发出，正在整理回复"
+  if (runtimeStatus.value === "connecting") return "正在唤起智能体会话"
+  return "正在等待智能体返回"
+})
+const waitingStateDescription = computed(() => {
+  if (runtimeStatus.value === "waiting_permission") {
+    return "完成授权后会继续返回结果，这不是故障。"
+  }
+  if (runtimeStatus.value === "waiting_question") {
+    return "完成当前选择后，智能体会继续处理并返回消息。"
+  }
+  if (runtimeStatus.value === "running_tool") {
+    return "智能体已经开始执行，首条消息可能会在操作完成后出现。"
+  }
+  if (runtimeStatus.value === "thinking") {
+    return "首条回复生成前，这里会先保留一个占位气泡。"
+  }
+  if (runtimeStatus.value === "connecting") {
+    return "连接建立后会继续生成首条回复，请保持页面打开。"
+  }
+  return "消息已经在路上，页面会在首条回复生成后自动补全。"
+})
+const waitingStateFootnote = computed(() => {
+  if (!showWaitingResponseState.value) return ""
+  if (runtimeStatus.value === "waiting_permission" || runtimeStatus.value === "waiting_question") {
+    return ""
+  }
+  if (longWaitElapsedMs.value >= 20_000) {
+    return "首次响应可能需要一点时间，请先不要离开当前页面。"
+  }
+  if (longWaitElapsedMs.value >= 8_000) {
+    return "远端仍在处理中。"
+  }
+  return ""
+})
 
 const canSend = computed(() => Boolean(inputText.value.trim() || attachments.value.length > 0))
 
@@ -1397,8 +1497,9 @@ const isBusyForSend = computed(
 const runtimeStatusLabel = computed(() => {
   if (detailStatusState.value.code === "bridge_reconnecting") return "重连中"
   if (detailStatusState.value.code === "bridge_error") return "连接异常"
-  if (runtimeStatus.value === "thinking") return "思考中"
-  if (runtimeStatus.value === "running_tool") return "运行命令中"
+  if (runtimeStatus.value === "thinking" || runtimeStatus.value === "running_tool") {
+    return activeModelStatusLabel.value || (runtimeStatus.value === "thinking" ? "思考中" : "执行命令中")
+  }
   if (runtimeStatus.value === "waiting_permission") return "等待授权"
   if (runtimeStatus.value === "waiting_question") return "等待选择"
   if (runtimeStatus.value === "error") return "运行异常"
@@ -4658,6 +4759,187 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 .empty-messages__loading-text {
   font-size: 24rpx;
   color: var(--up-content-color, #606266);
+}
+
+.empty-messages--pending {
+  min-height: 260rpx;
+}
+
+.pending-response-card {
+  position: relative;
+  width: 100%;
+  padding: 34rpx 30rpx;
+  border-radius: 28rpx;
+  overflow: hidden;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--up-primary, #2979ff) 8%, var(--up-card-bg-color, #ffffff) 92%) 0%,
+      var(--up-card-bg-color, #ffffff) 100%
+    );
+  border: 1rpx solid color-mix(in srgb, var(--up-primary, #2979ff) 20%, var(--up-border-color, #dadbde) 80%);
+  box-shadow: 0 18rpx 40rpx rgba(41, 121, 255, 0.08);
+  box-sizing: border-box;
+}
+
+.pending-response-card__pulse {
+  position: absolute;
+  top: -120rpx;
+  right: -60rpx;
+  width: 280rpx;
+  height: 280rpx;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 12%, transparent 88%);
+  filter: blur(10rpx);
+  opacity: 0.75;
+}
+
+.pending-response-card__badge {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 10rpx;
+  padding: 10rpx 16rpx;
+  border-radius: 999rpx;
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 12%, var(--up-card-bg-color, #ffffff) 88%);
+}
+
+.pending-response-card__badge-dot {
+  width: 14rpx;
+  height: 14rpx;
+  border-radius: 50%;
+  background: var(--up-primary, #2979ff);
+  animation: pendingPulse 1.4s ease-in-out infinite;
+}
+
+.pending-response-card__badge-text {
+  font-size: 21rpx;
+  font-weight: 600;
+  color: var(--up-primary, #2979ff);
+}
+
+.pending-response-card__title {
+  position: relative;
+  z-index: 1;
+  display: block;
+  margin-top: 20rpx;
+  font-size: 32rpx;
+  line-height: 1.35;
+  color: var(--up-main-color, #303133);
+  font-weight: 650;
+}
+
+.pending-response-card__desc {
+  position: relative;
+  z-index: 1;
+  display: block;
+  margin-top: 12rpx;
+  font-size: 24rpx;
+  line-height: 1.6;
+  color: var(--up-content-color, #606266);
+}
+
+.pending-response-card__bubble {
+  position: relative;
+  z-index: 1;
+  margin-top: 26rpx;
+  padding: 26rpx 24rpx 22rpx;
+  border-radius: 24rpx 24rpx 24rpx 10rpx;
+  background: var(--up-card-bg-color, #ffffff);
+  border: 1rpx solid color-mix(in srgb, var(--up-primary, #2979ff) 14%, var(--up-border-color, #dadbde) 86%);
+  box-shadow: 0 10rpx 26rpx rgba(15, 23, 42, 0.04);
+}
+
+.pending-response-card__bubble-line {
+  height: 16rpx;
+  margin-top: 14rpx;
+  border-radius: 999rpx;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--up-page-bg-color, #f5f6f8) 82%, var(--up-card-bg-color, #ffffff) 18%) 0%,
+    color-mix(in srgb, var(--up-primary, #2979ff) 10%, var(--up-card-bg-color, #ffffff) 90%) 50%,
+    color-mix(in srgb, var(--up-page-bg-color, #f5f6f8) 82%, var(--up-card-bg-color, #ffffff) 18%) 100%
+  );
+  background-size: 200% 100%;
+  animation: pendingShimmer 1.8s linear infinite;
+}
+
+.pending-response-card__bubble-line--strong {
+  width: 76%;
+  margin-top: 0;
+}
+
+.pending-response-card__bubble-line--short {
+  width: 48%;
+}
+
+.pending-response-card__typing {
+  display: inline-flex;
+  align-items: center;
+  gap: 10rpx;
+  margin-top: 22rpx;
+  padding: 12rpx 18rpx;
+  border-radius: 999rpx;
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 8%, var(--up-card-bg-color, #ffffff) 92%);
+}
+
+.pending-response-card__typing-dot {
+  width: 12rpx;
+  height: 12rpx;
+  border-radius: 50%;
+  background: var(--up-primary, #2979ff);
+  opacity: 0.35;
+  animation: pendingTyping 1.1s ease-in-out infinite;
+}
+
+.pending-response-card__typing-dot:nth-child(2) {
+  animation-delay: 0.16s;
+}
+
+.pending-response-card__typing-dot:nth-child(3) {
+  animation-delay: 0.32s;
+}
+
+.pending-response-card__footnote {
+  position: relative;
+  z-index: 1;
+  display: block;
+  margin-top: 18rpx;
+  font-size: 22rpx;
+  line-height: 1.5;
+  color: var(--up-tips-color, #909193);
+}
+
+@keyframes pendingTyping {
+  0%, 80%, 100% {
+    transform: translateY(0);
+    opacity: 0.35;
+  }
+  40% {
+    transform: translateY(-6rpx);
+    opacity: 1;
+  }
+}
+
+@keyframes pendingShimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+@keyframes pendingPulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.7;
+  }
+  50% {
+    transform: scale(1.18);
+    opacity: 1;
+  }
 }
 
 .history-status {
