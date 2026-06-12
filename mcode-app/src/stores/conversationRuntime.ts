@@ -27,6 +27,7 @@ import {
 } from "@/services/conversation/conversationSyncService"
 import { ensureConversationSchema } from "@/services/db/migrations"
 import {
+  getOlderTurns,
   getNewestTurns,
   insertCompletedTurn,
   type PersistedTurnPartRow,
@@ -542,20 +543,49 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         managed?.instanceKey ||
         auth.currentRemoteInstance().instanceKey
       let discovered: ConversationConnectionInfo | null = null
-
-      if (!managed) {
-        try {
-          discovered = await acpApi.acpFindConnectionForConversation(conversationId)
-        } catch (error) {
-          console.warn("acp_find_connection_for_conversation failed", error)
-        }
+      try {
+        discovered = await acpApi.acpFindConnectionForConversation(conversationId)
+      } catch (error) {
+        console.warn("acp_find_connection_for_conversation failed", error)
       }
 
-      if (!managed && discovered?.connection_id) {
+      const discoveredConnectionId = firstString(
+        discovered?.connection_id,
+        discovered?.connectionId
+      )
+      if (
+        managed &&
+        discoveredConnectionId &&
+        discoveredConnectionId !== managed.connectionId
+      ) {
         managed = connectionSessionManager.adoptConversation({
           conversationId,
           instanceKey: targetInstanceKey,
-          connectionId: discovered.connection_id,
+          connectionId: discoveredConnectionId,
+          agentType:
+            firstString(discovered?.agent_type, discovered?.agentType) ||
+            managed.connection.agentType ||
+            agentType,
+          sessionId:
+            firstString(discovered?.session_id, discovered?.sessionId) ||
+            managed.externalId ||
+            sessionId ||
+            null,
+          status: "connected",
+          role: "viewer",
+          sharedLive: true,
+          detachOnly: true,
+          allowSend: false,
+        })
+        const session = getOrCreateSession(conversationId)
+        session.lastAppliedSeq = null
+      }
+
+      if (!managed && discoveredConnectionId) {
+        managed = connectionSessionManager.adoptConversation({
+          conversationId,
+          instanceKey: targetInstanceKey,
+          connectionId: discoveredConnectionId,
           agentType,
           sessionId: sessionId || null,
           status: "connected",
@@ -856,8 +886,48 @@ async function persistCompletedTurns(
 
 async function reloadLocalTurns(session: RuntimeSession) {
   const limit = Math.max(session.localTurns.length, 10)
-  const turns = await getNewestTurns(session.conversationId, limit)
+  const turns = await getNewestTurnsWithUserCoverage(session.conversationId, limit)
   return turns.slice().reverse().map(mapPersistedTurnToMessage)
+}
+
+const INITIAL_USER_TURN_TARGET = 3
+const INITIAL_TURN_EXPAND_BATCH = 12
+const INITIAL_TURN_MAX_BATCH = 48
+
+async function getNewestTurnsWithUserCoverage(
+  conversationId: number,
+  limit: number
+) {
+  let turns = await getNewestTurns(conversationId, limit)
+  if (turns.length === 0) return turns
+
+  const userTurnCount = (items: PersistedTurnWithParts[]) =>
+    items.filter((item) => String(item.role || "") === "user").length
+
+  let oldestCursor = getOldestCursorFromPersistedTurns(turns)
+  while (
+    oldestCursor != null &&
+    turns.length < INITIAL_TURN_MAX_BATCH &&
+    userTurnCount(turns) < INITIAL_USER_TURN_TARGET
+  ) {
+    const remaining = INITIAL_TURN_MAX_BATCH - turns.length
+    const batchSize = Math.min(INITIAL_TURN_EXPAND_BATCH, remaining)
+    const older = await getOlderTurns(conversationId, oldestCursor, batchSize)
+    if (older.length === 0) break
+    turns = [...turns, ...older]
+    oldestCursor = getOldestCursorFromPersistedTurns(turns)
+  }
+
+  return turns
+}
+
+function getOldestCursorFromPersistedTurns(turns: PersistedTurnWithParts[]) {
+  const oldest = turns[turns.length - 1]
+  if (!oldest) return null
+  return {
+    sortKey: oldest.sortKey,
+    id: oldest.id,
+  }
 }
 
 function maybeBackfillExternalUserTurn(
