@@ -62,7 +62,7 @@ export async function inspectClearableCache(): Promise<CacheInventory> {
       {
         id: "conversation-sqlite",
         title: "对话列表与消息本地缓存",
-        description: "清除后下次进入会从当前连接重新拉取，不影响服务端数据。",
+        description: "清除后下次进入会从已连接实例重新拉取，不影响服务端数据。",
         count:
           conversationCounts.folders +
           conversationCounts.conversations +

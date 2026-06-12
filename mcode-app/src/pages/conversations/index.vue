@@ -687,7 +687,7 @@ const selectedProjectPath = computed(() => {
 
 const canCreateInHistory = computed(() => {
   if (!showHistoryPanel.value || !historyGroupKey.value) return false
-  return historyGroupKey.value === currentAuthConnectionKey()
+  return true
 })
 
 const historyProjectSections = computed(() =>
@@ -1256,13 +1256,6 @@ function getConnectedConnections(): ConnectionItem[] {
   const savedConnections = normalizeList(uni.getStorageSync("mcode_connections")) as ConnectionItem[]
   const connectedMap = (uni.getStorageSync("mcode_connected_map") || {}) as Record<string, boolean>
   return savedConnections.filter((conn) => Boolean(connectedMap[connectionKey(conn)]))
-}
-
-function currentAuthConnectionKey(): string {
-  const mode = auth.mode
-  const url = mode === "direct" ? auth.directBaseUrl : auth.relayUrl
-  if (!url) return ""
-  return connectionKey({ mode, url })
 }
 
 async function loadConnectionGroup(conn: ConnectionItem): Promise<ConnectionGroup> {
@@ -1925,7 +1918,7 @@ function createConversation(projectId?: number) {
   clearPendingCreateRequest()
   const defaultConnectionKey = showHistoryPanel.value
     ? historyGroupKey.value
-    : currentAuthConnectionKey() || connectionGroups.value[0]?.key || ""
+    : selectedConnectionKey.value || connectionGroups.value[0]?.key || ""
   applySelectedConnection(defaultConnectionKey)
 
   if (projectId) {

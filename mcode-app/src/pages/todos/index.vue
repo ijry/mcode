@@ -512,13 +512,6 @@ function syncAuthToConnection(conn: ConnectionItem) {
   }
 }
 
-function currentAuthConnectionKey(): string {
-  const mode = auth.mode
-  const url = mode === "direct" ? auth.directBaseUrl : auth.relayUrl
-  if (!url) return ""
-  return connectionKey({ mode, url })
-}
-
 async function loadConnectionGroups() {
   const connected = getConnectedConnections()
   if (connected.length === 0) return
@@ -567,11 +560,7 @@ async function openSendSheet(item: TodoItem) {
     }
   }
 
-  // 自动选中当前认证的连接
-  const currentKey = currentAuthConnectionKey()
-  if (currentKey && connectionGroups.value.find((g) => g.key === currentKey)) {
-    applySelectedConnection(currentKey)
-  } else if (connectionGroups.value.length > 0) {
+  if (connectionGroups.value.length > 0) {
     applySelectedConnection(connectionGroups.value[0].key)
   }
 }

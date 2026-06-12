@@ -246,7 +246,7 @@ function buildClearCacheConfirmContent(items: CacheInventoryItem[]) {
     "当前可清除缓存：",
     ...lines,
     "",
-    "风险：无服务端数据风险。对话数据清除后，下次进入会从当前连接重新拉取。",
+    "风险：无服务端数据风险。对话数据清除后，下次进入会从已连接实例重新拉取。",
     "不会清除登录状态、主题设置、连接配置和宠物数据。",
   ].join("\n")
 }

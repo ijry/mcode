@@ -263,7 +263,7 @@
             <view class="connections-sheet__scan-copy">
               <text class="connections-sheet__scan-title">扫码导入已有连接</text>
               <text class="connections-sheet__scan-desc">
-                支持扫描当前连接配置码，自动导入直连或中继配置。
+                支持扫描已保存连接的配置码，自动导入直连或中继配置。
               </text>
             </view>
 
@@ -330,7 +330,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from "vue"
 import { onShow } from "@dcloudio/uni-app"
-import { useAuthStore } from "@/stores/auth"
 import { createGateway } from "@/services/gateway"
 import type { RelaySessionInfo } from "@/services/gateway"
 import { buildWebSocketProtocols } from "@/services/gateway/wsProtocol"
@@ -340,7 +339,6 @@ declare const plus: any
 
 const DEPLOYMENT_GUIDE_URL = "https://pan.quark.cn/s/0008015b1d33"
 
-const auth = useAuthStore()
 const formRef = ref()
 const showAddPopup = ref(false)
 const showTutorialPopup = ref(false)
@@ -497,8 +495,6 @@ async function submitConnection() {
         token: form.value.directToken,
       })
 
-      auth.setDirectMode(form.value.directBaseUrl, form.value.directToken)
-
       const newConnection: ConnectionItem = {
         name: form.value.name,
         mode: "direct",
@@ -528,23 +524,23 @@ async function submitConnection() {
         secret: form.value.pairSecret,
       })
 
-      if (session) {
-        auth.setRelayMode(form.value.relayUrl, session)
-
-        const newConnection: ConnectionItem = {
-          name: form.value.name,
-          mode: "relay",
-          url: form.value.relayUrl,
-          active: true,
-          pairCode: form.value.pairCode,
-          pairSecret: form.value.pairSecret,
-          relaySession: session,
-        }
-
-        saveConnection(newConnection, previousKey || undefined)
-        syncConnectionRuntimeState(previousKey, newConnection)
-        uni.showToast({ title: "配对成功", icon: "success" })
+      if (!session) {
+        throw new Error("配对失败：未获取到中继会话")
       }
+
+      const newConnection: ConnectionItem = {
+        name: form.value.name,
+        mode: "relay",
+        url: form.value.relayUrl,
+        active: true,
+        pairCode: form.value.pairCode,
+        pairSecret: form.value.pairSecret,
+        relaySession: session,
+      }
+
+      saveConnection(newConnection, previousKey || undefined)
+      syncConnectionRuntimeState(previousKey, newConnection)
+      uni.showToast({ title: "配对成功", icon: "success" })
     }
 
     closeAddPopup()
@@ -622,12 +618,12 @@ function handleActionSelect(e: any) {
   if (!conn || !action) return
 
   if (action === "连接") {
-    if (isCurrentConnection(conn) && isConnectionConnected(conn)) {
-      uni.showToast({ title: "当前已连接", icon: "none" })
+    if (isConnectionConnected(conn)) {
+      uni.showToast({ title: "该连接已在线", icon: "none" })
       showActionSheet.value = false
       return
     }
-    switchConnection(conn)
+    connectConnection(conn)
   } else if (action === "断开连接") {
     disconnectConnection(conn)
   } else if (action === "配置码") {
@@ -679,20 +675,11 @@ function copyConfigCode() {
 }
 
 async function activateConnection(conn: ConnectionItem) {
-  if (isCurrentConnection(conn)) return
-
-  uni.showModal({
-    title: "切换连接",
-    content: `确定切换到 ${conn.name} 吗？`,
-    success: (res) => {
-      if (res.confirm) {
-        switchConnection(conn)
-      }
-    },
-  })
+  if (isConnectionConnected(conn)) return
+  await connectConnection(conn)
 }
 
-async function switchConnection(conn: ConnectionItem) {
+async function connectConnection(conn: ConnectionItem) {
   try {
     if (conn.mode === "direct") {
       if (!conn.directToken) {
@@ -710,15 +697,12 @@ async function switchConnection(conn: ConnectionItem) {
         token: conn.directToken,
       })
 
-      auth.setDirectMode(conn.url, conn.directToken)
     } else {
       const session = await ensureRelaySession(conn)
       if (!session?.accessToken) {
         uni.showToast({ title: "连接信息不完整", icon: "none" })
         return
       }
-
-      auth.setRelayMode(conn.url, session)
     }
 
     setConnectionConnected(conn, true)
@@ -741,9 +725,6 @@ function disconnectConnection(conn: ConnectionItem) {
   const nextOnline = { ...onlineMap.value }
   delete nextOnline[key]
   onlineMap.value = nextOnline
-  if (isCurrentConnection(conn)) {
-    auth.clearAuth()
-  }
   uni.showToast({ title: "已断开连接", icon: "success" })
   loadConnections()
 }
@@ -783,7 +764,7 @@ function deleteConnection(index: number) {
         delete nextOnline[connectionKey(conn)]
         onlineMap.value = nextOnline
 
-        // 删除当前连接时仅移除记录，不在此处强制改写当前认证状态
+        // 删除连接只清理本地记录与在线状态，不影响其它已建立连接
 
         uni.showToast({ title: "删除成功", icon: "success" })
         loadConnections()
@@ -1222,12 +1203,6 @@ function createH5StatusSocket(url: string, token: string): StatusSocket {
       socket.close(options?.code, options?.reason)
     },
   }
-}
-
-function isCurrentConnection(conn: ConnectionItem): boolean {
-  const currentMode = auth.mode
-  const currentUrl = currentMode === "direct" ? auth.directBaseUrl : auth.relayUrl
-  return conn.mode === currentMode && normalizeBaseUrl(conn.url) === normalizeBaseUrl(currentUrl)
 }
 
 function persistConnectedMap() {
