@@ -1268,7 +1268,7 @@ function currentAuthConnectionKey(): string {
 async function loadConnectionGroup(conn: ConnectionItem): Promise<ConnectionGroup> {
   const gateway = await createConnectionGateway(conn)
   const descriptor = gateway.getRemoteInstanceDescriptor()
-  await ensureGlobalConversationSync(descriptor.instanceKey).catch((error) => {
+  void ensureGlobalConversationSync(descriptor.instanceKey).catch((error) => {
     console.warn("ensure global conversation sync skipped:", error)
   })
   const foldersRaw = await gateway.call<unknown>("list_open_folder_details")
@@ -1298,13 +1298,18 @@ async function loadConnectionGroup(conn: ConnectionItem): Promise<ConnectionGrou
     return initialGroup
   }
 
-  const remoteConversations = await fetchRemoteConversations(gateway, folders)
-  await persistConversationSummaries(descriptor.instanceKey, remoteConversations)
+  void scheduleOverviewConversationRefresh({
+    conn,
+    gateway,
+    instanceKey: descriptor.instanceKey,
+    folders,
+    tabs,
+  })
   return buildConnectionGroupSnapshot({
     conn,
     folders,
     tabs,
-    conversations: remoteConversations,
+    conversations: [],
   })
 }
 
@@ -1374,7 +1379,7 @@ async function loadRemoteConnectionSnapshot(
 async function refreshConnectionGroupFromRemote(conn: ConnectionItem, current: ConnectionGroup) {
   const gateway = await createConnectionGateway(conn)
   const descriptor = gateway.getRemoteInstanceDescriptor()
-  await ensureGlobalConversationSync(descriptor.instanceKey).catch((error) => {
+  void ensureGlobalConversationSync(descriptor.instanceKey).catch((error) => {
     console.warn("ensure global conversation sync skipped:", error)
   })
   const foldersRaw = await gateway.call<unknown>("list_open_folder_details")
