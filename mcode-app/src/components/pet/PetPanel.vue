@@ -49,7 +49,7 @@
           :key="tab.id"
           class="pet-panel__tab"
           :class="{ 'pet-panel__tab--active': activeTab === tab.id }"
-          @click="activeTab = tab.id"
+          @tap="activeTab = tab.id"
         >
           <text>{{ tab.label }}</text>
         </view>
@@ -79,11 +79,11 @@
             <text class="tab-status__label">累计 Turns</text>
             <text class="tab-status__value">{{ petStore.stats.totalTurns }}</text>
           </view>
-          <view class="tab-status__row" @click="petStore.setVoiceEnabled(!petStore.voiceEnabled)">
+          <view class="tab-status__row" @tap="petStore.setVoiceEnabled(!petStore.voiceEnabled)">
             <text class="tab-status__label">宠物语音</text>
             <text class="tab-status__value">{{ petStore.voiceEnabled ? '已开启' : '已关闭' }}</text>
           </view>
-          <view class="tab-status__row" @click="petStore.toggleMute()">
+          <view class="tab-status__row" @tap="petStore.toggleMute()">
             <text class="tab-status__label">气泡提醒</text>
             <text class="tab-status__value">{{ petStore.bubbleMuted ? '已关闭' : '已开启' }}</text>
           </view>
@@ -103,7 +103,7 @@
                 'tab-skins__item--active': petStore.skinId === skin.id,
                 'tab-skins__item--locked': !petStore.unlockedSkins.includes(skin.id),
               }"
-              @click="onSkinTap(skin)"
+              @tap="onSkinTap(skin)"
             >
               <view
                 class="tab-skins__swatch"
@@ -125,7 +125,7 @@
                 'tab-skins__item--active': isAccessoryEquipped(acc.id),
                 'tab-skins__item--locked': !petStore.unlockedAccessories.includes(acc.id),
               }"
-              @click="onAccessoryTap(acc)"
+              @tap="onAccessoryTap(acc)"
             >
               <text class="tab-skins__acc-icon">{{ slotIcon(acc.slot) }}</text>
               <text class="tab-skins__name">{{ acc.name }}</text>
@@ -153,7 +153,7 @@
       </scroll-view>
 
       <!-- Close handle -->
-      <view class="pet-panel__close-handle" @click="emit('update:show', false)">
+      <view class="pet-panel__close-handle" @tap="emit('update:show', false)">
         <view class="pet-panel__handle-bar" />
       </view>
     </view>
