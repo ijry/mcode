@@ -61,15 +61,15 @@ export interface GitFileStatusPresentation {
 }
 
 export interface GitDiffViewCell {
-  lineNumber: number | null
+  oldLineNumber: number | null
+  newLineNumber: number | null
   content: string
-  type: "context" | "add" | "del" | "empty"
+  type: "context" | "add" | "del"
 }
 
 export interface GitDiffViewRow {
   id: string
-  left: GitDiffViewCell
-  right: GitDiffViewCell
+  line: GitDiffViewCell
 }
 
 export interface GitDiffViewHunk {
@@ -305,36 +305,37 @@ function buildGitDiffRows(
     if (change.type === "normal") {
       rows.push({
         id: `row-${fileIndex}-${chunkIndex}-${index}`,
-        left: { lineNumber: change.ln1, content: change.content.slice(1), type: "context" },
-        right: { lineNumber: change.ln2, content: change.content.slice(1), type: "context" },
+        line: {
+          oldLineNumber: change.ln1,
+          newLineNumber: change.ln2,
+          content: change.content.slice(1),
+          type: "context",
+        },
       })
       continue
     }
 
     if (change.type === "del") {
-      const nextChange = changes[index + 1]
-      if (nextChange?.type === "add") {
-        rows.push({
-          id: `row-${fileIndex}-${chunkIndex}-${index}`,
-          left: { lineNumber: change.ln, content: change.content.slice(1), type: "del" },
-          right: { lineNumber: nextChange.ln, content: nextChange.content.slice(1), type: "add" },
-        })
-        index += 1
-        continue
-      }
-
       rows.push({
         id: `row-${fileIndex}-${chunkIndex}-${index}`,
-        left: { lineNumber: change.ln, content: change.content.slice(1), type: "del" },
-        right: { lineNumber: null, content: "", type: "empty" },
+        line: {
+          oldLineNumber: change.ln,
+          newLineNumber: null,
+          content: change.content.slice(1),
+          type: "del",
+        },
       })
       continue
     }
 
     rows.push({
       id: `row-${fileIndex}-${chunkIndex}-${index}`,
-      left: { lineNumber: null, content: "", type: "empty" },
-      right: { lineNumber: change.ln, content: change.content.slice(1), type: "add" },
+      line: {
+        oldLineNumber: null,
+        newLineNumber: change.ln,
+        content: change.content.slice(1),
+        type: "add",
+      },
     })
   }
 

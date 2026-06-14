@@ -19,13 +19,10 @@
         <scroll-view scroll-x class="git-diff-hunk__scroll">
           <view class="git-diff-table">
             <view v-for="row in hunk.rows" :key="row.id" class="git-diff-row">
-              <view :class="['git-diff-cell', `git-diff-cell--${row.left.type}`]">
-                <text class="git-diff-cell__line">{{ row.left.lineNumber ?? "" }}</text>
-                <text class="git-diff-cell__content">{{ row.left.content }}</text>
-              </view>
-              <view :class="['git-diff-cell', `git-diff-cell--${row.right.type}`]">
-                <text class="git-diff-cell__line">{{ row.right.lineNumber ?? "" }}</text>
-                <text class="git-diff-cell__content">{{ row.right.content }}</text>
+              <view :class="['git-diff-line', `git-diff-line--${row.line.type}`]">
+                <text class="git-diff-line__line">{{ row.line.oldLineNumber ?? "" }}</text>
+                <text class="git-diff-line__line">{{ row.line.newLineNumber ?? "" }}</text>
+                <text class="git-diff-line__content">{{ row.line.content }}</text>
               </view>
             </view>
           </view>
@@ -112,54 +109,49 @@ function normalizePath(value: string) {
 }
 
 .git-diff-table {
-  min-width: 1280rpx;
+  min-width: 960rpx;
 }
 
 .git-diff-row {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  display: block;
 }
 
-.git-diff-cell {
+.git-diff-line {
   display: grid;
-  grid-template-columns: 88rpx minmax(0, 1fr);
+  grid-template-columns: 76rpx 76rpx minmax(0, 1fr);
   align-items: stretch;
   min-height: 56rpx;
   border-top: 1rpx solid var(--up-border-color, #ebeef5);
 }
 
-.git-diff-cell__line,
-.git-diff-cell__content {
+.git-diff-line__line,
+.git-diff-line__content {
   padding: 12rpx 14rpx;
   font-size: 22rpx;
   line-height: 1.5;
   font-family: "Courier New", monospace;
 }
 
-.git-diff-cell__line {
+.git-diff-line__line {
   text-align: right;
   color: var(--up-tips-color, #909193);
   border-right: 1rpx solid var(--up-border-color, #ebeef5);
 }
 
-.git-diff-cell__content {
+.git-diff-line__content {
   color: var(--up-main-color, #303133);
   white-space: pre;
 }
 
-.git-diff-cell--context {
+.git-diff-line--context {
   background: var(--up-card-bg-color, #ffffff);
 }
 
-.git-diff-cell--add {
+.git-diff-line--add {
   background: color-mix(in srgb, var(--up-success, #19be6b) 14%, #ffffff 86%);
 }
 
-.git-diff-cell--del {
+.git-diff-line--del {
   background: color-mix(in srgb, var(--up-error, #fa3534) 14%, #ffffff 86%);
-}
-
-.git-diff-cell--empty {
-  background: color-mix(in srgb, var(--up-border-color, #dadbde) 24%, #ffffff 76%);
 }
 </style>
