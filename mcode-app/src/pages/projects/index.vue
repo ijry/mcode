@@ -38,26 +38,38 @@
           :key="item.id"
           class="project-card"
           :style="upThemeCardStyle"
-          @click="openProjectSessions(item)"
         >
-          <view class="project-card__main">
-            <text class="project-card__title">{{ item.name }}</text>
-            <text class="project-card__path">{{ item.path || "未提供项目路径" }}</text>
+          <view class="project-card__tap" @click="openProjectSessions(item)">
+            <view class="project-card__main">
+              <text class="project-card__title">{{ item.name }}</text>
+              <text class="project-card__path">{{ item.path || "未提供项目路径" }}</text>
+            </view>
+
+            <view class="project-card__stats">
+              <view class="project-card__stat">
+                <text class="project-card__stat-value">{{ item.totalSessions }}</text>
+                <text class="project-card__stat-label">会话</text>
+              </view>
+              <view class="project-card__stat project-card__stat--active">
+                <text class="project-card__stat-value">{{ item.activeSessions }}</text>
+                <text class="project-card__stat-label">进行中</text>
+              </view>
+              <u-icon name="arrow-right" size="16" color="#2979ff"></u-icon>
+            </view>
           </view>
 
-          <view class="project-card__stats">
-            <view class="project-card__stat">
-              <text class="project-card__stat-value">{{ item.totalSessions }}</text>
-              <text class="project-card__stat-label">会话</text>
-            </view>
-            <view class="project-card__stat project-card__stat--active">
-              <text class="project-card__stat-value">{{ item.activeSessions }}</text>
-              <text class="project-card__stat-label">进行中</text>
-            </view>
-            <u-icon name="arrow-right" size="16" color="#2979ff"></u-icon>
+          <view class="project-card__menu" @click.stop="openProjectActionSheet(item)">
+            <u-icon name="more-dot-fill" size="18" color="#c7c7cc"></u-icon>
           </view>
         </view>
       </view>
+
+      <u-action-sheet
+        :show="showProjectActionSheet"
+        :actions="projectActions"
+        @select="handleProjectActionSelect"
+        @close="showProjectActionSheet = false"
+      ></u-action-sheet>
     </view>
   </view>
 </template>
@@ -77,6 +89,7 @@ import {
   loadRemoteProjects,
   type ProjectListItem,
 } from "@/services/projectSessions"
+import { buildProjectGitRoute } from "@/services/projectGit"
 
 const currentInstance = getCurrentInstance()
 const upThemeVars = computed(() => currentInstance?.proxy?.upThemeVars || {})
@@ -87,8 +100,11 @@ const loading = ref(false)
 const errorMessage = ref("")
 const projectItems = ref<ProjectListItem[]>([])
 const connection = ref<ConnectionContext | null>(null)
+const showProjectActionSheet = ref(false)
+const currentProjectAction = ref<ProjectListItem | null>(null)
 
 const connectionName = computed(() => connection.value?.name || "项目列表")
+const projectActions = computed(() => [{ name: "Git 管理", color: "#2979ff" }])
 
 onLoad((options) => {
   connection.value = decodeConnectionContext(options?.connection as string)
@@ -130,6 +146,26 @@ function openProjectSessions(item: ProjectListItem) {
   const title = encodeURIComponent(item.name)
   uni.navigateTo({
     url: `/pages/sessions/index?connection=${encodedConnection}&folderId=${item.id}&projectName=${title}`,
+  })
+}
+
+function openProjectActionSheet(item: ProjectListItem) {
+  currentProjectAction.value = item
+  showProjectActionSheet.value = true
+}
+
+function handleProjectActionSelect() {
+  const item = currentProjectAction.value
+  showProjectActionSheet.value = false
+  if (!item || !connection.value) return
+  const encodedConnection = encodeConnectionContext(connection.value)
+  uni.navigateTo({
+    url: buildProjectGitRoute({
+      encodedConnection,
+      folderId: item.id,
+      projectName: item.name,
+      projectPath: item.path,
+    }),
   })
 }
 
@@ -234,8 +270,17 @@ function toErrorMessage(error: unknown) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 20rpx;
+  gap: 16rpx;
   padding: 26rpx 24rpx;
+}
+
+.project-card__tap {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20rpx;
 }
 
 .project-card__main {
@@ -263,6 +308,17 @@ function toErrorMessage(error: unknown) {
   align-items: center;
   gap: 18rpx;
   flex-shrink: 0;
+}
+
+.project-card__menu {
+  width: 56rpx;
+  height: 56rpx;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
 }
 
 .project-card__stat {

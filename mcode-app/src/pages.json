@@ -76,6 +76,13 @@
       }
     },
     {
+      "path": "pages/project-git/index",
+      "style": {
+        "navigationBarTitleText": "Git 管理",
+        "enablePullDownRefresh": true
+      }
+    },
+    {
       "path": "pages/auth/login",
       "style": {
         "navigationStyle": "custom",
