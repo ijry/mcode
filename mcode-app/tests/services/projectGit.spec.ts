@@ -1,9 +1,11 @@
 import {
+  buildGitDiffView,
   buildProjectGitCommitRoute,
   buildProjectGitDiffRoute,
   buildProjectGitRoute,
   buildWorkspaceStatusSummary,
   getRemoteCommitDiff,
+  getGitFileStatusPresentation,
   getRemoteWorkspaceDiff,
   isNotGitRepositoryError,
   isCurrentBranchHistoryView,
@@ -152,6 +154,53 @@ describe("projectGit service", () => {
         branch: "main",
       })
     ).toContain("mode=workspace")
+  })
+
+  it("maps file statuses to colored icon presentations", () => {
+    expect(getGitFileStatusPresentation("A")).toEqual({
+      icon: "plus-circle",
+      label: "新增",
+      tone: "success",
+    })
+    expect(getGitFileStatusPresentation("D")).toEqual({
+      icon: "minus-circle",
+      label: "删除",
+      tone: "error",
+    })
+    expect(getGitFileStatusPresentation("M")).toEqual({
+      icon: "edit-pen",
+      label: "修改",
+      tone: "warning",
+    })
+    expect(getGitFileStatusPresentation("??")).toEqual({
+      icon: "plus-circle",
+      label: "未跟踪",
+      tone: "info",
+    })
+  })
+
+  it("parses unified diff text into split-view rows", () => {
+    const files = buildGitDiffView(`diff --git a/src/App.vue b/src/App.vue
+index 1111111..2222222 100644
+--- a/src/App.vue
++++ b/src/App.vue
+@@ -1,2 +1,2 @@
+-old line
++new line
+ same line
+`)
+
+    expect(files).toHaveLength(1)
+    expect(files[0].hunks[0].rows[0]).toEqual({
+      id: expect.any(String),
+      left: { lineNumber: 1, content: "old line", type: "del" },
+      right: { lineNumber: 1, content: "new line", type: "add" },
+    })
+    expect(files[0].hunks[0].rows[1]).toEqual({
+      id: expect.any(String),
+      left: { lineNumber: 2, content: "same line", type: "context" },
+      right: { lineNumber: 2, content: "same line", type: "context" },
+    })
   })
 
   it("detects not-a-git-repository errors from backend messages", () => {

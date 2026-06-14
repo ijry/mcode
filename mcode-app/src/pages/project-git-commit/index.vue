@@ -35,14 +35,27 @@
             v-for="file in commitEntry.files"
             :key="`${commitEntry.full_hash}:${file.path}`"
             class="project-git-commit-file-row"
+            :class="`project-git-commit-file-row--${getStatusPresentation(file.status).tone}`"
             @click="openCommitDiff(file)"
           >
             <view class="project-git-commit-file-row__main">
-              <text class="project-git-commit-file-row__status">{{ file.status }}</text>
+              <view class="project-git-commit-file-row__badge">
+                <u-icon
+                  :name="getStatusPresentation(file.status).icon"
+                  size="16"
+                  :color="getToneColor(getStatusPresentation(file.status).tone)"
+                ></u-icon>
+                <text
+                  class="project-git-commit-file-row__status"
+                  :style="{ color: getToneColor(getStatusPresentation(file.status).tone) }"
+                >
+                  {{ file.status }}
+                </text>
+              </view>
               <view class="project-git-commit-file-row__copy">
                 <text class="project-git-commit-file-row__path">{{ file.path }}</text>
                 <text class="project-git-commit-file-row__meta">
-                  +{{ file.additions }} / -{{ file.deletions }}
+                  {{ getStatusPresentation(file.status).label }} · +{{ file.additions }} / -{{ file.deletions }}
                 </text>
               </view>
             </view>
@@ -65,6 +78,8 @@ import {
 import {
   buildProjectGitDiffRoute,
   formatGitDateTime,
+  getGitFileStatusPresentation,
+  getGitFileToneColor,
   parseProjectGitCommitRoute,
   type GitLogEntry,
   type GitLogFileChange,
@@ -108,6 +123,14 @@ function openCommitDiff(file: GitLogFileChange) {
 
 function formatDateTime(value: string) {
   return formatGitDateTime(value)
+}
+
+function getStatusPresentation(status: string) {
+  return getGitFileStatusPresentation(status)
+}
+
+function getToneColor(tone: "success" | "error" | "warning" | "info") {
+  return getGitFileToneColor(tone)
 }
 </script>
 
@@ -189,18 +212,39 @@ function formatDateTime(value: string) {
   background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
 }
 
+.project-git-commit-file-row--success {
+  background: color-mix(in srgb, var(--up-success, #19be6b) 10%, #ffffff 90%);
+}
+
+.project-git-commit-file-row--error {
+  background: color-mix(in srgb, var(--up-error, #fa3534) 10%, #ffffff 90%);
+}
+
+.project-git-commit-file-row--warning {
+  background: color-mix(in srgb, var(--up-warning, #f9ae3d) 12%, #ffffff 88%);
+}
+
+.project-git-commit-file-row--info {
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 10%, #ffffff 90%);
+}
+
 .project-git-commit-file-row__main {
   flex: 1;
   min-width: 0;
   justify-content: flex-start;
 }
 
-.project-git-commit-file-row__status {
-  width: 56rpx;
+.project-git-commit-file-row__badge {
+  width: 96rpx;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+}
+
+.project-git-commit-file-row__status {
   font-size: 22rpx;
   font-weight: 700;
-  color: var(--up-primary, #2979ff);
 }
 
 .project-git-commit-file-row__copy {

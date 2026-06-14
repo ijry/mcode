@@ -38,11 +38,7 @@
             <text>复制</text>
           </view>
         </view>
-        <scroll-view scroll-x class="project-git-diff-scroll">
-          <view class="project-git-diff-code">
-            <text class="project-git-diff-code__text">{{ diffContent || "没有可展示的 Diff 内容。" }}</text>
-          </view>
-        </scroll-view>
+        <GitDiffViewer :files="diffFiles" />
       </view>
     </view>
   </view>
@@ -52,6 +48,7 @@
 import { computed, getCurrentInstance, ref } from "vue"
 import { onLoad } from "@dcloudio/uni-app"
 import type { CodegGateway } from "@/services/gateway"
+import GitDiffViewer from "@/components/GitDiffViewer.vue"
 import {
   decodeConnectionContext,
   persistResolvedConnection,
@@ -59,6 +56,7 @@ import {
   type ConnectionContext,
 } from "@/services/connectionContext"
 import {
+  buildGitDiffView,
   getRemoteCommitDiff,
   getRemoteWorkspaceDiff,
   type ProjectGitDiffMode,
@@ -83,6 +81,7 @@ const commitMessage = ref("")
 const diffContent = ref("")
 
 const shortCommitHash = computed(() => commitHash.value.slice(0, 7))
+const diffFiles = computed(() => buildGitDiffView(diffContent.value))
 
 onLoad((options) => {
   connection.value = decodeConnectionContext(options?.connection as string)
@@ -233,24 +232,4 @@ function toErrorMessage(error: unknown) {
   gap: 16rpx;
 }
 
-.project-git-diff-scroll {
-  margin-top: 20rpx;
-  border-radius: 24rpx;
-  overflow: hidden;
-}
-
-.project-git-diff-code {
-  min-width: 100%;
-  padding: 24rpx;
-  border-radius: 24rpx;
-  background: #101318;
-}
-
-.project-git-diff-code__text {
-  font-size: 22rpx;
-  line-height: 1.6;
-  font-family: "Courier New", monospace;
-  color: #d7dde8;
-  white-space: pre;
-}
 </style>

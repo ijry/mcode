@@ -21,9 +21,11 @@
 - `mcode-app/src/pages/project-git-commit/index.vue`
   - Responsibility: render a second-level page for one commit, showing commit metadata and changed files, and route file taps to the diff page.
 - `mcode-app/src/pages/project-git-diff/index.vue`
-  - Responsibility: load and display the diff text for either a workspace file or a commit file.
+  - Responsibility: load the diff text for either a workspace file or a commit file and render it through a structured split diff viewer.
+- `mcode-app/src/components/GitDiffViewer.vue`
+  - Responsibility: render parsed unified diff hunks with split old/new columns, line numbers, and colored addition/deletion rows.
 - `mcode-app/src/services/projectGit.ts`
-  - Responsibility: typed wrappers around the remote git RPC calls, route/presentation helpers, route builders for commit-detail and diff pages, and payload encode/decode helpers for passing commit/file metadata between pages.
+  - Responsibility: typed wrappers around the remote git RPC calls, route/presentation helpers, route builders for commit-detail and diff pages, payload encode/decode helpers for passing commit/file metadata between pages, and diff/file-status presentation helpers.
 - `mcode-app/src/pages.json`
   - Responsibility: page registration for `pages/project-git/index`, `pages/project-git-commit/index`, and `pages/project-git-diff/index`.
 - `mcode-app/tests/services/projectGit.spec.ts`

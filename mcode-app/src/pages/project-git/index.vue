@@ -74,11 +74,29 @@
               v-for="entry in workspaceEntries"
               :key="`${entry.status}:${entry.file}`"
               class="project-git-file-row"
+              :class="`project-git-file-row--${getStatusPresentation(entry.status).tone}`"
               @click="openWorkspaceDiff(entry)"
             >
               <view class="project-git-file-row__main">
-                <text class="project-git-file-row__status">{{ entry.status }}</text>
-                <text class="project-git-file-row__path">{{ entry.file }}</text>
+                <view class="project-git-file-row__badge">
+                  <u-icon
+                    :name="getStatusPresentation(entry.status).icon"
+                    size="16"
+                    :color="getToneColor(getStatusPresentation(entry.status).tone)"
+                  ></u-icon>
+                  <text
+                    class="project-git-file-row__status"
+                    :style="{ color: getToneColor(getStatusPresentation(entry.status).tone) }"
+                  >
+                    {{ entry.status }}
+                  </text>
+                </view>
+                <view class="project-git-file-row__copy">
+                  <text class="project-git-file-row__path">{{ entry.file }}</text>
+                  <text class="project-git-file-row__meta">
+                    {{ getStatusPresentation(entry.status).label }}
+                  </text>
+                </view>
               </view>
               <u-icon name="arrow-right" size="16" color="#c0c4cc"></u-icon>
             </view>
@@ -201,6 +219,8 @@ import {
   checkoutRemoteBranch,
   createRemoteBranch,
   formatGitDateTime,
+  getGitFileStatusPresentation,
+  getGitFileToneColor,
   getRemoteCommitBranches,
   getRemoteGitBranch,
   getRemoteGitBranches,
@@ -455,6 +475,14 @@ function formatDateTime(value: string) {
   return formatGitDateTime(value)
 }
 
+function getStatusPresentation(status: string) {
+  return getGitFileStatusPresentation(status)
+}
+
+function getToneColor(tone: "success" | "error" | "warning" | "info") {
+  return getGitFileToneColor(tone)
+}
+
 function toErrorMessage(error: unknown) {
   if (error instanceof Error && error.message.trim()) return error.message.trim()
   return "读取 Git 信息失败"
@@ -626,6 +654,22 @@ function toErrorMessage(error: unknown) {
   background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
 }
 
+.project-git-file-row--success {
+  background: color-mix(in srgb, var(--up-success, #19be6b) 10%, #ffffff 90%);
+}
+
+.project-git-file-row--error {
+  background: color-mix(in srgb, var(--up-error, #fa3534) 10%, #ffffff 90%);
+}
+
+.project-git-file-row--warning {
+  background: color-mix(in srgb, var(--up-warning, #f9ae3d) 12%, #ffffff 88%);
+}
+
+.project-git-file-row--info {
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 10%, #ffffff 90%);
+}
+
 .project-git-file-row__main {
   flex: 1;
   min-width: 0;
@@ -634,12 +678,25 @@ function toErrorMessage(error: unknown) {
   gap: 14rpx;
 }
 
-.project-git-file-row__status {
-  width: 56rpx;
+.project-git-file-row__badge {
+  width: 96rpx;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+}
+
+.project-git-file-row__status {
   font-size: 22rpx;
   font-weight: 700;
-  color: var(--up-primary, #2979ff);
+}
+
+.project-git-file-row__copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
 }
 
 .project-git-file-row__path,
@@ -649,6 +706,11 @@ function toErrorMessage(error: unknown) {
   font-size: 24rpx;
   color: var(--up-main-color, #303133);
   word-break: break-all;
+}
+
+.project-git-file-row__meta {
+  font-size: 22rpx;
+  color: var(--up-content-color, #606266);
 }
 
 .project-git-empty-row {

@@ -370,6 +370,26 @@ The commit-detail file list should show:
 
 The workspace-status file list should also support tapping through to the same diff page type, but in workspace mode backed by `git_diff(path, file)`.
 
+### Diff Presentation
+
+The diff page should no longer render raw unified diff text as a plain code block.
+
+Instead:
+
+- parse the unified diff with a mature parser library
+- render a mobile-optimized split diff viewer
+- show old/new line numbers in separate columns
+- use red styling for deletions
+- use green styling for additions
+- keep neutral styling for context lines
+
+The changed-file lists should also adopt visual status cues:
+
+- `A`: green add icon + green accent
+- `D`: red remove icon + red accent
+- `M`: amber or primary edit icon + colored accent
+- `??`: muted or info accent for untracked files
+
 ## Error Handling And Limits
 
 ### Non-Git Repository

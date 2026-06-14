@@ -1,4 +1,8 @@
 import type { CodegGateway } from "@/services/gateway"
+import parseDiffModule from "parse-diff"
+import type { Change as ParseDiffChange } from "parse-diff"
+
+const parseDiff = parseDiffModule as unknown as typeof import("parse-diff")
 
 export interface GitStatusEntry {
   status: string
@@ -47,6 +51,41 @@ export interface GitLogResult {
 }
 
 export type ProjectGitDiffMode = "workspace" | "commit"
+
+export type GitFileTone = "success" | "error" | "warning" | "info"
+
+export interface GitFileStatusPresentation {
+  icon: string
+  label: string
+  tone: GitFileTone
+}
+
+export interface GitDiffViewCell {
+  lineNumber: number | null
+  content: string
+  type: "context" | "add" | "del" | "empty"
+}
+
+export interface GitDiffViewRow {
+  id: string
+  left: GitDiffViewCell
+  right: GitDiffViewCell
+}
+
+export interface GitDiffViewHunk {
+  id: string
+  header: string
+  rows: GitDiffViewRow[]
+}
+
+export interface GitDiffViewFile {
+  id: string
+  from: string
+  to: string
+  additions: number
+  deletions: number
+  hunks: GitDiffViewHunk[]
+}
 
 export interface WorkspaceStatusSummary {
   modified: number
@@ -208,6 +247,98 @@ export function formatGitDateTime(value: string) {
   const hours = `${date.getHours()}`.padStart(2, "0")
   const minutes = `${date.getMinutes()}`.padStart(2, "0")
   return `${month}-${day} ${hours}:${minutes}`
+}
+
+export function getGitFileStatusPresentation(status: string): GitFileStatusPresentation {
+  const normalized = status.trim().toUpperCase()
+  if (normalized === "??") {
+    return { icon: "plus-circle", label: "未跟踪", tone: "info" }
+  }
+  if (normalized.includes("D")) {
+    return { icon: "minus-circle", label: "删除", tone: "error" }
+  }
+  if (normalized.includes("A")) {
+    return { icon: "plus-circle", label: "新增", tone: "success" }
+  }
+  if (normalized.includes("M")) {
+    return { icon: "edit-pen", label: "修改", tone: "warning" }
+  }
+  return { icon: "file-text", label: "变更", tone: "info" }
+}
+
+export function getGitFileToneColor(tone: GitFileTone) {
+  if (tone === "success") return "var(--up-success, #19be6b)"
+  if (tone === "error") return "var(--up-error, #fa3534)"
+  if (tone === "warning") return "var(--up-warning, #f9ae3d)"
+  return "var(--up-primary, #2979ff)"
+}
+
+export function buildGitDiffView(diffText: string): GitDiffViewFile[] {
+  const files = parseDiff(diffText || "")
+  return files.map((file, fileIndex) => {
+    const from = file.from || "a/unknown"
+    const to = file.to || "b/unknown"
+    return {
+      id: `file-${fileIndex}-${from}-${to}`,
+      from,
+      to,
+      additions: file.additions || 0,
+      deletions: file.deletions || 0,
+      hunks: file.chunks.map((chunk, chunkIndex) => ({
+        id: `hunk-${fileIndex}-${chunkIndex}`,
+        header: chunk.content,
+        rows: buildGitDiffRows(chunk.changes, fileIndex, chunkIndex),
+      })),
+    }
+  })
+}
+
+function buildGitDiffRows(
+  changes: ParseDiffChange[],
+  fileIndex: number,
+  chunkIndex: number
+): GitDiffViewRow[] {
+  const rows: GitDiffViewRow[] = []
+
+  for (let index = 0; index < changes.length; index += 1) {
+    const change = changes[index]
+    if (change.type === "normal") {
+      rows.push({
+        id: `row-${fileIndex}-${chunkIndex}-${index}`,
+        left: { lineNumber: change.ln1, content: change.content.slice(1), type: "context" },
+        right: { lineNumber: change.ln2, content: change.content.slice(1), type: "context" },
+      })
+      continue
+    }
+
+    if (change.type === "del") {
+      const nextChange = changes[index + 1]
+      if (nextChange?.type === "add") {
+        rows.push({
+          id: `row-${fileIndex}-${chunkIndex}-${index}`,
+          left: { lineNumber: change.ln, content: change.content.slice(1), type: "del" },
+          right: { lineNumber: nextChange.ln, content: nextChange.content.slice(1), type: "add" },
+        })
+        index += 1
+        continue
+      }
+
+      rows.push({
+        id: `row-${fileIndex}-${chunkIndex}-${index}`,
+        left: { lineNumber: change.ln, content: change.content.slice(1), type: "del" },
+        right: { lineNumber: null, content: "", type: "empty" },
+      })
+      continue
+    }
+
+    rows.push({
+      id: `row-${fileIndex}-${chunkIndex}-${index}`,
+      left: { lineNumber: null, content: "", type: "empty" },
+      right: { lineNumber: change.ln, content: change.content.slice(1), type: "add" },
+    })
+  }
+
+  return rows
 }
 
 export async function getRemoteGitBranch(

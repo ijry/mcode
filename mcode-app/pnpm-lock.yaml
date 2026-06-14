@@ -62,6 +62,9 @@ importers:
       '@vue/runtime-dom':
         specifier: 3.4.21
         version: 3.4.21
+      parse-diff:
+        specifier: ^0.12.0
+        version: 0.12.0
       pinia:
         specifier: ^3.0.4
         version: 3.0.4(typescript@5.9.3)(vue@3.4.21(typescript@5.9.3))
@@ -3384,6 +3387,9 @@ packages:
 
   parse-css-font@4.0.0:
     resolution: {integrity: sha512-lnY7dTUfjRXsSo5G5C639L8RaBBaVSgL+5hacIFKsNHzeCJQ5SFSZv1DZmc7+wZv/22PFGOq2YbaEHLdaCS/mQ==}
+
+  parse-diff@0.12.0:
+    resolution: {integrity: sha512-2Xr5mW4Bqd4CqYq2zttfw/RZraK+KcRuJvNkJzbDk3ea67Ap525XeTvBdtDE5tigJMVzIx/DMUzsShAf6+5SCA==}
 
   parse-headers@2.0.6:
     resolution: {integrity: sha512-Tz11t3uKztEW5FEVZnj1ox8GKblWn+PvHY9TmJV5Mll2uHEwRdR/5Li1OlXoECjLYkApdhWy44ocONwXLiKO5A==}
@@ -8701,6 +8707,8 @@ snapshots:
       css-list-helpers: 2.0.0
       css-system-font-keywords: 1.0.0
       unquote: 1.1.1
+
+  parse-diff@0.12.0: {}
 
   parse-headers@2.0.6: {}
 

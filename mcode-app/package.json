@@ -57,6 +57,7 @@
     "@dcloudio/uni-quickapp-webview": "3.0.0-5000720260410001",
     "@vue/runtime-core": "3.4.21",
     "@vue/runtime-dom": "3.4.21",
+    "parse-diff": "^0.12.0",
     "pinia": "^3.0.4",
     "pinia-plugin-persistedstate": "^4.7.1",
     "sql.js": "^1.14.1",
