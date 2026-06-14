@@ -54,6 +54,14 @@
       }
     },
     {
+      "path": "pages/achievement/index",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "成就中心",
+        "enablePullDownRefresh": false
+      }
+    },
+    {
       "path": "pages/auth/login",
       "style": {
         "navigationStyle": "custom",

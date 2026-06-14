@@ -12,6 +12,25 @@
       <u-icon name="arrow-right" :color="upThemeVar('--up-light-color', '#c0c4cc')" size="20"></u-icon>
     </view>
 
+    <view class="achievement-entry" @click="goToAchievement">
+      <view class="achievement-entry__copy">
+        <text class="achievement-entry__eyebrow">ACHIEVEMENT</text>
+        <text class="achievement-entry__title">成就中心</text>
+        <text class="achievement-entry__subtitle">{{ achievementEntry.highlightText || "看看你击败了多少用户" }}</text>
+      </view>
+
+      <view class="achievement-entry__side">
+        <text class="achievement-entry__title-chip">{{ achievementEntry.title || "待解锁" }}</text>
+        <view class="achievement-entry__percentile">
+          <text class="achievement-entry__percentile-value">{{ achievementEntry.percentile || 0 }}%</text>
+          <text class="achievement-entry__percentile-label">全国前线</text>
+        </view>
+        <text class="achievement-entry__progress">已解锁 {{ achievementEntry.unlockedCount }}/{{ achievementEntry.totalCount }}</text>
+      </view>
+
+      <view v-if="achievementEntry.hasNew" class="achievement-entry__dot"></view>
+    </view>
+
     <!-- 功能列表 -->
     <view class="section">
       <view class="section-title">外观设置</view>
@@ -119,6 +138,10 @@ import { usePetEngine } from "@/services/petEngine"
 import PetPanel from "@/components/pet/PetPanel.vue"
 import { useAccountStore } from "@/stores/account"
 import {
+  getAchievementEntrySummary,
+  type AchievementEntrySummary,
+} from "@/services/achievement"
+import {
   clearInspectableCache,
   inspectClearableCache,
   type CacheInventoryItem,
@@ -130,6 +153,14 @@ const version = ref("1.0.0")
 const themePreference = ref<ThemePreference>("system")
 const showThemeSheet = ref(false)
 const showPetPanel = ref(false)
+const achievementEntry = ref<AchievementEntrySummary>({
+  hasNew: false,
+  unlockedCount: 0,
+  totalCount: 0,
+  title: "",
+  highlightText: "",
+  percentile: 0,
+})
 const themeActions = [
   { name: "跟随系统", value: "system" },
   { name: "浅色", value: "light" },
@@ -147,12 +178,21 @@ const isLoggedIn = computed(() => account.isLoggedIn)
 const displayName = computed(() => account.userInfo?.name || "未登录")
 const displayEmail = computed(() => account.userInfo?.email || "点击登录 / 注册")
 
-onMounted(() => {
+onMounted(async () => {
   loadThemePreference()
+  await loadAchievementEntry()
 })
 
 function loadThemePreference() {
   themePreference.value = getCurrentThemePreference()
+}
+
+async function loadAchievementEntry() {
+  try {
+    achievementEntry.value = await getAchievementEntrySummary()
+  } catch (error) {
+    console.warn("load achievement entry failed", error)
+  }
 }
 
 function handleThemeSelect(action: { value?: string }) {
@@ -168,6 +208,12 @@ function handleThemeSelect(action: { value?: string }) {
 function goToConnections() {
   uni.switchTab({
     url: "/pages/connections/index",
+  })
+}
+
+function goToAchievement() {
+  uni.navigateTo({
+    url: "/pages/achievement/index",
   })
 }
 
@@ -303,6 +349,106 @@ function logout() {
   background-color: var(--up-card-bg-color, #ffffff);
   border-radius: 30rpx;
   box-shadow: none;
+}
+
+.achievement-entry {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 20rpx;
+  padding: 30rpx;
+  margin: 12rpx 8rpx 24rpx;
+  border-radius: 32rpx;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at top right, rgba(255, 214, 97, 0.34), transparent 30%),
+    linear-gradient(135deg, #1d2745 0%, #2d4b83 48%, #7a6225 100%);
+  box-shadow: 0 20rpx 50rpx rgba(15, 23, 42, 0.16);
+}
+
+.achievement-entry__copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10rpx;
+}
+
+.achievement-entry__eyebrow {
+  font-size: 20rpx;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  color: rgba(255, 255, 255, 0.74);
+}
+
+.achievement-entry__title {
+  font-size: 42rpx;
+  line-height: 1.08;
+  font-weight: 800;
+  color: #ffffff;
+}
+
+.achievement-entry__subtitle {
+  font-size: 24rpx;
+  line-height: 1.55;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.achievement-entry__side {
+  min-width: 178rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12rpx;
+  flex-shrink: 0;
+}
+
+.achievement-entry__title-chip {
+  padding: 8rpx 14rpx;
+  border-radius: 999rpx;
+  background: rgba(255, 255, 255, 0.14);
+  font-size: 20rpx;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.achievement-entry__percentile {
+  padding: 16rpx 18rpx;
+  border-radius: 24rpx;
+  background: rgba(255, 255, 255, 0.1);
+  text-align: right;
+}
+
+.achievement-entry__percentile-value {
+  display: block;
+  font-size: 42rpx;
+  line-height: 1;
+  font-weight: 800;
+  color: #ffd867;
+}
+
+.achievement-entry__percentile-label {
+  display: block;
+  margin-top: 6rpx;
+  font-size: 20rpx;
+  color: rgba(255, 255, 255, 0.66);
+}
+
+.achievement-entry__progress {
+  font-size: 20rpx;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.achievement-entry__dot {
+  position: absolute;
+  top: 22rpx;
+  right: 22rpx;
+  width: 18rpx;
+  height: 18rpx;
+  border-radius: 50%;
+  background: #ff5f56;
+  box-shadow: 0 0 0 8rpx rgba(255, 95, 86, 0.18);
 }
 
 .user-info {
