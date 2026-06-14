@@ -1038,6 +1038,7 @@ const session = computed(() => {
   if (!conversationId.value) return null
   return runtime.getOrCreateSession(conversationId.value)
 })
+const hasBoundConnection = computed(() => Boolean(firstString(session.value?.connectionId)))
 
 function cloneRenderContentParts(parts: ContentPart[]): ContentPart[] {
   return JSON.parse(JSON.stringify(parts || [])) as ContentPart[]
@@ -1111,7 +1112,11 @@ const toolbarNoticeItems = computed(() => {
   return items
 })
 
-const runtimeStatus = computed<string>(() => String(session.value?.status || "idle"))
+const runtimeStatus = computed<string>(() => {
+  const status = String(session.value?.status || "idle")
+  if (status === "connected" && !hasBoundConnection.value) return "connecting"
+  return status
+})
 const canStopSession = computed(() => isStoppableRuntimeStatus(runtimeStatus.value))
 const liveActivitySignature = computed(() =>
   buildLiveActivitySignature(session.value?.liveMessage?.content || [])
@@ -3135,6 +3140,25 @@ async function submitPreparedDraft(draft: QueuedDraft) {
   }
 }
 
+async function ensureConversationReadyForSend() {
+  const connectionId = firstString(session.value?.connectionId)
+  if (connectionId) return connectionId
+  if (!conversationId.value) {
+    throw new Error("未连接到代理")
+  }
+
+  const recovered = await runtime.connect(
+    conversationId.value,
+    currentAgentType.value || "claude_code",
+    undefined,
+    undefined,
+    session.value?.lastAppliedSeq ?? undefined,
+    resolveDetailInstanceKey()
+  )
+  persistDetailRuntimeState()
+  return firstString(recovered?.id, session.value?.connectionId) || ""
+}
+
 async function sendQuickReply(text: string) {
   if (!canSendSharedLive.value) {
     showSharedLiveBlockedToast()
@@ -3191,6 +3215,9 @@ async function sendDraft(draft: QueuedDraft): Promise<boolean> {
   anchorMessageId.value = ""
 
   try {
+    const conn = await ensureConversationReadyForSend()
+    if (!conn) throw new Error("未连接到代理")
+
     const imageAtts = draft.attachments.filter((item) => item.kind === "image")
     const fileAtts = draft.attachments.filter((item) => item.kind === "file")
     const optimisticTurnId = runtime.addOptimisticUserMessage(
@@ -3222,9 +3249,6 @@ async function sendDraft(draft: QueuedDraft): Promise<boolean> {
         },
       })
     })
-
-    const conn = session.value?.connectionId
-    if (!conn) throw new Error("未连接到代理")
     if (isViewerMode.value) {
       const liveInfo = await acpApi
         .acpFindConnectionForConversation(conversationId.value)
