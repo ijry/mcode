@@ -27,3 +27,12 @@ Thumbs.db
 .vscode/
 .worktrees/
 mcode-app/unpackage/resources
+
+# mcode-app local transpile byproducts beside source files
+mcode-app/src/**/*.vue.js
+mcode-app/src/**/*.js
+!mcode-app/src/**/*.ts
+!mcode-app/src/**/*.vue
+!mcode-app/src/**/main.ts
+!mcode-app/src/**/manifest.json
+!mcode-app/src/**/pages.json
