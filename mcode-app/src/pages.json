@@ -83,6 +83,20 @@
       }
     },
     {
+      "path": "pages/project-git-commit/index",
+      "style": {
+        "navigationBarTitleText": "提交详情",
+        "enablePullDownRefresh": false
+      }
+    },
+    {
+      "path": "pages/project-git-diff/index",
+      "style": {
+        "navigationBarTitleText": "Diff",
+        "enablePullDownRefresh": false
+      }
+    },
+    {
       "path": "pages/auth/login",
       "style": {
         "navigationStyle": "custom",

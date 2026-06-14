@@ -46,6 +46,8 @@ export interface GitLogResult {
   has_upstream: boolean
 }
 
+export type ProjectGitDiffMode = "workspace" | "commit"
+
 export interface WorkspaceStatusSummary {
   modified: number
   added: number
@@ -123,6 +125,91 @@ export function buildProjectGitRoute(params: {
   return `/pages/project-git/index?connection=${params.encodedConnection}&folderId=${params.folderId}&projectName=${projectName}&projectPath=${projectPath}`
 }
 
+export function buildProjectGitCommitRoute(params: {
+  encodedConnection: string
+  folderId: number
+  projectName: string
+  projectPath?: string | null
+  commit: GitLogEntry
+}) {
+  const projectName = encodeURIComponent(params.projectName)
+  const projectPath = encodeURIComponent(params.projectPath || "")
+  const commit = encodeURIComponent(JSON.stringify(params.commit))
+  return `/pages/project-git-commit/index?connection=${params.encodedConnection}&folderId=${params.folderId}&projectName=${projectName}&projectPath=${projectPath}&commit=${commit}`
+}
+
+export function buildProjectGitDiffRoute(params: {
+  encodedConnection: string
+  folderId: number
+  projectName: string
+  projectPath?: string | null
+  filePath: string
+  fileStatus?: string | null
+  mode: ProjectGitDiffMode
+  branch?: string | null
+  commitHash?: string | null
+  commitMessage?: string | null
+}) {
+  const projectName = encodeURIComponent(params.projectName)
+  const projectPath = encodeURIComponent(params.projectPath || "")
+  const filePath = encodeURIComponent(params.filePath)
+  const fileStatus = encodeURIComponent(params.fileStatus || "")
+  const branch = encodeURIComponent(params.branch || "")
+  const commitHash = encodeURIComponent(params.commitHash || "")
+  const commitMessage = encodeURIComponent(params.commitMessage || "")
+  return `/pages/project-git-diff/index?connection=${params.encodedConnection}&folderId=${params.folderId}&projectName=${projectName}&projectPath=${projectPath}&mode=${params.mode}&filePath=${filePath}&fileStatus=${fileStatus}&branch=${branch}&commitHash=${commitHash}&commitMessage=${commitMessage}`
+}
+
+export function parseProjectGitCommitRoute(raw: unknown): GitLogEntry | null {
+  if (typeof raw !== "string" || !raw.trim()) return null
+  try {
+    const parsed = JSON.parse(decodeURIComponent(raw)) as Partial<GitLogEntry>
+    if (
+      !parsed ||
+      typeof parsed.full_hash !== "string" ||
+      typeof parsed.hash !== "string" ||
+      typeof parsed.author !== "string" ||
+      typeof parsed.date !== "string" ||
+      typeof parsed.message !== "string" ||
+      !Array.isArray(parsed.files)
+    ) {
+      return null
+    }
+    return {
+      hash: parsed.hash,
+      full_hash: parsed.full_hash,
+      author: parsed.author,
+      date: parsed.date,
+      message: parsed.message,
+      pushed: typeof parsed.pushed === "boolean" ? parsed.pushed : null,
+      files: parsed.files
+        .map((entry) => {
+          if (!entry || typeof entry !== "object") return null
+          const path = typeof entry.path === "string" ? entry.path : ""
+          const status = typeof entry.status === "string" ? entry.status : ""
+          const additions = typeof entry.additions === "number" ? entry.additions : 0
+          const deletions = typeof entry.deletions === "number" ? entry.deletions : 0
+          if (!path.trim() || !status.trim()) return null
+          return { path, status, additions, deletions }
+        })
+        .filter((entry): entry is GitLogFileChange => Boolean(entry)),
+    }
+  } catch {
+    return null
+  }
+}
+
+export function formatGitDateTime(value: string) {
+  const timestamp = new Date(value).getTime()
+  if (!Number.isFinite(timestamp)) return "刚刚"
+  const date = new Date(timestamp)
+  const month = `${date.getMonth() + 1}`.padStart(2, "0")
+  const day = `${date.getDate()}`.padStart(2, "0")
+  const hours = `${date.getHours()}`.padStart(2, "0")
+  const minutes = `${date.getMinutes()}`.padStart(2, "0")
+  return `${month}-${day} ${hours}:${minutes}`
+}
+
 export async function getRemoteGitBranch(
   gateway: CodegGateway,
   path: string
@@ -139,6 +226,30 @@ export async function getRemoteGitStatus(
     showAllUntracked: true,
   })
   return normalizeGitStatusEntries(raw)
+}
+
+export async function getRemoteWorkspaceDiff(
+  gateway: CodegGateway,
+  path: string,
+  file?: string | null
+): Promise<string> {
+  return gateway.call<string>("git_diff", {
+    path,
+    file: file ?? null,
+  })
+}
+
+export async function getRemoteCommitDiff(
+  gateway: CodegGateway,
+  path: string,
+  commit: string,
+  file?: string | null
+): Promise<string> {
+  return gateway.call<string>("git_show_diff", {
+    path,
+    commit,
+    file: file ?? null,
+  })
 }
 
 export async function getRemoteGitBranches(

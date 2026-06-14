@@ -74,9 +74,13 @@
               v-for="entry in workspaceEntries"
               :key="`${entry.status}:${entry.file}`"
               class="project-git-file-row"
+              @click="openWorkspaceDiff(entry)"
             >
-              <text class="project-git-file-row__status">{{ entry.status }}</text>
-              <text class="project-git-file-row__path">{{ entry.file }}</text>
+              <view class="project-git-file-row__main">
+                <text class="project-git-file-row__status">{{ entry.status }}</text>
+                <text class="project-git-file-row__path">{{ entry.file }}</text>
+              </view>
+              <u-icon name="arrow-right" size="16" color="#c0c4cc"></u-icon>
             </view>
           </view>
         </view>
@@ -96,6 +100,7 @@
               v-for="entry in gitEntries"
               :key="entry.full_hash"
               class="project-git-commit"
+              @click="openCommitDetail(entry)"
             >
               <view class="project-git-commit__head">
                 <view class="project-git-commit__copy">
@@ -106,21 +111,16 @@
                 </view>
                 <view
                   class="project-git-commit__menu"
-                  @click="openCommitActionSheet(entry)"
+                  @click.stop="openCommitActionSheet(entry)"
                 >
                   <u-icon name="more-dot-fill" size="18" color="#c7c7cc"></u-icon>
                 </view>
               </view>
-
-              <view v-if="entry.files.length > 0" class="project-git-commit__files">
-                <view
-                  v-for="file in entry.files"
-                  :key="`${entry.full_hash}:${file.path}`"
-                  class="project-git-commit__file"
-                >
-                  <text class="project-git-commit__file-status">{{ file.status }}</text>
-                  <text class="project-git-commit__file-path">{{ file.path }}</text>
-                </view>
+              <view class="project-git-commit__footer">
+                <text class="project-git-commit__footer-text">
+                  {{ entry.files.length }} 个文件变更
+                </text>
+                <u-icon name="arrow-right" size="16" color="#c0c4cc"></u-icon>
               </view>
             </view>
           </view>
@@ -188,15 +188,19 @@ import { computed, getCurrentInstance, ref } from "vue"
 import { onLoad, onPullDownRefresh } from "@dcloudio/uni-app"
 import type { CodegGateway } from "@/services/gateway"
 import {
+  encodeConnectionContext,
   decodeConnectionContext,
   persistResolvedConnection,
   resolveConnectionContext,
   type ConnectionContext,
 } from "@/services/connectionContext"
 import {
+  buildProjectGitCommitRoute,
+  buildProjectGitDiffRoute,
   buildWorkspaceStatusSummary,
   checkoutRemoteBranch,
   createRemoteBranch,
+  formatGitDateTime,
   getRemoteCommitBranches,
   getRemoteGitBranch,
   getRemoteGitBranches,
@@ -365,6 +369,35 @@ function openCommitActionSheet(entry: GitLogEntry) {
   showCommitActionSheet.value = true
 }
 
+function openCommitDetail(entry: GitLogEntry) {
+  if (!connection.value) return
+  uni.navigateTo({
+    url: buildProjectGitCommitRoute({
+      encodedConnection: encodeConnectionContext(connection.value),
+      folderId: folderId.value,
+      projectName: projectName.value,
+      projectPath: projectPath.value,
+      commit: entry,
+    }),
+  })
+}
+
+function openWorkspaceDiff(entry: GitStatusEntry) {
+  if (!connection.value) return
+  uni.navigateTo({
+    url: buildProjectGitDiffRoute({
+      encodedConnection: encodeConnectionContext(connection.value),
+      folderId: folderId.value,
+      projectName: projectName.value,
+      projectPath: projectPath.value,
+      filePath: entry.file,
+      fileStatus: entry.status,
+      mode: "workspace",
+      branch: selectedBranch.value || currentBranch.value,
+    }),
+  })
+}
+
 function handleCommitActionSelect(action: { name: string }) {
   showCommitActionSheet.value = false
   if (action.name === "新建分支") {
@@ -419,14 +452,7 @@ async function submitReset() {
 }
 
 function formatDateTime(value: string) {
-  const timestamp = new Date(value).getTime()
-  if (!Number.isFinite(timestamp)) return "刚刚"
-  const date = new Date(timestamp)
-  const month = `${date.getMonth() + 1}`.padStart(2, "0")
-  const day = `${date.getDate()}`.padStart(2, "0")
-  const hours = `${date.getHours()}`.padStart(2, "0")
-  const minutes = `${date.getMinutes()}`.padStart(2, "0")
-  return `${month}-${day} ${hours}:${minutes}`
+  return formatGitDateTime(value)
 }
 
 function toErrorMessage(error: unknown) {
@@ -590,17 +616,25 @@ function toErrorMessage(error: unknown) {
 }
 
 .project-git-file-row,
-.project-git-commit__file {
+.project-git-commit__footer {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 14rpx;
   padding: 16rpx 18rpx;
   border-radius: 20rpx;
   background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
 }
 
-.project-git-file-row__status,
-.project-git-commit__file-status {
+.project-git-file-row__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 14rpx;
+}
+
+.project-git-file-row__status {
   width: 56rpx;
   flex-shrink: 0;
   font-size: 22rpx;
@@ -609,7 +643,6 @@ function toErrorMessage(error: unknown) {
 }
 
 .project-git-file-row__path,
-.project-git-commit__file-path,
 .project-git-commit__message {
   flex: 1;
   min-width: 0;
@@ -652,11 +685,13 @@ function toErrorMessage(error: unknown) {
   background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
 }
 
-.project-git-commit__files {
-  display: flex;
-  flex-direction: column;
-  gap: 10rpx;
+.project-git-commit__footer {
   margin-top: 18rpx;
+}
+
+.project-git-commit__footer-text {
+  font-size: 22rpx;
+  color: var(--up-content-color, #606266);
 }
 
 .project-git-popup {

@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Finish and harden the existing half-implemented `mcode-app` project git management flow so the project list keeps session navigation as the primary action, exposes `Git 管理` from a right-side menu, and the dedicated git page reliably loads workspace state above commit history while supporting branch switch, branch creation, reset, and push.
+**Goal:** Adjust the existing `mcode-app` project git management flow so commit history no longer renders inline file lists, but instead drills into a commit-detail page and then into a dedicated diff page, while keeping workspace state above history and allowing workspace files to open diff as well.
 
-**Architecture:** Keep the current full connection-context routing chain and reuse the existing `codeg-main` web git RPC surface directly through `mcode-app/src/services/projectGit.ts`. The current workspace already contains partial implementations of the route, service, page, tests, and architecture note, so the work is not greenfield: it is a convergence pass that fixes RPC parameter mismatches, adds normalization and presentation helpers, tightens the git page interaction logic, and verifies the end-to-end flow with focused Jest tests plus a `vue-tsc` pass.
+**Architecture:** Keep the current full connection-context routing chain and reuse the existing `codeg-main` web git RPC surface directly through `mcode-app/src/services/projectGit.ts`. The existing history page becomes a summary/index page, a new commit-detail page renders a selected commit's file list from already-loaded route data, and a new diff page loads either `git_show_diff(path, commit, file)` or `git_diff(path, file)` depending on whether the user came from commit history or the current workspace.
 
 **Tech Stack:** Vue 3 `script setup`, uni-app pages/navigation, `uview-plus` components, TypeScript service helpers, Jest unit tests, existing remote web RPC protocol exposed by `codeg-main`.
 
@@ -17,11 +17,15 @@
 - `mcode-app/src/pages/projects/index.vue`
   - Responsibility: preserve project-session primary navigation, keep the right-side action-sheet entry for `Git 管理`, and ensure the route params are built consistently through a shared helper.
 - `mcode-app/src/pages/project-git/index.vue`
-  - Responsibility: render the git page, load all required data through the resolved connection context, and correctly wire branch switching, branch creation, reset, and push around the current service API surface.
+  - Responsibility: render the git page, load all required data through the resolved connection context, keep workspace status above history, route commit taps to the commit-detail page, and route workspace file taps to the diff page.
+- `mcode-app/src/pages/project-git-commit/index.vue`
+  - Responsibility: render a second-level page for one commit, showing commit metadata and changed files, and route file taps to the diff page.
+- `mcode-app/src/pages/project-git-diff/index.vue`
+  - Responsibility: load and display the diff text for either a workspace file or a commit file.
 - `mcode-app/src/services/projectGit.ts`
-  - Responsibility: typed wrappers around the remote git RPC calls, route/presentation helpers, and any normalization needed so the page can stay focused on UI state instead of transport quirks.
+  - Responsibility: typed wrappers around the remote git RPC calls, route/presentation helpers, route builders for commit-detail and diff pages, and payload encode/decode helpers for passing commit/file metadata between pages.
 - `mcode-app/src/pages.json`
-  - Responsibility: page registration for `pages/project-git/index`; this file already contains the route and should only be adjusted if the final page config needs correction.
+  - Responsibility: page registration for `pages/project-git/index`, `pages/project-git-commit/index`, and `pages/project-git-diff/index`.
 - `mcode-app/tests/services/projectGit.spec.ts`
   - Responsibility: service/helper regression tests for route building, git status normalization, summary counters, and branch-view gating.
 - `mcode-app/tests/pages/projectGitPresentation.spec.ts`
@@ -53,7 +57,7 @@ The workspace already contains uncommitted project-git files:
 
 This plan therefore treats them as partial implementations to refine rather than files to create from scratch.
 
-## Task 1: Stabilize the shared project git service helpers around the real remote RPC contract
+## Task 1: Extend shared project git service helpers for drill-down navigation and diff loading
 
 **Files:**
 - Modify: `mcode-app/src/services/projectGit.ts`
@@ -719,4 +723,3 @@ No `TODO`, `TBD`, or “similar to” instructions remain. Each task lists exact
 ### Type consistency
 
 The plan uses the current `CodegGateway` signature from `mcode-app/src/services/gateway/types.ts`, the current helper/module names already present in `projectGit.ts`, and Jest-based `pnpm test:unit -- <pattern>` commands that match the repo’s current test runner configuration.
-

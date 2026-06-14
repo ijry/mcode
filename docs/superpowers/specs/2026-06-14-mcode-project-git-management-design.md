@@ -89,6 +89,8 @@ The important rule is that the primary tap target remains session-oriented, and 
 Add a dedicated page:
 
 - `/pages/project-git/index`
+- `/pages/project-git-commit/index`
+- `/pages/project-git-diff/index`
 
 Route parameters should include:
 
@@ -132,10 +134,11 @@ The history page is still history-first, but the approved requirement is that th
 
 Each commit item should support:
 
-- expand to inspect changed files
-- view diff
+- tap to open a second-level commit-detail page
 - create a branch from this commit
 - reset to this commit
+
+The commit-detail page should render the file list for that commit. Tapping a file from that list opens a dedicated diff page.
 
 ## Data And Routing Model
 
@@ -354,17 +357,18 @@ The history section should default to the current branch view.
 
 Each commit card supports:
 
-- collapsed summary
-- expandable details
-- file list inside the commit
+- summary metadata
+- tap-to-open commit detail
 - action menu
 
-The file list may show:
+The commit-detail file list should show:
 
 - path
 - status
 - additions
 - deletions
+
+The workspace-status file list should also support tapping through to the same diff page type, but in workspace mode backed by `git_diff(path, file)`.
 
 ## Error Handling And Limits
 
@@ -472,4 +476,3 @@ Verify:
 1. non-git repositories render the dedicated not-a-git-repo state
 2. old connection context routing still works for project and session flows
 3. git-page routing keeps the full connection context instead of assuming a global singleton
-

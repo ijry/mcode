@@ -1,4 +1,6 @@
 import {
+  buildProjectGitCommitRoute,
+  buildProjectGitDiffRoute,
   buildProjectGitRoute,
   buildWorkspaceStatusSummary,
   isCurrentBranchHistoryView,
@@ -16,6 +18,39 @@ describe("project git routing helpers", () => {
     ).toBe(
       "/pages/project-git/index?connection=ctx123&folderId=42&projectName=demo&projectPath=D%3A%2FRepos%2Fdemo"
     )
+  })
+
+  it("builds drill-down routes for commit detail and diff pages", () => {
+    expect(
+      buildProjectGitCommitRoute({
+        encodedConnection: "ctx123",
+        folderId: 42,
+        projectName: "demo",
+        projectPath: "D:/Repos/demo",
+        commit: {
+          hash: "abc1234",
+          full_hash: "abc123456789",
+          author: "dev",
+          date: "2026-06-14T10:00:00Z",
+          message: "feat: change",
+          files: [{ path: "src/App.vue", status: "M", additions: 3, deletions: 1 }],
+          pushed: true,
+        },
+      })
+    ).toContain("/pages/project-git-commit/index?")
+
+    expect(
+      buildProjectGitDiffRoute({
+        encodedConnection: "ctx123",
+        folderId: 42,
+        projectName: "demo",
+        projectPath: "D:/Repos/demo",
+        filePath: "src/App.vue",
+        fileStatus: "M",
+        mode: "workspace",
+        branch: "main",
+      })
+    ).toContain("/pages/project-git-diff/index?")
   })
 })
 
