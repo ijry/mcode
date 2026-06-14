@@ -106,4 +106,40 @@ describe('conversationRuntime ACP error handling', () => {
     expect(session.status).toBe('idle')
     expect(session.inputErrorMessage).toBeNull()
   })
+
+  it('does not let an older snapshot overwrite newer streamed tail content', () => {
+    const { store, session } = prepareSession()
+    session.lastAppliedSeq = 12
+
+    store.handleEvent({
+      type: 'stream_batch',
+      connectionId: 'conn-1',
+      seq: 12,
+      data: {
+        delta: ' newer tail',
+        contentType: 'text',
+      },
+    } as any)
+
+    expect(store.getMessages(1)[0]?.content?.[0]).toEqual({
+      type: 'text',
+      text: ' newer tail',
+    })
+
+    store.hydrateLiveSnapshot(1, {
+      event_seq: 10,
+      live_message: {
+        started_at: Date.now(),
+        content: [
+          { kind: 'text', text: 'older snapshot' },
+        ],
+      },
+    })
+
+    expect(store.getMessages(1)[0]?.content?.[0]).toEqual({
+      type: 'text',
+      text: ' newer tail',
+    })
+    expect(session.lastAppliedSeq).toBe(12)
+  })
 })

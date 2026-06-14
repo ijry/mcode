@@ -256,6 +256,25 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     const session = getOrCreateSession(conversationId)
     if (!snapshot || typeof snapshot !== "object") return
 
+    const snapshotSeq = firstNumber(snapshot?.event_seq, snapshot?.eventSeq)
+    const currentSeq = session.lastAppliedSeq
+    const shouldIgnoreOlderSnapshot =
+      typeof snapshotSeq === "number" &&
+      Number.isFinite(snapshotSeq) &&
+      typeof currentSeq === "number" &&
+      Number.isFinite(currentSeq) &&
+      snapshotSeq < currentSeq
+
+    if (shouldIgnoreOlderSnapshot) {
+      session.pendingPermission = normalizePendingPermission(snapshot?.pending_permission)
+      session.pendingQuestion = normalizePendingQuestion(snapshot?.pending_question)
+      session.status = deriveRuntimeStatus(snapshot, session.liveMessage)
+      session.inputErrorMessage = deriveRuntimeError(snapshot)
+      session.apiRetry = null
+      maybeBackfillExternalUserTurn(session, "snapshot")
+      return
+    }
+
     const normalizedLiveMessage = mapSnapshotLiveMessage(snapshot)
     if (normalizedLiveMessage) {
       session.liveMessage = normalizedLiveMessage
@@ -265,7 +284,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     session.status = deriveRuntimeStatus(snapshot, normalizedLiveMessage ?? session.liveMessage)
     session.inputErrorMessage = deriveRuntimeError(snapshot)
     session.apiRetry = null
-    session.lastAppliedSeq = firstNumber(snapshot?.event_seq, snapshot?.eventSeq) ?? session.lastAppliedSeq
+    session.lastAppliedSeq = snapshotSeq ?? session.lastAppliedSeq
 
     const usage = snapshot.usage
     if (usage && typeof usage === "object") {

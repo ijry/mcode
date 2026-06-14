@@ -952,6 +952,7 @@ const pendingPermissionSubmittingOptionId = ref("")
 const questionSubmitting = ref(false)
 const askQuestionSelections = ref<Record<string, QuestionSelectionState>>({})
 const cachedOldestLoadedSortKey = ref<number | null>(null)
+const forceRemoteTurnReconcileOnLoad = ref(false)
 let detailAgentProbeToken = 0
 let stuckPromptTimer: ReturnType<typeof setTimeout> | null = null
 let lastLiveActivitySignature = ""
@@ -1673,6 +1674,7 @@ onShow(() => {
   if (!hasLoadedOnce.value || !conversationId.value || loading.value) return
   if (!needsResumeRefresh.value) return
   needsResumeRefresh.value = false
+  forceRemoteTurnReconcileOnLoad.value = true
   syncDetailBridgeHealth()
   syncLongWaitState()
   if (routeConnectionKey.value) {
@@ -1988,6 +1990,10 @@ async function loadConversation() {
       console.warn("local conversation hydrate skipped", error)
     }
 
+    const shouldForceRemoteTurnReconcile =
+      forceRemoteTurnReconcileOnLoad.value ||
+      shouldReconcileTurnsFromPersistedRuntime(persistedRuntime)
+
     restoreDraftState(cachedViewState, persistedRuntime)
 
     let agentType =
@@ -2032,6 +2038,9 @@ async function loadConversation() {
         restoreHistoryCursorFromCache(cachedViewState) ?? oldestLoadedCursor.value
       hasMoreHistory.value = cachedViewState?.hasMoreHistory ?? hasMoreHistory.value
       finishInitialLoad(cachedViewState, persistedRuntime)
+      if (shouldForceRemoteTurnReconcile) {
+        void reconcileRemoteTurnsAfterResume(runtimeSession, cachedViewState, initialTurnLimit)
+      }
     } else if (localTurns.length > 0) {
       const totalLocalTurnCount = await countConversationTurns(conversationId.value)
       runtimeSession.localTurns = localTurns
@@ -2149,6 +2158,7 @@ async function loadConversation() {
     const message = toErrorMessage(error)
     uni.showToast({ title: `加载失败: ${message}`, icon: "none", duration: 3000 })
   } finally {
+    forceRemoteTurnReconcileOnLoad.value = false
     finishInitialLoad(cachedViewState, persistedRuntime)
   }
 }
@@ -2472,6 +2482,19 @@ function summarizeDetailTurns(detail: any) {
     oldestRemoteTurnId: firstString(oldest?.id) || null,
     oldestRemoteTurnTs: firstString(oldest?.timestamp) || null,
   }
+}
+
+function shouldReconcileTurnsFromPersistedRuntime(
+  persistedRuntime: ConversationRuntimeRecord | null
+) {
+  if (!persistedRuntime) return false
+  if (!persistedRuntime.isActive) return false
+  if (persistedRuntime.liveMessageJson) return true
+
+  const optimisticTurns = safeParseArray(persistedRuntime.optimisticJson)
+  if (optimisticTurns.length > 0) return true
+
+  return typeof persistedRuntime.lastAppliedSeq === "number" && persistedRuntime.lastAppliedSeq > 0
 }
 
 function restoreDraftState(
@@ -3137,6 +3160,34 @@ async function submitPreparedDraft(draft: QueuedDraft) {
     queueExpanded.value = true
   } else {
     void processDraftQueue()
+  }
+}
+
+async function reconcileRemoteTurnsAfterResume(
+  runtimeSession: ReturnType<typeof runtime.getOrCreateSession>,
+  cachedViewState: ReturnType<typeof cacheStore.restore>,
+  limit: number
+) {
+  if (!conversationId.value) return
+
+  try {
+    const gateway = await getDetailGateway({ refreshAuth: true })
+    const result = await gateway.call<any>("get_folder_conversation", {
+      conversationId: conversationId.value,
+    })
+    detailDebugLog("resume-remote-reconcile", summarizeDetailTurns(result))
+    await persistConversationDetailSnapshot({
+      instanceKey: resolveDetailInstanceKey(),
+      conversationId: conversationId.value,
+      detail: result,
+      fallbackFolderId: folderId.value,
+    })
+    await refreshSessionTurnsFromDb(runtimeSession, cachedViewState, limit)
+  } catch (error) {
+    detailDebugLog("resume-remote-reconcile-failed", {
+      message: toErrorMessage(error),
+    })
+    console.warn("reconcile remote turns after resume skipped", error)
   }
 }
 
