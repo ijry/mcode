@@ -729,6 +729,7 @@ import {
   getRegisteredRemoteInstanceDescriptor,
   registerRemoteInstanceDescriptor,
 } from "@/services/realtime/remoteInstanceRegistry"
+import { decodeConnectionContext } from "@/services/connectionContext"
 import { usePetStore } from "@/stores/pet"
 import {
   buildAgentConfigContextKey,
@@ -845,6 +846,8 @@ interface StoredConnectionItem {
   mode: "direct" | "relay"
   url: string
   directToken?: string
+  pairCode?: string
+  pairSecret?: string
   relaySession?: {
     accessToken?: string
     refreshToken?: string
@@ -906,6 +909,7 @@ const sequence = ref(0)
 const conversationId = ref<number>(0)
 const folderId = ref<number>(0)
 const routeConnectionKey = ref("")
+const routeConnectionContext = ref<StoredConnectionItem | null>(null)
 const bridgeHealth = ref<RealtimeBridgeHealth | null>(null)
 const bridgeRecoveredAt = ref(0)
 const conversationTitle = ref("未命名会话")
@@ -1660,7 +1664,10 @@ onLoad((options: any) => {
     ? decodeURIComponent(options.connectionKey)
     : ""
   routeConnectionKey.value = connectionKey
-  if (connectionKey) {
+  routeConnectionContext.value = normalizeStoredConnectionLike(decodeConnectionContext(connectionKey))
+  if (routeConnectionContext.value) {
+    syncAuthByStoredConnection(routeConnectionContext.value)
+  } else if (connectionKey) {
     syncAuthByConnectionKey(connectionKey)
   }
   if (conversationId.value) {
@@ -1677,7 +1684,9 @@ onShow(() => {
   forceRemoteTurnReconcileOnLoad.value = true
   syncDetailBridgeHealth()
   syncLongWaitState()
-  if (routeConnectionKey.value) {
+  if (routeConnectionContext.value) {
+    syncAuthByStoredConnection(routeConnectionContext.value)
+  } else if (routeConnectionKey.value) {
     syncAuthByConnectionKey(routeConnectionKey.value)
   }
   void loadDetailProjectEntries()
@@ -1939,7 +1948,9 @@ watch(
 )
 
 async function loadConversation() {
-  if (routeConnectionKey.value) {
+  if (routeConnectionContext.value) {
+    syncAuthByStoredConnection(routeConnectionContext.value)
+  } else if (routeConnectionKey.value) {
     syncAuthByConnectionKey(routeConnectionKey.value)
   }
   loading.value = true
@@ -3690,6 +3701,12 @@ function syncAuthByConnectionKey(connKey: string) {
   const matched = findStoredConnectionByKey(connKey)
   if (!matched) return
 
+  syncAuthByStoredConnection(matched)
+}
+
+function syncAuthByStoredConnection(matched: StoredConnectionItem) {
+  if (!matched) return
+
   if (matched.mode === "direct") {
     const token = matched.directToken || getDirectToken(matched.url)
     if (token) auth.setDirectMode(matched.url, token)
@@ -3717,6 +3734,28 @@ function findStoredConnectionByKey(connKey: string) {
   return saved.find((item) => buildConnectionKey(item.mode, item.url) === connKey) || null
 }
 
+function normalizeStoredConnectionLike(input: any): StoredConnectionItem | null {
+  if (!input || typeof input !== "object") return null
+  const mode = input.mode === "relay" ? "relay" : input.mode === "direct" ? "direct" : null
+  const url = String(input.url || "").trim()
+  if (!mode || !url) return null
+
+  return {
+    mode,
+    url,
+    directToken: firstString(input.directToken) || undefined,
+    pairCode: firstString(input.pairCode) || undefined,
+    pairSecret: firstString(input.pairSecret) || undefined,
+    relaySession: input.relaySession && typeof input.relaySession === "object"
+      ? {
+          accessToken: firstString(input.relaySession.accessToken) || undefined,
+          refreshToken: firstString(input.relaySession.refreshToken) || undefined,
+          targetId: firstString(input.relaySession.targetId) || undefined,
+        }
+      : undefined,
+  }
+}
+
 function resolveDetailDescriptor(): RemoteInstanceDescriptor {
   const managed = managedConversation.value
   if (managed?.instanceKey) {
@@ -3726,7 +3765,9 @@ function resolveDetailDescriptor(): RemoteInstanceDescriptor {
     }
   }
 
-  const stored = findStoredConnectionByKey(routeConnectionKey.value || detailConnectionKey.value)
+  const stored =
+    routeConnectionContext.value ||
+    findStoredConnectionByKey(routeConnectionKey.value || detailConnectionKey.value)
   const fromStored = stored ? buildDescriptorFromStoredConnection(stored) : null
   if (fromStored) {
     registerRemoteInstanceDescriptor(fromStored)

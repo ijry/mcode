@@ -93,7 +93,7 @@
             </text>
 
             <view class="connection-card__footer">
-              <text class="connection-card__footer-link">管理连接</text>
+              <text class="connection-card__footer-link">项目列表</text>
               <u-icon name="arrow-right" size="14" color="#007aff"></u-icon>
             </view>
           </view>
@@ -334,6 +334,7 @@ import { createGateway } from "@/services/gateway"
 import type { RelaySessionInfo } from "@/services/gateway"
 import { buildWebSocketProtocols } from "@/services/gateway/wsProtocol"
 import { buildConnectionConfigCode, parseConnectionConfigCodeToConnection } from "./connectionConfigCode"
+import { encodeConnectionContext } from "@/services/connectionContext"
 
 declare const plus: any
 
@@ -675,8 +676,25 @@ function copyConfigCode() {
 }
 
 async function activateConnection(conn: ConnectionItem) {
-  if (isConnectionConnected(conn)) return
-  await connectConnection(conn)
+  if (!isConnectionLinked(conn)) {
+    await connectConnection(conn)
+  }
+  openProjectList(conn)
+}
+
+function openProjectList(conn: ConnectionItem) {
+  const encodedConnection = encodeConnectionContext({
+    name: conn.name,
+    mode: conn.mode,
+    url: conn.url,
+    directToken: conn.directToken,
+    pairCode: conn.pairCode,
+    pairSecret: conn.pairSecret,
+    relaySession: conn.relaySession,
+  })
+  uni.navigateTo({
+    url: `/pages/projects/index?connection=${encodedConnection}`,
+  })
 }
 
 async function connectConnection(conn: ConnectionItem) {

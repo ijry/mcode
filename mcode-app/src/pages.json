@@ -62,6 +62,20 @@
       }
     },
     {
+      "path": "pages/projects/index",
+      "style": {
+        "navigationBarTitleText": "项目列表",
+        "enablePullDownRefresh": true
+      }
+    },
+    {
+      "path": "pages/sessions/index",
+      "style": {
+        "navigationBarTitleText": "项目会话",
+        "enablePullDownRefresh": true
+      }
+    },
+    {
       "path": "pages/auth/login",
       "style": {
         "navigationStyle": "custom",
