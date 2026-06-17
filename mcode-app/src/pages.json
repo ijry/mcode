@@ -97,6 +97,20 @@
       }
     },
     {
+      "path": "pages/connection-agents/index",
+      "style": {
+        "navigationBarTitleText": "智能体管理",
+        "enablePullDownRefresh": true
+      }
+    },
+    {
+      "path": "pages/model-providers/index",
+      "style": {
+        "navigationBarTitleText": "模型供应商",
+        "enablePullDownRefresh": true
+      }
+    },
+    {
       "path": "pages/auth/login",
       "style": {
         "navigationStyle": "custom",

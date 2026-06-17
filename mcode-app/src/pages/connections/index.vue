@@ -335,6 +335,10 @@ import type { RelaySessionInfo } from "@/services/gateway"
 import { buildWebSocketProtocols } from "@/services/gateway/wsProtocol"
 import { buildConnectionConfigCode, parseConnectionConfigCodeToConnection } from "./connectionConfigCode"
 import { encodeConnectionContext } from "@/services/connectionContext"
+import {
+  buildConnectionAgentsRoute,
+  buildModelProvidersRoute,
+} from "@/services/remoteSettings"
 
 declare const plus: any
 
@@ -392,6 +396,8 @@ const connectionActions = computed(() => {
   return [
     { name: "连接", color: "#2979ff", disabled: isConnected },
     { name: "断开连接", color: "#fa8c16", disabled: !isLinked },
+    { name: "智能体管理", color: "#2979ff" },
+    { name: "模型供应商", color: "#2979ff" },
     { name: "配置码", color: "#8b5cf6" },
     { name: "编辑", color: "#19be6b" },
     { name: "删除", color: "#fa3534" },
@@ -627,6 +633,10 @@ function handleActionSelect(e: any) {
     connectConnection(conn)
   } else if (action === "断开连接") {
     disconnectConnection(conn)
+  } else if (action === "智能体管理") {
+    openConnectionAgents(conn)
+  } else if (action === "模型供应商") {
+    openModelProviders(conn)
   } else if (action === "配置码") {
     openConfigCodePopup(conn)
   } else if (action === "编辑") {
@@ -672,6 +682,34 @@ function copyConfigCode() {
     fail: () => {
       uni.showToast({ title: "复制失败", icon: "none" })
     },
+  })
+}
+
+function openConnectionAgents(conn: ConnectionItem) {
+  uni.navigateTo({
+    url: buildConnectionAgentsRoute({
+      encodedConnection: encodeConnectionForRoute(conn),
+    }),
+  })
+}
+
+function openModelProviders(conn: ConnectionItem) {
+  uni.navigateTo({
+    url: buildModelProvidersRoute({
+      encodedConnection: encodeConnectionForRoute(conn),
+    }),
+  })
+}
+
+function encodeConnectionForRoute(conn: ConnectionItem) {
+  return encodeConnectionContext({
+    name: conn.name,
+    mode: conn.mode,
+    url: conn.url,
+    directToken: conn.directToken,
+    pairCode: conn.pairCode,
+    pairSecret: conn.pairSecret,
+    relaySession: conn.relaySession,
   })
 }
 
