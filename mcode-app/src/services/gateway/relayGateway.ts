@@ -6,6 +6,10 @@ import { buildWebSocketProtocols } from "./wsProtocol"
 
 const COMMAND_TIMEOUT_MS: Record<string, number> = {
   acp_describe_agent_options: 70_000,
+  acp_download_agent_binary: 600_000,
+  acp_install_uv_tool: 600_000,
+  acp_prepare_npx_agent: 600_000,
+  acp_uninstall_agent: 180_000,
 }
 
 function getHeaders(session?: RelaySessionInfo | null): HeadersInit {
