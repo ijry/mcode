@@ -117,6 +117,14 @@ export interface AgentDistributionPresentation {
   actionLabel: string
 }
 
+export interface AgentInstallProgressState {
+  status: "idle" | "running" | "success" | "failed"
+  progress: number
+  stage: string
+  latestLog: string
+  logCount: number
+}
+
 export const AGENT_INSTALL_EVENT_CHANNEL = "app://agent-install"
 export const ACP_AGENTS_UPDATED_EVENT_CHANNEL = "app://acp-agents-updated"
 
@@ -225,6 +233,54 @@ export function normalizeAgentsUpdatedEvent(raw: unknown): AcpAgentsUpdatedEvent
   return {
     reason: pickString(record.reason) || "updated",
     agent_type: isAgentType(record.agent_type) ? record.agent_type : null,
+  }
+}
+
+export function buildAgentInstallProgressState(params: {
+  status: AgentInstallProgressState["status"]
+  logs: string[]
+}): AgentInstallProgressState {
+  const logs = params.logs.map((line) => String(line || "").trim()).filter(Boolean)
+  const latestLog = logs[logs.length - 1] || ""
+
+  if (params.status === "success") {
+    return {
+      status: params.status,
+      progress: 100,
+      stage: "安装完成",
+      latestLog,
+      logCount: logs.length,
+    }
+  }
+
+  if (params.status === "failed") {
+    return {
+      status: params.status,
+      progress: Math.max(extractProgressPercent(logs), 4),
+      stage: "安装失败",
+      latestLog,
+      logCount: logs.length,
+    }
+  }
+
+  if (params.status === "idle") {
+    return {
+      status: params.status,
+      progress: 0,
+      stage: "未开始",
+      latestLog,
+      logCount: logs.length,
+    }
+  }
+
+  const parsedPercent = extractProgressPercent(logs)
+  const fallback = Math.min(92, 8 + logs.length * 7)
+  return {
+    status: params.status,
+    progress: Math.max(parsedPercent, fallback),
+    stage: inferInstallStage(latestLog, logs.length),
+    latestLog,
+    logCount: logs.length,
   }
 }
 
@@ -444,4 +500,35 @@ function pickString(...values: unknown[]) {
     if (typeof value === "string" && value.trim()) return value.trim()
   }
   return ""
+}
+
+function extractProgressPercent(logs: string[]) {
+  for (let index = logs.length - 1; index >= 0; index -= 1) {
+    const match = logs[index].match(/(^|[^\d])(\d{1,3})(?:\.\d+)?\s*%/)
+    if (!match) continue
+    const value = Number(match[2])
+    if (Number.isFinite(value)) {
+      return clampProgress(value)
+    }
+  }
+  return 0
+}
+
+function inferInstallStage(latestLog: string, logCount: number) {
+  const normalized = latestLog.toLowerCase()
+  if (!latestLog) return "等待远端响应"
+  if (normalized.includes("download") || normalized.includes("fetch")) return "正在下载"
+  if (normalized.includes("extract") || normalized.includes("unpack")) return "正在解压"
+  if (normalized.includes("install")) return "正在安装"
+  if (normalized.includes("prepare") || normalized.includes("uvx") || normalized.includes("--version")) {
+    return "正在准备智能体"
+  }
+  if (normalized.includes("uninstall") || normalized.includes("remove")) return "正在卸载"
+  return logCount <= 1 ? "任务已提交" : "执行中"
+}
+
+function clampProgress(value: number) {
+  if (value < 0) return 0
+  if (value > 100) return 100
+  return Math.round(value)
 }

@@ -1,6 +1,7 @@
 import {
   ACP_AGENTS_UPDATED_EVENT_CHANNEL,
   AGENT_INSTALL_EVENT_CHANNEL,
+  buildAgentInstallProgressState,
   buildConnectionAgentsRoute,
   buildModelProvidersRoute,
   createAgentTaskId,
@@ -95,6 +96,55 @@ NO_SEPARATOR
     expect(
       normalizeAgentsUpdatedEvent({ reason: "env", agent_type: "codex" })
     ).toEqual({ reason: "env", agent_type: "codex" })
+  })
+
+  it("builds install progress from explicit percent logs", () => {
+    expect(
+      buildAgentInstallProgressState({
+        status: "running",
+        logs: ["downloading package 12%", "extracting 45%"],
+      })
+    ).toEqual({
+      status: "running",
+      progress: 45,
+      stage: "正在解压",
+      latestLog: "extracting 45%",
+      logCount: 2,
+    })
+  })
+
+  it("builds fallback install progress when backend emits only text logs", () => {
+    expect(
+      buildAgentInstallProgressState({
+        status: "running",
+        logs: ["任务 task-1 已提交", "$ npm install -g @example/agent", "added 12 packages"],
+      })
+    ).toEqual({
+      status: "running",
+      progress: 29,
+      stage: "执行中",
+      latestLog: "added 12 packages",
+      logCount: 3,
+    })
+  })
+
+  it("pins install progress for terminal states", () => {
+    expect(
+      buildAgentInstallProgressState({
+        status: "success",
+        logs: ["done"],
+      }).progress
+    ).toBe(100)
+    expect(
+      buildAgentInstallProgressState({
+        status: "failed",
+        logs: ["failed at 60%"],
+      })
+    ).toMatchObject({
+      status: "failed",
+      progress: 60,
+      stage: "安装失败",
+    })
   })
 
   it("creates task ids with operation and agent hints", () => {
