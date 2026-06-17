@@ -107,6 +107,27 @@
             </view>
           </view>
 
+          <view
+            v-if="taskStatus !== 'idle' && currentTaskAgentType === selectedAgent.agent_type"
+            class="agent-progress-card"
+            @click="showLogPopup = true"
+          >
+            <view class="agent-progress-card__head">
+              <text class="agent-progress-card__title">{{ taskProgress.stage }}</text>
+              <text class="agent-progress-card__value">{{ taskProgress.progress }}%</text>
+            </view>
+            <view class="agent-progress-card__track">
+              <view
+                class="agent-progress-card__bar"
+                :class="`agent-progress-card__bar--${taskStatus}`"
+                :style="{ width: `${taskProgress.progress}%` }"
+              ></view>
+            </view>
+            <text class="agent-progress-card__log">
+              {{ taskProgress.latestLog || "等待远端任务日志..." }}
+            </text>
+          </view>
+
           <view class="form-section">
             <text class="form-label">模型供应商</text>
             <view
@@ -182,6 +203,22 @@
           </view>
           <up-icon name="close" size="20" color="#909193" @click="showLogPopup = false"></up-icon>
         </view>
+        <view class="task-progress">
+          <view class="task-progress__meta">
+            <text class="task-progress__stage">{{ taskProgress.stage }}</text>
+            <text class="task-progress__value">{{ taskProgress.progress }}%</text>
+          </view>
+          <view class="task-progress__track">
+            <view
+              class="task-progress__bar"
+              :class="`task-progress__bar--${taskStatus}`"
+              :style="{ width: `${taskProgress.progress}%` }"
+            ></view>
+          </view>
+          <text class="task-progress__hint">
+            {{ taskProgress.logCount }} 条日志 · {{ currentTaskAgentLabel }}
+          </text>
+        </view>
         <scroll-view scroll-y class="task-log__body">
           <text v-if="taskLogs.length === 0" class="task-log__line">等待远端任务日志...</text>
           <text v-for="(line, index) in taskLogs" :key="index" class="task-log__line">
@@ -207,6 +244,7 @@ import {
 import {
   ACP_AGENTS_UPDATED_EVENT_CHANNEL,
   AGENT_INSTALL_EVENT_CHANNEL,
+  buildAgentInstallProgressState,
   createAgentTaskId,
   downloadRemoteAgentBinary,
   getAgentAvailabilityPresentation,
@@ -263,6 +301,7 @@ const opencodeAuthJsonText = ref("")
 const showLogPopup = ref(false)
 const taskStatus = ref<TaskStatus>("idle")
 const currentTaskId = ref("")
+const currentTaskAgentType = ref<AgentType | null>(null)
 const taskLogs = ref<string[]>([])
 
 const selectedAgent = computed(() =>
@@ -302,6 +341,17 @@ const taskStatusText = computed(() => {
   if (taskStatus.value === "failed") return "任务失败"
   return "未开始"
 })
+
+const taskProgress = computed(() =>
+  buildAgentInstallProgressState({
+    status: taskStatus.value,
+    logs: taskLogs.value,
+  })
+)
+
+const currentTaskAgentLabel = computed(() =>
+  currentTaskAgentType.value ? getAgentLabel(currentTaskAgentType.value) : "智能体"
+)
 
 onLoad((options) => {
   connection.value = decodeConnectionContext(options?.connection as string)
@@ -489,6 +539,7 @@ async function moveSelectedAgent(direction: -1 | 1) {
 
 async function runDownloadSelected() {
   if (!gateway.value || !selectedAgent.value) return
+  if (guardRunningTask()) return
   const taskId = beginTask("download", selectedAgent.value.agent_type)
   try {
     await downloadRemoteAgentBinary(
@@ -504,6 +555,7 @@ async function runDownloadSelected() {
 
 async function runPrepareSelected() {
   if (!gateway.value || !selectedAgent.value) return
+  if (guardRunningTask()) return
   const agent = selectedAgent.value
   if (agent.distribution_type.toLowerCase().includes("uv")) {
     const taskId = beginTask("install-uv", agent.agent_type)
@@ -531,6 +583,7 @@ async function runPrepareSelected() {
 
 async function runUninstallSelected() {
   if (!gateway.value || !selectedAgent.value) return
+  if (guardRunningTask()) return
   const taskId = beginTask("uninstall", selectedAgent.value.agent_type)
   try {
     await uninstallRemoteAgent(gateway.value, selectedAgent.value.agent_type, taskId)
@@ -542,8 +595,9 @@ async function runUninstallSelected() {
 function beginTask(operation: string, agentType: AgentType) {
   const taskId = createAgentTaskId(operation, agentType)
   currentTaskId.value = taskId
+  currentTaskAgentType.value = agentType
   taskStatus.value = "running"
-  taskLogs.value = [`任务 ${taskId} 已提交`]
+  taskLogs.value = [`${getAgentLabel(agentType)} ${getTaskOperationLabel(operation)}任务已提交`]
   showLogPopup.value = true
   return taskId
 }
@@ -551,6 +605,13 @@ function beginTask(operation: string, agentType: AgentType) {
 function failTask(error: unknown) {
   taskStatus.value = "failed"
   taskLogs.value = [...taskLogs.value, `ERROR: ${toErrorMessage(error)}`]
+}
+
+function guardRunningTask() {
+  if (taskStatus.value !== "running") return false
+  uni.showToast({ title: "已有智能体任务执行中", icon: "none" })
+  showLogPopup.value = true
+  return true
 }
 
 async function ensureEventConnection(nextGateway: CodegGateway) {
@@ -564,20 +625,23 @@ async function ensureEventConnection(nextGateway: CodegGateway) {
       if (!event || event.task_id !== currentTaskId.value) return
       if (event.kind === "started") {
         taskStatus.value = "running"
+        if (event.payload) {
+          taskLogs.value = appendTaskLog(event.payload)
+        }
         return
       }
       if (event.kind === "log") {
-        taskLogs.value = [...taskLogs.value, event.payload]
+        taskLogs.value = appendTaskLog(event.payload)
         return
       }
       if (event.kind === "completed") {
         taskStatus.value = "success"
-        taskLogs.value = [...taskLogs.value, event.payload || "任务完成"]
+        taskLogs.value = appendTaskLog(event.payload || "任务完成")
         void reloadRemoteData()
         return
       }
       taskStatus.value = "failed"
-      taskLogs.value = [...taskLogs.value, `ERROR: ${event.payload}`]
+      taskLogs.value = appendTaskLog(`ERROR: ${event.payload}`)
       void reloadRemoteData()
       return
     }
@@ -585,6 +649,19 @@ async function ensureEventConnection(nextGateway: CodegGateway) {
       void reloadRemoteData()
     }
   })
+}
+
+function appendTaskLog(line: string) {
+  const text = String(line || "").trim()
+  if (!text) return taskLogs.value
+  return [...taskLogs.value, text].slice(-200)
+}
+
+function getTaskOperationLabel(operation: string) {
+  if (operation.includes("download")) return "下载"
+  if (operation.includes("uninstall")) return "卸载"
+  if (operation.includes("uv")) return "安装 uv"
+  return "准备"
 }
 
 function closeEventConnection() {
@@ -845,6 +922,74 @@ function toErrorMessage(error: unknown) {
   color: var(--up-error, #fa3534);
 }
 
+.agent-progress-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+  padding: 18rpx;
+  border-radius: 22rpx;
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 9%, var(--up-card-bg-color, #ffffff) 91%);
+  border: 1rpx solid color-mix(in srgb, var(--up-primary, #2979ff) 26%, var(--up-border-color, #dadbde) 74%);
+}
+
+.agent-progress-card__head,
+.task-progress__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+}
+
+.agent-progress-card__title,
+.task-progress__stage {
+  font-size: 24rpx;
+  font-weight: 700;
+  color: var(--up-main-color, #303133);
+}
+
+.agent-progress-card__value,
+.task-progress__value {
+  font-size: 24rpx;
+  font-weight: 800;
+  color: var(--up-primary, #2979ff);
+}
+
+.agent-progress-card__track,
+.task-progress__track {
+  height: 12rpx;
+  overflow: hidden;
+  border-radius: 999rpx;
+  background: var(--up-border-color, #dadbde);
+}
+
+.agent-progress-card__bar,
+.task-progress__bar {
+  height: 100%;
+  min-width: 4%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--up-primary, #2979ff), #34c759);
+  transition: width 180ms ease;
+}
+
+.agent-progress-card__bar--failed,
+.task-progress__bar--failed {
+  background: var(--up-error, #fa3534);
+}
+
+.agent-progress-card__bar--success,
+.task-progress__bar--success {
+  background: var(--up-success, #19be6b);
+}
+
+.agent-progress-card__log {
+  font-size: 22rpx;
+  line-height: 1.5;
+  color: var(--up-content-color, #606266);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .form-label,
 .config-editor__label {
   font-size: 24rpx;
@@ -886,6 +1031,22 @@ function toErrorMessage(error: unknown) {
 .task-log {
   padding: 24rpx;
   min-height: 560rpx;
+}
+
+.task-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+  margin-top: 18rpx;
+  padding: 18rpx;
+  border-radius: 20rpx;
+  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
+  border: 1rpx solid var(--up-border-color, #dadbde);
+}
+
+.task-progress__hint {
+  font-size: 22rpx;
+  color: var(--up-content-color, #606266);
 }
 
 .task-log__body {
