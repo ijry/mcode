@@ -611,6 +611,11 @@
           </scroll-view>
         </view>
 
+        <view v-if="showNetworkReachabilityFeedback" class="input-feedback input-feedback--network">
+          <up-icon name="alert-circle" size="14" color="#fa8c16"></up-icon>
+          <text class="input-feedback__text">{{ networkReachabilityFeedbackText }}</text>
+        </view>
+
         <view v-if="showRuntimeRetryFeedback" class="input-feedback input-feedback--retry">
           <up-loading-icon mode="circle" size="14" color="#fa8c16"></up-loading-icon>
           <text class="input-feedback__text">{{ runtimeRetryText }}</text>
@@ -1280,6 +1285,33 @@ const runtimeRetryText = computed(() => {
   }
   return pieces.filter(Boolean).join(" · ")
 })
+const networkReachabilityFeedbackText = computed(() => {
+  const health = bridgeHealth.value
+  if (health?.state === "reconnecting") {
+    const retryText = health.nextRetryDelayMs && health.nextRetryDelayMs > 0
+      ? `，${(health.nextRetryDelayMs / 1000).toFixed(1)}s 后自动重试`
+      : ""
+    return `实时连接已断开，正在恢复${retryText}。请检查主机网络可达性和内网穿透连接稳定性。`
+  }
+  if (health?.state === "error") {
+    return "实时连接异常。请检查主机网络可达性、内网穿透地址是否仍在线，以及电脑端 Web 服务是否开启。"
+  }
+
+  const retryText = runtimeRetryText.value
+  if (retryText && looksLikeNetworkFailure(retryText)) {
+    return `${retryText}。请检查主机网络可达性和连接稳定性。`
+  }
+
+  const errorText = runtimeErrorText.value
+  if (errorText && looksLikeNetworkFailure(errorText)) {
+    return `${errorText}。请检查主机网络可达性、内网穿透地址稳定性，以及电脑端 Web 服务状态。`
+  }
+
+  return ""
+})
+const showNetworkReachabilityFeedback = computed(() =>
+  Boolean(networkReachabilityFeedbackText.value)
+)
 const showBridgeRecoveredBanner = computed(() => {
   if (!bridgeRecoveredAt.value) return false
   return Date.now() - bridgeRecoveredAt.value < 3000
@@ -1421,10 +1453,14 @@ const detailStatusBanner = computed(() =>
   detailStatusState.value.code === "idle" ? null : detailStatusState.value
 )
 const showRuntimeRetryFeedback = computed(() =>
-  Boolean(runtimeRetryText.value) && detailStatusState.value.code !== "api_retry"
+  Boolean(runtimeRetryText.value) &&
+  detailStatusState.value.code !== "api_retry" &&
+  !showNetworkReachabilityFeedback.value
 )
 const showRuntimeErrorFeedback = computed(() =>
-  Boolean(runtimeErrorText.value) && detailStatusState.value.code !== "runtime_error"
+  Boolean(runtimeErrorText.value) &&
+  detailStatusState.value.code !== "runtime_error" &&
+  !showNetworkReachabilityFeedback.value
 )
 const hasRenderedMessages = computed(() => renderMessageItems.value.length > 0)
 const hasPendingInteraction = computed(() =>
@@ -4287,6 +4323,30 @@ function firstString(...values: unknown[]): string | undefined {
   return undefined
 }
 
+function looksLikeNetworkFailure(message: string) {
+  const text = message.toLowerCase()
+  return [
+    "network",
+    "timeout",
+    "timed out",
+    "connect",
+    "connection",
+    "socket",
+    "websocket",
+    "fetch",
+    "request",
+    "econn",
+    "unreachable",
+    "refused",
+    "断开",
+    "连接",
+    "超时",
+    "网络",
+    "不可达",
+    "重试",
+  ].some((keyword) => text.includes(keyword))
+}
+
 function toObject(raw: unknown): Record<string, any> | null {
   if (!raw) return null
   if (typeof raw === "object") return raw as Record<string, any>
@@ -5516,6 +5576,16 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 
 .input-feedback--retry {
   color: #fa8c16;
+}
+
+.input-feedback--network {
+  align-items: flex-start;
+  margin-top: 12rpx;
+  padding: 14rpx 16rpx;
+  border-radius: 18rpx;
+  background: color-mix(in srgb, var(--up-warning, #f9ae3d) 12%, var(--up-card-bg-color, #ffffff) 88%);
+  border: 1rpx solid color-mix(in srgb, var(--up-warning, #f9ae3d) 28%, var(--up-border-color, #dadbde) 72%);
+  color: var(--up-content-color, #606266);
 }
 
 .input-feedback--error {

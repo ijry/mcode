@@ -57,18 +57,18 @@
           v-for="(conn, index) in connections"
           :key="index"
           class="connection-card"
-          :class="{ 'connection-card--online': isConnectionConnected(conn) }"
+          :class="getConnectionCardClass(conn)"
           :style="upThemeCardStyle"
           @click="activateConnection(conn)"
         >
           <view
             class="connection-card__icon"
-            :class="{ 'connection-card__icon--online': isConnectionConnected(conn) }"
+            :class="getConnectionIconClass(conn)"
           >
             <u-icon
               :name="conn.mode === 'direct' ? 'wifi' : 'cloud'"
               size="24"
-              :color="isConnectionConnected(conn) ? '#007aff' : '#8e8e93'"
+              :color="getConnectionIconColor(conn)"
             ></u-icon>
           </view>
 
@@ -77,10 +77,10 @@
               <text class="connection-card__name">{{ conn.name }}</text>
               <view
                 class="connection-card__status"
-                :class="{ 'connection-card__status--online': isConnectionConnected(conn) }"
+                :class="getConnectionStatusClass(conn)"
               >
                 <text class="connection-card__status-text">
-                  {{ getConnectionBadgeText(isConnectionConnected(conn)) }}
+                  {{ getConnectionBadgeText(conn) }}
                 </text>
               </view>
               <view class="connection-card__menu" @click.stop="showConnectionMenu(conn, index)">
@@ -92,9 +92,34 @@
               {{ getConnectionSubtitle(conn.mode, conn.url) }}
             </text>
 
+            <text
+              v-if="getConnectionHealthDetail(conn)"
+              class="connection-card__health-detail"
+            >
+              {{ getConnectionHealthDetail(conn) }}
+            </text>
+
             <view class="connection-card__footer">
-              <text class="connection-card__footer-link">项目列表</text>
-              <u-icon name="arrow-right" size="14" color="#007aff"></u-icon>
+              <view class="connection-card__footer-main" @click.stop="activateConnection(conn)">
+                <text class="connection-card__footer-link">{{ getConnectionPrimaryActionText(conn) }}</text>
+                <u-icon name="arrow-right" size="14" color="#007aff"></u-icon>
+              </view>
+
+              <view
+                v-if="shouldShowConnectionRetry(conn)"
+                class="connection-card__quick-action"
+                @click.stop="retryConnection(conn)"
+              >
+                <text>立即重试</text>
+              </view>
+
+              <view
+                v-if="shouldShowConnectionHelp(conn)"
+                class="connection-card__quick-action connection-card__quick-action--ghost"
+                @click.stop="showConnectionTroubleshooting(conn)"
+              >
+                <text>排查建议</text>
+              </view>
             </view>
           </view>
         </view>
@@ -360,10 +385,21 @@ const configCodeConnectionName = ref("")
 const configCodeConnectionMeta = ref("")
 const connectedMap = ref<Record<string, boolean>>({})
 const onlineMap = ref<Record<string, boolean>>({})
+type ConnectionHealthState = "idle" | "online" | "reconnecting" | "error"
+interface ConnectionHealth {
+  state: ConnectionHealthState
+  message?: string
+  attempt?: number
+  lastFailedAt?: number
+  nextRetryAt?: number
+}
+const connectionHealthMap = ref<Record<string, ConnectionHealth>>({})
 type StatusSocket = Pick<UniApp.SocketTask, "onOpen" | "onClose" | "onError" | "close">
 const statusSocketMap = new Map<string, StatusSocket>()
 const reconnectTimerMap = new Map<string, ReturnType<typeof setTimeout>>()
 const stoppedWatcherKeys = new Set<string>()
+const NETWORK_FAILURE_HINT = "请检查主机网络可达性、内网穿透地址稳定性，以及电脑端 Web 服务是否开启。"
+const CONNECTION_RETRY_DELAY_MS = 3000
 
 interface ConnectionItem {
   name: string
@@ -409,8 +445,92 @@ function getConnectionSubtitle(mode: ConnectionItem["mode"], url: string) {
   return `${modeText} · ${normalizeBaseUrl(url)}`
 }
 
-function getConnectionBadgeText(online: boolean) {
-  return online ? "在线" : "离线"
+function getConnectionHealth(conn: ConnectionItem): ConnectionHealth {
+  const key = connectionKey(conn)
+  if (!connectedMap.value[key]) return { state: "idle" }
+  if (onlineMap.value[key]) return { state: "online" }
+  return connectionHealthMap.value[key] || {
+    state: "reconnecting",
+    message: NETWORK_FAILURE_HINT,
+  }
+}
+
+function getConnectionBadgeText(conn: ConnectionItem) {
+  const health = getConnectionHealth(conn)
+  if (health.state === "online") return "在线"
+  if (health.state === "reconnecting") return "重连中"
+  if (health.state === "error") return "连接异常"
+  return "未连接"
+}
+
+function getConnectionHealthDetail(conn: ConnectionItem) {
+  const health = getConnectionHealth(conn)
+  if (health.state === "online" || health.state === "idle") return ""
+
+  const pieces: string[] = []
+  if (health.message) {
+    pieces.push(health.message)
+  } else {
+    pieces.push(NETWORK_FAILURE_HINT)
+  }
+  if (health.state === "reconnecting") {
+    if (health.attempt) pieces.push(`正在第 ${health.attempt} 次重试`)
+    if (health.nextRetryAt && health.nextRetryAt > Date.now()) {
+      pieces.push(`${Math.ceil((health.nextRetryAt - Date.now()) / 1000)} 秒后自动重试`)
+    }
+  }
+  return pieces.join(" · ")
+}
+
+function getConnectionPrimaryActionText(conn: ConnectionItem) {
+  const health = getConnectionHealth(conn)
+  if (health.state === "online") return "项目列表"
+  if (health.state === "idle") return "连接并打开"
+  return "尝试打开"
+}
+
+function shouldShowConnectionRetry(conn: ConnectionItem) {
+  const health = getConnectionHealth(conn)
+  return health.state === "reconnecting" || health.state === "error"
+}
+
+function shouldShowConnectionHelp(conn: ConnectionItem) {
+  return getConnectionHealth(conn).state === "error"
+}
+
+function getConnectionCardClass(conn: ConnectionItem) {
+  const health = getConnectionHealth(conn)
+  return {
+    "connection-card--online": health.state === "online",
+    "connection-card--reconnecting": health.state === "reconnecting",
+    "connection-card--error": health.state === "error",
+  }
+}
+
+function getConnectionIconClass(conn: ConnectionItem) {
+  const health = getConnectionHealth(conn)
+  return {
+    "connection-card__icon--online": health.state === "online",
+    "connection-card__icon--reconnecting": health.state === "reconnecting",
+    "connection-card__icon--error": health.state === "error",
+  }
+}
+
+function getConnectionStatusClass(conn: ConnectionItem) {
+  const health = getConnectionHealth(conn)
+  return {
+    "connection-card__status--online": health.state === "online",
+    "connection-card__status--reconnecting": health.state === "reconnecting",
+    "connection-card__status--error": health.state === "error",
+  }
+}
+
+function getConnectionIconColor(conn: ConnectionItem) {
+  const health = getConnectionHealth(conn)
+  if (health.state === "online") return "#007aff"
+  if (health.state === "reconnecting") return "#fa8c16"
+  if (health.state === "error") return "#fa3534"
+  return "#8e8e93"
 }
 
 onMounted(() => {
@@ -510,6 +630,7 @@ async function submitConnection() {
         directToken: form.value.directToken,
       }
 
+      await assertConnectionReachable(newConnection)
       saveConnection(newConnection, previousKey || undefined)
       syncConnectionRuntimeState(previousKey, newConnection)
       uni.showToast({ title: "连接成功", icon: "success" })
@@ -545,6 +666,7 @@ async function submitConnection() {
         relaySession: session,
       }
 
+      await assertConnectionReachable(newConnection)
       saveConnection(newConnection, previousKey || undefined)
       syncConnectionRuntimeState(previousKey, newConnection)
       uni.showToast({ title: "配对成功", icon: "success" })
@@ -553,8 +675,7 @@ async function submitConnection() {
     closeAddPopup()
     loadConnections()
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    uni.showToast({ title: `连接失败: ${message}`, icon: "none", duration: 3000 })
+    uni.showToast({ title: formatConnectionFailureToast(error), icon: "none", duration: 4500 })
   } finally {
     loading.value = false
   }
@@ -610,9 +731,11 @@ function syncConnectionRuntimeState(previousKey: string, conn: ConnectionItem) {
     const nextOnline = { ...onlineMap.value }
     delete nextOnline[previousKey]
     onlineMap.value = nextOnline
+    clearConnectionRuntimeHealth(previousKey)
   }
 
   setConnectionConnected(conn, true)
+  clearConnectionHealth(nextKey)
   persistConnectedMap()
   syncOnlineWatchers()
   void refreshOnlineStatus()
@@ -715,7 +838,11 @@ function encodeConnectionForRoute(conn: ConnectionItem) {
 
 async function activateConnection(conn: ConnectionItem) {
   if (!isConnectionLinked(conn)) {
-    await connectConnection(conn)
+    const connected = await connectConnection(conn)
+    if (!connected) return
+  } else if (!isConnectionConnected(conn)) {
+    promptUnstableConnection(conn)
+    return
   }
   openProjectList(conn)
 }
@@ -735,12 +862,19 @@ function openProjectList(conn: ConnectionItem) {
   })
 }
 
-async function connectConnection(conn: ConnectionItem) {
+async function connectConnection(conn: ConnectionItem): Promise<boolean> {
+  const key = connectionKey(conn)
+  setConnectionHealth(key, {
+    state: "reconnecting",
+    message: "正在尝试连接主机。",
+    attempt: 1,
+  })
   try {
     if (conn.mode === "direct") {
       if (!conn.directToken) {
         uni.showToast({ title: "连接信息不完整", icon: "none" })
-        return
+        markConnectionFailure(key, "连接信息不完整", "error")
+        return false
       }
 
       const gateway = createGateway({
@@ -752,25 +886,74 @@ async function connectConnection(conn: ConnectionItem) {
         directBaseUrl: conn.url,
         token: conn.directToken,
       })
+      await assertConnectionReachable(conn)
 
     } else {
       const session = await ensureRelaySession(conn)
       if (!session?.accessToken) {
         uni.showToast({ title: "连接信息不完整", icon: "none" })
-        return
+        markConnectionFailure(key, "连接信息不完整", "error")
+        return false
       }
+      await assertConnectionReachable(conn)
     }
 
     setConnectionConnected(conn, true)
+    markConnectionOnline(key)
     persistConnectedMap()
     syncOnlineWatchers()
     void refreshOnlineStatus()
     uni.showToast({ title: "连接成功", icon: "success" })
     loadConnections()
+    return true
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    uni.showToast({ title: `连接失败: ${message}`, icon: "none", duration: 3000 })
+    markConnectionFailure(key, error, "error")
+    uni.showToast({ title: formatConnectionFailureToast(error), icon: "none", duration: 4500 })
+    return false
   }
+}
+
+async function retryConnection(conn: ConnectionItem) {
+  stopOnlineWatcher(connectionKey(conn))
+  await connectConnection(conn)
+}
+
+function promptUnstableConnection(conn: ConnectionItem) {
+  const detail = getConnectionHealthDetail(conn) || NETWORK_FAILURE_HINT
+  uni.showModal({
+    title: "连接暂不可用",
+    content: `${detail}\n\n如果你正在使用内网穿透，请确认公网地址仍可访问且连接稳定。`,
+    confirmText: "立即重试",
+    cancelText: "继续打开",
+    success: (res) => {
+      if (res.confirm) {
+        void retryConnection(conn)
+        return
+      }
+      if (res.cancel) {
+        openProjectList(conn)
+      }
+    },
+  })
+}
+
+function showConnectionTroubleshooting(conn: ConnectionItem) {
+  const host = normalizeBaseUrl(conn.url)
+  uni.showModal({
+    title: "连接排查建议",
+    content:
+      `当前地址：${host}\n\n` +
+      "1. 确认电脑端 codeg 的 Web 服务仍在运行。\n" +
+      "2. 手机网络可以访问该地址；内网穿透地址没有休眠、过期或切换。\n" +
+      "3. 访问 token 未改动，防火墙或代理没有拦截 WebSocket。",
+    confirmText: "立即重试",
+    cancelText: "知道了",
+    success: (res) => {
+      if (res.confirm) {
+        void retryConnection(conn)
+      }
+    },
+  })
 }
 
 function disconnectConnection(conn: ConnectionItem) {
@@ -781,6 +964,7 @@ function disconnectConnection(conn: ConnectionItem) {
   const nextOnline = { ...onlineMap.value }
   delete nextOnline[key]
   onlineMap.value = nextOnline
+  clearConnectionRuntimeHealth(key)
   uni.showToast({ title: "已断开连接", icon: "success" })
   loadConnections()
 }
@@ -819,6 +1003,7 @@ function deleteConnection(index: number) {
         const nextOnline = { ...onlineMap.value }
         delete nextOnline[connectionKey(conn)]
         onlineMap.value = nextOnline
+        clearConnectionRuntimeHealth(connectionKey(conn))
 
         // 删除连接只清理本地记录与在线状态，不影响其它已建立连接
 
@@ -962,6 +1147,78 @@ function setConnectionConnected(conn: ConnectionItem, connected: boolean) {
   connectedMap.value = next
 }
 
+function setConnectionHealth(key: string, health: ConnectionHealth) {
+  connectionHealthMap.value = {
+    ...connectionHealthMap.value,
+    [key]: health,
+  }
+}
+
+function clearConnectionHealth(key: string) {
+  if (!connectionHealthMap.value[key]) return
+  const next = { ...connectionHealthMap.value }
+  delete next[key]
+  connectionHealthMap.value = next
+}
+
+function clearConnectionRuntimeHealth(key: string) {
+  clearConnectionHealth(key)
+  clearReconnectTimer(key)
+}
+
+function markConnectionOnline(key: string) {
+  setOnlineStatus(key, true)
+  clearConnectionRuntimeHealth(key)
+}
+
+function markConnectionFailure(
+  key: string,
+  error: unknown,
+  state: Exclude<ConnectionHealthState, "idle" | "online">,
+  attempt?: number,
+  nextRetryAt?: number
+) {
+  setOnlineStatus(key, false)
+  setConnectionHealth(key, {
+    state,
+    message: buildConnectionFailureMessage(error),
+    attempt,
+    lastFailedAt: Date.now(),
+    nextRetryAt,
+  })
+}
+
+function buildConnectionFailureMessage(error: unknown) {
+  const raw = extractErrorMessage(error)
+  if (!raw || raw === "error" || raw === "close") return NETWORK_FAILURE_HINT
+  return `${raw}。${NETWORK_FAILURE_HINT}`
+}
+
+function formatConnectionFailureToast(error: unknown) {
+  const message = buildConnectionFailureMessage(error)
+  return `连接失败：${message}`
+}
+
+async function assertConnectionReachable(conn: ConnectionItem) {
+  const result = await probeConnectionOnline(conn)
+  if (!result.online) {
+    throw new Error(result.error || NETWORK_FAILURE_HINT)
+  }
+}
+
+function extractErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message.trim()) return error.message.trim()
+  if (typeof error === "string" && error.trim()) return error.trim()
+  if (error && typeof error === "object") {
+    const record = error as Record<string, unknown>
+    const candidates = [record.errMsg, record.message, record.detail, record.error]
+    for (const candidate of candidates) {
+      if (typeof candidate === "string" && candidate.trim()) return candidate.trim()
+    }
+  }
+  return ""
+}
+
 function resolveActionName(e: any): string {
   if (typeof e === "string") return e
   if (e && typeof e.name === "string") return e.name
@@ -986,6 +1243,7 @@ function pruneConnectedMapByConnections() {
 async function refreshOnlineStatus() {
   if (!connections.value.length) {
     onlineMap.value = {}
+    connectionHealthMap.value = {}
     return
   }
 
@@ -994,20 +1252,24 @@ async function refreshOnlineStatus() {
   )
   if (!connectedConnections.length) {
     onlineMap.value = {}
+    connectionHealthMap.value = {}
     return
   }
 
   const results = await Promise.all(
     connectedConnections.map(async (conn) => ({
       key: connectionKey(conn),
-      online: await probeConnectionOnline(conn),
+      result: await probeConnectionOnline(conn),
     }))
   )
 
   const next: Record<string, boolean> = {}
   results.forEach((item) => {
-    if (item.online) {
+    if (item.result.online) {
       next[item.key] = true
+      clearConnectionHealth(item.key)
+    } else {
+      markConnectionFailure(item.key, item.result.error || NETWORK_FAILURE_HINT, "error")
     }
   })
   onlineMap.value = next
@@ -1048,6 +1310,15 @@ async function startOnlineWatcher(conn: ConnectionItem) {
   if (!connectedMap.value[key]) return
 
   try {
+    const existingSocket = statusSocketMap.get(key)
+    if (existingSocket) {
+      stoppedWatcherKeys.add(key)
+      try {
+        existingSocket.close({ code: 1000, reason: "replace_watcher" })
+      } catch {}
+      statusSocketMap.delete(key)
+    }
+
     const socketTask = await createStatusSocket(conn)
     stoppedWatcherKeys.delete(key)
     statusSocketMap.set(key, socketTask)
@@ -1055,22 +1326,25 @@ async function startOnlineWatcher(conn: ConnectionItem) {
     const handleDisconnect = () => {
       if (disconnected) return
       disconnected = true
-      statusSocketMap.delete(key)
-      setOnlineStatus(key, false)
+      if (statusSocketMap.get(key) === socketTask) {
+        statusSocketMap.delete(key)
+      } else if (statusSocketMap.has(key)) {
+        return
+      }
       if (stoppedWatcherKeys.has(key)) {
         stoppedWatcherKeys.delete(key)
         return
       }
+      markConnectionFailure(key, "实时连接已断开", "reconnecting")
       scheduleReconnect(key)
     }
     socketTask.onOpen(() => {
-      setOnlineStatus(key, true)
-      clearReconnectTimer(key)
+      markConnectionOnline(key)
     })
     socketTask.onClose(handleDisconnect)
     socketTask.onError(handleDisconnect)
-  } catch {
-    setOnlineStatus(key, false)
+  } catch (error) {
+    markConnectionFailure(key, error, "reconnecting")
     scheduleReconnect(key)
   }
 }
@@ -1093,13 +1367,24 @@ function scheduleReconnect(key: string) {
   if (!connectedMap.value[key]) return
   if (reconnectTimerMap.has(key)) return
 
+  const current = connectionHealthMap.value[key]
+  const attempt = Math.max(1, Number(current?.attempt || 0) + 1)
+  const nextRetryAt = Date.now() + CONNECTION_RETRY_DELAY_MS
+  setConnectionHealth(key, {
+    state: "reconnecting",
+    message: current?.message || NETWORK_FAILURE_HINT,
+    attempt,
+    lastFailedAt: current?.lastFailedAt || Date.now(),
+    nextRetryAt,
+  })
+
   const timer = setTimeout(() => {
     reconnectTimerMap.delete(key)
     if (!connectedMap.value[key]) return
     const conn = connections.value.find((item) => connectionKey(item) === key)
     if (!conn) return
     void startOnlineWatcher(conn)
-  }, 3000)
+  }, CONNECTION_RETRY_DELAY_MS)
   reconnectTimerMap.set(key, timer)
 }
 
@@ -1119,6 +1404,9 @@ function setOnlineStatus(key: string, online: boolean) {
     delete next[key]
   }
   onlineMap.value = next
+  if (online) {
+    clearConnectionHealth(key)
+  }
 }
 
 async function createStatusSocket(conn: ConnectionItem): Promise<StatusSocket> {
@@ -1152,14 +1440,19 @@ async function createStatusSocket(conn: ConnectionItem): Promise<StatusSocket> {
   }) as StatusSocket
 }
 
-async function probeConnectionOnline(conn: ConnectionItem): Promise<boolean> {
+interface ProbeConnectionResult {
+  online: boolean
+  error?: string
+}
+
+async function probeConnectionOnline(conn: ConnectionItem): Promise<ProbeConnectionResult> {
   if (conn.mode === "direct") {
     return probeDirectOnline(conn)
   }
   return probeRelayOnline(conn)
 }
 
-async function probeDirectOnline(conn: ConnectionItem): Promise<boolean> {
+async function probeDirectOnline(conn: ConnectionItem): Promise<ProbeConnectionResult> {
   try {
     const token = conn.directToken || ""
     const res = await uni.request({
@@ -1172,16 +1465,19 @@ async function probeDirectOnline(conn: ConnectionItem): Promise<boolean> {
       },
       timeout: 3000,
     })
-    return Number(res.statusCode) >= 200 && Number(res.statusCode) < 400
-  } catch {
-    return false
+    const online = Number(res.statusCode) >= 200 && Number(res.statusCode) < 400
+    return online
+      ? { online: true }
+      : { online: false, error: `健康检查返回 HTTP ${Number(res.statusCode) || 0}` }
+  } catch (error) {
+    return { online: false, error: extractErrorMessage(error) }
   }
 }
 
-async function probeRelayOnline(conn: ConnectionItem): Promise<boolean> {
+async function probeRelayOnline(conn: ConnectionItem): Promise<ProbeConnectionResult> {
   try {
     const session = await ensureRelaySession(conn)
-    if (!session?.accessToken) return false
+    if (!session?.accessToken) return { online: false, error: "中继会话不可用" }
 
     const response = await uni.request({
       url: `${normalizeBaseUrl(conn.url)}/v1/targets`,
@@ -1192,7 +1488,9 @@ async function probeRelayOnline(conn: ConnectionItem): Promise<boolean> {
       timeout: 3000,
     })
 
-    if (Number(response.statusCode) !== 200) return false
+    if (Number(response.statusCode) !== 200) {
+      return { online: false, error: `中继状态返回 HTTP ${Number(response.statusCode) || 0}` }
+    }
 
     const data = response.data as
       | {
@@ -1202,9 +1500,11 @@ async function probeRelayOnline(conn: ConnectionItem): Promise<boolean> {
       | undefined
     const currentTargetId = data?.currentTargetId
     const target = (data?.targets || []).find((item) => item.targetId === currentTargetId)
-    return Boolean(target?.online)
-  } catch {
-    return false
+    return target?.online
+      ? { online: true }
+      : { online: false, error: "电脑端目标未在线" }
+  } catch (error) {
+    return { online: false, error: extractErrorMessage(error) }
   }
 }
 
@@ -1512,6 +1812,15 @@ function persistConnectedMap() {
   box-shadow: 0 22rpx 50rpx rgba(0, 122, 255, 0.1);
 }
 
+.connection-card--reconnecting {
+  border-color: color-mix(in srgb, var(--up-warning, #f9ae3d) 38%, var(--up-border-color, #dadbde) 62%);
+}
+
+.connection-card--error {
+  border-color: color-mix(in srgb, var(--up-error, #fa3534) 34%, var(--up-border-color, #dadbde) 66%);
+  box-shadow: 0 18rpx 42rpx rgba(250, 53, 52, 0.08);
+}
+
 .connection-card__icon {
   width: 88rpx;
   height: 88rpx;
@@ -1525,6 +1834,14 @@ function persistConnectedMap() {
 
 .connection-card__icon--online {
   background: color-mix(in srgb, var(--up-primary, #2979ff) 12%, var(--up-card-bg-color, #ffffff) 88%);
+}
+
+.connection-card__icon--reconnecting {
+  background: color-mix(in srgb, var(--up-warning, #f9ae3d) 16%, var(--up-card-bg-color, #ffffff) 84%);
+}
+
+.connection-card__icon--error {
+  background: color-mix(in srgb, var(--up-error, #fa3534) 12%, var(--up-card-bg-color, #ffffff) 88%);
 }
 
 .connection-card__body {
@@ -1564,6 +1881,14 @@ function persistConnectedMap() {
   background: rgba(52, 199, 89, 0.14);
 }
 
+.connection-card__status--reconnecting {
+  background: color-mix(in srgb, var(--up-warning, #f9ae3d) 18%, var(--up-card-bg-color, #ffffff) 82%);
+}
+
+.connection-card__status--error {
+  background: color-mix(in srgb, var(--up-error, #fa3534) 14%, var(--up-card-bg-color, #ffffff) 86%);
+}
+
 .connection-card__status-text {
   font-size: 20rpx;
   font-weight: 700;
@@ -1572,6 +1897,14 @@ function persistConnectedMap() {
 
 .connection-card__status--online .connection-card__status-text {
   color: #34c759;
+}
+
+.connection-card__status--reconnecting .connection-card__status-text {
+  color: var(--up-warning, #f9ae3d);
+}
+
+.connection-card__status--error .connection-card__status-text {
+  color: var(--up-error, #fa3534);
 }
 
 .connection-card__menu {
@@ -1592,17 +1925,49 @@ function persistConnectedMap() {
   word-break: break-all;
 }
 
+.connection-card__health-detail {
+  padding: 16rpx 18rpx;
+  border-radius: 20rpx;
+  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
+  color: var(--up-content-color, #606266);
+  font-size: 22rpx;
+  line-height: 1.5;
+}
+
 .connection-card__footer {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12rpx;
+  margin-top: 4rpx;
+}
+
+.connection-card__footer-main,
+.connection-card__quick-action {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 8rpx;
-  margin-top: 4rpx;
 }
 
 .connection-card__footer-link {
   font-size: 22rpx;
   font-weight: 600;
   color: var(--up-primary, #2979ff);
+}
+
+.connection-card__quick-action {
+  padding: 10rpx 18rpx;
+  border-radius: 999rpx;
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 12%, var(--up-card-bg-color, #ffffff) 88%);
+  color: var(--up-primary, #2979ff);
+  font-size: 22rpx;
+  font-weight: 600;
+}
+
+.connection-card__quick-action--ghost {
+  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
+  color: var(--up-content-color, #606266);
 }
 
 .connections-add-card,
