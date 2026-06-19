@@ -751,7 +751,7 @@ import { persistConversationDetailSnapshot } from "@/services/conversation/conve
 import {
   hasRenderableRuntimeState,
   hasVolatileRuntimeState,
-} from "@/services/conversation/runtimeViewState"
+} from "@/services/conversation/runtimeViewState.ts"
 import { buildRemoteInstanceKey } from "@/services/realtime/instance-key"
 import {
   getRegisteredRemoteInstanceDescriptor,

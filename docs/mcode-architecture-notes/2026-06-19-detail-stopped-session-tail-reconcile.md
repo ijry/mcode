@@ -20,6 +20,10 @@ The calibration persists the remote detail snapshot into SQLite and reloads the
 newest local turn window. This lets stopped conversations pick up the final
 assistant turn that may have arrived after the previous local cache write.
 
+The detail page imports the runtime view-state helper through its explicit
+`.ts` source path. This avoids uni/Vite resolving to ignored stale `.js` build
+artifacts that may exist in local development worktrees.
+
 ## UI Behavior
 
 The detail page can still paint immediately from cache. If the cache is missing
@@ -34,6 +38,10 @@ not overwritten by this background reload.
 No protocol changes are required. The change only refines the mobile client's
 cache reconciliation guard and uses the existing detail snapshot persistence
 path.
+
+If a native or alternate web build has generated JavaScript files alongside
+TypeScript sources, ensure helper imports resolve to the authoritative source or
+keep generated files in sync before bundling.
 
 ## Native iOS/Android Replication Guidance
 
