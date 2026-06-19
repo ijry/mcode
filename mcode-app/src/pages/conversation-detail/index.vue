@@ -748,7 +748,10 @@ import {
 import { connectionSessionManager } from "@/services/conversation/connectionSessionManager"
 import { markConversationListDirty } from "@/services/conversation/conversationListRefresh"
 import { persistConversationDetailSnapshot } from "@/services/conversation/conversationDetailPersistence"
-import { hasRenderableRuntimeState } from "@/services/conversation/runtimeViewState"
+import {
+  hasRenderableRuntimeState,
+  hasVolatileRuntimeState,
+} from "@/services/conversation/runtimeViewState"
 import { buildRemoteInstanceKey } from "@/services/realtime/instance-key"
 import {
   getRegisteredRemoteInstanceDescriptor,
@@ -2475,10 +2478,7 @@ async function reconcileRemoteTurnsAfterLocalHydrate(
   limit: number
 ) {
   if (!conversationId.value) return
-  if (hasRenderableRuntimeState(runtimeSession)) return
-
-  const loadedUserTurns = runtimeSession.localTurns.filter((turn) => turn.role === "user").length
-  if (loadedUserTurns >= INITIAL_USER_TURN_TARGET && !hasMoreHistory.value) return
+  if (hasVolatileRuntimeState(runtimeSession)) return
 
   try {
     const gateway = await getDetailGateway()

@@ -3,6 +3,7 @@ export interface RenderableRuntimeStateLike {
   optimisticTurns?: unknown[] | null
   liveMessage?: unknown | null
   pendingPermission?: unknown | null
+  pendingQuestion?: unknown | null
 }
 
 export function hasRenderableRuntimeState(
@@ -13,5 +14,17 @@ export function hasRenderableRuntimeState(
   if (Array.isArray(session.optimisticTurns) && session.optimisticTurns.length > 0) return true
   if (session.liveMessage) return true
   if (session.pendingPermission) return true
+  if (session.pendingQuestion) return true
+  return false
+}
+
+export function hasVolatileRuntimeState(
+  session: RenderableRuntimeStateLike | null | undefined
+) {
+  if (!session) return false
+  if (Array.isArray(session.optimisticTurns) && session.optimisticTurns.length > 0) return true
+  if (session.liveMessage) return true
+  if (session.pendingPermission) return true
+  if (session.pendingQuestion) return true
   return false
 }
