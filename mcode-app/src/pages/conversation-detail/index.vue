@@ -636,6 +636,26 @@
         <view v-if="hasUnreadBelow" class="scroll-bottom-fab__dot"></view>
       </view>
 
+      <view
+        v-if="showConnectingOperationBlocker"
+        class="connecting-operation-blocker"
+        :style="connectingOperationBlockerStyle"
+        @click.stop
+        @touchmove.stop.prevent
+      >
+        <view class="connecting-operation-blocker__panel" :style="upThemeCardStyle">
+          <up-loading-icon
+            mode="circle"
+            size="30"
+            :color="upThemeVar('--up-primary', '#2979ff')"
+          ></up-loading-icon>
+          <text class="connecting-operation-blocker__title">正在连接智能体...</text>
+          <text class="connecting-operation-blocker__desc">
+            连接建立后会自动继续，请先不要进行其他操作。
+          </text>
+        </view>
+      </view>
+
     </view>
 
     <up-popup v-model:show="showPlanDrawer" mode="bottom" :round="20">
@@ -1068,6 +1088,9 @@ const messageListPageStyle = computed(() => {
   }
 })
 const detailToolbarStyle = computed(() => ({
+  top: `${getNavbarHeight()}px`,
+}))
+const connectingOperationBlockerStyle = computed(() => ({
   top: `${getNavbarHeight()}px`,
 }))
 const historyStatusStyle = computed(() => ({
@@ -1539,6 +1562,7 @@ const isBusyForSend = computed(
     runtimeStatus.value === "waiting_permission" ||
     runtimeStatus.value === "waiting_question"
 )
+const showConnectingOperationBlocker = computed(() => runtimeStatus.value === "connecting")
 
 const runtimeStatusLabel = computed(() => {
   if (detailStatusState.value.code === "bridge_reconnecting") return "重连中"
@@ -6088,6 +6112,49 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   background-color: #fa3534;
   border: 2rpx solid #ffffff;
   box-sizing: border-box;
+}
+
+.connecting-operation-blocker {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40rpx;
+  background: color-mix(in srgb, var(--up-page-bg-color, var(--up-bg-color, #f3f4f6)) 72%, transparent);
+  backdrop-filter: blur(8rpx);
+  box-sizing: border-box;
+}
+
+.connecting-operation-blocker__panel {
+  width: min(560rpx, calc(100vw - 80rpx));
+  padding: 42rpx 36rpx;
+  border-radius: 24rpx;
+  border: 1rpx solid color-mix(in srgb, var(--up-primary, #2979ff) 18%, var(--up-border-color, #dadbde) 82%);
+  background: var(--up-card-bg-color, #ffffff);
+  box-shadow: 0 22rpx 56rpx rgba(0, 0, 0, 0.12);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16rpx;
+  text-align: center;
+  box-sizing: border-box;
+}
+
+.connecting-operation-blocker__title {
+  font-size: 30rpx;
+  line-height: 1.35;
+  font-weight: 600;
+  color: var(--up-main-color, #303133);
+}
+
+.connecting-operation-blocker__desc {
+  font-size: 24rpx;
+  line-height: 1.55;
+  color: var(--up-content-color, #606266);
 }
 
 .plan-fab {
