@@ -24,6 +24,7 @@ export interface MessageTurn {
   timestamp: number
   status?: "pending" | "streaming" | "completed" | "error"
   error?: string
+  usage?: TurnUsage | null
 }
 
 export interface ContentPart {
@@ -329,6 +330,23 @@ export interface ConversationDetail {
   createdAt: number
   updatedAt: number
   turns: MessageTurn[]
+  sessionStats?: ConversationSessionStats | null
+  session_stats?: ConversationSessionStats | null
+}
+
+export interface TurnUsage {
+  input_tokens: number
+  output_tokens: number
+  cache_creation_input_tokens: number
+  cache_read_input_tokens: number
+}
+
+export interface ConversationSessionStats {
+  total_usage?: TurnUsage | null
+  total_tokens?: number | null
+  context_window_used_tokens?: number | null
+  context_window_max_tokens?: number | null
+  context_window_usage_percent?: number | null
 }
 
 export interface SessionStats {

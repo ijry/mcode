@@ -47,7 +47,8 @@ jest.mock('@/services/db/migrations', () => ({
 }))
 
 jest.mock('@/services/db/repositories/conversationRepository', () => ({
-  getNewestTurns: jest.fn(),
+  getNewestTurns: jest.fn(() => []),
+  getOlderTurns: jest.fn(() => []),
   insertCompletedTurn: jest.fn(),
 }))
 
@@ -160,5 +161,60 @@ describe('conversationRuntime ACP error handling', () => {
     store.clearCachedSessionState()
 
     expect(session.localTurns).toHaveLength(1)
+  })
+
+  it('applies parsed conversation token usage to runtime stats', () => {
+    const store = useConversationRuntimeStore()
+    const session = store.getOrCreateSession(1)
+
+    const applied = store.applyConversationDetailStats(1, {
+      turns: [
+        {
+          id: 'assistant-1',
+          role: 'assistant',
+          content: [],
+          timestamp: 1,
+          usage: {
+            input_tokens: 100,
+            output_tokens: 35,
+            cache_creation_input_tokens: 7,
+            cache_read_input_tokens: 11,
+          },
+        },
+      ],
+    } as any)
+
+    expect(applied).toBe(true)
+    expect(session.stats).toEqual({
+      inputTokens: 118,
+      outputTokens: 35,
+      totalTokens: 153,
+      turnCount: 1,
+    })
+  })
+
+  it('prefers session total usage when available', () => {
+    const store = useConversationRuntimeStore()
+    const session = store.getOrCreateSession(1)
+
+    store.applyConversationDetailStats(1, {
+      turns: [{ id: 'assistant-1', role: 'assistant', content: [], timestamp: 1 }],
+      session_stats: {
+        total_usage: {
+          input_tokens: 200,
+          output_tokens: 40,
+          cache_creation_input_tokens: 0,
+          cache_read_input_tokens: 60,
+        },
+        total_tokens: 300,
+      },
+    } as any)
+
+    expect(session.stats).toEqual({
+      inputTokens: 260,
+      outputTokens: 40,
+      totalTokens: 300,
+      turnCount: 1,
+    })
   })
 })

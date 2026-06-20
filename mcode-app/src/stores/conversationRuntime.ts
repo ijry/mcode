@@ -5,6 +5,7 @@ import type {
   LiveMessage,
   ConnectionInfo,
   ConversationConnectionInfo,
+  ConversationDetail,
   EventEnvelope,
   SessionStats,
   ContentPart,
@@ -299,6 +300,11 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     maybeBackfillExternalUserTurn(session, "snapshot")
   }
 
+  function applyConversationDetailStats(conversationId: number, detail: ConversationDetail | any) {
+    const session = getOrCreateSession(conversationId)
+    return applyConversationDetailStatsToSession(session, detail)
+  }
+
   /**
    * 完成当前轮次
    */
@@ -325,7 +331,8 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         session.liveMessage = null
         if (!hadOptimisticTurns && assistantTurn) {
           try {
-            await calibrateAfterReplayGap(conversationId)
+            const replayDetail = await calibrateAfterReplayGap(conversationId)
+            applyConversationDetailStats(conversationId, replayDetail)
           } catch (error) {
             console.warn("turn_complete external-user backfill skipped", error)
           }
@@ -344,7 +351,8 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       session.pendingPermission = null
       session.pendingQuestion = null
       try {
-        await calibrateAfterReplayGap(conversationId)
+        const replayDetail = await calibrateAfterReplayGap(conversationId)
+        applyConversationDetailStats(conversationId, replayDetail)
         session.localTurns = await reloadLocalTurns(session)
       } catch (error) {
         console.warn("turn_complete remote backfill skipped", error)
@@ -352,7 +360,8 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     }
 
     try {
-      await calibrateAfterTurnComplete(conversationId)
+      const calibratedDetail = await calibrateAfterTurnComplete(conversationId)
+      applyConversationDetailStats(conversationId, calibratedDetail)
     } catch (error) {
       console.warn("turn_complete summary calibrate skipped", error)
     }
@@ -553,9 +562,8 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         break
 
       case "usage_update":
-        session.stats.inputTokens += event.data.inputTokens || 0
-        session.stats.outputTokens += event.data.outputTokens || 0
-        session.stats.totalTokens += event.data.totalTokens || 0
+        // ACP usage_update carries live context-window usage, not split token
+        // accounting. Parsed conversation detail supplies input/output totals.
         break
     }
   }
@@ -858,6 +866,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     clearPendingQuestion,
     bindCreatedConversationRuntime,
     setSessionError,
+    applyConversationDetailStats,
     canSend,
     getManagedConversation,
   }
@@ -905,6 +914,97 @@ function isSharedInProgressStatus(status: RuntimeSession["status"]) {
     status === "waiting_permission" ||
     status === "waiting_question"
   )
+}
+
+function deriveSessionStatsFromConversationDetail(
+  detail: ConversationDetail | any,
+  fallbackTurnCount = 0
+): SessionStats | null {
+  if (!detail || typeof detail !== "object") return null
+
+  const rawSessionStats = firstObject(detail.sessionStats, detail.session_stats)
+  const totalUsage = normalizeTurnUsage(
+    firstObject(rawSessionStats?.total_usage, rawSessionStats?.totalUsage)
+  )
+  const usage = totalUsage || sumTurnUsage(Array.isArray(detail.turns) ? detail.turns : [])
+  if (!usage) return null
+
+  const totalTokens =
+    firstNumber(rawSessionStats?.total_tokens, rawSessionStats?.totalTokens) ??
+    usage.input_tokens +
+      usage.output_tokens +
+      usage.cache_creation_input_tokens +
+      usage.cache_read_input_tokens
+
+  return {
+    inputTokens: usage.input_tokens + usage.cache_creation_input_tokens + usage.cache_read_input_tokens,
+    outputTokens: usage.output_tokens,
+    totalTokens,
+    turnCount: Array.isArray(detail.turns) ? detail.turns.length : fallbackTurnCount,
+  }
+}
+
+function applyConversationDetailStatsToSession(
+  session: RuntimeSession,
+  detail: ConversationDetail | any
+) {
+  const nextStats = deriveSessionStatsFromConversationDetail(detail, session.stats.turnCount)
+  if (!nextStats) return false
+  session.stats = nextStats
+  return true
+}
+
+function sumTurnUsage(turns: any[]): TurnUsageAccumulator | null {
+  let total: TurnUsageAccumulator | null = null
+  for (const turn of turns) {
+    const usage = normalizeTurnUsage(firstObject(turn?.usage))
+    if (!usage) continue
+    if (!total) {
+      total = { ...usage }
+      continue
+    }
+    total.input_tokens += usage.input_tokens
+    total.output_tokens += usage.output_tokens
+    total.cache_creation_input_tokens += usage.cache_creation_input_tokens
+    total.cache_read_input_tokens += usage.cache_read_input_tokens
+  }
+  return total
+}
+
+interface TurnUsageAccumulator {
+  input_tokens: number
+  output_tokens: number
+  cache_creation_input_tokens: number
+  cache_read_input_tokens: number
+}
+
+function normalizeTurnUsage(raw: Record<string, any> | null | undefined): TurnUsageAccumulator | null {
+  if (!raw) return null
+  const inputTokens = firstNumber(raw.input_tokens, raw.inputTokens, raw.input, raw.prompt) ?? 0
+  const outputTokens = firstNumber(raw.output_tokens, raw.outputTokens, raw.output, raw.completion) ?? 0
+  const cacheCreationInputTokens =
+    firstNumber(
+      raw.cache_creation_input_tokens,
+      raw.cacheCreationInputTokens,
+      raw.cache_write,
+      raw.cacheWrite
+    ) ?? 0
+  const cacheReadInputTokens =
+    firstNumber(
+      raw.cache_read_input_tokens,
+      raw.cacheReadInputTokens,
+      raw.cache_read,
+      raw.cacheRead,
+      raw.cached
+    ) ?? 0
+  const total = inputTokens + outputTokens + cacheCreationInputTokens + cacheReadInputTokens
+  if (total <= 0) return null
+  return {
+    input_tokens: inputTokens,
+    output_tokens: outputTokens,
+    cache_creation_input_tokens: cacheCreationInputTokens,
+    cache_read_input_tokens: cacheReadInputTokens,
+  }
 }
 
 async function persistCompletedTurns(
@@ -1002,7 +1102,8 @@ function maybeBackfillExternalUserTurn(
   session.externalTurnBackfillLastAttemptAt = now
   void (async () => {
     try {
-      await calibrateAfterReplayGap(session.conversationId)
+      const replayDetail = await calibrateAfterReplayGap(session.conversationId)
+      applyConversationDetailStatsToSession(session, replayDetail)
       session.localTurns = await reloadLocalTurns(session)
     } catch (error) {
       console.warn(`external-user backfill skipped (${reason})`, error)
@@ -1471,6 +1572,15 @@ function firstNumber(...values: unknown[]) {
       if (Number.isFinite(parsed)) {
         return parsed
       }
+    }
+  }
+  return null
+}
+
+function firstObject(...values: unknown[]) {
+  for (const value of values) {
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      return value as Record<string, any>
     }
   }
   return null

@@ -175,6 +175,22 @@
             </text>
           </view>
 
+          <view v-if="showBottomGeneratingIndicator" class="bottom-generating">
+            <view class="bottom-generating__orb">
+              <view class="bottom-generating__ring"></view>
+              <view class="bottom-generating__dot"></view>
+            </view>
+            <view class="bottom-generating__copy">
+              <text class="bottom-generating__title">生成中</text>
+              <text class="bottom-generating__subtitle">{{ bottomGeneratingText }}</text>
+            </view>
+            <view class="bottom-generating__typing" aria-hidden="true">
+              <view class="bottom-generating__typing-dot"></view>
+              <view class="bottom-generating__typing-dot"></view>
+              <view class="bottom-generating__typing-dot"></view>
+            </view>
+          </view>
+
           <view id="message-list-bottom" class="list-bottom"></view>
         </view>
       </view>
@@ -1511,6 +1527,16 @@ const showWaitingResponseState = computed(() =>
   !hasRenderedMessages.value &&
   (isActiveWaitingRuntime.value || hasPendingInteraction.value)
 )
+const showBottomGeneratingIndicator = computed(() =>
+  !loading.value &&
+  hasRenderedMessages.value &&
+  !hasPendingInteraction.value &&
+  (runtimeStatus.value === "thinking" || runtimeStatus.value === "running_tool")
+)
+const bottomGeneratingText = computed(() => {
+  if (runtimeStatus.value === "running_tool") return activeModelStatusLabel.value || "正在执行操作"
+  return activeModelStatusLabel.value || "正在整理回复"
+})
 const waitingStateBadgeText = computed(() => {
   if (runtimeStatus.value === "waiting_permission") return "等待授权"
   if (runtimeStatus.value === "waiting_question") return "等待选择"
@@ -2088,6 +2114,7 @@ async function loadConversation() {
         remoteDetail = await gateway.call<any>("get_folder_conversation", {
           conversationId: conversationId.value,
         })
+        applyRemoteDetailStats(remoteDetail)
         const summary = (remoteDetail?.summary && typeof remoteDetail.summary === "object")
           ? remoteDetail.summary
           : {}
@@ -2135,6 +2162,7 @@ async function loadConversation() {
       const result = remoteDetail || await gateway.call<any>("get_folder_conversation", {
         conversationId: conversationId.value,
       })
+      applyRemoteDetailStats(result)
       const summary = (result?.summary && typeof result.summary === "object")
         ? result.summary
         : {}
@@ -2489,6 +2517,7 @@ async function reconcileRemoteTurnsAfterLocalHydrate(
     const result = await gateway.call<any>("get_folder_conversation", {
       conversationId: conversationId.value,
     })
+    applyRemoteDetailStats(result)
     detailDebugLog("local-hydrate-remote-reconcile", summarizeDetailTurns(result))
     await persistConversationDetailSnapshot({
       instanceKey: resolveDetailInstanceKey(),
@@ -2557,6 +2586,11 @@ function summarizeDetailTurns(detail: any) {
     oldestRemoteTurnId: firstString(oldest?.id) || null,
     oldestRemoteTurnTs: firstString(oldest?.timestamp) || null,
   }
+}
+
+function applyRemoteDetailStats(detail: any) {
+  if (!conversationId.value) return
+  runtime.applyConversationDetailStats(conversationId.value, detail)
 }
 
 function shouldReconcileTurnsFromPersistedRuntime(
@@ -3250,6 +3284,7 @@ async function reconcileRemoteTurnsAfterResume(
     const result = await gateway.call<any>("get_folder_conversation", {
       conversationId: conversationId.value,
     })
+    applyRemoteDetailStats(result)
     detailDebugLog("resume-remote-reconcile", summarizeDetailTurns(result))
     await persistConversationDetailSnapshot({
       instanceKey: resolveDetailInstanceKey(),
@@ -5204,8 +5239,131 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
   color: var(--up-tips-color, #909193);
 }
 
+.bottom-generating {
+  align-self: flex-start;
+  display: flex;
+  align-items: center;
+  gap: 18rpx;
+  max-width: calc(100% - 56rpx);
+  margin: 20rpx 24rpx 12rpx;
+  padding: 18rpx 22rpx;
+  border-radius: 999rpx;
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--up-primary, #2979ff) 12%, var(--up-card-bg-color, #ffffff) 88%) 0%,
+      var(--up-card-bg-color, #ffffff) 78%
+    );
+  border: 1rpx solid color-mix(in srgb, var(--up-primary, #2979ff) 24%, var(--up-border-color, #dadbde) 76%);
+  box-shadow: 0 16rpx 36rpx rgba(41, 121, 255, 0.12);
+  box-sizing: border-box;
+}
+
+.bottom-generating__orb {
+  position: relative;
+  width: 42rpx;
+  height: 42rpx;
+  flex-shrink: 0;
+}
+
+.bottom-generating__ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 4rpx solid color-mix(in srgb, var(--up-primary, #2979ff) 22%, transparent 78%);
+  border-top-color: var(--up-primary, #2979ff);
+  animation: bottomGeneratingSpin 0.9s linear infinite;
+}
+
+.bottom-generating__dot {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 14rpx;
+  height: 14rpx;
+  margin-top: -7rpx;
+  margin-left: -7rpx;
+  border-radius: 50%;
+  background: var(--up-primary, #2979ff);
+  box-shadow: 0 0 18rpx color-mix(in srgb, var(--up-primary, #2979ff) 55%, transparent 45%);
+  animation: bottomGeneratingPulse 1.2s ease-in-out infinite;
+}
+
+.bottom-generating__copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.bottom-generating__title {
+  font-size: 27rpx;
+  line-height: 1.25;
+  font-weight: 700;
+  color: var(--up-main-color, #303133);
+}
+
+.bottom-generating__subtitle {
+  margin-top: 3rpx;
+  font-size: 21rpx;
+  line-height: 1.3;
+  color: var(--up-content-color, #606266);
+}
+
+.bottom-generating__typing {
+  display: flex;
+  align-items: center;
+  gap: 7rpx;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.bottom-generating__typing-dot {
+  width: 10rpx;
+  height: 10rpx;
+  border-radius: 50%;
+  background: var(--up-primary, #2979ff);
+  opacity: 0.35;
+  animation: bottomGeneratingTyping 1.05s ease-in-out infinite;
+}
+
+.bottom-generating__typing-dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.bottom-generating__typing-dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes bottomGeneratingSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes bottomGeneratingPulse {
+  0%, 100% {
+    transform: scale(0.82);
+    opacity: 0.55;
+  }
+  50% {
+    transform: scale(1.12);
+    opacity: 1;
+  }
+}
+
+@keyframes bottomGeneratingTyping {
+  0%, 80%, 100% {
+    transform: translateY(0);
+    opacity: 0.35;
+  }
+  40% {
+    transform: translateY(-5rpx);
+    opacity: 1;
+  }
+}
+
 .list-bottom {
-  height: calc(24rpx + env(safe-area-inset-bottom));
+  height: calc(34rpx + env(safe-area-inset-bottom));
 }
 
 .input-wrap {
