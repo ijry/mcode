@@ -348,6 +348,13 @@ class AcpApiClient {
     }
   }
 
+  subscribeOpenedTabsChanged(
+    callback: (payload: unknown) => void,
+    instanceKey?: string
+  ) {
+    return this.subscribeGlobalEvent("tabs://changed", callback, instanceKey)
+  }
+
   subscribeRealtimeBridgeHealth(
     callback: (health: RealtimeBridgeHealth) => void,
     instanceKey?: string

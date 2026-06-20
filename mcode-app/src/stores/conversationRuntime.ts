@@ -25,6 +25,11 @@ import {
   detachConversationRealtime,
   unbindConversationEventHandler,
 } from "@/services/conversation/conversationSyncService"
+import {
+  isHotConversation,
+  releaseHotConversation,
+  touchHotConversation,
+} from "@/services/conversation/hotConversationCoordinator"
 import { ensureConversationSchema } from "@/services/db/migrations"
 import {
   getOlderTurns,
@@ -255,6 +260,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
   function hydrateLiveSnapshot(conversationId: number, snapshot: any) {
     const session = getOrCreateSession(conversationId)
     if (!snapshot || typeof snapshot !== "object") return
+    touchHotConversation(conversationId)
 
     const snapshotSeq = firstNumber(snapshot?.event_seq, snapshot?.eventSeq)
     const currentSeq = session.lastAppliedSeq
@@ -478,6 +484,15 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
           }
           session.apiRetry = null
         }
+        if (
+          event.data.status === "idle" &&
+          !session.liveMessage &&
+          session.optimisticTurns.length === 0
+        ) {
+          releaseHotConversation(session.conversationId)
+        } else {
+          touchHotConversation(session.conversationId)
+        }
         if (event.data.status !== "waiting_permission") {
           session.pendingPermission = null
         }
@@ -489,6 +504,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         break
 
       case "permission_request":
+        touchHotConversation(session.conversationId)
         session.status = "waiting_permission"
         session.inputErrorMessage = null
         session.pendingPermission = normalizePermissionRequest(event.data)
@@ -498,6 +514,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         break
 
       case "question_request":
+        touchHotConversation(session.conversationId)
         session.status = "waiting_question"
         session.inputErrorMessage = null
         session.pendingPermission = null
@@ -507,11 +524,13 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         break
 
       case "api_retry":
+        touchHotConversation(session.conversationId)
         session.apiRetry = normalizeApiRetryEvent(event.data)
         session.inputErrorMessage = null
         break
 
       case "error":
+        touchHotConversation(session.conversationId)
         session.status = "error"
         session.apiRetry = null
         session.inputErrorMessage =
@@ -529,6 +548,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         break
 
       case "turn_complete":
+        touchHotConversation(session.conversationId)
         void completeTurn(session.conversationId, event.data)
         break
 
@@ -553,6 +573,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
   ) {
     const session = getOrCreateSession(conversationId)
     session.status = "connecting"
+    touchHotConversation(conversationId)
     connectionSessionManager.touchConversation(conversationId)
 
     try {
@@ -679,6 +700,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
    */
   async function disconnect(conversationId: number) {
     const session = sessions.value.get(conversationId)
+    releaseHotConversation(conversationId)
     if (session?.connectionId) {
       detachConversationRealtime(conversationId)
       unbindConversationEventHandler(conversationId)
@@ -697,6 +719,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
    * 清理会话
    */
   function clearSession(conversationId: number) {
+    releaseHotConversation(conversationId)
     detachConversationRealtime(conversationId)
     unbindConversationEventHandler(conversationId)
     connectionSessionManager.clearConversation(conversationId)
@@ -705,7 +728,12 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
 
   function clearCachedSessionState() {
     for (const session of sessions.value.values()) {
-      if (isSharedInProgressStatus(session.status) || session.liveMessage || session.optimisticTurns.length > 0) {
+      if (
+        isSharedInProgressStatus(session.status) ||
+        session.liveMessage ||
+        session.optimisticTurns.length > 0 ||
+        isHotConversation(session.conversationId)
+      ) {
         continue
       }
       session.localTurns = []
@@ -771,6 +799,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       allowSend: true,
     })
     const session = getOrCreateSession(input.conversationId)
+    touchHotConversation(input.conversationId)
     session.connectionId = managed.connectionId
     session.instanceKey = managed.instanceKey
     session.status = "connected"

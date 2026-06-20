@@ -84,4 +84,29 @@ describe("conversationOverviewSnapshot", () => {
     expect(snapshot.openTabCards).toHaveLength(1)
     expect(snapshot.recentActiveCards).toEqual([])
   })
+
+  it("keeps active tab metadata from normalized snapshots", () => {
+    const snapshot = buildSnapshot({
+      now: Date.parse("2026-06-09T00:10:00+08:00"),
+      tabs: [
+        {
+          id: 6,
+          folder_id: folder.id,
+          conversation_id: 101,
+          agent_type: "codex",
+          is_active: true,
+          position: 1,
+        },
+      ],
+      conversations: [conversation()],
+    })
+
+    expect(snapshot.openTabCards[0]).toEqual(
+      expect.objectContaining({
+        tabId: 6,
+        conversationId: 101,
+        isActive: true,
+      })
+    )
+  })
 })

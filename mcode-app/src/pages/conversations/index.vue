@@ -485,6 +485,15 @@ import {
   subscribeConversationOverviewInvalidation,
 } from "@/services/conversation/globalConversationSync"
 import {
+  applyOpenedTabsSnapshot,
+  getOpenedTabsSnapshot,
+  replaceOpenedTabsSnapshot,
+} from "@/services/conversation/openedTabsRealtimeCache"
+import {
+  ensureConversationTab,
+  normalizeOpenedTabsList,
+} from "@/services/conversation/pcTabSyncService"
+import {
   buildConnectionConversationSnapshot,
   mapConversationSummaryRecordToConversation,
   mapConversationToSummaryRecord,
@@ -548,6 +557,7 @@ const createAgentListError = ref("")
 let createAgentProbeToken = 0
 let createAgentListToken = 0
 let disposeOverviewInvalidation: (() => void) | null = null
+const disposeOpenedTabsChangedMap = new Map<string, () => void>()
 let activeCreateRequestId = ""
 let activeCreateRequestFingerprint = ""
 let activeCreateConversationId = 0
@@ -1166,6 +1176,8 @@ onMounted(() => {
 onUnload(() => {
   disposeOverviewInvalidation?.()
   disposeOverviewInvalidation = null
+  disposeOpenedTabsChangedMap.forEach((dispose) => dispose())
+  disposeOpenedTabsChangedMap.clear()
   stopCreateProgressTimer()
 })
 
@@ -1264,10 +1276,12 @@ async function loadConnectionGroup(conn: ConnectionItem): Promise<ConnectionGrou
   void ensureGlobalConversationSync(descriptor.instanceKey).catch((error) => {
     console.warn("ensure global conversation sync skipped:", error)
   })
+  ensureOpenedTabsSubscription(descriptor.instanceKey)
   const foldersRaw = await gateway.call<unknown>("list_open_folder_details")
   const folders = normalizeList(foldersRaw) as Project[]
   const tabsRaw = await gateway.call<unknown>("list_opened_tabs")
-  const tabs = normalizeList(tabsRaw) as OpenedTabItem[]
+  const tabsSnapshot = normalizeOpenedTabsResponse(descriptor.instanceKey, tabsRaw)
+  const tabs = tabsSnapshot.items
   rememberConnectionRemoteState(connectionKey(conn), folders, tabs)
   const localConversations = (await loadLocalConversationSummaries(
     descriptor.instanceKey,
@@ -1375,10 +1389,12 @@ async function refreshConnectionGroupFromRemote(conn: ConnectionItem, current: C
   void ensureGlobalConversationSync(descriptor.instanceKey).catch((error) => {
     console.warn("ensure global conversation sync skipped:", error)
   })
+  ensureOpenedTabsSubscription(descriptor.instanceKey)
   const foldersRaw = await gateway.call<unknown>("list_open_folder_details")
   const folders = normalizeList(foldersRaw) as Project[]
   const tabsRaw = await gateway.call<unknown>("list_opened_tabs")
-  const tabs = normalizeList(tabsRaw) as OpenedTabItem[]
+  const tabsSnapshot = normalizeOpenedTabsResponse(descriptor.instanceKey, tabsRaw)
+  const tabs = tabsSnapshot.items
   rememberConnectionRemoteState(connectionKey(conn), folders, tabs)
   const nextGroup = await loadRemoteConnectionSnapshot(conn, folders, tabs)
   replaceConnectionGroup(nextGroup)
@@ -1502,6 +1518,17 @@ function rememberConnectionRemoteState(
   connectionTabSnapshotMap.set(key, tabs)
 }
 
+function ensureOpenedTabsSubscription(instanceKey: string) {
+  if (!instanceKey || disposeOpenedTabsChangedMap.has(instanceKey)) return
+  const unsubscribe = acpApi.subscribeOpenedTabsChanged((payload) => {
+    const snapshot = normalizeOpenedTabsChangedPayload(instanceKey, payload)
+    if (!snapshot) return
+    applyOpenedTabsSnapshot(instanceKey, snapshot)
+    void refreshConnectionGroupFromLocalCache(instanceKey)
+  }, instanceKey)
+  disposeOpenedTabsChangedMap.set(instanceKey, unsubscribe)
+}
+
 function replaceConnectionGroup(nextGroup: ConnectionGroup) {
   const index = connectionGroups.value.findIndex((group) => group.key === nextGroup.key)
   if (index < 0) return
@@ -1601,6 +1628,35 @@ function normalizeList(input: unknown): any[] {
   if (input && typeof input === "object" && Array.isArray((input as any).data))
     return (input as any).data
   return []
+}
+
+function normalizeOpenedTabsResponse(instanceKey: string, raw: unknown) {
+  const record = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null
+  if (record && Array.isArray(record.items)) {
+    const version = Number(record.version || 0)
+    const items = normalizeOpenedTabsList(record.items)
+    replaceOpenedTabsSnapshot(instanceKey, version, items, "server")
+    return {
+      version,
+      items,
+    }
+  }
+  const items = normalizeOpenedTabsList(raw)
+  replaceOpenedTabsSnapshot(instanceKey, 0, items, "server")
+  return {
+    version: 0,
+    items,
+  }
+}
+
+function normalizeOpenedTabsChangedPayload(instanceKey: string, payload: unknown) {
+  if (!payload || typeof payload !== "object") return null
+  const record = payload as Record<string, unknown>
+  return {
+    version: Number(record.version || 0),
+    origin: firstString(record.origin) || "remote",
+    tabs: normalizeOpenedTabsList(record.tabs),
+  }
 }
 
 function normalizeBaseUrl(url: string): string {
@@ -2148,6 +2204,18 @@ async function confirmCreate() {
       connectionId,
       instanceKey: gateway.getRemoteInstanceDescriptor().instanceKey,
       sessionId: resolveConnectedSessionId(connectionInfo),
+    })
+
+    await ensureConversationTab({
+      instanceKey: gateway.getRemoteInstanceDescriptor().instanceKey,
+      gateway,
+      folderId: selectedProjectId.value,
+      conversationId: newConversationId,
+      agentType,
+      activation: "preserve",
+      origin: "mcode-mobile-create",
+    }).catch((error) => {
+      console.warn("ensure conversation tab after create skipped:", error)
     })
 
     await gateway.call("open_folder_by_id", {

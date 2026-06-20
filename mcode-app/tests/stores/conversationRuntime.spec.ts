@@ -36,6 +36,12 @@ jest.mock('@/services/conversation/conversationSyncService', () => ({
   unbindConversationEventHandler: jest.fn(),
 }))
 
+jest.mock('@/services/conversation/hotConversationCoordinator', () => ({
+  touchHotConversation: jest.fn(),
+  releaseHotConversation: jest.fn(),
+  isHotConversation: jest.fn(() => false),
+}))
+
 jest.mock('@/services/db/migrations', () => ({
   ensureConversationSchema: jest.fn(),
 }))
@@ -141,5 +147,18 @@ describe('conversationRuntime ACP error handling', () => {
       text: ' newer tail',
     })
     expect(session.lastAppliedSeq).toBe(12)
+  })
+
+  it('keeps cached session state for hot conversations', () => {
+    const hot = require('@/services/conversation/hotConversationCoordinator')
+    hot.isHotConversation.mockReturnValue(true)
+    const store = useConversationRuntimeStore()
+    const session = store.getOrCreateSession(1)
+    session.localTurns = [{ id: 't1', role: 'assistant', content: [], timestamp: 1 }] as any
+    session.status = 'connected'
+
+    store.clearCachedSessionState()
+
+    expect(session.localTurns).toHaveLength(1)
   })
 })

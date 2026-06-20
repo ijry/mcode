@@ -179,6 +179,28 @@ export type GlobalConversationChangeEvent =
   | { kind: "deleted"; id: number }
   | { kind: "status"; id: number; status: string }
 
+export interface OpenedTabItem {
+  id: number
+  folder_id: number
+  conversation_id?: number | null
+  agent_type?: string
+  position?: number
+  is_active?: boolean
+  is_pinned?: boolean
+}
+
+export interface OpenedTabsSnapshot {
+  instanceKey: string
+  version: number
+  items: OpenedTabItem[]
+}
+
+export interface OpenedTabsChangedPayload {
+  version: number
+  origin: string
+  tabs: OpenedTabItem[]
+}
+
 export interface ConversationConnectionInfo {
   connection_id: string
   event_seq: number

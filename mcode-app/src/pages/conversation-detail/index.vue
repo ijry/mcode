@@ -623,7 +623,10 @@
 
         <view v-if="showRuntimeErrorFeedback" class="input-feedback input-feedback--error">
           <up-icon name="close-circle-fill" size="14" color="#fa3534"></up-icon>
-          <text class="input-feedback__text">{{ runtimeErrorText }}</text>
+          <view class="input-feedback__body">
+            <text class="input-feedback__label">发送失败</text>
+            <text class="input-feedback__text">{{ runtimeErrorText }}</text>
+          </view>
         </view>
       </view>
 
@@ -748,6 +751,8 @@ import {
 import { connectionSessionManager } from "@/services/conversation/connectionSessionManager"
 import { markConversationListDirty } from "@/services/conversation/conversationListRefresh"
 import { persistConversationDetailSnapshot } from "@/services/conversation/conversationDetailPersistence"
+import { ensureConversationTabForPrompt } from "@/services/conversation/pcTabSyncService"
+import { touchHotConversation } from "@/services/conversation/hotConversationCoordinator"
 import {
   hasRenderableRuntimeState,
   hasVolatileRuntimeState,
@@ -1485,7 +1490,6 @@ const showRuntimeRetryFeedback = computed(() =>
 )
 const showRuntimeErrorFeedback = computed(() =>
   Boolean(runtimeErrorText.value) &&
-  detailStatusState.value.code !== "runtime_error" &&
   !showNetworkReachabilityFeedback.value
 )
 const hasRenderedMessages = computed(() => renderMessageItems.value.length > 0)
@@ -3281,6 +3285,25 @@ async function ensureConversationReadyForSend() {
   return firstString(recovered?.id, session.value?.connectionId) || ""
 }
 
+async function ensurePcTabReadyForPrompt() {
+  if (!conversationId.value || !folderId.value) return
+  try {
+    const gateway = await getDetailGateway({ refreshAuth: true })
+    const descriptor = gateway.getRemoteInstanceDescriptor()
+    await ensureConversationTabForPrompt({
+      instanceKey: descriptor.instanceKey,
+      gateway,
+      folderId: folderId.value,
+      conversationId: conversationId.value,
+      agentType: currentAgentType.value || "claude_code",
+      activation: "preserve",
+      origin: "mcode-mobile-prompt",
+    })
+  } catch (error) {
+    console.warn("ensure pc tab before prompt skipped:", error)
+  }
+}
+
 async function sendQuickReply(text: string) {
   if (!canSendSharedLive.value) {
     showSharedLiveBlockedToast()
@@ -3337,6 +3360,8 @@ async function sendDraft(draft: QueuedDraft): Promise<boolean> {
   anchorMessageId.value = ""
 
   try {
+    touchHotConversation(conversationId.value)
+    await ensurePcTabReadyForPrompt()
     const conn = await ensureConversationReadyForSend()
     if (!conn) throw new Error("未连接到代理")
 
@@ -3494,6 +3519,7 @@ async function confirmPromptStartFromSnapshot() {
     const snapshot = await acpApi.acpGetSessionSnapshotByConversation(conversationId.value)
     if (!snapshot || typeof snapshot !== "object") return false
     runtime.hydrateLiveSnapshot(conversationId.value, snapshot)
+    touchHotConversation(conversationId.value)
     return hasPromptActuallyStarted()
   } catch {
     return false
@@ -5613,6 +5639,27 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
 }
 
 .input-feedback--error {
+  align-items: flex-start;
+  margin-top: 12rpx;
+  padding: 14rpx 16rpx;
+  border-radius: 18rpx;
+  color: var(--up-error, #fa3534);
+  background: color-mix(in srgb, var(--up-error, #fa3534) 10%, var(--up-card-bg-color, #ffffff) 90%);
+  border: 1rpx solid color-mix(in srgb, var(--up-error, #fa3534) 28%, var(--up-border-color, #dadbde) 72%);
+}
+
+.input-feedback__body {
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+  min-width: 0;
+  flex: 1;
+}
+
+.input-feedback__label {
+  font-size: 21rpx;
+  line-height: 1.35;
+  font-weight: 600;
   color: var(--up-error, #fa3534);
 }
 
