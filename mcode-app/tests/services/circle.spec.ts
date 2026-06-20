@@ -1,8 +1,10 @@
 import { createPinia, setActivePinia } from "pinia"
 
 import {
+  fetchCircleComments,
   fetchCirclePosts,
   fetchCircleTopics,
+  publishCircleComment,
   publishCirclePost,
   toggleCircleAction,
 } from "@/services/circle"
@@ -158,5 +160,99 @@ describe("circle service", () => {
         },
       })
     )
+  })
+
+  it("loads comments through the shared comment endpoint", async () => {
+    uni.request.mockResolvedValue({
+      statusCode: 200,
+      data: {
+        code: 200,
+        msg: "ok",
+        data: {
+          dataList: [
+            {
+              id: "mcode-circle-101-0001",
+              uid: "2",
+              content: "这条评论很有价值",
+              createTime: 1781923680,
+              replyCount: 1,
+              zanCount: 2,
+              userInfo: { nickname: "林屿", avatar: "/avatar.png" },
+              children: [
+                {
+                  id: "mcode-circle-101-0002",
+                  uid: "3",
+                  content: "同意",
+                  createTime: 1781923700,
+                  userInfo: { nickname: "南栀" },
+                },
+              ],
+            },
+          ],
+          dataPage: { total: 1, page: 1, limit: 20 },
+        },
+      },
+    })
+
+    const result = await fetchCircleComments({ postId: 101, page: 1, limit: 20 })
+
+    expect(uni.request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: "https://xycloud.example.com/v1/comment/comment/lists?dataModel=circle_post&dataId=101&page=1&limit=20&sortBy=createTime%20desc",
+        method: "GET",
+      })
+    )
+    expect(result.comments[0]).toEqual(
+      expect.objectContaining({
+        id: "mcode-circle-101-0001",
+        uid: 2,
+        author: "林屿",
+        avatar: "/avatar.png",
+        content: "这条评论很有价值",
+        replyCount: 1,
+        likeCount: 2,
+      })
+    )
+    expect(result.comments[0].children[0]).toEqual(
+      expect.objectContaining({
+        author: "南栀",
+        content: "同意",
+      })
+    )
+  })
+
+  it("publishes a top-level circle comment", async () => {
+    uni.request.mockResolvedValue({
+      statusCode: 200,
+      data: {
+        code: 200,
+        msg: "ok",
+        data: {
+          comment: {
+            id: "mcode-circle-new",
+            uid: "2",
+            content: "新的评论内容",
+            createTime: 1781923900,
+          },
+        },
+      },
+    })
+
+    const result = await publishCircleComment({ postId: 101, content: "  新的评论内容  " })
+
+    expect(uni.request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: "https://xycloud.example.com/v1/comment/comment/add",
+        method: "POST",
+        data: {
+          dataModel: "circle_post",
+          dataId: 101,
+          content: "新的评论内容",
+          pid: 0,
+          tpid: 0,
+        },
+      })
+    )
+    expect(result.content).toBe("新的评论内容")
   })
 })

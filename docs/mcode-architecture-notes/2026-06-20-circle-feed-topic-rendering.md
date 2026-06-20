@@ -25,6 +25,8 @@ The frontend calls the xycloud circle API through `src/services/circle.ts`:
 - `GET /v1/circle/topic/lists`
 - `POST /v1/circle/post/add`
 - `POST /v1/action/action/set`
+- `GET /v1/comment/comment/lists?dataModel=circle_post&dataId=<post id>`
+- `POST /v1/comment/comment/add`
 
 Circle requests use the same xycloud origin resolver as account auth. Runtime
 overrides from `VITE_XYCLOUD_BASE_URL` still take precedence; otherwise the
@@ -34,6 +36,20 @@ Post list responses are normalized to `CirclePost` with `topicIds`,
 `topicTitles`, `topicList`, optional `userTitle`, action counts, and
 `liked/favorited`. Publish sends `content`, optional `title`, direct `topicIds`
 as comma-separated IDs, and optional `images`.
+
+Feed pagination is page based. Initial latest/hot loads request page 1 with
+limit 20. Page pull-down refresh reloads latest and hot from page 1; page
+reach-bottom loads the next page for the active latest/hot tab and appends
+deduplicated posts. The topic tab does not trigger feed pagination.
+
+The comment action opens a bottom `up-popup` panel. The panel reads top-level
+comments from the shared comment module with `dataModel=circle_post`, displays
+up to 10 backend-provided child replies per top-level comment, and uses
+`POST /v1/comment/comment/add` with `pid=0` and `tpid=0` for new top-level
+comments. The backend validates 5-300 characters, so native clients should keep
+the same minimum before enabling send. If the user switches posts while a
+comment request is pending, stale responses must be ignored so they do not
+overwrite the active panel.
 
 ## Backend Shape
 
@@ -67,6 +83,7 @@ optional `userTitle`. Use three top tabs for latest, hot, and topics, then show
 the selected feed/topic content immediately below the tab bar. Render the title
 chip after the username with `userTitle.bgColor`. Hide the publish title input
 until body length is greater than 200, and hide feed titles when trimmed title is
-empty. Resolve circle API requests through the same origin setting used for
+empty. Support pull-down refresh and reach-bottom pagination for latest/hot
+feeds. Resolve circle API requests through the same origin setting used for
 account APIs, defaulting to `https://getmcode.lingyun.net/api` when no
 environment or app-config override is present.

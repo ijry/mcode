@@ -43,7 +43,7 @@
       "style": {
         "navigationStyle": "custom",
         "navigationBarTitleText": "圈子",
-        "enablePullDownRefresh": false
+        "enablePullDownRefresh": true
       }
     },
     {

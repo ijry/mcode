@@ -12,7 +12,7 @@
       <u-icon name="arrow-right" :color="upThemeVar('--up-light-color', '#c0c4cc')" size="20"></u-icon>
     </view>
 
-    <view class="achievement-entry" @click="goToAchievement">
+    <view v-if="showAchievementEntry" class="achievement-entry" @click="goToAchievement">
       <view class="achievement-entry__copy">
         <text class="achievement-entry__eyebrow">ACHIEVEMENT</text>
         <text class="achievement-entry__title">成就中心</text>
@@ -131,7 +131,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted } from "vue"
+import { computed, ref, onMounted, watch } from "vue"
 import { applyThemePreference, getCurrentThemePreference, type ThemePreference } from "@/services/theme"
 import { usePetStore } from "@/stores/pet"
 import { usePetEngine } from "@/services/petEngine"
@@ -161,6 +161,7 @@ const achievementEntry = ref<AchievementEntrySummary>({
   highlightText: "",
   percentile: 0,
 })
+const achievementEntryLoaded = ref(false)
 const themeActions = [
   { name: "跟随系统", value: "system" },
   { name: "浅色", value: "light" },
@@ -177,14 +178,32 @@ const themeLabel = computed(() => {
 const isLoggedIn = computed(() => account.isLoggedIn)
 const displayName = computed(() => account.userInfo?.name || "未登录")
 const displayEmail = computed(() => account.userInfo?.email || "点击登录 / 注册")
+const loggedInUserId = computed(() => normalizeUserId(account.userInfo?.id))
+const showAchievementEntry = computed(() => isLoggedIn.value && loggedInUserId.value === 3)
 
 onMounted(async () => {
   loadThemePreference()
-  await loadAchievementEntry()
 })
+
+watch(showAchievementEntry, (enabled) => {
+  if (!enabled) {
+    achievementEntryLoaded.value = false
+    return
+  }
+  loadAchievementEntryOnce()
+}, { immediate: true })
 
 function loadThemePreference() {
   themePreference.value = getCurrentThemePreference()
+}
+
+function normalizeUserId(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return Math.trunc(value)
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) return Math.trunc(parsed)
+  }
+  return 0
 }
 
 async function loadAchievementEntry() {
@@ -193,6 +212,12 @@ async function loadAchievementEntry() {
   } catch (error) {
     console.warn("load achievement entry failed", error)
   }
+}
+
+async function loadAchievementEntryOnce() {
+  if (achievementEntryLoaded.value) return
+  achievementEntryLoaded.value = true
+  await loadAchievementEntry()
 }
 
 function handleThemeSelect(action: { value?: string }) {

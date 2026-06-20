@@ -40,6 +40,20 @@ export interface CirclePost {
   timeText: string
 }
 
+export interface CircleComment {
+  id: string
+  uid: number
+  author: string
+  avatar: string
+  avatarText: string
+  content: string
+  createTime: number
+  timeText: string
+  replyCount: number
+  likeCount: number
+  children: CircleComment[]
+}
+
 export interface CirclePostListResult {
   posts: CirclePost[]
   topics: CircleTopic[]
@@ -50,6 +64,13 @@ export interface CirclePostListResult {
 
 export interface CircleTopicListResult {
   topics: CircleTopic[]
+  total: number
+  page: number
+  limit: number
+}
+
+export interface CircleCommentListResult {
+  comments: CircleComment[]
   total: number
   page: number
   limit: number
@@ -144,6 +165,43 @@ export async function toggleCircleAction(postId: number, actionType: 1 | 2): Pro
   return toNumber(record.currentValue) === 1
 }
 
+export async function fetchCircleComments(params: {
+  postId: number
+  page?: number
+  limit?: number
+}): Promise<CircleCommentListResult> {
+  const data = await requestCircle("GET", "/v1/comment/comment/lists", undefined, {
+    dataModel: "circle_post",
+    dataId: params.postId,
+    page: params.page || 1,
+    limit: params.limit || 20,
+    sortBy: "createTime desc",
+  })
+  const payload = normalizeRecord(data)
+  const pageInfo = normalizeRecord(payload.dataPage)
+  return {
+    comments: normalizeArray(payload.dataList).map(normalizeComment),
+    total: toNumber(pageInfo.total),
+    page: toNumber(pageInfo.page) || params.page || 1,
+    limit: toNumber(pageInfo.limit) || params.limit || 20,
+  }
+}
+
+export async function publishCircleComment(params: {
+  postId: number
+  content: string
+}): Promise<CircleComment> {
+  const data = await requestCircle("POST", "/v1/comment/comment/add", {
+    dataModel: "circle_post",
+    dataId: params.postId,
+    content: params.content.trim(),
+    pid: 0,
+    tpid: 0,
+  })
+  const record = normalizeRecord(data)
+  return normalizeComment(record.comment || record)
+}
+
 function normalizePost(value: unknown): CirclePost {
   const record = normalizeRecord(value)
   const userInfo = normalizeRecord(record.userInfo)
@@ -172,6 +230,26 @@ function normalizePost(value: unknown): CirclePost {
     favorited: Boolean(record.favorited),
     postTime: toNumber(record.postTime || record.createTime),
     timeText: formatRelativeTime(toNumber(record.postTime || record.createTime)),
+  }
+}
+
+function normalizeComment(value: unknown): CircleComment {
+  const record = normalizeRecord(value)
+  const userInfo = normalizeRecord(record.userInfo)
+  const author = firstString(userInfo.nickname, userInfo.name, `用户${toNumber(record.uid) || ""}`, "匿名用户")
+  const createTime = toNumber(record.createTime)
+  return {
+    id: firstString(record.id) || String(toNumber(record.gid)),
+    uid: toNumber(record.uid),
+    author,
+    avatar: firstString(userInfo.avatar),
+    avatarText: author.slice(0, 1) || "评",
+    content: firstString(record.content),
+    createTime,
+    timeText: formatRelativeTime(createTime),
+    replyCount: toNumber(record.replyCount),
+    likeCount: toNumber(record.zanCount),
+    children: normalizeArray(record.children).map(normalizeComment),
   }
 }
 
