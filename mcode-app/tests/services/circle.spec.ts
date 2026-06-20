@@ -1,0 +1,162 @@
+import { createPinia, setActivePinia } from "pinia"
+
+import {
+  fetchCirclePosts,
+  fetchCircleTopics,
+  publishCirclePost,
+  toggleCircleAction,
+} from "@/services/circle"
+import { XYCLOUD_DEFAULT_BASE_URL } from "@/services/xycloudAuth"
+import { useAccountStore } from "@/stores/account"
+
+describe("circle service", () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    ;(globalThis as any).__XYCLOUD_BASE_URL__ = "https://xycloud.example.com/"
+    uni.clearStorageSync()
+    const account = useAccountStore()
+    account.setSession({
+      token: "Bearer token-1",
+      userInfo: { name: "Ada" },
+    })
+  })
+
+  afterEach(() => {
+    delete (globalThis as any).__XYCLOUD_BASE_URL__
+  })
+
+  it("loads posts from the circle API and normalizes multi-topic data", async () => {
+    uni.request.mockResolvedValue({
+      statusCode: 200,
+      data: {
+        code: 200,
+        msg: "ok",
+        data: {
+          dataList: [
+            {
+              id: "101",
+              uid: "2",
+              title: "",
+              content: "正文",
+              images: "[\"/a.png\"]",
+              topicIdsFormat: [1, 3],
+              topicList: [
+                { id: 1, name: "product", title: "产品共创", postCount: 2, memberCount: 10 },
+                { id: 3, name: "coding", title: "AI 编程现场", postCount: 1, memberCount: 8 },
+              ],
+              userInfo: { nickname: "林屿", avatar: "/avatar.png" },
+              userTitle: { title: "共创官", bgColor: "#2979ff" },
+              likeCount: 12,
+              favoriteCount: 3,
+              commentCount: 4,
+              viewCount: 88,
+              liked: true,
+              favorited: false,
+              postTime: 1781923680,
+            },
+          ],
+          hotTopics: [],
+          dataPage: { total: 1, page: 1, limit: 20 },
+        },
+      },
+    })
+
+    const result = await fetchCirclePosts({ order: "latest", keyword: "AI", topicId: 3, limit: 20 })
+
+    expect(uni.request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: "https://xycloud.example.com/v1/circle/post/lists?order=latest&page=1&limit=20&keyword=AI&topicId=3",
+        method: "GET",
+        header: expect.objectContaining({
+          Authorization: "Bearer token-1",
+        }),
+      })
+    )
+    expect(result.posts[0]).toEqual(
+      expect.objectContaining({
+        id: 101,
+        uid: 2,
+        author: "林屿",
+        avatar: "/avatar.png",
+        title: "",
+        topicIds: [1, 3],
+        topicTitles: ["产品共创", "AI 编程现场"],
+        userTitle: { title: "共创官", bgColor: "#2979ff" },
+        liked: true,
+        favorited: false,
+      })
+    )
+    expect(result.total).toBe(1)
+  })
+
+  it("falls back to the production mcode API domain for circle requests", async () => {
+    delete (globalThis as any).__XYCLOUD_BASE_URL__
+    uni.request.mockResolvedValue({
+      statusCode: 200,
+      data: {
+        code: 200,
+        msg: "ok",
+        data: {
+          dataList: [],
+          dataPage: { total: 0, page: 1, limit: 30 },
+        },
+      },
+    })
+
+    await fetchCircleTopics()
+
+    expect(uni.request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: `${XYCLOUD_DEFAULT_BASE_URL}/v1/circle/topic/lists?page=1&limit=30`,
+        method: "GET",
+      })
+    )
+  })
+
+  it("publishes with optional blank title and direct multi-topic ids", async () => {
+    uni.request.mockResolvedValue({
+      statusCode: 200,
+      data: { code: 200, msg: "ok", data: { id: 120 } },
+    })
+
+    await publishCirclePost({
+      title: "",
+      content: "  只发正文  ",
+      topicIds: [3, 2],
+    })
+
+    expect(uni.request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: "https://xycloud.example.com/v1/circle/post/add",
+        method: "POST",
+        data: {
+          title: "",
+          content: "只发正文",
+          topicIds: "3,2",
+          images: [],
+        },
+      })
+    )
+  })
+
+  it("toggles like and favorite through the shared action endpoint", async () => {
+    uni.request.mockResolvedValue({
+      statusCode: 200,
+      data: { code: 200, msg: "ok", data: { currentValue: 1 } },
+    })
+
+    await expect(toggleCircleAction(101, 2)).resolves.toBe(true)
+
+    expect(uni.request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: "https://xycloud.example.com/v1/action/action/set",
+        method: "POST",
+        data: {
+          dataModel: "circle_post",
+          dataId: 101,
+          actionType: 2,
+        },
+      })
+    )
+  })
+})

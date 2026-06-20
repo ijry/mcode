@@ -22,8 +22,8 @@ export interface CirclePost {
   title: string
   content: string
   images: string[]
-  tags: string[]
-  topic: string
+  topicIds: number[]
+  topicTitles: string[]
   likeCount: number
   commentCount: number
   favoriteCount: number
@@ -53,8 +53,8 @@ export const mockPosts: CirclePost[] = [
     title: "把手机变成 AI 工作台后，最明显的变化是什么？",
     content: "我现在会把碎片时间里的想法先丢到移动端，再回桌面继续执行。关键不是多一个入口，而是上下文能不能稳定接住。",
     images: ["/static/illustrations/connection-ai-coding-hero.svg"],
-    tags: ["远程控制", "工作流", "MCode"],
-    topic: "产品共创",
+    topicIds: [1, 2, 3],
+    topicTitles: ["产品共创", "远程工作流", "AI 编程现场"],
     likeCount: 128,
     commentCount: 24,
     favoriteCount: 36,
@@ -67,11 +67,11 @@ export const mockPosts: CirclePost[] = [
     avatarText: "南",
     role: "全栈工程师",
     time: "48 分钟前",
-    title: "今天用移动端处理了一次线上小故障",
+    title: "",
     content: "连接、会话、待办已经能串起来。圈子如果能沉淀真实案例，会比普通社区更有价值。",
     images: [],
-    tags: ["案例复盘", "移动开发"],
-    topic: "AI 编程现场",
+    topicIds: [3, 2],
+    topicTitles: ["AI 编程现场", "远程工作流"],
     likeCount: 76,
     commentCount: 11,
     favoriteCount: 19,
@@ -87,8 +87,8 @@ export const mockPosts: CirclePost[] = [
     title: "我想要一个产品话题榜，而不是泛泛的信息流",
     content: "榜单可以帮新用户快速知道大家在讨论什么，动态流负责承接深度内容。两者结合会更像产品社区。",
     images: [],
-    tags: ["话题榜", "社区"],
-    topic: "产品共创",
+    topicIds: [1, 2],
+    topicTitles: ["产品共创", "远程工作流"],
     likeCount: 93,
     commentCount: 18,
     favoriteCount: 27,
@@ -101,7 +101,8 @@ export function cloneCirclePosts(): CirclePost[] {
   return mockPosts.map((post) => ({
     ...post,
     images: [...post.images],
-    tags: [...post.tags],
+    topicIds: [...post.topicIds],
+    topicTitles: [...post.topicTitles],
   }))
 }
 

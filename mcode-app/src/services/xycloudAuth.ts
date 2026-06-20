@@ -1,5 +1,5 @@
 const XYCLOUD_BASE_URL_KEY = "__XYCLOUD_BASE_URL__"
-export const XYCLOUD_DEFAULT_BASE_URL = "https://getmcode.lingyun.net"
+export const XYCLOUD_DEFAULT_BASE_URL = "https://getmcode.lingyun.net/api"
 
 export interface XycloudUserInfo {
   name?: string

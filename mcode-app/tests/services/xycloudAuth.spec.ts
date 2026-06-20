@@ -38,7 +38,7 @@ describe("xycloud auth service", () => {
 
     expect(uni.request).toHaveBeenCalledWith(
       expect.objectContaining({
-        url: "https://getmcode.lingyun.net/v1/core/user/login",
+        url: "https://getmcode.lingyun.net/api/v1/core/user/login",
         method: "POST",
         data: { account: "alice", password: "secret" },
       })

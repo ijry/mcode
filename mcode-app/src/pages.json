@@ -47,6 +47,14 @@
       }
     },
     {
+      "path": "pages/circles/publish",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "发布动态",
+        "enablePullDownRefresh": false
+      }
+    },
+    {
       "path": "pages/profile/index",
       "style": {
         "navigationBarTitleText": "我的",
