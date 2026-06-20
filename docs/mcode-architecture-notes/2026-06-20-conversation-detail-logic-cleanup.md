@@ -33,6 +33,8 @@ Draft restore and persistence snapshot shaping is also pure normalization logic.
 
 Runtime presentation helpers now own compact token formatting, queued-draft labels, optimistic attachment text, stoppable runtime status checks, live activity signatures, and network-like error detection. These helpers do not mutate runtime state and should be safe to mirror in native UI layers.
 
+Status presentation helpers now own retry text, network reachability hints, toolbar/banner status state, waiting-state copy, bottom generating copy, and runtime dot labels/classes. The Vue page passes the uview theme resolver into these helpers so color variables still come from `--up-*` runtime theme variables.
+
 ## UI Behavior
 
 There are no template, copy, style, or theme-variable changes. Message rendering still merges adjacent assistant turns the same way, plan-task badges keep the same counts and labels, permission command extraction keeps the same default text, and ask-question answers keep the same submitted payload shape.
@@ -56,5 +58,6 @@ Native clients can mirror these helpers as pure presentation/normalization utili
 - derive remote instance descriptors from stored connection records without mutating auth or storage inside the pure helper
 - restore composer text, queued drafts, attachments, and queue expansion using the same cache, local snapshot, and runtime fallback order
 - compute runtime badges, queue labels, token summaries, optimistic attachment copy, and network-failure hints with side-effect-free presentation helpers
+- derive banner, toolbar, waiting, and generating status copy from runtime status, bridge health, retry state, long-wait timers, and model labels without changing realtime behavior
 
 Do not move ACP connection management, realtime authority, or SQLite calibration into these helpers.
