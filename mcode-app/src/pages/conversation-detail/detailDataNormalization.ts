@@ -1,4 +1,8 @@
 import type { ContentPart, MessageTurn } from "@/types/acp"
+import type {
+  PersistedTurnPartRow,
+  PersistedTurnWithParts,
+} from "@/services/db/repositories/conversationRepository"
 
 export interface UploadedAttachment {
   id: string
@@ -176,6 +180,59 @@ function normalizeContentPart(raw: any): ContentPart | null {
 export function getTurnContentParts(turn: any): ContentPart[] {
   if (turn?.content && Array.isArray(turn.content)) return turn.content as ContentPart[]
   return normalizeContentParts(turn?.content, turn?.blocks)
+}
+
+export function mapPersistedTurnToMessage(turn: PersistedTurnWithParts): MessageTurn {
+  return {
+    id: turn.id,
+    role: turn.role as MessageTurn["role"],
+    timestamp: turn.createdAt,
+    status: (turn.status as MessageTurn["status"] | undefined) || "completed",
+    content: turn.parts
+      .slice()
+      .sort((a, b) => a.partIndex - b.partIndex)
+      .map(mapPersistedPartToContent)
+      .filter(Boolean) as ContentPart[],
+  }
+}
+
+function mapPersistedPartToContent(part: PersistedTurnPartRow): ContentPart | null {
+  try {
+    const payload = JSON.parse(part.payloadJson || "{}") as Record<string, any>
+    if (part.type === "text") {
+      return {
+        type: "text",
+        text: String(payload.text || payload.value || ""),
+      }
+    }
+    if (part.type === "thinking") {
+      return {
+        type: "thinking",
+        thinking: String(payload.thinking || payload.text || payload.value || ""),
+      }
+    }
+    if (part.type === "tool_call") {
+      return {
+        type: "tool_call",
+        tool_call: payload.tool_call || payload,
+      }
+    }
+    if (part.type === "image") {
+      return {
+        type: "image",
+        image: payload.image || payload,
+      }
+    }
+    if (part.type === "plan") {
+      return {
+        type: "plan",
+        plan: payload.plan || payload,
+      }
+    }
+  } catch (error) {
+    console.warn("failed to parse local part payload", error)
+  }
+  return null
 }
 
 export function normalizeAgentType(raw?: string): string {

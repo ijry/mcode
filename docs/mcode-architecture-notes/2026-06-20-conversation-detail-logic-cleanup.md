@@ -19,7 +19,7 @@ The existing detail load order is unchanged:
 5. realtime connection and snapshot hydration
 6. composer config and slash command hydration
 
-The extracted helpers only transform data already owned by the page.
+The extracted helpers only transform data already owned by the page. This now includes local SQLite persisted turn rows: `detailDataNormalization.ts` maps sorted persisted parts into renderable `MessageTurn` content without changing repository queries or storage schema.
 
 ## UI Behavior
 
@@ -39,5 +39,6 @@ Native clients can mirror these helpers as pure presentation/normalization utili
 - split permission descriptions into text and command blocks before display
 - build ask-question responses from a local selection map
 - normalize backend turns, agent aliases, restored drafts, and restored attachments defensively
+- map persisted local turn rows into message parts with stable part-index ordering
 
 Do not move ACP connection management, realtime authority, or SQLite calibration into these helpers.

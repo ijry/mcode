@@ -2,6 +2,7 @@ import {
   cloneDraftQueue,
   firstString,
   getTurnContentParts,
+  mapPersistedTurnToMessage,
   normalizeAgentType,
   normalizeAttachments,
   normalizeContentParts,
@@ -146,5 +147,125 @@ describe("detailDataNormalization", () => {
     const cloned = cloneDraftQueue(drafts)
     cloned[0].attachments[0].name = "changed"
     expect(drafts[0].attachments[0].name).toBe("image.png")
+  })
+
+  it("maps persisted local turn rows into message turns with sorted parts", () => {
+    const message = mapPersistedTurnToMessage({
+      id: "turn-local",
+      conversationId: 7,
+      instanceKey: "instance",
+      dedupeKey: "dedupe",
+      role: "assistant",
+      createdAt: 12345,
+      sortKey: 99,
+      status: null,
+      version: 1,
+      parts: [
+        {
+          id: "part-2",
+          turnId: "turn-local",
+          conversationId: 7,
+          partIndex: 2,
+          type: "tool_call",
+          payloadJson: JSON.stringify({
+            tool_call: {
+              id: "tool-1",
+              name: "TaskList",
+              input: {},
+              status: "completed",
+            },
+          }),
+          updatedAt: 1,
+        },
+        {
+          id: "part-0",
+          turnId: "turn-local",
+          conversationId: 7,
+          partIndex: 0,
+          type: "text",
+          payloadJson: JSON.stringify({ text: "hello" }),
+          updatedAt: 1,
+        },
+        {
+          id: "part-1",
+          turnId: "turn-local",
+          conversationId: 7,
+          partIndex: 1,
+          type: "thinking",
+          payloadJson: JSON.stringify({ thinking: "think" }),
+          updatedAt: 1,
+        },
+        {
+          id: "part-3",
+          turnId: "turn-local",
+          conversationId: 7,
+          partIndex: 3,
+          type: "image",
+          payloadJson: JSON.stringify({ image: { url: "https://image", alt: "image" } }),
+          updatedAt: 1,
+        },
+        {
+          id: "part-4",
+          turnId: "turn-local",
+          conversationId: 7,
+          partIndex: 4,
+          type: "plan",
+          payloadJson: JSON.stringify({ plan: { steps: [{ description: "ship" }] } }),
+          updatedAt: 1,
+        },
+      ],
+    })
+
+    expect(message).toEqual({
+      id: "turn-local",
+      role: "assistant",
+      timestamp: 12345,
+      status: "completed",
+      content: [
+        { type: "text", text: "hello" },
+        { type: "thinking", thinking: "think" },
+        {
+          type: "tool_call",
+          tool_call: {
+            id: "tool-1",
+            name: "TaskList",
+            input: {},
+            status: "completed",
+          },
+        },
+        { type: "image", image: { url: "https://image", alt: "image" } },
+        { type: "plan", plan: { steps: [{ description: "ship" }] } },
+      ],
+    })
+  })
+
+  it("drops malformed persisted part payloads", () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined)
+
+    const message = mapPersistedTurnToMessage({
+      id: "bad-turn",
+      conversationId: 7,
+      instanceKey: "instance",
+      dedupeKey: "dedupe",
+      role: "user",
+      createdAt: 10,
+      sortKey: 10,
+      status: "completed",
+      version: 1,
+      parts: [
+        {
+          id: "bad-part",
+          turnId: "bad-turn",
+          conversationId: 7,
+          partIndex: 0,
+          type: "text",
+          payloadJson: "{bad-json",
+          updatedAt: 1,
+        },
+      ],
+    })
+
+    expect(message.content).toEqual([])
+    expect(warn).toHaveBeenCalledWith("failed to parse local part payload", expect.any(Error))
   })
 })
