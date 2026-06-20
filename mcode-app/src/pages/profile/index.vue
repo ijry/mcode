@@ -362,7 +362,7 @@ function logout() {
 .page {
   min-height: 100vh;
   background-color: var(--up-page-bg-color, var(--up-bg-color, #f3f4f6));
-  padding-bottom: 40rpx;
+  padding: 0 12px 15px 12px;
 }
 
 .user-card {
