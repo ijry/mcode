@@ -176,8 +176,29 @@ const themeLabel = computed(() => {
 })
 
 const isLoggedIn = computed(() => account.isLoggedIn)
-const displayName = computed(() => account.userInfo?.name || "未登录")
-const displayEmail = computed(() => account.userInfo?.email || "点击登录 / 注册")
+const displayName = computed(() => {
+  if (!isLoggedIn.value) return "未登录"
+  return firstAccountText(
+    account.userInfo?.nickname,
+    account.userInfo?.name,
+    account.userInfo?.username,
+    account.userInfo?.account,
+    account.userInfo?.email,
+    account.userInfo?.mobile,
+    "已登录用户"
+  )
+})
+const displayEmail = computed(() => {
+  if (!isLoggedIn.value) return "点击登录 / 注册"
+  return firstAccountText(
+    account.userInfo?.email,
+    account.userInfo?.mobile,
+    account.userInfo?.account,
+    account.userInfo?.username,
+    formatUserId(account.userInfo?.id),
+    "已登录"
+  )
+})
 const loggedInUserId = computed(() => normalizeUserId(account.userInfo?.id))
 const showAchievementEntry = computed(() => isLoggedIn.value && loggedInUserId.value === 3)
 
@@ -204,6 +225,19 @@ function normalizeUserId(value: unknown) {
     if (Number.isFinite(parsed)) return Math.trunc(parsed)
   }
   return 0
+}
+
+function firstAccountText(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value.trim()
+    if (typeof value === "number" && Number.isFinite(value)) return String(Math.trunc(value))
+  }
+  return ""
+}
+
+function formatUserId(value: unknown) {
+  const id = normalizeUserId(value)
+  return id > 0 ? `用户ID：${id}` : ""
 }
 
 async function loadAchievementEntry() {

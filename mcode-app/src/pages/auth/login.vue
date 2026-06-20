@@ -156,9 +156,11 @@ async function submitLogin(payload: XycloudLoginPayload) {
       title: "登录成功",
       icon: "success",
     })
-    uni.switchTab({
-      url: "/pages/profile/index",
-    })
+    setTimeout(() => {
+      uni.switchTab({
+        url: "/pages/profile/index",
+      })
+    }, 250)
   } catch (error) {
     const apiError = error as Partial<XycloudApiError> & { verifyList?: string[] }
     if (apiError?.code === 401003) {

@@ -47,6 +47,13 @@ session normalizer reads token fields from `token`, `accessToken`, or
 `authToken`, and safety verification requirements continue to surface through
 `XycloudApiError.verifyList`.
 
+After login succeeds, the UI must persist the token before navigation and show
+success feedback with `uni.showToast`, not alert/modal APIs. Profile rendering
+uses token presence as the logged-in source of truth. If the backend user info
+does not include an email address, the profile card must fall back to mobile,
+account, username, user ID, or a neutral "已登录" label instead of showing
+"点击登录 / 注册".
+
 ## Native iOS/Android Replication Guidance
 
 Native clients should centralize account API base URL resolution in their
@@ -61,3 +68,7 @@ JSON `POST` bodies, treat `code == 200` as success, normalize token/user-info
 fields from the response data object, and surface server-provided safety
 verification lists so the UI can request email, mobile, authenticator, pay
 password, or password verification when required.
+
+Native profile screens should render the unauthenticated call to action only
+when there is no stored token. A missing email field on an authenticated user is
+not a logout signal.
