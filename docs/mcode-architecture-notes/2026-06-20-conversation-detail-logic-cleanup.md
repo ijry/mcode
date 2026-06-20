@@ -29,6 +29,8 @@ The page-local load helpers preserve the same fallback behavior: local summary/r
 
 Connection resolution preserves the existing direct and relay identity rules: connection keys normalize trailing slashes, direct instance principals prefer inline tokens before token-store fallbacks, and relay principals prefer target id, then refresh token, then access token, then anonymous relay fallback.
 
+Draft restore and persistence snapshot shaping is also pure normalization logic. Restore precedence remains cached view state, local draft snapshot, then persisted runtime JSON; queue expansion still prefers explicit cached/local flags and otherwise opens when restored queued drafts exist.
+
 ## UI Behavior
 
 There are no template, copy, style, or theme-variable changes. Message rendering still merges adjacent assistant turns the same way, plan-task badges keep the same counts and labels, permission command extraction keeps the same default text, and ask-question answers keep the same submitted payload shape.
@@ -50,5 +52,6 @@ Native clients can mirror these helpers as pure presentation/normalization utili
 - map persisted local turn rows into message parts with stable part-index ordering
 - keep screen-level load orchestration explicit: hydrate local cache first, optionally hydrate remote metadata, connect realtime, then apply the live snapshot and slash commands
 - derive remote instance descriptors from stored connection records without mutating auth or storage inside the pure helper
+- restore composer text, queued drafts, attachments, and queue expansion using the same cache, local snapshot, and runtime fallback order
 
 Do not move ACP connection management, realtime authority, or SQLite calibration into these helpers.

@@ -1,14 +1,18 @@
 import {
+  buildConversationDraftSnapshot,
   cloneDraftQueue,
   firstString,
   getTurnContentParts,
+  isConversationDraftSnapshotEmpty,
   mapPersistedTurnToMessage,
   normalizeAgentType,
   normalizeAttachments,
+  normalizeConversationDraftSnapshot,
   normalizeContentParts,
   normalizeDraftQueue,
   normalizeList,
   normalizeTurns,
+  resolveConversationDraftRestoreState,
   safeParseArray,
   toObject,
 } from "@/pages/conversation-detail/detailDataNormalization"
@@ -147,6 +151,99 @@ describe("detailDataNormalization", () => {
     const cloned = cloneDraftQueue(drafts)
     cloned[0].attachments[0].name = "changed"
     expect(drafts[0].attachments[0].name).toBe("image.png")
+  })
+
+  it("normalizes draft snapshots and resolves restore source precedence", () => {
+    const snapshot = normalizeConversationDraftSnapshot({
+      composerText: "local",
+      draftQueue: [{ text: "local draft", status: "sending", attachments: [] }],
+      attachments: [{ kind: "file", url: "https://file" }],
+      queueExpanded: true,
+    }, createId)
+
+    expect(snapshot).toEqual({
+      composerText: "local",
+      draftQueue: [expect.objectContaining({
+        id: "draft-restored-0-stable",
+        text: "local draft",
+        status: "pending",
+      })],
+      attachments: [expect.objectContaining({
+        id: "att-restored-0-stable",
+        kind: "file",
+        url: "https://file",
+      })],
+      queueExpanded: true,
+    })
+
+    const restored = resolveConversationDraftRestoreState({
+      cachedViewState: {
+        composerText: "cached",
+        draftQueue: [{
+          id: "cached-draft",
+          text: "cached draft",
+          attachments: [],
+          status: "pending",
+          createdAt: 1,
+        }],
+        attachments: [],
+        queueExpanded: false,
+      },
+      localSnapshot: snapshot,
+      persistedRuntime: {
+        composerText: "runtime",
+        draftQueueJson: JSON.stringify([{ text: "runtime draft", attachments: [] }]),
+        attachmentsJson: JSON.stringify([{ kind: "image", url: "https://runtime-image" }]),
+      },
+      createId,
+    })
+
+    expect(restored.composerText).toBe("cached")
+    expect(restored.draftQueue[0]).toEqual(expect.objectContaining({ text: "cached draft" }))
+    expect(restored.attachments).toEqual([])
+    expect(restored.queueExpanded).toBe(false)
+
+    const runtimeRestored = resolveConversationDraftRestoreState({
+      persistedRuntime: {
+        composerText: "runtime",
+        draftQueueJson: JSON.stringify([{ text: "runtime draft", attachments: [] }]),
+        attachmentsJson: JSON.stringify([{ kind: "image", url: "https://runtime-image" }]),
+      },
+      createId,
+    })
+
+    expect(runtimeRestored.composerText).toBe("runtime")
+    expect(runtimeRestored.draftQueue[0]).toEqual(expect.objectContaining({ text: "runtime draft" }))
+    expect(runtimeRestored.attachments[0]).toEqual(expect.objectContaining({
+      kind: "image",
+      url: "https://runtime-image",
+    }))
+    expect(runtimeRestored.queueExpanded).toBe(true)
+  })
+
+  it("builds cloned draft snapshots and detects empty snapshots", () => {
+    const source = {
+      composerText: "",
+      draftQueue: [{
+        id: "draft-1",
+        text: "queued",
+        attachments: [{ id: "att-1", kind: "image" as const, url: "https://image", name: "", size: 0, type: "image/png" }],
+        createdAt: 1,
+        status: "pending" as const,
+      }],
+      attachments: [],
+      queueExpanded: true,
+    }
+
+    const snapshot = buildConversationDraftSnapshot(source)
+    snapshot.draftQueue[0].attachments[0].name = "changed"
+    expect(source.draftQueue[0].attachments[0].name).toBe("")
+    expect(isConversationDraftSnapshotEmpty(snapshot)).toBe(false)
+    expect(isConversationDraftSnapshotEmpty({
+      composerText: "",
+      draftQueue: [],
+      attachments: [],
+    })).toBe(true)
   })
 
   it("maps persisted local turn rows into message turns with sorted parts", () => {

@@ -29,6 +29,8 @@ export interface ConversationDraftSnapshot {
   queueExpanded: boolean
 }
 
+export interface ConversationDraftRestoreState extends ConversationDraftSnapshot {}
+
 export type RestoredIdFactory = (prefix: string) => string
 
 export function firstString(...values: unknown[]): string | undefined {
@@ -419,4 +421,73 @@ export function cloneDraftQueue(source: QueuedDraft[]) {
     ...item,
     attachments: cloneAttachments(item.attachments),
   }))
+}
+
+export function normalizeConversationDraftSnapshot(
+  source: unknown,
+  createId: RestoredIdFactory
+): ConversationDraftSnapshot | null {
+  if (!source || typeof source !== "object") return null
+  const record = source as Record<string, unknown>
+  return {
+    composerText: typeof record.composerText === "string" ? record.composerText : "",
+    draftQueue: normalizeDraftQueue(record.draftQueue, createId),
+    attachments: normalizeAttachments(record.attachments, createId),
+    queueExpanded: Boolean(record.queueExpanded),
+  }
+}
+
+export function resolveConversationDraftRestoreState(input: {
+  cachedViewState?: Partial<ConversationDraftSnapshot> | null
+  localSnapshot?: ConversationDraftSnapshot | null
+  persistedRuntime?: {
+    composerText?: string | null
+    draftQueueJson?: string | null
+    attachmentsJson?: string | null
+  } | null
+  createId: RestoredIdFactory
+}): ConversationDraftRestoreState {
+  const sourceComposer =
+    input.cachedViewState?.composerText
+    ?? input.localSnapshot?.composerText
+    ?? input.persistedRuntime?.composerText
+    ?? ""
+  const sourceDraftQueue =
+    input.cachedViewState?.draftQueue
+    ?? input.localSnapshot?.draftQueue
+    ?? safeParseArray(input.persistedRuntime?.draftQueueJson)
+  const sourceAttachments =
+    input.cachedViewState?.attachments
+    ?? input.localSnapshot?.attachments
+    ?? safeParseArray(input.persistedRuntime?.attachmentsJson)
+  const draftQueue = normalizeDraftQueue(sourceDraftQueue, input.createId)
+  const attachments = normalizeAttachments(sourceAttachments, input.createId)
+
+  return {
+    composerText: typeof sourceComposer === "string" ? sourceComposer : "",
+    draftQueue,
+    attachments,
+    queueExpanded:
+      typeof input.cachedViewState?.queueExpanded === "boolean"
+        ? input.cachedViewState.queueExpanded
+        : typeof input.localSnapshot?.queueExpanded === "boolean"
+          ? input.localSnapshot.queueExpanded
+          : draftQueue.length > 0,
+  }
+}
+
+export function buildConversationDraftSnapshot(input: ConversationDraftSnapshot): ConversationDraftSnapshot {
+  return {
+    composerText: input.composerText,
+    draftQueue: cloneDraftQueue(input.draftQueue),
+    attachments: cloneAttachments(input.attachments),
+    queueExpanded: input.queueExpanded,
+  }
+}
+
+export function isConversationDraftSnapshotEmpty(input: Pick<
+  ConversationDraftSnapshot,
+  "composerText" | "draftQueue" | "attachments"
+>) {
+  return input.composerText.length === 0 && input.attachments.length === 0 && input.draftQueue.length === 0
 }

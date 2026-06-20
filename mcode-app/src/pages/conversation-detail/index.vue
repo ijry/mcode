@@ -810,15 +810,15 @@ import {
   type RenderMessageItem,
 } from "./detailMessagePresentation"
 import {
-  cloneAttachments,
-  cloneDraftQueue,
+  buildConversationDraftSnapshot,
   firstString,
   getTurnContentParts,
+  isConversationDraftSnapshotEmpty,
   mapPersistedTurnToMessage,
   normalizeAgentType,
-  normalizeAttachments,
-  normalizeDraftQueue,
+  normalizeConversationDraftSnapshot,
   normalizeList,
+  resolveConversationDraftRestoreState,
   safeParseArray,
   type ConversationDraftSnapshot,
   type QueuedDraft,
@@ -2601,31 +2601,16 @@ function restoreDraftState(
   persistedRuntime: ConversationRuntimeRecord | null
 ) {
   const localSnapshot = readConversationDraftSnapshot()
-  const sourceComposer =
-    cachedViewState?.composerText
-    ?? localSnapshot?.composerText
-    ?? persistedRuntime?.composerText
-    ?? ""
-  const sourceDraftQueue =
-    cachedViewState?.draftQueue
-    ?? localSnapshot?.draftQueue
-    ?? safeParseArray(persistedRuntime?.draftQueueJson)
-  const sourceAttachments =
-    cachedViewState?.attachments
-    ?? localSnapshot?.attachments
-    ?? safeParseArray(persistedRuntime?.attachmentsJson)
-  const restoredDraftQueue = normalizeDraftQueue(sourceDraftQueue, createLocalId)
-  const restoredAttachments = normalizeAttachments(sourceAttachments, createLocalId)
-
-  inputText.value = typeof sourceComposer === "string" ? sourceComposer : ""
-  draftQueue.value = restoredDraftQueue
-  attachments.value = restoredAttachments
-  queueExpanded.value =
-    typeof cachedViewState?.queueExpanded === "boolean"
-      ? cachedViewState.queueExpanded
-      : typeof localSnapshot?.queueExpanded === "boolean"
-        ? localSnapshot.queueExpanded
-      : restoredDraftQueue.length > 0
+  const restored = resolveConversationDraftRestoreState({
+    cachedViewState,
+    localSnapshot,
+    persistedRuntime,
+    createId: createLocalId,
+  })
+  inputText.value = restored.composerText
+  draftQueue.value = restored.draftQueue
+  attachments.value = restored.attachments
+  queueExpanded.value = restored.queueExpanded
   hasRestoredDraftState.value = true
 }
 
@@ -2647,13 +2632,7 @@ function readConversationDraftSnapshot(): ConversationDraftSnapshot | null {
     const raw = uni.getStorageSync(key)
     if (!raw) return null
     const parsed = typeof raw === "string" ? JSON.parse(raw) : raw
-    if (!parsed || typeof parsed !== "object") return null
-    return {
-      composerText: typeof parsed.composerText === "string" ? parsed.composerText : "",
-      draftQueue: normalizeDraftQueue((parsed as Record<string, unknown>).draftQueue, createLocalId),
-      attachments: normalizeAttachments((parsed as Record<string, unknown>).attachments, createLocalId),
-      queueExpanded: Boolean(parsed.queueExpanded),
-    }
+    return normalizeConversationDraftSnapshot(parsed, createLocalId)
   } catch (error) {
     console.warn("restore conversation draft snapshot skipped", error)
     return null
@@ -2663,15 +2642,15 @@ function readConversationDraftSnapshot(): ConversationDraftSnapshot | null {
 function persistConversationDraftSnapshot() {
   const key = buildConversationDraftSnapshotStorageKey()
   if (!key) return
-  if (shouldClearConversationDraftSnapshot()) {
+  const snapshot = buildConversationDraftSnapshot({
+    composerText: inputText.value,
+    draftQueue: draftQueue.value,
+    attachments: attachments.value,
+    queueExpanded: queueExpanded.value,
+  })
+  if (isConversationDraftSnapshotEmpty(snapshot)) {
     uni.removeStorageSync(key)
     return
-  }
-  const snapshot: ConversationDraftSnapshot = {
-    composerText: inputText.value,
-    draftQueue: cloneDraftQueue(draftQueue.value),
-    attachments: cloneAttachments(attachments.value),
-    queueExpanded: queueExpanded.value,
   }
   try {
     uni.setStorageSync(key, JSON.stringify(snapshot))
@@ -2680,13 +2659,15 @@ function persistConversationDraftSnapshot() {
   }
 }
 
-function shouldClearConversationDraftSnapshot() {
-  return inputText.value.length === 0 && attachments.value.length === 0 && draftQueue.value.length === 0
-}
-
 function persistDetailRuntimeState() {
   if (!conversationId.value) return
   persistConversationDraftSnapshot()
+  const draftSnapshot = buildConversationDraftSnapshot({
+    composerText: inputText.value,
+    draftQueue: draftQueue.value,
+    attachments: attachments.value,
+    queueExpanded: queueExpanded.value,
+  })
   cacheStore.persistViewState({
     conversationId: conversationId.value,
     loadedTurnCount: messages.value.length,
@@ -2696,10 +2677,10 @@ function persistDetailRuntimeState() {
     scrollTop: lastMeasuredScrollTop.value || pageScrollTop.value || 0,
     nearBottom: shouldAutoFollowBottom.value,
     anchorMessageId: anchorMessageId.value || undefined,
-    composerText: inputText.value,
-    draftQueue: cloneDraftQueue(draftQueue.value),
-    attachments: cloneAttachments(attachments.value),
-    queueExpanded: queueExpanded.value,
+    composerText: draftSnapshot.composerText,
+    draftQueue: draftSnapshot.draftQueue,
+    attachments: draftSnapshot.attachments,
+    queueExpanded: draftSnapshot.queueExpanded,
   })
   const currentSession = session.value
   void saveDraftState({
