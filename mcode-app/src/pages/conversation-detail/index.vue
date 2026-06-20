@@ -863,6 +863,16 @@ import {
   type DetailStatusState,
 } from "./detailStatusPresentation"
 import {
+  bottomAnchorId,
+  getOldestCursorFromPersistedTurns,
+  messageAnchorId as buildMessageAnchorId,
+  resolveInitialTurnLimit as resolveInitialTurnLimitValue,
+  resolveRenderAnchorId as resolveRenderAnchorIdValue,
+  resolveScrollRestoreAction,
+  restoreHistoryCursorFromCache as restoreHistoryCursorValueFromCache,
+  type HistoryPageCursor,
+} from "./detailScrollState"
+import {
   buildConnectionKey,
   buildDescriptorFromStoredConnection,
   findStoredConnectionByKey as findStoredConnectionInList,
@@ -905,11 +915,6 @@ type ComposerPanelMode = "" | "quick_reply" | "config"
 interface QuickReplyItem {
   label: string
   value: string
-}
-
-interface HistoryPageCursor {
-  sortKey: number
-  id: string
 }
 
 const auth = useAuthStore()
@@ -2303,13 +2308,11 @@ function resolveInitialTurnLimit(
   cachedViewState: ReturnType<typeof cacheStore.restore>,
   currentLoadedCount = 0
 ) {
-  const cachedCount = Number(cachedViewState?.loadedTurnCount || 0)
-  const liveCount = Number(currentLoadedCount || 0)
-  return Math.max(
-    INITIAL_TURN_BATCH,
-    Number.isFinite(cachedCount) ? cachedCount : 0,
-    Number.isFinite(liveCount) ? liveCount : 0
-  )
+  return resolveInitialTurnLimitValue({
+    cachedLoadedTurnCount: cachedViewState?.loadedTurnCount,
+    currentLoadedCount,
+    minimumBatch: INITIAL_TURN_BATCH,
+  })
 }
 
 function summarizeDetailTurns(detail: any) {
@@ -2447,22 +2450,13 @@ function persistDetailRuntimeState() {
   })
 }
 
-function getOldestCursorFromPersistedTurns(turns: PersistedTurnWithParts[]) {
-  if (turns.length === 0) return null
-  const tail = turns[turns.length - 1]
-  const sortKey = Number(tail.sortKey ?? tail.seq ?? tail.createdAt ?? 0)
-  if (!sortKey || !tail.id) return null
-  return { sortKey, id: tail.id }
-}
-
 function restoreHistoryCursorFromCache(
   cachedViewState: ReturnType<typeof cacheStore.restore>
 ): HistoryPageCursor | null {
-  const sortKey = Number(cachedViewState?.oldestLoadedSeq ?? 0)
-  if (!sortKey) return null
-  const firstMessageId = messages.value[0]?.id || ""
-  if (!firstMessageId) return null
-  return { sortKey, id: firstMessageId }
+  return restoreHistoryCursorValueFromCache({
+    oldestLoadedSeq: cachedViewState?.oldestLoadedSeq,
+    firstMessageId: messages.value[0]?.id,
+  })
 }
 
 function ensureHistoryCursorFromLoadedMessages() {
@@ -2584,18 +2578,18 @@ function scrollToBottom(force = false) {
 }
 
 function messageAnchorId(messageId: string) {
-  return `msg-${String(messageId).replace(/[^a-zA-Z0-9_-]/g, "_")}`
+  return buildMessageAnchorId(messageId)
 }
 
 function resolveRenderAnchorId(messageId: string) {
-  const normalized = String(messageId || "").trim()
-  if (!normalized) return ""
-  const matched = renderMessageItems.value.find((item) => item.sourceIds.includes(normalized))
-  return matched?.anchorId || normalized
+  return resolveRenderAnchorIdValue({
+    messageId,
+    items: renderMessageItems.value,
+  })
 }
 
 function getBottomAnchorId() {
-  return "message-list-bottom"
+  return bottomAnchorId()
 }
 
 function setProgrammaticAnchor(messageId: string) {
@@ -2619,18 +2613,14 @@ function restoreScrollState(
   cachedViewState: ReturnType<typeof cacheStore.restore>,
   persistedRuntime: ConversationRuntimeRecord | null
 ) {
-  const cachedNearBottom = cachedViewState?.nearBottom
-  const cachedScrollTop = cachedViewState?.scrollTop
-  const cachedAnchorMessageId = cachedViewState?.anchorMessageId
-  const persistedAnchor = persistedRuntime?.scrollAnchor || ""
-
-  if (!cachedViewState && !persistedAnchor) {
-    scrollToBottom(true)
-    restoredInitialScroll.value = true
-    return
-  }
-
-  if (cachedNearBottom) {
+  const action = resolveScrollRestoreAction({
+    hasCachedViewState: Boolean(cachedViewState),
+    cachedNearBottom: cachedViewState?.nearBottom,
+    cachedScrollTop: cachedViewState?.scrollTop,
+    cachedAnchorMessageId: cachedViewState?.anchorMessageId,
+    persistedAnchor: persistedRuntime?.scrollAnchor,
+  })
+  if (action.type === "bottom") {
     scrollToBottom(true)
     restoredInitialScroll.value = true
     return
@@ -2639,20 +2629,16 @@ function restoreScrollState(
   isRestoringScroll.value = true
   shouldAutoFollowBottom.value = false
 
-  if (typeof cachedScrollTop === "number" && cachedScrollTop > 0) {
-    lastMeasuredScrollTop.value = cachedScrollTop
+  if (action.type === "scrollTop") {
+    lastMeasuredScrollTop.value = action.scrollTop
     nextTick(() => {
       uni.pageScrollTo({
-        scrollTop: cachedScrollTop,
+        scrollTop: action.scrollTop,
         duration: 0,
       })
     })
-  } else if (cachedAnchorMessageId) {
-    setProgrammaticAnchor(resolveRenderAnchorId(cachedAnchorMessageId))
-  } else if (persistedAnchor) {
-    setProgrammaticAnchor(resolveRenderAnchorId(persistedAnchor))
-  } else {
-    scrollToBottom(true)
+  } else if (action.type === "anchor") {
+    setProgrammaticAnchor(resolveRenderAnchorId(action.anchorMessageId))
   }
 
   nextTick(() => {
