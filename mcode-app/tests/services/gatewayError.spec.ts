@@ -29,6 +29,7 @@ describe("gateway error normalization", () => {
   })
 
   it("falls back to explicit HTTP status when no backend message exists", () => {
+    expect(toResponseErrorMessage({}, 423)).toBe("HTTP 423")
     expect(toResponseErrorMessage({ statusCode: 429 }, 429)).toBe("HTTP 429")
     expect(toErrorMessage({ response: { status: 429 } })).toBe("HTTP 429")
     expect(toErrorMessage("429")).toBe("HTTP 429")

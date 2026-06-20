@@ -1,4 +1,5 @@
 const XYCLOUD_BASE_URL_KEY = "__XYCLOUD_BASE_URL__"
+export const XYCLOUD_DEFAULT_BASE_URL = "https://getmcode.lingyun.net"
 
 export interface XycloudUserInfo {
   name?: string
@@ -100,9 +101,10 @@ export function resolveXycloudBaseUrl(): string {
   const runtime = globalThis as Record<string, unknown>
   const stored = runtime[XYCLOUD_BASE_URL_KEY]
   if (typeof stored === "string") {
-    return normalizeBaseUrl(stored)
+    const override = normalizeBaseUrl(stored)
+    if (override) return override
   }
-  return ""
+  return XYCLOUD_DEFAULT_BASE_URL
 }
 
 export async function login(payload: XycloudLoginPayload): Promise<XycloudSession> {

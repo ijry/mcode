@@ -5,6 +5,7 @@ import {
   resolveXycloudBaseUrl,
   sendEmailVerifyCode,
   sendMobileVerifyCode,
+  XYCLOUD_DEFAULT_BASE_URL,
 } from "@/services/xycloudAuth"
 
 describe("xycloud auth service", () => {
@@ -22,6 +23,26 @@ describe("xycloud auth service", () => {
 
   it("normalizes the runtime base url", () => {
     expect(resolveXycloudBaseUrl()).toBe("https://xycloud.example.com")
+  })
+
+  it("falls back to the production account api base url", () => {
+    delete (globalThis as any).__XYCLOUD_BASE_URL__
+
+    expect(resolveXycloudBaseUrl()).toBe(XYCLOUD_DEFAULT_BASE_URL)
+  })
+
+  it("uses the default base url for login when no override is configured", async () => {
+    delete (globalThis as any).__XYCLOUD_BASE_URL__
+
+    await login({ account: "alice", password: "secret" })
+
+    expect(uni.request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: "https://getmcode.lingyun.net/v1/core/user/login",
+        method: "POST",
+        data: { account: "alice", password: "secret" },
+      })
+    )
   })
 
   it("posts login payload to the xycloud login endpoint", async () => {
