@@ -1655,11 +1655,7 @@ onLoad((options: any) => {
     : ""
   routeConnectionKey.value = connectionKey
   routeConnectionContext.value = normalizeStoredConnectionLike(decodeConnectionContext(connectionKey))
-  if (routeConnectionContext.value) {
-    syncAuthByStoredConnection(routeConnectionContext.value)
-  } else if (connectionKey) {
-    syncAuthByConnectionKey(connectionKey)
-  }
+  syncRouteAuthContext()
   if (conversationId.value) {
     void loadDetailProjectEntries()
     loadConversation()
@@ -1674,11 +1670,7 @@ onShow(() => {
   forceRemoteTurnReconcileOnLoad.value = true
   syncDetailBridgeHealth()
   syncLongWaitState()
-  if (routeConnectionContext.value) {
-    syncAuthByStoredConnection(routeConnectionContext.value)
-  } else if (routeConnectionKey.value) {
-    syncAuthByConnectionKey(routeConnectionKey.value)
-  }
+  syncRouteAuthContext()
   void loadDetailProjectEntries()
   void loadConversation().then(() => {
     resumeStuckPromptDetection()
@@ -1937,12 +1929,205 @@ watch(
   }
 )
 
-async function loadConversation() {
+function syncRouteAuthContext() {
   if (routeConnectionContext.value) {
     syncAuthByStoredConnection(routeConnectionContext.value)
-  } else if (routeConnectionKey.value) {
+    return
+  }
+  if (routeConnectionKey.value) {
     syncAuthByConnectionKey(routeConnectionKey.value)
   }
+}
+
+async function hydrateLocalConversationState(input: {
+  instanceKey: string
+  initialTurnLimit: number
+  hasHotRuntime: boolean
+}) {
+  let localSummary: Awaited<ReturnType<typeof getConversationSummaryById>> | null = null
+  let persistedRuntime: ConversationRuntimeRecord | null = null
+  let localTurns: PersistedTurnWithParts[] = []
+  try {
+    await ensureConversationSchema()
+    localSummary = await getConversationSummaryById(input.instanceKey, conversationId.value)
+    syncConversationTitle(localSummary?.title)
+    persistedRuntime = await getRuntime(input.instanceKey, conversationId.value)
+    if (!input.hasHotRuntime) {
+      localTurns = await getNewestTurns(
+        conversationId.value,
+        Math.min(input.initialTurnLimit, INITIAL_TURN_BATCH)
+      )
+    }
+  } catch (error) {
+    console.warn("local conversation hydrate skipped", error)
+  }
+  return {
+    localSummary,
+    persistedRuntime,
+    localTurns,
+  }
+}
+
+function getRemoteConversationSummary(detail: any): Record<string, any> {
+  return detail?.summary && typeof detail.summary === "object" ? detail.summary : {}
+}
+
+function getRemoteConversationMetadata(
+  detail: any,
+  fallbackAgentType?: string,
+  fallbackSessionId?: string
+) {
+  const summary = getRemoteConversationSummary(detail)
+  return {
+    agentType:
+      firstString(detail?.agentType, detail?.agent_type, summary?.agent_type) ||
+      fallbackAgentType ||
+      "claude_code",
+    resumeSessionId:
+      firstString(detail?.sessionId, detail?.session_id, summary?.external_id) ||
+      fallbackSessionId,
+    title: firstString(summary?.title, detail?.title),
+  }
+}
+
+async function fetchRemoteConversationDetail() {
+  const gateway = await getDetailGateway({ refreshAuth: true })
+  return await gateway.call<any>("get_folder_conversation", {
+    conversationId: conversationId.value,
+  })
+}
+
+async function hydrateRemoteConversationMetadata(input: {
+  managed: ReturnType<typeof connectionSessionManager.getByConversationId>
+  instanceKey: string
+  agentType: string
+  resumeSessionId?: string
+  remoteDetail: any
+}) {
+  if (input.managed || input.resumeSessionId || input.remoteDetail) return input
+  try {
+    const remoteDetail = await fetchRemoteConversationDetail()
+    applyRemoteDetailStats(remoteDetail)
+    const metadata = getRemoteConversationMetadata(
+      remoteDetail,
+      input.agentType,
+      input.resumeSessionId
+    )
+    currentAgentType.value = normalizeAgentType(metadata.agentType)
+    syncConversationTitle(metadata.title)
+    await persistConversationDetailSnapshot({
+      instanceKey: input.instanceKey,
+      conversationId: conversationId.value,
+      detail: remoteDetail,
+      fallbackFolderId: folderId.value,
+      persistTurns: false,
+    })
+    return {
+      ...input,
+      remoteDetail,
+      agentType: metadata.agentType,
+      resumeSessionId: metadata.resumeSessionId,
+    }
+  } catch (error) {
+    console.warn("remote conversation metadata hydrate skipped", error)
+    return input
+  }
+}
+
+async function persistInitialRemoteDetail(input: {
+  instanceKey: string
+  detail: any
+}) {
+  try {
+    detailDebugLog("initial-remote-detail", summarizeDetailTurns(input.detail))
+    await persistConversationDetailSnapshot({
+      instanceKey: input.instanceKey,
+      conversationId: conversationId.value,
+      detail: input.detail,
+      fallbackFolderId: folderId.value,
+    })
+  } catch (error) {
+    detailDebugLog("initial-persist-failed", { message: toErrorMessage(error) })
+    console.warn("persist remote conversation detail skipped", error)
+  }
+}
+
+async function loadLiveConversationSnapshot(connectionId?: string) {
+  let snapshot: any = null
+  let snapshotFromConversation = false
+  try {
+    snapshot = await acpApi.acpGetSessionSnapshotByConversation(conversationId.value)
+    snapshotFromConversation = Boolean(snapshot)
+  } catch (error) {
+    console.warn("acp_get_session_snapshot_by_conversation failed", error)
+  }
+  if (!snapshot && connectionId) {
+    try {
+      snapshot = await acpApi.acpGetSessionSnapshot(connectionId)
+    } catch (error) {
+      console.warn("acp_get_session_snapshot failed", error)
+    }
+  }
+  return {
+    snapshot,
+    snapshotFromConversation,
+  }
+}
+
+async function persistLiveSnapshotMetadata(input: {
+  instanceKey: string
+  snapshot: any
+  snapshotFromConversation: boolean
+  resumeSessionId?: string
+  managedExternalId?: string | null
+  agentType: string
+  connectionId?: string
+}) {
+  const snapshotSessionId = firstString(input.snapshot.external_id, input.snapshot.externalId)
+  const trustSnapshotMetadata =
+    Boolean(input.snapshotFromConversation) ||
+    Boolean(input.resumeSessionId) ||
+    Boolean(input.managedExternalId)
+  if (!snapshotSessionId || !trustSnapshotMetadata) return
+  try {
+    await persistConversationDetailSnapshot({
+      instanceKey: input.instanceKey,
+      conversationId: conversationId.value,
+      detail: {
+        session_id: snapshotSessionId,
+        agent_type: input.agentType,
+        summary: {
+          external_id: snapshotSessionId,
+          agent_type: input.agentType,
+        },
+      },
+      fallbackFolderId: folderId.value,
+      fallbackConnectionId: input.connectionId,
+      persistTurns: false,
+    })
+  } catch (error) {
+    console.warn("persist live snapshot metadata skipped", error)
+  }
+}
+
+function hydrateSlashCommandsFromSnapshot(snapshot: any) {
+  const availableCommands = Array.isArray(snapshot?.available_commands)
+    ? snapshot.available_commands
+    : Array.isArray(snapshot?.availableCommands)
+      ? snapshot.availableCommands
+      : []
+  slashCommands.value = availableCommands
+    .filter((item: any) => item && typeof item === "object" && firstString(item.name))
+    .map((item: any) => ({
+      key: `/${firstString(item.name) || ""}`,
+      name: firstString(item.name) || "",
+      desc: firstString(item.description) || "",
+      hint: firstString(item.input_hint),
+    }))
+}
+
+async function loadConversation() {
+  syncRouteAuthContext()
   loading.value = true
   isRestoringScroll.value = false
   restoredInitialScroll.value = false
@@ -1974,22 +2159,14 @@ async function loadConversation() {
     const managed = connectionSessionManager.getByConversationId(conversationId.value)
     const hasHotRuntime = hasRenderableRuntimeState(runtimeSession)
 
-    let localSummary: Awaited<ReturnType<typeof getConversationSummaryById>> | null = null
-    let localTurns: PersistedTurnWithParts[] = []
-    try {
-      await ensureConversationSchema()
-      localSummary = await getConversationSummaryById(instanceKey, conversationId.value)
-      syncConversationTitle(localSummary?.title)
-      persistedRuntime = await getRuntime(instanceKey, conversationId.value)
-      if (!hasHotRuntime) {
-        localTurns = await getNewestTurns(
-          conversationId.value,
-          Math.min(initialTurnLimit, INITIAL_TURN_BATCH)
-        )
-      }
-    } catch (error) {
-      console.warn("local conversation hydrate skipped", error)
-    }
+    const localState = await hydrateLocalConversationState({
+      instanceKey,
+      initialTurnLimit,
+      hasHotRuntime,
+    })
+    const localSummary = localState.localSummary
+    persistedRuntime = localState.persistedRuntime
+    const localTurns = localState.localTurns
 
     const shouldForceRemoteTurnReconcile =
       forceRemoteTurnReconcileOnLoad.value ||
@@ -2005,34 +2182,16 @@ async function loadConversation() {
     currentAgentType.value = normalizeAgentType(agentType)
 
     const hydrateRemoteMetadata = async () => {
-      if (managed || resumeSessionId || remoteDetail) return
-      try {
-        const gateway = await getDetailGateway({ refreshAuth: true })
-        remoteDetail = await gateway.call<any>("get_folder_conversation", {
-          conversationId: conversationId.value,
-        })
-        applyRemoteDetailStats(remoteDetail)
-        const summary = (remoteDetail?.summary && typeof remoteDetail.summary === "object")
-          ? remoteDetail.summary
-          : {}
-        agentType =
-          firstString(remoteDetail?.agentType, remoteDetail?.agent_type, summary?.agent_type) ||
-          agentType
-        resumeSessionId =
-          firstString(remoteDetail?.sessionId, remoteDetail?.session_id, summary?.external_id) ||
-          resumeSessionId
-        currentAgentType.value = normalizeAgentType(agentType)
-        syncConversationTitle(firstString(summary?.title, remoteDetail?.title))
-        await persistConversationDetailSnapshot({
-          instanceKey,
-          conversationId: conversationId.value,
-          detail: remoteDetail,
-          fallbackFolderId: folderId.value,
-          persistTurns: false,
-        })
-      } catch (error) {
-        console.warn("remote conversation metadata hydrate skipped", error)
-      }
+      const hydrated = await hydrateRemoteConversationMetadata({
+        managed,
+        instanceKey,
+        agentType,
+        resumeSessionId,
+        remoteDetail,
+      })
+      agentType = hydrated.agentType
+      resumeSessionId = hydrated.resumeSessionId
+      remoteDetail = hydrated.remoteDetail
     }
 
     if (hasHotRuntime) {
@@ -2055,30 +2214,14 @@ async function loadConversation() {
       void reconcileRemoteTurnsAfterLocalHydrate(runtimeSession, cachedViewState, initialTurnLimit)
     } else {
       await hydrateRemoteMetadata()
-      const gateway = await getDetailGateway({ refreshAuth: true })
-      const result = remoteDetail || await gateway.call<any>("get_folder_conversation", {
-        conversationId: conversationId.value,
-      })
+      const result = remoteDetail || await fetchRemoteConversationDetail()
       applyRemoteDetailStats(result)
-      const summary = (result?.summary && typeof result.summary === "object")
-        ? result.summary
-        : {}
-      syncConversationTitle(firstString(summary?.title, result?.title))
-      agentType = firstString(result?.agentType, result?.agent_type, summary?.agent_type) || "claude_code"
-      resumeSessionId = firstString(result?.sessionId, result?.session_id, summary?.external_id)
+      const metadata = getRemoteConversationMetadata(result)
+      syncConversationTitle(metadata.title)
+      agentType = metadata.agentType
+      resumeSessionId = metadata.resumeSessionId
       currentAgentType.value = normalizeAgentType(agentType)
-      try {
-        detailDebugLog("initial-remote-detail", summarizeDetailTurns(result))
-        await persistConversationDetailSnapshot({
-          instanceKey,
-          conversationId: conversationId.value,
-          detail: result,
-          fallbackFolderId: folderId.value,
-        })
-      } catch (error) {
-        detailDebugLog("initial-persist-failed", { message: toErrorMessage(error) })
-        console.warn("persist remote conversation detail skipped", error)
-      }
+      await persistInitialRemoteDetail({ instanceKey, detail: result })
 
       await refreshSessionTurnsFromDb(runtimeSession, cachedViewState, initialTurnLimit)
       finishInitialLoad(cachedViewState, persistedRuntime)
@@ -2097,65 +2240,22 @@ async function loadConversation() {
     )
     persistDetailRuntimeState()
 
-    let snapshot: any = null
-    let snapshotFromConversation = false
-    try {
-      snapshot = await acpApi.acpGetSessionSnapshotByConversation(conversationId.value)
-      snapshotFromConversation = Boolean(snapshot)
-    } catch (error) {
-      console.warn("acp_get_session_snapshot_by_conversation failed", error)
-    }
-    if (!snapshot && conn.id) {
-      try {
-        snapshot = await acpApi.acpGetSessionSnapshot(conn.id)
-      } catch (error) {
-        console.warn("acp_get_session_snapshot failed", error)
-      }
-    }
+    const { snapshot, snapshotFromConversation } = await loadLiveConversationSnapshot(conn.id)
     if (snapshot) {
-      const snapshotSessionId = firstString(snapshot.external_id, snapshot.externalId)
-      const trustSnapshotMetadata =
-        Boolean(snapshotFromConversation) ||
-        Boolean(resumeSessionId) ||
-        Boolean(managed?.externalId)
-      if (snapshotSessionId && trustSnapshotMetadata) {
-        try {
-          await persistConversationDetailSnapshot({
-            instanceKey,
-            conversationId: conversationId.value,
-            detail: {
-              session_id: snapshotSessionId,
-              agent_type: agentType,
-              summary: {
-                external_id: snapshotSessionId,
-                agent_type: agentType,
-              },
-            },
-            fallbackFolderId: folderId.value,
-            fallbackConnectionId: conn.id,
-            persistTurns: false,
-          })
-        } catch (error) {
-          console.warn("persist live snapshot metadata skipped", error)
-        }
-      }
+      await persistLiveSnapshotMetadata({
+        instanceKey,
+        snapshot,
+        snapshotFromConversation,
+        resumeSessionId,
+        managedExternalId: managed?.externalId,
+        agentType,
+        connectionId: conn.id,
+      })
       runtime.hydrateLiveSnapshot(conversationId.value, snapshot)
       persistDetailRuntimeState()
     }
     await loadDetailAgentConfig()
-    const availableCommands = Array.isArray(snapshot?.available_commands)
-      ? snapshot.available_commands
-      : Array.isArray(snapshot?.availableCommands)
-        ? snapshot.availableCommands
-        : []
-    slashCommands.value = availableCommands
-      .filter((item: any) => item && typeof item === "object" && firstString(item.name))
-      .map((item: any) => ({
-        key: `/${firstString(item.name) || ""}`,
-        name: firstString(item.name) || "",
-        desc: firstString(item.description) || "",
-        hint: firstString(item.input_hint),
-      }))
+    hydrateSlashCommandsFromSnapshot(snapshot)
 
   } catch (error) {
     const message = toErrorMessage(error)
