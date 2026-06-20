@@ -796,8 +796,6 @@ import type {
   AgentOptionsSnapshot,
   PromptInputBlock,
   RealtimeBridgeHealth,
-  ContentPart,
-  MessageTurn,
   PermissionRequest,
   PendingQuestionState,
   QuestionAnswer,
@@ -841,6 +839,16 @@ import {
   type PlanTask,
   type PlanTaskFilter,
 } from "./detailPlanPresentation"
+import {
+  buildLiveActivitySignature,
+  buildOptimisticText,
+  draftSummary,
+  formatQueueTime,
+  formatTokenCountK,
+  isStoppableRuntimeStatus,
+  looksLikeNetworkFailure,
+  queueStatusText,
+} from "./detailRuntimePresentation"
 import {
   buildConnectionKey,
   buildDescriptorFromStoredConnection,
@@ -1195,16 +1203,6 @@ const stats = computed(() => session.value?.stats || {
   totalTokens: 0,
   turnCount: 0,
 })
-
-function formatTokenCountK(value: number) {
-  const normalized = Number(value || 0)
-  if (!Number.isFinite(normalized) || normalized <= 0) return "0"
-  if (normalized < 1000) return "<1K"
-  const kiloValue = normalized / 1000
-  if (kiloValue >= 100) return `${Math.round(kiloValue)}K`
-  if (kiloValue >= 10) return `${kiloValue.toFixed(1).replace(/\.0$/, "")}K`
-  return `${kiloValue.toFixed(2).replace(/\.?0+$/, "")}K`
-}
 
 function getViewportHeight() {
   const windowInfo = typeof uni.getWindowInfo === "function" ? uni.getWindowInfo() : uni.getSystemInfoSync?.()
@@ -2422,45 +2420,6 @@ function showStuckSessionPrompt() {
 
 function resumeStuckPromptDetection() {
   handleLiveActivityChange(runtimeStatus.value, conversationActivitySignature.value)
-}
-
-function isStoppableRuntimeStatus(status: string) {
-  return (
-    status === "thinking" ||
-    status === "running_tool" ||
-    status === "waiting_permission" ||
-    status === "waiting_question"
-  )
-}
-
-function buildLiveActivitySignature(parts: ContentPart[]): string {
-  return JSON.stringify((parts || []).map((part) => {
-    if (part.type === "text") return ["text", part.text || ""]
-    if (part.type === "thinking") return ["thinking", part.thinking || ""]
-    if (part.type === "tool_call") {
-      const toolCall = part.tool_call
-      return [
-        "tool_call",
-        toolCall?.id || "",
-        toolCall?.name || "",
-        toolCall?.status || "",
-        JSON.stringify(toolCall?.input || {}),
-        toolCall?.output || "",
-        toolCall?.error || "",
-      ]
-    }
-    if (part.type === "tool_result") {
-      const toolResult = part.tool_result
-      return [
-        "tool_result",
-        toolResult?.tool_call_id || "",
-        toolResult?.output || "",
-        toolResult?.is_error ? "1" : "0",
-      ]
-    }
-    if (part.type === "plan") return ["plan", JSON.stringify(part.plan || {})]
-    return [part.type]
-  }))
 }
 
 async function refreshSessionTurnsFromDb(
@@ -3812,38 +3771,6 @@ async function regenerateLastMessage() {
   }
 }
 
-function draftSummary(item: QueuedDraft): string {
-  const text = item.text.trim()
-  if (text) {
-    if (item.attachments.length > 0) {
-      return `${text}（${item.attachments.length} 个附件）`
-    }
-    return text
-  }
-  return `附件消息（${item.attachments.length} 个）`
-}
-
-function queueStatusText(status: QueuedDraft["status"]): string {
-  if (status === "sending") return "发送中"
-  if (status === "failed") return "失败"
-  return "待发送"
-}
-
-function formatQueueTime(ts: number): string {
-  const date = new Date(ts)
-  const hh = String(date.getHours()).padStart(2, "0")
-  const mm = String(date.getMinutes()).padStart(2, "0")
-  return `${hh}:${mm}`
-}
-
-function buildOptimisticText(text: string, files: UploadedAttachment[]): string {
-  if (files.length === 0) return text
-  const filesLine = files.map((item) => item.name).join("、")
-  const prefix = text.trim()
-  if (!prefix) return `已附文件：${filesLine}`
-  return `${prefix}\n\n已附文件：${filesLine}`
-}
-
 function createLocalId(prefix: string): string {
   sequence.value += 1
   return `${prefix}-${Date.now()}-${sequence.value}`
@@ -3988,30 +3915,6 @@ async function respondToPermission(optionId: string) {
     permissionSubmitting.value = false
     pendingPermissionSubmittingOptionId.value = ""
   }
-}
-
-function looksLikeNetworkFailure(message: string) {
-  const text = message.toLowerCase()
-  return [
-    "network",
-    "timeout",
-    "timed out",
-    "connect",
-    "connection",
-    "socket",
-    "websocket",
-    "fetch",
-    "request",
-    "econn",
-    "unreachable",
-    "refused",
-    "断开",
-    "连接",
-    "超时",
-    "网络",
-    "不可达",
-    "重试",
-  ].some((keyword) => text.includes(keyword))
 }
 
 </script>
