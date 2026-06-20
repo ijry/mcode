@@ -75,9 +75,38 @@
           </view>
         </view>
 
+        <view class="field">
+          <view class="field__label-row">
+            <text class="field__label">图片</text>
+            <text class="field__hint">{{ images.length }}/9</text>
+          </view>
+          <view class="image-picker">
+            <view
+              v-for="(image, index) in images"
+              :key="`${image}-${index}`"
+              class="image-picker__item"
+            >
+              <image class="image-picker__preview" :src="image" mode="aspectFill" />
+              <view class="image-picker__remove" @click="removeImage(index)">
+                <up-icon name="close" size="10" color="#ffffff"></up-icon>
+              </view>
+            </view>
+            <view
+              v-if="images.length < 9"
+              class="image-picker__add"
+              :class="uploadingImages && 'image-picker__add--loading'"
+              @click="chooseImages"
+            >
+              <up-loading-icon v-if="uploadingImages" mode="circle" size="18" :color="upThemeVar('--up-primary', '#2979ff')"></up-loading-icon>
+              <up-icon v-else name="plus" size="20" :color="upThemeVar('--up-primary', '#2979ff')"></up-icon>
+              <text>{{ uploadingImages ? "上传中" : "添加图片" }}</text>
+            </view>
+          </view>
+        </view>
+
         <view class="publish-actions">
-          <up-button type="primary" shape="circle" :loading="submitting" @click="submitPost">
-            {{ submitting ? "发布中..." : "发布" }}
+          <up-button type="primary" shape="circle" :loading="submitting || uploadingImages" @click="submitPost">
+            {{ submitting ? "发布中..." : uploadingImages ? "图片上传中..." : "发布" }}
           </up-button>
         </view>
       </view>
@@ -92,6 +121,7 @@ import { onLoad } from "@dcloudio/uni-app"
 import {
   fetchCircleTopics,
   publishCirclePost,
+  uploadCircleImage,
   type CircleTopic,
 } from "@/services/circle"
 
@@ -99,9 +129,11 @@ const title = ref("")
 const content = ref("")
 const topics = ref<CircleTopic[]>([])
 const selectedTopicIds = ref<number[]>([])
+const images = ref<string[]>([])
 const topicsLoading = ref(false)
 const topicsError = ref("")
 const submitting = ref(false)
+const uploadingImages = ref(false)
 
 const showTitleInput = computed(() => content.value.length > 200)
 const fieldInputStyle = {
@@ -135,10 +167,44 @@ function toggleTopic(topicId: number) {
   selectedTopicIds.value = [...selectedTopicIds.value, topicId]
 }
 
+function chooseImages() {
+  if (uploadingImages.value) return
+  const remaining = Math.max(0, 9 - images.value.length)
+  if (remaining === 0) return
+  uni.chooseImage({
+    count: remaining,
+    sizeType: ["compressed"],
+    sourceType: ["album", "camera"],
+    success: async (res) => {
+      const tempPaths = Array.isArray(res.tempFilePaths) ? res.tempFilePaths : []
+      if (tempPaths.length === 0) return
+      uploadingImages.value = true
+      try {
+        for (const path of tempPaths) {
+          const result = await uploadCircleImage(path)
+          images.value = [...images.value, result.url].slice(0, 9)
+        }
+      } catch (error) {
+        uni.showToast({ title: normalizeErrorMessage(error), icon: "none", duration: 2500 })
+      } finally {
+        uploadingImages.value = false
+      }
+    },
+  })
+}
+
+function removeImage(index: number) {
+  images.value = images.value.filter((_, currentIndex) => currentIndex !== index)
+}
+
 async function submitPost() {
   const normalizedContent = content.value.trim()
   if (!normalizedContent) {
     uni.showToast({ title: "请填写正文", icon: "none" })
+    return
+  }
+  if (uploadingImages.value) {
+    uni.showToast({ title: "图片上传完成后再发布", icon: "none" })
     return
   }
 
@@ -148,6 +214,7 @@ async function submitPost() {
       title: showTitleInput.value ? title.value.trim() : "",
       content: normalizedContent,
       topicIds: selectedTopicIds.value,
+      images: images.value,
     })
     uni.setStorageSync("mcode_circle_should_refresh", "1")
     uni.showToast({ title: "发布成功", icon: "success" })
@@ -332,6 +399,58 @@ function normalizeErrorMessage(error: unknown) {
   border-color: color-mix(in srgb, var(--circle-primary) 42%, transparent);
   background: color-mix(in srgb, var(--circle-primary) 12%, var(--circle-card-bg) 88%);
   color: var(--circle-primary);
+}
+
+.image-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14rpx;
+}
+
+.image-picker__item,
+.image-picker__add {
+  position: relative;
+  width: 156rpx;
+  height: 156rpx;
+  border-radius: 24rpx;
+  overflow: hidden;
+  background: var(--circle-soft-bg);
+}
+
+.image-picker__preview {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.image-picker__remove {
+  position: absolute;
+  top: 8rpx;
+  right: 8rpx;
+  width: 34rpx;
+  height: 34rpx;
+  border-radius: 999rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.58);
+}
+
+.image-picker__add {
+  border: 1rpx dashed color-mix(in srgb, var(--circle-primary) 44%, var(--up-border-color, #dadbde) 56%);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10rpx;
+  color: var(--circle-primary);
+  font-size: 22rpx;
+  font-weight: 700;
+}
+
+.image-picker__add--loading {
+  color: var(--circle-tips);
 }
 
 .publish-actions {

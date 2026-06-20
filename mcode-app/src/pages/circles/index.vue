@@ -109,8 +109,14 @@
               </text>
             </view>
 
-            <view v-if="post.images.length" class="post-card__image-wrap">
-              <image class="post-card__image" :src="post.images[0]" mode="aspectFill" />
+            <view v-if="post.images.length" :class="['post-card__image-grid', post.images.length === 1 && 'post-card__image-grid--single']">
+              <image
+                v-for="(imageUrl, imageIndex) in post.images.slice(0, 9)"
+                :key="`${post.id}-image-${imageIndex}`"
+                class="post-card__image"
+                :src="imageUrl"
+                mode="aspectFill"
+              />
             </view>
 
             <view class="post-card__actions">
@@ -189,47 +195,49 @@
           <text class="comment-panel__post-title">{{ commentPost.title.trim() || commentPost.content.slice(0, 42) }}</text>
         </view>
 
-        <scroll-view class="comment-list" scroll-y @scrolltolower="loadMoreComments">
-          <view v-if="commentsLoading" class="comment-state">
-            <up-loading-icon mode="circle" size="22" :color="upThemeVar('--up-primary', '#2979ff')"></up-loading-icon>
-            <text>加载评论...</text>
-          </view>
-          <view v-else-if="commentsError" class="comment-state comment-state--error">
-            <text>{{ commentsError }}</text>
-            <text class="comment-state__retry" @click="reloadComments">重试</text>
-          </view>
-          <view v-else-if="comments.length === 0" class="comment-state">
-            <text>暂无评论，来发第一条。</text>
-          </view>
-          <view v-else class="comment-items">
-            <view v-for="comment in comments" :key="comment.id" class="comment-item">
-              <view class="comment-item__avatar">
-                <image v-if="comment.avatar" class="comment-item__avatar-image" :src="comment.avatar" mode="aspectFill" />
-                <text v-else>{{ comment.avatarText }}</text>
+        <view class="comment-list-shell">
+          <scroll-view class="comment-list" scroll-y enhanced show-scrollbar @scrolltolower="loadMoreComments">
+            <view v-if="commentsLoading" class="comment-state">
+              <up-loading-icon mode="circle" size="22" :color="upThemeVar('--up-primary', '#2979ff')"></up-loading-icon>
+              <text>加载评论...</text>
+            </view>
+            <view v-else-if="commentsError" class="comment-state comment-state--error">
+              <text>{{ commentsError }}</text>
+              <text class="comment-state__retry" @click="reloadComments">重试</text>
+            </view>
+            <view v-else-if="comments.length === 0" class="comment-state">
+              <text>暂无评论，来发第一条。</text>
+            </view>
+            <view v-else class="comment-items">
+              <view v-for="comment in comments" :key="comment.id" class="comment-item">
+                <view class="comment-item__avatar">
+                  <image v-if="comment.avatar" class="comment-item__avatar-image" :src="comment.avatar" mode="aspectFill" />
+                  <text v-else>{{ comment.avatarText }}</text>
+                </view>
+                <view class="comment-item__body">
+                  <view class="comment-item__meta">
+                    <text class="comment-item__author">{{ comment.author }}</text>
+                    <text class="comment-item__time">{{ comment.timeText }}</text>
+                  </view>
+                  <text class="comment-item__content">{{ comment.content }}</text>
+                  <view v-if="comment.children.length" class="comment-replies">
+                    <text
+                      v-for="reply in comment.children"
+                      :key="reply.id"
+                      class="comment-reply"
+                    >
+                      {{ reply.author }}：{{ reply.content }}
+                    </text>
+                  </view>
+                </view>
               </view>
-              <view class="comment-item__body">
-                <view class="comment-item__meta">
-                  <text class="comment-item__author">{{ comment.author }}</text>
-                  <text class="comment-item__time">{{ comment.timeText }}</text>
-                </view>
-                <text class="comment-item__content">{{ comment.content }}</text>
-                <view v-if="comment.children.length" class="comment-replies">
-                  <text
-                    v-for="reply in comment.children"
-                    :key="reply.id"
-                    class="comment-reply"
-                  >
-                    {{ reply.author }}：{{ reply.content }}
-                  </text>
-                </view>
+              <view class="comment-more">
+                <up-loading-icon v-if="commentsLoadingMore" mode="circle" size="16" :color="upThemeVar('--up-primary', '#2979ff')"></up-loading-icon>
+                <text>{{ commentLoadMoreText }}</text>
               </view>
             </view>
-            <view class="comment-more">
-              <up-loading-icon v-if="commentsLoadingMore" mode="circle" size="16" :color="upThemeVar('--up-primary', '#2979ff')"></up-loading-icon>
-              <text>{{ commentLoadMoreText }}</text>
-            </view>
-          </view>
-        </scroll-view>
+          </scroll-view>
+        </view>
 
         <view class="comment-composer">
           <input
@@ -968,17 +976,29 @@ function formatCompactCount(value: number) {
   font-weight: 700;
 }
 
-.post-card__image-wrap {
+.post-card__image-grid {
   margin-top: 20rpx;
-  border-radius: 26rpx;
-  overflow: hidden;
-  background: var(--circle-soft-bg);
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10rpx;
+}
+
+.post-card__image-grid--single {
+  display: block;
 }
 
 .post-card__image {
   width: 100%;
-  height: 260rpx;
+  height: 188rpx;
+  border-radius: 22rpx;
   display: block;
+  background: var(--circle-soft-bg);
+  overflow: hidden;
+}
+
+.post-card__image-grid--single .post-card__image {
+  height: 360rpx;
+  border-radius: 26rpx;
 }
 
 .post-card__actions {
@@ -1021,12 +1041,12 @@ function formatCompactCount(value: number) {
 }
 
 .comment-panel {
-  min-height: 65vh;
-  max-height: 82vh;
+  height: 82vh;
   padding: 26rpx 26rpx calc(24rpx + env(safe-area-inset-bottom));
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
   background: var(--circle-card-bg);
   color: var(--circle-main);
 }
@@ -1072,10 +1092,15 @@ function formatCompactCount(value: number) {
   color: var(--circle-content);
 }
 
-.comment-list {
+.comment-list-shell {
   flex: 1;
-  height: 1px;
-  min-height: 360rpx;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.comment-list {
+  height: 100%;
+  width: 100%;
 }
 
 .comment-state {

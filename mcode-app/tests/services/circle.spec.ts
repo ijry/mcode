@@ -7,6 +7,7 @@ import {
   publishCircleComment,
   publishCirclePost,
   toggleCircleAction,
+  uploadCircleImage,
 } from "@/services/circle"
 import { XYCLOUD_DEFAULT_BASE_URL } from "@/services/xycloudAuth"
 import { useAccountStore } from "@/stores/account"
@@ -115,7 +116,7 @@ describe("circle service", () => {
     )
   })
 
-  it("publishes with optional blank title and direct multi-topic ids", async () => {
+  it("publishes with optional blank title, direct multi-topic ids, and image urls", async () => {
     uni.request.mockResolvedValue({
       statusCode: 200,
       data: { code: 200, msg: "ok", data: { id: 120 } },
@@ -125,6 +126,7 @@ describe("circle service", () => {
       title: "",
       content: "  只发正文  ",
       topicIds: [3, 2],
+      images: ["https://cdn.example.com/a.png", "https://cdn.example.com/b.png"],
     })
 
     expect(uni.request).toHaveBeenCalledWith(
@@ -135,10 +137,45 @@ describe("circle service", () => {
           title: "",
           content: "只发正文",
           topicIds: "3,2",
-          images: [],
+          images: ["https://cdn.example.com/a.png", "https://cdn.example.com/b.png"],
         },
       })
     )
+  })
+
+  it("uploads circle images through the shared xycloud upload endpoint", async () => {
+    uni.uploadFile.mockImplementation((options) => {
+      options.success({
+        statusCode: 200,
+        data: JSON.stringify({
+          code: 200,
+          msg: "ok",
+          data: {
+            url: "https://cdn.example.com/a.png",
+            path: "/storage/a.png",
+            name: "a.png",
+          },
+        }),
+      })
+    })
+
+    const result = await uploadCircleImage("/tmp/a.png")
+
+    expect(uni.uploadFile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: "https://xycloud.example.com/v1/core/index/upload",
+        filePath: "/tmp/a.png",
+        name: "file",
+        header: {
+          Authorization: "Bearer token-1",
+        },
+      })
+    )
+    expect(result).toEqual({
+      url: "https://cdn.example.com/a.png",
+      path: "/storage/a.png",
+      name: "a.png",
+    })
   })
 
   it("toggles like and favorite through the shared action endpoint", async () => {

@@ -83,6 +83,12 @@ export interface CirclePublishPayload {
   images?: string[]
 }
 
+export interface CircleImageUploadResult {
+  url: string
+  path: string
+  name: string
+}
+
 type CircleOrder = "latest" | "hot"
 
 export class CircleApiError extends Error {
@@ -153,6 +159,54 @@ export async function publishCirclePost(payload: CirclePublishPayload): Promise<
   })
   const record = normalizeRecord(data)
   return { id: toNumber(record.id) }
+}
+
+export async function uploadCircleImage(filePath: string): Promise<CircleImageUploadResult> {
+  const account = useAccountStore()
+  const header: Record<string, string> = {}
+  if (account.token) {
+    header.Authorization = account.token
+  }
+
+  const response = await new Promise<{ statusCode?: number; data?: unknown; errMsg?: string }>((resolve, reject) => {
+    uni.uploadFile({
+      url: resolveRequestUrl("/v1/core/index/upload"),
+      filePath,
+      name: "file",
+      header,
+      success: resolve,
+      fail: (error) => reject(new CircleApiError(firstString(error?.errMsg, "图片上传失败"), {
+        code: 0,
+        payload: { filePath },
+        response: error,
+      })),
+    })
+  })
+
+  const statusCode = toNumber(response.statusCode)
+  const body = normalizeRecord(parseUploadResponseData(response.data))
+  const bodyCode = toNumber(body.code || statusCode)
+  if (bodyCode !== 200) {
+    throw new CircleApiError(firstString(body.msg, body.message, response.errMsg, `图片上传失败(${bodyCode})`), {
+      code: bodyCode,
+      payload: { filePath },
+      response,
+    })
+  }
+  const data = normalizeRecord(body.data)
+  const url = firstString(data.url, data.path)
+  if (!url) {
+    throw new CircleApiError("图片上传结果缺少 URL", {
+      code: bodyCode,
+      payload: { filePath },
+      response,
+    })
+  }
+  return {
+    url,
+    path: firstString(data.path),
+    name: firstString(data.name),
+  }
 }
 
 export async function toggleCircleAction(postId: number, actionType: 1 | 2): Promise<boolean> {
@@ -347,6 +401,15 @@ function normalizeRecord(value: unknown): Record<string, any> {
     return value as Record<string, any>
   }
   return {}
+}
+
+function parseUploadResponseData(value: unknown): unknown {
+  if (typeof value !== "string") return value
+  try {
+    return JSON.parse(value)
+  } catch {
+    return {}
+  }
 }
 
 function normalizeArray(value: unknown): unknown[] {

@@ -9,6 +9,8 @@ global.uni = {
   clearStorageSync: jest.fn(() => storage.clear()),
   getWindowInfo: jest.fn(() => ({ windowWidth: 390, windowHeight: 844 })),
   request: jest.fn(),
+  uploadFile: jest.fn(),
+  chooseImage: jest.fn(),
   showToast: jest.fn(),
   createInnerAudioContext: jest.fn(() => ({
     src: '',
@@ -28,6 +30,8 @@ beforeEach(() => {
   global.uni.removeStorageSync.mockClear()
   global.uni.clearStorageSync.mockClear()
   global.uni.request.mockClear()
+  global.uni.uploadFile.mockClear()
+  global.uni.chooseImage.mockClear()
   global.uni.showToast.mockClear()
   global.uni.createInnerAudioContext.mockClear()
 })
