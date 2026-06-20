@@ -772,7 +772,6 @@ import {
   hasRenderableRuntimeState,
   hasVolatileRuntimeState,
 } from "@/services/conversation/runtimeViewState"
-import { buildRemoteInstanceKey } from "@/services/realtime/instance-key"
 import {
   getRegisteredRemoteInstanceDescriptor,
   registerRemoteInstanceDescriptor,
@@ -842,6 +841,13 @@ import {
   type PlanTask,
   type PlanTaskFilter,
 } from "./detailPlanPresentation"
+import {
+  buildConnectionKey,
+  buildDescriptorFromStoredConnection,
+  findStoredConnectionByKey as findStoredConnectionInList,
+  normalizeStoredConnectionLike,
+  type StoredConnectionItem,
+} from "./detailConnectionResolution"
 
 interface UploadQueueItem {
   id: string
@@ -898,19 +904,6 @@ interface PickedLocalFile {
   size: number
   type: string
   kind: "image" | "file"
-}
-
-interface StoredConnectionItem {
-  mode: "direct" | "relay"
-  url: string
-  directToken?: string
-  pairCode?: string
-  pairSecret?: string
-  relaySession?: {
-    accessToken?: string
-    refreshToken?: string
-    targetId?: string
-  }
 }
 
 type ComposerPanelMode = "" | "quick_reply" | "config"
@@ -3718,37 +3711,9 @@ function syncAuthByStoredConnection(matched: StoredConnectionItem) {
   }
 }
 
-function buildConnectionKey(mode: "direct" | "relay", url: string): string {
-  return `${mode}::${String(url || "").trim().replace(/\/+$/, "")}`
-}
-
 function findStoredConnectionByKey(connKey: string) {
-  const saved = (Array.isArray(uni.getStorageSync("mcode_connections"))
-    ? uni.getStorageSync("mcode_connections")
-    : []) as StoredConnectionItem[]
-  return saved.find((item) => buildConnectionKey(item.mode, item.url) === connKey) || null
-}
-
-function normalizeStoredConnectionLike(input: any): StoredConnectionItem | null {
-  if (!input || typeof input !== "object") return null
-  const mode = input.mode === "relay" ? "relay" : input.mode === "direct" ? "direct" : null
-  const url = String(input.url || "").trim()
-  if (!mode || !url) return null
-
-  return {
-    mode,
-    url,
-    directToken: firstString(input.directToken) || undefined,
-    pairCode: firstString(input.pairCode) || undefined,
-    pairSecret: firstString(input.pairSecret) || undefined,
-    relaySession: input.relaySession && typeof input.relaySession === "object"
-      ? {
-          accessToken: firstString(input.relaySession.accessToken) || undefined,
-          refreshToken: firstString(input.relaySession.refreshToken) || undefined,
-          targetId: firstString(input.relaySession.targetId) || undefined,
-        }
-      : undefined,
-  }
+  const saved = uni.getStorageSync("mcode_connections")
+  return findStoredConnectionInList(Array.isArray(saved) ? saved : [], connKey)
 }
 
 function resolveDetailDescriptor(): RemoteInstanceDescriptor {
@@ -3763,7 +3728,9 @@ function resolveDetailDescriptor(): RemoteInstanceDescriptor {
   const stored =
     routeConnectionContext.value ||
     findStoredConnectionByKey(routeConnectionKey.value || detailConnectionKey.value)
-  const fromStored = stored ? buildDescriptorFromStoredConnection(stored) : null
+  const fromStored = stored
+    ? buildDescriptorFromStoredConnection(stored, getDirectToken(stored.url))
+    : null
   if (fromStored) {
     registerRemoteInstanceDescriptor(fromStored)
     return fromStored
@@ -3774,46 +3741,6 @@ function resolveDetailDescriptor(): RemoteInstanceDescriptor {
 
 function resolveDetailInstanceKey() {
   return resolveDetailDescriptor().instanceKey || "anonymous"
-}
-
-function buildDescriptorFromStoredConnection(
-  conn: StoredConnectionItem
-): RemoteInstanceDescriptor | null {
-  const baseUrl = String(conn.url || "").trim().replace(/\/+$/, "")
-  if (!baseUrl) return null
-
-  if (conn.mode === "direct") {
-    const token = firstString(conn.directToken, getDirectToken(conn.url))
-    const principal = token ? `direct:${token.slice(0, 16)}` : "direct:anonymous"
-    return {
-      instanceKey: buildRemoteInstanceKey({
-        mode: "direct",
-        baseUrl,
-        principal,
-      }),
-      mode: "direct",
-      baseUrl,
-      principal,
-      authToken: token || undefined,
-    }
-  }
-
-  const accessToken = firstString(conn.relaySession?.accessToken)
-  const refreshToken = firstString(conn.relaySession?.refreshToken) || undefined
-  const targetId = firstString(conn.relaySession?.targetId)
-  const principal = targetId || refreshToken || accessToken || "relay:anonymous"
-  return {
-    instanceKey: buildRemoteInstanceKey({
-      mode: "relay",
-      baseUrl,
-      principal,
-    }),
-    mode: "relay",
-    baseUrl,
-    principal,
-    authToken: accessToken || undefined,
-    refreshToken,
-  }
 }
 
 async function getDetailGateway(options: { refreshAuth?: boolean } = {}) {
