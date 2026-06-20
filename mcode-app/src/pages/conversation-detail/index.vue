@@ -772,7 +772,7 @@ import { touchHotConversation } from "@/services/conversation/hotConversationCoo
 import {
   hasRenderableRuntimeState,
   hasVolatileRuntimeState,
-} from "@/services/conversation/runtimeViewState.ts"
+} from "@/services/conversation/runtimeViewState"
 import { buildRemoteInstanceKey } from "@/services/realtime/instance-key"
 import {
   getRegisteredRemoteInstanceDescriptor,
@@ -798,7 +798,6 @@ import type {
   AgentOptionsSnapshot,
   PromptInputBlock,
   RealtimeBridgeHealth,
-  ToolCall,
   ContentPart,
   MessageTurn,
   PermissionRequest,
@@ -808,15 +807,41 @@ import type {
 import type { RelaySessionInfo } from "@/services/gateway"
 import type { RemoteInstanceDescriptor } from "@/services/realtime/types"
 import MessageBubble from "@/components/MessageBubble.vue"
-
-interface UploadedAttachment {
-  id: string
-  url: string
-  name: string
-  size: number
-  type: string
-  kind: "image" | "file"
-}
+import {
+  buildRenderMessageItems,
+  type RenderMessageItem,
+} from "./detailMessagePresentation"
+import {
+  cloneAttachments,
+  cloneDraftQueue,
+  firstString,
+  getTurnContentParts,
+  normalizeAgentType,
+  normalizeAttachments,
+  normalizeDraftQueue,
+  normalizeList,
+  safeParseArray,
+  type ConversationDraftSnapshot,
+  type QueuedDraft,
+  type UploadedAttachment,
+} from "./detailDataNormalization"
+import {
+  buildQuestionAnswer as buildPendingQuestionAnswer,
+  createQuestionSelectionState,
+  isQuestionRecommended,
+  isQuestionSelectionAnswered,
+  questionInputValue,
+  questionLabelText,
+  splitPermissionDescription,
+  type QuestionSelectionState,
+} from "./detailInteractionPresentation"
+import {
+  buildPlanFilterItems,
+  buildPlanTasks,
+  taskStatusLabel,
+  type PlanTask,
+  type PlanTaskFilter,
+} from "./detailPlanPresentation"
 
 interface UploadQueueItem {
   id: string
@@ -829,25 +854,9 @@ interface UploadQueueItem {
   error?: string
 }
 
-interface QueuedDraft {
-  id: string
-  text: string
-  attachments: UploadedAttachment[]
-  createdAt: number
-  status: "pending" | "sending" | "failed"
-  error?: string
-}
-
 interface SendAttemptResult {
   started: boolean
   error?: string
-}
-
-interface ConversationDraftSnapshot {
-  composerText: string
-  draftQueue: QueuedDraft[]
-  attachments: UploadedAttachment[]
-  queueExpanded: boolean
 }
 
 interface SlashCommandItem {
@@ -908,13 +917,6 @@ type ComposerPanelMode = "" | "quick_reply" | "config"
 interface QuickReplyItem {
   label: string
   value: string
-}
-
-
-interface QuestionSelectionState {
-  selected: string[]
-  otherActive: boolean
-  otherText: string
 }
 
 interface HistoryPageCursor {
@@ -1025,78 +1027,15 @@ const messages = computed(() => {
   return runtime.getMessages(conversationId.value)
 })
 
-interface RenderMessageItem {
-  key: string
-  anchorId: string
-  sourceIds: string[]
-  message: MessageTurn
-}
-
-const renderMessageItems = computed<RenderMessageItem[]>(() => {
-  if (messages.value.length === 0) return []
-
-  const result: RenderMessageItem[] = []
-  let assistantBuffer: MessageTurn[] = []
-
-  const pushBufferedAssistantMessages = () => {
-    if (assistantBuffer.length === 0) return
-
-    if (assistantBuffer.length === 1) {
-      const single = assistantBuffer[0]
-      result.push({
-        key: single.id,
-        anchorId: single.id,
-        sourceIds: [single.id],
-        message: single,
-      })
-      assistantBuffer = []
-      return
-    }
-
-    const first = assistantBuffer[0]
-    const last = assistantBuffer[assistantBuffer.length - 1]
-    result.push({
-      key: `merged-${first.id}-${last.id}`,
-      anchorId: last.id,
-      sourceIds: assistantBuffer.map((item) => item.id),
-      message: {
-        ...last,
-        id: last.id,
-        content: assistantBuffer.flatMap((item) => cloneRenderContentParts(item.content || [])),
-        timestamp: last.timestamp,
-      },
-    })
-    assistantBuffer = []
-  }
-
-  for (const message of messages.value) {
-    if (message.role === "assistant") {
-      assistantBuffer.push(message)
-      continue
-    }
-
-    pushBufferedAssistantMessages()
-    result.push({
-      key: message.id,
-      anchorId: message.id,
-      sourceIds: [message.id],
-      message,
-    })
-  }
-
-  pushBufferedAssistantMessages()
-  return result
-})
+const renderMessageItems = computed<RenderMessageItem[]>(() =>
+  buildRenderMessageItems(messages.value)
+)
 
 const session = computed(() => {
   if (!conversationId.value) return null
   return runtime.getOrCreateSession(conversationId.value)
 })
 const hasBoundConnection = computed(() => Boolean(firstString(session.value?.connectionId)))
-
-function cloneRenderContentParts(parts: ContentPart[]): ContentPart[] {
-  return JSON.parse(JSON.stringify(parts || [])) as ContentPart[]
-}
 
 const managedConversation = computed(() => {
   if (!conversationId.value) return null
@@ -1680,48 +1619,14 @@ function getSlashCommandDesc(item: SlashCommandItem) {
   return slashCommandDescMap[commandName] || item.desc || item.hint || ""
 }
 
-type PlanTaskStatus = "pending" | "in_progress" | "completed" | "failed"
-interface PlanTask {
-  id: string
-  subject: string
-  description?: string
-  status: PlanTaskStatus
-  order: number
-}
-type PlanTaskFilter = "all" | PlanTaskStatus
 const planStatusFilter = ref<PlanTaskFilter>("all")
 
-const planTasks = computed<PlanTask[]>(() => {
-  const taskMap = new Map<string, PlanTask>()
-  let order = 0
-
-  const nextOrder = () => {
-    order += 1
-    return order
-  }
-
-  for (const msg of messages.value) {
-    getTurnContentParts(msg).forEach((part, partIndex) => {
-      if (part.type === "plan" && part.plan) {
-        mergeTaskFromPlanPart(taskMap, part.plan, nextOrder, `${msg.id}-${partIndex}`)
-        return
-      }
-      if (part.type === "tool_call" && part.tool_call) {
-        mergeTaskFromToolCall(taskMap, part.tool_call, nextOrder)
-      }
-    })
-  }
-
-  if (taskMap.size === 0) {
-    ;(session.value?.liveMessage?.content || []).forEach((part, partIndex) => {
-      if (part.type === "plan" && part.plan) {
-        mergeTaskFromPlanPart(taskMap, part.plan, nextOrder, `live-${partIndex}`)
-      }
-    })
-  }
-
-  return Array.from(taskMap.values()).sort((a, b) => a.order - b.order)
-})
+const planTasks = computed<PlanTask[]>(() =>
+  buildPlanTasks({
+    messages: messages.value,
+    liveContent: session.value?.liveMessage?.content || [],
+  })
+)
 
 const completedTaskCount = computed(
   () => planTasks.value.filter((task) => task.status === "completed").length
@@ -1739,15 +1644,7 @@ const showScrollToBottomFab = computed(
     !isRestoringScroll.value
 )
 
-const planFilterItems = computed<
-  Array<{ key: PlanTaskFilter; label: string; count: number }>
->(() => [
-  { key: "all", label: "全部", count: planTasks.value.length },
-  { key: "in_progress", label: "进行中", count: countByStatus("in_progress") },
-  { key: "pending", label: "待处理", count: countByStatus("pending") },
-  { key: "completed", label: "已完成", count: countByStatus("completed") },
-  { key: "failed", label: "失败", count: countByStatus("failed") },
-])
+const planFilterItems = computed(() => buildPlanFilterItems(planTasks.value))
 
 onLoad((options: any) => {
   conversationId.value = Number(options.id || 0)
@@ -2624,8 +2521,8 @@ function restoreDraftState(
     cachedViewState?.attachments
     ?? localSnapshot?.attachments
     ?? safeParseArray(persistedRuntime?.attachmentsJson)
-  const restoredDraftQueue = normalizeDraftQueue(sourceDraftQueue)
-  const restoredAttachments = normalizeAttachments(sourceAttachments)
+  const restoredDraftQueue = normalizeDraftQueue(sourceDraftQueue, createLocalId)
+  const restoredAttachments = normalizeAttachments(sourceAttachments, createLocalId)
 
   inputText.value = typeof sourceComposer === "string" ? sourceComposer : ""
   draftQueue.value = restoredDraftQueue
@@ -2637,20 +2534,6 @@ function restoreDraftState(
         ? localSnapshot.queueExpanded
       : restoredDraftQueue.length > 0
   hasRestoredDraftState.value = true
-}
-
-function safeParseArray(value?: string | null) {
-  if (!value) return []
-  try {
-    const parsed = JSON.parse(value)
-    return Array.isArray(parsed) ? parsed : []
-  } catch {
-    return []
-  }
-}
-
-function normalizeList(input: unknown): any[] {
-  return Array.isArray(input) ? input : []
 }
 
 interface DetailProjectEntry {
@@ -2674,8 +2557,8 @@ function readConversationDraftSnapshot(): ConversationDraftSnapshot | null {
     if (!parsed || typeof parsed !== "object") return null
     return {
       composerText: typeof parsed.composerText === "string" ? parsed.composerText : "",
-      draftQueue: normalizeDraftQueue((parsed as Record<string, unknown>).draftQueue),
-      attachments: normalizeAttachments((parsed as Record<string, unknown>).attachments),
+      draftQueue: normalizeDraftQueue((parsed as Record<string, unknown>).draftQueue, createLocalId),
+      attachments: normalizeAttachments((parsed as Record<string, unknown>).attachments, createLocalId),
       queueExpanded: Boolean(parsed.queueExpanded),
     }
   } catch (error) {
@@ -2706,62 +2589,6 @@ function persistConversationDraftSnapshot() {
 
 function shouldClearConversationDraftSnapshot() {
   return inputText.value.length === 0 && attachments.value.length === 0 && draftQueue.value.length === 0
-}
-
-function normalizeAttachments(source: unknown): UploadedAttachment[] {
-  if (!Array.isArray(source)) return []
-  return source
-    .map((item, index) => normalizeAttachment(item, index))
-    .filter(Boolean) as UploadedAttachment[]
-}
-
-function normalizeAttachment(source: unknown, index: number): UploadedAttachment | null {
-  if (!source || typeof source !== "object") return null
-  const record = source as Record<string, unknown>
-  const kind = record.kind === "image" ? "image" : record.kind === "file" ? "file" : null
-  const url = typeof record.url === "string" ? record.url : ""
-  if (!kind || !url) return null
-  return {
-    id: typeof record.id === "string" && record.id ? record.id : createLocalId(`att-restored-${index}`),
-    url,
-    name: typeof record.name === "string" ? record.name : "",
-    size: Number(record.size || 0),
-    type: typeof record.type === "string" ? record.type : "application/octet-stream",
-    kind,
-  }
-}
-
-function normalizeDraftQueue(source: unknown): QueuedDraft[] {
-  if (!Array.isArray(source)) return []
-  return source
-    .map((item, index) => normalizeDraft(item, index))
-    .filter(Boolean) as QueuedDraft[]
-}
-
-function normalizeDraft(source: unknown, index: number): QueuedDraft | null {
-  if (!source || typeof source !== "object") return null
-  const record = source as Record<string, unknown>
-  const rawStatus = record.status === "failed" ? "failed" : record.status === "sending" ? "sending" : "pending"
-  const status: QueuedDraft["status"] = rawStatus === "sending" ? "pending" : rawStatus
-  return {
-    id: typeof record.id === "string" && record.id ? record.id : createLocalId(`draft-restored-${index}`),
-    text: typeof record.text === "string" ? record.text : "",
-    attachments: normalizeAttachments(record.attachments),
-    createdAt: Number(record.createdAt || Date.now()),
-    status,
-    error: status === "failed" && typeof record.error === "string" ? record.error : undefined,
-  }
-}
-
-function cloneAttachments(source: UploadedAttachment[]) {
-  return source.map((item) => ({ ...item }))
-}
-
-function cloneDraftQueue(source: QueuedDraft[]) {
-  return source.map((item) => ({
-    ...item,
-    attachments: cloneAttachments(item.attachments),
-  }))
 }
 
 function persistDetailRuntimeState() {
@@ -4068,16 +3895,7 @@ function createLocalId(prefix: string): string {
 }
 
 function resetQuestionSelections() {
-  const pending = pendingQuestionCard.value
-  const next: Record<string, QuestionSelectionState> = {}
-  for (const question of pending?.questions || []) {
-    next[question.id] = {
-      selected: [],
-      otherActive: false,
-      otherText: "",
-    }
-  }
-  askQuestionSelections.value = next
+  askQuestionSelections.value = createQuestionSelectionState(pendingQuestionCard.value)
 }
 
 function questionSelection(questionId: string): QuestionSelectionState {
@@ -4104,11 +3922,7 @@ function isQuestionOtherActive(questionId: string) {
 }
 
 function isQuestionAnswered(questionId: string) {
-  const selection = questionSelection(questionId)
-  return (
-    selection.selected.length > 0 ||
-    (selection.otherActive && Boolean(selection.otherText.trim()))
-  )
+  return isQuestionSelectionAnswered(questionSelection(questionId))
 }
 
 function toggleQuestionOption(question: PendingQuestionState["questions"][number], label: string) {
@@ -4145,10 +3959,7 @@ function toggleQuestionOther(question: PendingQuestionState["questions"][number]
 }
 
 function setQuestionOtherText(questionId: string, event: unknown) {
-  const value =
-    typeof event === "string"
-      ? event
-      : firstString((event as any)?.detail?.value, (event as any)?.target?.value) || ""
+  const value = questionInputValue(event)
   const current = questionSelection(questionId)
   askQuestionSelections.value = {
     ...askQuestionSelections.value,
@@ -4160,34 +3971,12 @@ function setQuestionOtherText(questionId: string, event: unknown) {
   }
 }
 
-function questionLabelText(label: string) {
-  return String(label || "").replace(/\s*\(recommended\)\s*$/i, "").trim() || label
-}
-
-function isQuestionRecommended(label: string) {
-  return /\s*\(recommended\)\s*$/i.test(String(label || "")) && Boolean(questionLabelText(label))
-}
-
 function buildQuestionAnswer(declined: boolean): QuestionAnswer {
-  if (declined) {
-    return { answers: [], declined: true }
-  }
-  const pending = pendingQuestionCard.value
-  return {
-    declined: false,
-    answers: (pending?.questions || []).map((question) => {
-      const selection = questionSelection(question.id)
-      const labels = [...selection.selected]
-      const otherText = selection.otherText.trim()
-      if (selection.otherActive && otherText) {
-        labels.push(otherText)
-      }
-      return {
-        questionId: question.id,
-        labels,
-      }
-    }),
-  }
+  return buildPendingQuestionAnswer(
+    pendingQuestionCard.value,
+    askQuestionSelections.value,
+    declined
+  )
 }
 
 async function answerAskQuestion(declined: boolean) {
@@ -4246,168 +4035,6 @@ async function respondToPermission(optionId: string) {
   }
 }
 
-function mergeTaskFromToolCall(
-  taskMap: Map<string, PlanTask>,
-  toolCall: ToolCall,
-  nextOrder: () => number
-) {
-  const name = normalizeToolName(toolCall.name)
-  if (!name.includes("task") && !name.includes("todo")) return
-
-  const input = (toolCall.input || {}) as Record<string, any>
-
-  if (name === "tasklist" || name === "task_list") {
-    const outputObj = toObject(toolCall.output)
-    const taskList =
-      (outputObj?.tasks as any[]) ||
-      (outputObj?.todos as any[]) ||
-      (outputObj?.list as any[]) ||
-      []
-
-    taskList.forEach((item, index) => {
-      if (!item || typeof item !== "object") return
-      const id = firstString(item.taskId, item.task_id, item.id) || `tasklist-${index}`
-      upsertTask(taskMap, id, nextOrder, {
-        subject:
-          firstString(item.subject, item.title, item.content, item.description) ||
-          `任务 ${index + 1}`,
-        description: firstString(item.description, item.activeForm),
-        status: normalizeTaskStatus(item.status),
-      })
-    })
-    return
-  }
-
-  if (name === "todowrite" && Array.isArray(input.todos)) {
-    input.todos.forEach((item: Record<string, any>, index: number) => {
-      if (!item || typeof item !== "object") return
-      const id = firstString(item.id, item.taskId) || `todo-${index}`
-      upsertTask(taskMap, id, nextOrder, {
-        subject:
-          firstString(item.content, item.subject, item.title, item.description) ||
-          `任务 ${index + 1}`,
-        description: firstString(item.activeForm),
-        status: normalizeTaskStatus(item.status),
-      })
-    })
-    return
-  }
-
-  if (name === "taskcreate" || name === "task_create") {
-    const outputObj = toObject(toolCall.output)
-    const id =
-      firstString(input.taskId, input.task_id, outputObj?.taskId, outputObj?.task_id, outputObj?.id) ||
-      `task-create-${toolCall.id}`
-    upsertTask(taskMap, id, nextOrder, {
-      subject:
-        firstString(input.subject, input.title, input.content, input.description) ||
-        "新任务",
-      description: firstString(input.description, input.activeForm),
-      status: normalizeTaskStatus(input.status || outputObj?.status),
-    })
-    return
-  }
-
-  if (name === "taskupdate" || name === "task_update") {
-    const id =
-      firstString(input.taskId, input.task_id, input.id) || `task-update-${toolCall.id}`
-    upsertTask(taskMap, id, nextOrder, {
-      subject: firstString(input.subject),
-      description: firstString(input.description, input.activeForm),
-      status: normalizeTaskStatus(input.status),
-    })
-  }
-}
-
-function mergeTaskFromPlanPart(
-  taskMap: Map<string, PlanTask>,
-  plan: ContentPart["plan"],
-  nextOrder: () => number,
-  keyPrefix: string
-) {
-  const steps = Array.isArray(plan?.steps) ? plan.steps : []
-  steps.forEach((step, index) => {
-    const subject = firstString(step?.description) || `任务 ${index + 1}`
-    const normalizedKey = normalizePlanStepKey(subject)
-    const id = normalizedKey ? `plan-${normalizedKey}` : `plan-${keyPrefix}-${index}`
-    upsertTask(taskMap, id, nextOrder, {
-      subject,
-      status: step?.completed ? "completed" : "pending",
-    })
-  })
-}
-
-function upsertTask(
-  taskMap: Map<string, PlanTask>,
-  id: string,
-  nextOrder: () => number,
-  patch: Partial<Omit<PlanTask, "id" | "order">>
-) {
-  const existing = taskMap.get(id)
-  if (!existing) {
-    taskMap.set(id, {
-      id,
-      subject: patch.subject || "任务",
-      description: patch.description,
-      status: patch.status || "pending",
-      order: nextOrder(),
-    })
-    return
-  }
-
-  if (patch.subject) existing.subject = patch.subject
-  if (patch.description) existing.description = patch.description
-  if (patch.status) existing.status = patch.status
-}
-
-function normalizeToolName(name?: string): string {
-  return String(name || "").trim().toLowerCase().replace(/[\s_-]/g, "")
-}
-
-function normalizePlanStepKey(value: string): string {
-  return String(value || "")
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-}
-
-function normalizeTaskStatus(value: unknown): PlanTaskStatus {
-  const status = String(value || "").trim().toLowerCase()
-  if (
-    status === "in_progress" ||
-    status === "inprogress" ||
-    status === "running" ||
-    status === "active" ||
-    status === "processing"
-  ) {
-    return "in_progress"
-  }
-  if (
-    status === "completed" ||
-    status === "done" ||
-    status === "success" ||
-    status === "finished"
-  ) {
-    return "completed"
-  }
-  if (
-    status === "failed" ||
-    status === "error" ||
-    status === "cancelled" ||
-    status === "canceled"
-  ) {
-    return "failed"
-  }
-  return "pending"
-}
-
-function firstString(...values: unknown[]): string | undefined {
-  for (const value of values) {
-    if (typeof value === "string" && value.trim()) return value.trim()
-  }
-  return undefined
-}
-
 function looksLikeNetworkFailure(message: string) {
   const text = message.toLowerCase()
   return [
@@ -4432,333 +4059,6 @@ function looksLikeNetworkFailure(message: string) {
   ].some((keyword) => text.includes(keyword))
 }
 
-function toObject(raw: unknown): Record<string, any> | null {
-  if (!raw) return null
-  if (typeof raw === "object") return raw as Record<string, any>
-  if (typeof raw !== "string") return null
-
-  const text = raw.trim()
-  if (!text) return null
-
-  try {
-    const parsed = JSON.parse(text)
-    if (parsed && typeof parsed === "object") return parsed as Record<string, any>
-    return null
-  } catch {
-    return null
-  }
-}
-
-function taskStatusLabel(status: PlanTaskStatus): string {
-  if (status === "in_progress") return "进行中"
-  if (status === "completed") return "已完成"
-  if (status === "failed") return "失败"
-  return "待处理"
-}
-
-function splitPermissionDescription(description: string): {
-  textParts: string[]
-  commandBlock: string
-} {
-  const text = String(description || "").trim()
-  if (!text) {
-    return {
-      textParts: ["智能体请求继续当前操作"],
-      commandBlock: "",
-    }
-  }
-
-  const normalized = text.replace(/\r\n/g, "\n")
-  const lines = normalized
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-
-  const commandLines: string[] = []
-  const textParts: string[] = []
-  let collectingCommand = false
-
-  lines.forEach((line) => {
-    if (looksLikePermissionCommandLine(line)) {
-      collectingCommand = true
-      commandLines.push(stripPermissionCommandPrefix(line))
-      return
-    }
-
-    if (collectingCommand && looksLikeCommandContinuation(line)) {
-      commandLines.push(line)
-      return
-    }
-
-    collectingCommand = false
-    textParts.push(line)
-  })
-
-  if (commandLines.length === 0) {
-    return {
-      textParts: [normalized],
-      commandBlock: "",
-    }
-  }
-
-  return {
-    textParts,
-    commandBlock: commandLines.join("\n"),
-  }
-}
-
-function looksLikePermissionCommandLine(line: string): boolean {
-  if (!line) return false
-  if (/^(command|cmd|命令|执行命令)\s*[:：]/i.test(line)) return true
-  if (line.length >= 72 && /[\\/]/.test(line)) return true
-  if (line.length >= 96 && /--?[a-z0-9]/i.test(line)) return true
-  return false
-}
-
-function looksLikeCommandContinuation(line: string): boolean {
-  if (!line) return false
-  if (/^(>|\\$|#)/.test(line)) return true
-  if (/^(--?[a-z0-9]|\/|\.\.?[\\/])/.test(line)) return true
-  if (line.length >= 48 && /[=\\/]/.test(line)) return true
-  return false
-}
-
-function stripPermissionCommandPrefix(line: string): string {
-  return line.replace(/^(command|cmd|命令|执行命令)\s*[:：]\s*/i, "")
-}
-
-function countByStatus(status: PlanTaskStatus): number {
-  return planTasks.value.filter((task) => task.status === status).length
-}
-
-function normalizeTurns(rawTurns: unknown): MessageTurn[] {
-  if (!Array.isArray(rawTurns)) return []
-  return rawTurns.map((raw, index) => normalizeTurn(raw, index)).filter(Boolean) as MessageTurn[]
-}
-
-function normalizeTurn(raw: any, index: number): MessageTurn | null {
-  if (!raw || typeof raw !== "object") return null
-  const rawRole = String(raw.role || "").toLowerCase()
-  const role = rawRole === "user" ? "user" : "assistant"
-  const content = normalizeContentParts(raw.content, raw.blocks)
-  const id = firstString(raw.id) || `turn-${index}-${Date.now()}`
-  const timestamp =
-    typeof raw.timestamp === "number"
-      ? raw.timestamp
-      : typeof raw.timestamp === "string"
-        ? Date.parse(raw.timestamp) || Date.now()
-      : typeof raw.created_at === "number"
-        ? raw.created_at
-        : Date.now()
-
-  return {
-    id,
-    role,
-    content,
-    timestamp,
-    status: raw.status,
-    error: firstString(raw.error),
-  }
-}
-
-function normalizeContentParts(rawContent: unknown, rawBlocks?: unknown): ContentPart[] {
-  if (Array.isArray(rawBlocks) && rawBlocks.length > 0) {
-    const parts = normalizeBlocks(rawBlocks)
-    if (parts.length > 0) return parts
-  }
-
-  if (Array.isArray(rawContent)) {
-    const hasCodegToolBlocks = rawContent.some((part: any) => {
-      const type = firstString(part?.type)
-      return type === "tool_use" || type === "tool_result"
-    })
-    if (hasCodegToolBlocks) {
-      const parts = normalizeBlocks(rawContent)
-      if (parts.length > 0) return parts
-    }
-    return rawContent
-      .map((part) => normalizeContentPart(part))
-      .filter(Boolean) as ContentPart[]
-  }
-
-  const text = firstString(rawContent)
-  if (text) return [{ type: "text", text }]
-  return []
-}
-
-function normalizeContentPart(raw: any): ContentPart | null {
-  if (!raw || typeof raw !== "object") {
-    const text = firstString(raw)
-    return text ? { type: "text", text } : null
-  }
-
-  const type = firstString(raw.type)
-  if (type === "text") return { type: "text", text: firstString(raw.text) || "" }
-  if (type === "thinking") return { type: "thinking", thinking: firstString(raw.thinking) || "" }
-  if (type === "tool_call" && raw.tool_call && typeof raw.tool_call === "object") {
-    return {
-      type: "tool_call",
-      tool_call: {
-        id: firstString(raw.tool_call.id) || `tool-${Date.now()}`,
-        name: firstString(raw.tool_call.name) || "unknown",
-        input: (raw.tool_call.input && typeof raw.tool_call.input === "object")
-          ? raw.tool_call.input
-          : {},
-        status: raw.tool_call.status,
-        output: firstString(raw.tool_call.output),
-        error: firstString(raw.tool_call.error),
-      },
-    }
-  }
-  if (type === "image" && raw.image && typeof raw.image === "object") {
-    return {
-      type: "image",
-      image: {
-        url: firstString(raw.image.url) || "",
-        alt: firstString(raw.image.alt),
-      },
-    }
-  }
-  if (type === "plan" && raw.plan && typeof raw.plan === "object") {
-    const steps = Array.isArray(raw.plan.steps) ? raw.plan.steps : []
-    return {
-      type: "plan",
-      plan: {
-        steps: steps
-          .map((step: any) => ({
-            description: firstString(step?.description, step?.title, step?.content) || "",
-            completed: Boolean(step?.completed),
-          }))
-          .filter((step: any) => step.description),
-        status: raw.plan.status,
-      },
-    }
-  }
-
-  const text = firstString(raw.text, raw.content, raw.description)
-  return text ? { type: "text", text } : null
-}
-
-function getTurnContentParts(turn: any): ContentPart[] {
-  if (turn?.content && Array.isArray(turn.content)) return turn.content as ContentPart[]
-  return normalizeContentParts(turn?.content, turn?.blocks)
-}
-
-function normalizeAgentType(raw?: string): string {
-  const value = String(raw || "").trim().toLowerCase().replace(/[\s-]/g, "_")
-  if (!value) return "claude_code"
-  if (value === "claudecode") return "claude_code"
-  if (value === "codex_cli") return "codex"
-  if (value === "gemini_cli" || value === "google_gemini" || value === "gemini_code") return "gemini"
-  if (value === "cline_cli") return "cline"
-  if (value === "opencode") return "open_code"
-  if (value === "open_code_cli") return "open_code"
-  if (value === "openclaw") return "open_claw"
-  if (value === "open_claw_cli") return "open_claw"
-  return value
-}
-
-function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
-  const parts: ContentPart[] = []
-  const consumedResultIndexes = new Set<number>()
-
-  for (let index = 0; index < rawBlocks.length; index++) {
-    if (consumedResultIndexes.has(index)) continue
-    const block = rawBlocks[index] as any
-    if (!block || typeof block !== "object") continue
-    const type = firstString(block.type)
-    if (type === "text") {
-      parts.push({ type: "text", text: firstString(block.text) || "" })
-      continue
-    }
-    if (type === "thinking") {
-      parts.push({ type: "thinking", thinking: firstString(block.text) || "" })
-      continue
-    }
-    if (type === "image") {
-      const uri = firstString(block.uri)
-      const data = firstString(block.data)
-      const mime = firstString(block.mime_type) || "image/png"
-      parts.push({
-        type: "image",
-        image: {
-          url: uri || (data ? `data:${mime};base64,${data}` : ""),
-          alt: "image",
-          },
-        })
-        continue
-      }
-    if (type === "tool_use") {
-      const toolUseId = firstString(block.tool_use_id)
-      const inputPreview = firstString(block.input_preview)
-      const nextBlock = rawBlocks[index + 1] as any
-      const canPairByPosition =
-        !toolUseId &&
-        nextBlock &&
-        typeof nextBlock === "object" &&
-        firstString(nextBlock.type) === "tool_result" &&
-        !firstString(nextBlock.tool_use_id)
-      const matchedResult =
-        toolUseId
-          ? rawBlocks.find((candidate: any) =>
-              candidate &&
-              typeof candidate === "object" &&
-              firstString(candidate.type) === "tool_result" &&
-              firstString(candidate.tool_use_id) === toolUseId
-            )
-          : canPairByPosition
-            ? nextBlock
-            : null
-
-      if (canPairByPosition) {
-        consumedResultIndexes.add(index + 1)
-      }
-
-      const output = matchedResult ? firstString(matchedResult.output_preview) || "" : undefined
-      const isError = Boolean(matchedResult?.is_error)
-      parts.push({
-        type: "tool_call",
-        tool_call: {
-          id: toolUseId || `tool-${index}-${Date.now()}`,
-          name: firstString(block.tool_name) || "tool",
-          input: toObject(inputPreview) || {},
-          output,
-          status: matchedResult ? (isError ? "error" : "completed") : "running",
-          error: isError ? output : undefined,
-        },
-      })
-      continue
-    }
-    if (type === "tool_result") {
-      const toolUseId = firstString(block.tool_use_id)
-      const output = firstString(block.output_preview) || ""
-      if (toolUseId) {
-        const matched = [...parts].reverse().find(
-          (part) => part.type === "tool_call" && part.tool_call?.id === toolUseId
-        )
-        if (matched?.tool_call) {
-          matched.tool_call.output = output
-          matched.tool_call.status = block.is_error ? "error" : "completed"
-          if (block.is_error) matched.tool_call.error = output
-          continue
-        }
-      }
-        parts.push({
-          type: "tool_call",
-          tool_call: {
-            id: toolUseId || `tool-${index}-${Date.now()}`,
-            name: "tool_result",
-            input: {},
-            output,
-            status: block.is_error ? "error" : "completed",
-            error: block.is_error ? output : undefined,
-          },
-        })
-      }
-  }
-
-  return parts
-}
 </script>
 
 <style scoped lang="scss">
