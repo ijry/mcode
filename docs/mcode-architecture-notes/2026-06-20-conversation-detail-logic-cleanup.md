@@ -43,6 +43,8 @@ Slash command helpers now own slash trigger detection, filtering, default descri
 
 Draft queue helpers now own queued draft construction, prompt block construction, attachment splitting, prompt-start status checks, and queue-process eligibility. The page still owns realtime connection recovery, PC tab readiness, optimistic runtime mutation, ACP `prompt` calls, watcher lifetimes, toast feedback, and queue mutation side effects.
 
+Attachment upload helpers now own image/file picker payload normalization, upload endpoint/header construction, and uploaded-attachment response shaping. The page still owns platform chooser calls, `uni.uploadFile`, progress mutation, toast feedback, and auth/descriptor lookup.
+
 ## UI Behavior
 
 There are no template, copy, style, or theme-variable changes. Message rendering still merges adjacent assistant turns the same way, plan-task badges keep the same counts and labels, permission command extraction keeps the same default text, and ask-question answers keep the same submitted payload shape.
@@ -71,5 +73,6 @@ Native clients can mirror these helpers as pure presentation/normalization utili
 - keep composer configuration UI derivation pure, then apply selected mode/options through ACP only from the page/controller layer
 - normalize slash commands from live snapshots and update composer text through pure string helpers before assigning it in the screen
 - build prompt input blocks and draft queue decisions in pure helpers, while leaving actual send/retry/runtime mutation in the screen/controller layer
+- normalize picked files and upload responses in pure helpers, while leaving platform file picking and upload tasks in the screen/controller layer
 
 Do not move ACP connection management, realtime authority, or SQLite calibration into these helpers.

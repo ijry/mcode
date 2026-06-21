@@ -897,6 +897,13 @@ import {
   splitDraftAttachments,
 } from "./detailDraftQueue"
 import {
+  buildUploadTarget,
+  buildUploadedAttachment,
+  normalizePickedImages,
+  normalizePickedMessageFiles,
+  type PickedLocalFile,
+} from "./detailAttachmentUpload"
+import {
   buildConnectionKey,
   buildDescriptorFromStoredConnection,
   findStoredConnectionByKey as findStoredConnectionInList,
@@ -918,14 +925,6 @@ interface UploadQueueItem {
 interface SendAttemptResult {
   started: boolean
   error?: string
-}
-
-interface PickedLocalFile {
-  path: string
-  name: string
-  size: number
-  type: string
-  kind: "image" | "file"
 }
 
 type ComposerPanelMode = "" | "quick_reply" | "config"
@@ -3171,17 +3170,9 @@ function chooseImages() {
     sizeType: ["compressed"],
     sourceType: ["album", "camera"],
     success: async (res) => {
-      const tempFiles = Array.isArray(res.tempFiles) ? res.tempFiles : []
-      const tempPaths = Array.isArray(res.tempFilePaths) ? res.tempFilePaths : []
-      const files = tempPaths.map((path: string, index: number) => {
-        const file = tempFiles[index] as { path?: string; size?: number; type?: string; name?: string } | undefined
-        return {
-          path,
-          name: file?.name || path.split("/").pop() || `image-${index + 1}.jpg`,
-          size: Number(file?.size || 0),
-          type: file?.type || "image/jpeg",
-          kind: "image",
-        } satisfies PickedLocalFile
+      const files = normalizePickedImages({
+        tempFilePaths: res.tempFilePaths,
+        tempFiles: res.tempFiles,
       })
       await uploadPickedFiles(files)
     },
@@ -3200,21 +3191,7 @@ function chooseFiles() {
     type: "file",
     extension: [],
     success: async (res: any) => {
-      const tempFiles = Array.isArray(res?.tempFiles) ? res.tempFiles : []
-      const files = tempFiles
-        .map((file: any, index: number) => {
-          const path = firstString(file?.path, file?.tempFilePath)
-          if (!path) return null
-          const name = firstString(file?.name) || path.split("/").pop() || `file-${index + 1}`
-          return {
-            path,
-            name,
-            size: Number(file?.size || 0),
-            type: firstString(file?.type) || "application/octet-stream",
-            kind: "file",
-          } satisfies PickedLocalFile
-        })
-        .filter(Boolean) as PickedLocalFile[]
+      const files = normalizePickedMessageFiles(res?.tempFiles)
 
       if (files.length === 0) {
         uni.showToast({ title: "未选择可用文件", icon: "none" })
@@ -3301,40 +3278,20 @@ async function uploadSingleFile(file: PickedLocalFile, queueId: string): Promise
     })
   })
 
-  const url = firstString(uploadResult.url, uploadResult.path)
-  if (!url) {
-    throw new Error("上传结果缺少 URL")
-  }
-
-  return {
-    id: createLocalId("att"),
-    url,
-    name: firstString(uploadResult.name) || file.name,
-    size: Number(uploadResult.size || file.size || 0),
-    type: file.type,
-    kind: file.kind,
-  }
+  return buildUploadedAttachment({
+    uploadResult,
+    file,
+    createId: createLocalId,
+  })
 }
 
 function resolveUploadTarget(): { url: string; header: Record<string, string> } {
   const descriptor = resolveDetailDescriptor()
-  const base = String(descriptor.baseUrl || "").replace(/\/$/, "")
-  if (!base) {
-    throw new Error("连接地址为空")
-  }
-
-  const header: Record<string, string> = {}
-  if (descriptor.mode === "direct") {
-    const token = firstString(descriptor.authToken, getDirectToken(descriptor.baseUrl))
-    if (token) header.authorization = `Bearer ${token}`
-    return { url: `${base}/api/upload_attachment`, header }
-  }
-
-  const relayToken = firstString(descriptor.authToken, auth.relaySession?.accessToken)
-  if (relayToken) {
-    header.authorization = `Bearer ${relayToken}`
-  }
-  return { url: `${base}/v1/proxy/upload_attachment`, header }
+  return buildUploadTarget({
+    descriptor,
+    directToken: getDirectToken(descriptor.baseUrl),
+    relayToken: auth.relaySession?.accessToken,
+  })
 }
 
 function syncAuthByConnectionKey(connKey: string) {
