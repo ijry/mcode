@@ -18,7 +18,11 @@ interface BuildConversationTimelineInput {
 export function buildConversationTimeline(
   input: BuildConversationTimelineInput
 ): ConversationTimelineTurn[] {
-  const completed = input.localTurns.map((turn, index) => ({
+  const visibleLocalTurns = suppressCoveredTrailingAssistantPartial(
+    input.localTurns,
+    input.liveMessage
+  )
+  const completed = visibleLocalTurns.map((turn, index) => ({
     key: `completed-${input.conversationId}-${turn.id}-${index}`,
     turn,
     phase: "completed" as const,
@@ -78,6 +82,63 @@ export function buildLiveMessageTurnId(
 
 export function dedupeTurnsByRoleAndId(turns: MessageTurn[]): MessageTurn[] {
   return dedupeEntriesByRoleAndId(turns, (turn) => turn)
+}
+
+function suppressCoveredTrailingAssistantPartial(
+  turns: MessageTurn[],
+  liveMessage: LiveMessage | null
+): MessageTurn[] {
+  if (!liveMessage || liveMessage.isPlaceholderThinking) return turns
+  const tail = turns[turns.length - 1]
+  if (!tail || tail.role !== "assistant") return turns
+  if (!isContentPrefix(tail.content, liveMessage.content)) return turns
+  return turns.slice(0, -1)
+}
+
+function isContentPrefix(prefixParts: MessageTurn["content"], fullParts: MessageTurn["content"]) {
+  const prefix = buildContentSignature(prefixParts)
+  const full = buildContentSignature(fullParts)
+  return prefix.length > 0 && full.length >= prefix.length && full.startsWith(prefix)
+}
+
+function buildContentSignature(parts: MessageTurn["content"]) {
+  return parts.map(buildPartSignature).filter(Boolean).join("\n")
+}
+
+function buildPartSignature(part: MessageTurn["content"][number]) {
+  if (part.type === "text") return `text:${part.text || ""}`
+  if (part.type === "thinking") return `thinking:${part.thinking || ""}`
+  if (part.type === "tool_call") {
+    return `tool_call:${stableStringify({
+      id: part.tool_call?.id,
+      name: part.tool_call?.name,
+      input: part.tool_call?.input,
+      status: part.tool_call?.status,
+      output: part.tool_call?.output,
+      error: part.tool_call?.error,
+    })}`
+  }
+  if (part.type === "tool_result") {
+    return `tool_result:${stableStringify(part.tool_result || {})}`
+  }
+  if (part.type === "image") return `image:${part.image?.url || ""}`
+  if (part.type === "plan") return `plan:${stableStringify(part.plan || {})}`
+  return ""
+}
+
+function stableStringify(value: unknown): string {
+  if (value === null || value === undefined) return ""
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringify).join(",")}]`
+  }
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>
+    return `{${Object.keys(record)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`)
+      .join(",")}}`
+  }
+  return JSON.stringify(value) ?? ""
 }
 
 function dedupeEntriesByRoleAndId<T>(

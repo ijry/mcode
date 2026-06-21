@@ -331,6 +331,73 @@ describe('conversationRuntime ACP error handling', () => {
     expect(new Set(assistantIds).size).toBe(assistantIds.length)
   })
 
+  it('suppresses a trailing persisted assistant partial when live content covers it', () => {
+    const store = useConversationRuntimeStore()
+    const session = store.getOrCreateSession(1)
+    session.localTurns = [
+      {
+        id: 'u-current',
+        role: 'user',
+        content: [{ type: 'text', text: 'ask' }],
+        timestamp: 100,
+        status: 'completed',
+      },
+      {
+        id: 'a-partial',
+        role: 'assistant',
+        content: [{ type: 'text', text: 'partial reply' }],
+        timestamp: 110,
+        status: 'completed',
+      },
+    ] as any
+
+    store.setLiveMessage(
+      1,
+      [{ type: 'text', text: 'partial reply with more content' }],
+      true,
+      { id: 'lm-current', timestamp: 105 }
+    )
+
+    expect(store.getMessages(1).map((turn) => turn.id)).toEqual([
+      'u-current',
+      'live-1-lm-current',
+    ])
+  })
+
+  it('keeps a trailing completed assistant when live content does not cover it', () => {
+    const store = useConversationRuntimeStore()
+    const session = store.getOrCreateSession(1)
+    session.localTurns = [
+      {
+        id: 'u-previous',
+        role: 'user',
+        content: [{ type: 'text', text: 'previous ask' }],
+        timestamp: 100,
+        status: 'completed',
+      },
+      {
+        id: 'a-previous',
+        role: 'assistant',
+        content: [{ type: 'text', text: 'previous answer' }],
+        timestamp: 110,
+        status: 'completed',
+      },
+    ] as any
+
+    store.setLiveMessage(
+      1,
+      [{ type: 'text', text: 'new streaming reply' }],
+      true,
+      { id: 'lm-next', timestamp: 200 }
+    )
+
+    expect(store.getMessages(1).map((turn) => turn.id)).toEqual([
+      'u-previous',
+      'a-previous',
+      'live-1-lm-next',
+    ])
+  })
+
   it('does not accumulate duplicate local assistant turns after the same live turn is re-promoted', async () => {
     const store = useConversationRuntimeStore()
 
