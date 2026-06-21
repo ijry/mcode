@@ -869,6 +869,11 @@ import {
   type HistoryPageCursor,
 } from "./detailScrollState"
 import {
+  buildHistoryStatusStyle,
+  buildMessageListPageStyle,
+  buildTopOffsetStyle,
+} from "./detailLayoutPresentation"
+import {
   activeModelStatusLabel as resolveActiveModelStatusLabel,
   detailAgentConfigSelectionPayload,
   detailConfigOptionSummary,
@@ -1059,23 +1064,20 @@ const managedConversation = computed(() => {
   return runtime.getManagedConversation(conversationId.value)
 })
 const messageListPageStyle = computed(() => {
-  const minHeight = Math.max(0, viewportHeight.value - topChromeHeight.value - bottomComposerHeight.value)
-  if (topChromeHeight.value <= 0 && bottomComposerHeight.value <= 0 && minHeight <= 0) return undefined
-  return {
-    paddingTop: `${topChromeHeight.value}px`,
-    paddingBottom: `${bottomComposerHeight.value}px`,
-    minHeight: `${minHeight}px`,
-  }
+  return buildMessageListPageStyle({
+    viewportHeight: viewportHeight.value,
+    topChromeHeight: topChromeHeight.value,
+    bottomComposerHeight: bottomComposerHeight.value,
+  })
 })
-const detailToolbarStyle = computed(() => ({
-  top: `${getNavbarHeight()}px`,
-}))
-const connectingOperationBlockerStyle = computed(() => ({
-  top: `${getNavbarHeight()}px`,
-}))
-const historyStatusStyle = computed(() => ({
-  top: `${getNavbarHeight() + toolbarHeight.value}px`,
-}))
+const detailToolbarStyle = computed(() => buildTopOffsetStyle(getNavbarHeight()))
+const connectingOperationBlockerStyle = computed(() => buildTopOffsetStyle(getNavbarHeight()))
+const historyStatusStyle = computed(() =>
+  buildHistoryStatusStyle({
+    navbarHeight: getNavbarHeight(),
+    toolbarHeight: toolbarHeight.value,
+  })
+)
 
 const detailConnectionKey = computed(() => {
   if (routeConnectionKey.value) {

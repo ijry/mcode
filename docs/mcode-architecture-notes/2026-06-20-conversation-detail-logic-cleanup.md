@@ -37,6 +37,8 @@ Status presentation helpers now own retry text, network reachability hints, tool
 
 Scroll state helpers now own initial turn limit selection, oldest-history cursor derivation, message anchor id normalization, render-anchor resolution for merged assistant turns, and the pure choice of initial scroll restore action. The page still owns DOM measurement, selector queries, and `uni.pageScrollTo` calls.
 
+Layout presentation helpers now own pure page-style object assembly for the message list and fixed top-offset regions. The page still owns actual viewport/navbar measurement, toolbar height reads, and DOM-driven layout recalculation timing.
+
 Composer presentation helpers now own detail composer summaries, active model status labels, config-row expansion decisions, immutable selection updates, persisted-selection payload shaping, and the list of mode/config values that should be applied when a realtime connection appears. The page still owns cache reads/writes, gateway discovery, ACP `set_mode` / `set_config_option` calls, and toast feedback.
 
 Slash command helpers now own slash trigger detection, filtering, default descriptions, composer text insertion, preset passthrough, and snapshot command normalization. The page still owns the composer refs and decides when to show or write command text.
@@ -74,6 +76,7 @@ Native clients can mirror these helpers as pure presentation/normalization utili
 - compute runtime badges, queue labels, token summaries, optimistic attachment copy, and network-failure hints with side-effect-free presentation helpers
 - derive banner, toolbar, waiting, and generating status copy from runtime status, bridge health, retry state, long-wait timers, and model labels without changing realtime behavior
 - choose history cursors and restore-scroll targets in pure helpers, then execute actual page scrolling in the Vue screen layer
+- build message-list padding/min-height styles and fixed top offsets in pure helpers, then feed them with measured viewport/navbar/toolbar sizes from the screen layer
 - keep composer configuration UI derivation pure, then apply selected mode/options through ACP only from the page/controller layer
 - normalize slash commands from live snapshots and update composer text through pure string helpers before assigning it in the screen
 - build prompt input blocks, queue decisions, and queue item state transitions in pure helpers, while leaving actual send/retry/runtime mutation in the screen/controller layer
