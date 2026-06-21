@@ -881,6 +881,16 @@ import {
   withSelectedDetailMode,
 } from "./detailComposerPresentation"
 import {
+  applySlashCommandText,
+  filterSlashCommands,
+  insertSlashText,
+  normalizeSlashCommandsFromSnapshot,
+  resolveSlashPreset,
+  resolveSlashState,
+  slashCommandDescription,
+  type SlashCommandItem,
+} from "./detailSlashCommands"
+import {
   buildConnectionKey,
   buildDescriptorFromStoredConnection,
   findStoredConnectionByKey as findStoredConnectionInList,
@@ -902,13 +912,6 @@ interface UploadQueueItem {
 interface SendAttemptResult {
   started: boolean
   error?: string
-}
-
-interface SlashCommandItem {
-  key: string
-  name: string
-  desc: string
-  hint?: string
 }
 
 interface PickedLocalFile {
@@ -1378,38 +1381,13 @@ const agentLogoPath = computed(() => {
 
 const slashCommands = ref<SlashCommandItem[]>([])
 
-const slashState = computed(() => {
-  const text = inputText.value || ""
-  const match = text.match(/(?:^|\n)\/([a-zA-Z]*)$/)
-  if (!match) return { visible: false, keyword: "" }
-  return { visible: true, keyword: (match[1] || "").toLowerCase() }
-})
-
-const filteredSlashCommands = computed(() => {
-  if (!slashState.value.visible) return []
-  const kw = slashState.value.keyword
-  if (!kw) return slashCommands.value
-  return slashCommands.value.filter((item) =>
-    item.key.toLowerCase().includes(`/${kw}`) ||
-    item.name.toLowerCase().includes(kw) ||
-    item.desc.toLowerCase().includes(kw) ||
-    String(item.hint || "").toLowerCase().includes(kw)
-  )
-})
-
-const slashCommandDescMap: Record<string, string> = {
-  review: "审查当前改动并找出问题",
-  "review-branch": "对比指定分支审查代码改动",
-  "review-commit": "审查某次提交引入的改动",
-  init: "为 Codex 创建 AGENTS.md 指令文件",
-  compact: "压缩当前会话，减少上下文占用",
-  undo: "撤销上一轮操作",
-  logout: "退出当前 Codex 会话",
-}
+const slashState = computed(() => resolveSlashState(inputText.value || ""))
+const filteredSlashCommands = computed(() =>
+  filterSlashCommands(slashCommands.value, slashState.value)
+)
 
 function getSlashCommandDesc(item: SlashCommandItem) {
-  const commandName = String(item.name || item.key || "").replace(/^\//, "").trim()
-  return slashCommandDescMap[commandName] || item.desc || item.hint || ""
+  return slashCommandDescription(item)
 }
 
 const planStatusFilter = ref<PlanTaskFilter>("all")
@@ -1904,19 +1882,7 @@ async function persistLiveSnapshotMetadata(input: {
 }
 
 function hydrateSlashCommandsFromSnapshot(snapshot: any) {
-  const availableCommands = Array.isArray(snapshot?.available_commands)
-    ? snapshot.available_commands
-    : Array.isArray(snapshot?.availableCommands)
-      ? snapshot.availableCommands
-      : []
-  slashCommands.value = availableCommands
-    .filter((item: any) => item && typeof item === "object" && firstString(item.name))
-    .map((item: any) => ({
-      key: `/${firstString(item.name) || ""}`,
-      name: firstString(item.name) || "",
-      desc: firstString(item.description) || "",
-      hint: firstString(item.input_hint),
-    }))
+  slashCommands.value = normalizeSlashCommandsFromSnapshot(snapshot)
 }
 
 async function loadConversation() {
@@ -3222,24 +3188,11 @@ function showSharedLiveBlockedToast() {
 }
 
 function applySlashCommand(item: SlashCommandItem) {
-  const source = inputText.value || ""
-  if (/(?:^|\n)\/([a-zA-Z]*)$/.test(source)) {
-    inputText.value = source.replace(/(?:^|\n)\/([a-zA-Z]*)$/, (all) =>
-      all.startsWith("\n") ? `\n${item.key} ` : `${item.key} `
-    )
-  } else {
-    inputText.value = `${source}${source ? "\n" : ""}${item.key} `
-  }
+  inputText.value = applySlashCommandText(inputText.value || "", item)
 }
 
 function insertSlash() {
-  if (!inputText.value.endsWith("/")) {
-    inputText.value = `${inputText.value}${inputText.value ? "\n" : ""}/`
-  }
-}
-
-function resolveSlashPreset(text: string): string {
-  return text
+  inputText.value = insertSlashText(inputText.value)
 }
 
 function chooseImages() {
