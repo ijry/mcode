@@ -491,7 +491,7 @@
       var(--up-card-bg-color, #ffffff) 78%
     );
   border: 1rpx solid color-mix(in srgb, var(--up-primary, #2979ff) 24%, var(--up-border-color, #dadbde) 76%);
-  box-shadow: 0 16rpx 36rpx rgba(41, 121, 255, 0.12);
+  box-shadow: 0 6rpx 16rpx rgba(41, 121, 255, 0.06);
   box-sizing: border-box;
 }
 
