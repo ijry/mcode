@@ -94,6 +94,7 @@ import {
   PET_SINGLE_TAP_DELAY_MS,
   PET_TAP_INTERACTION_DURATION_MS,
   PET_EXCITED_INTERACTION_DURATION_MS,
+  shouldDelaySingleTapForDoubleTap,
   shouldTreatAsDoubleTap,
 } from '@/services/petTapGesture'
 import { stopPetSpeech } from '@/services/petVoice'
@@ -241,12 +242,23 @@ function onTouchEnd() {
   }
 
   const now = Date.now()
+  const shouldDelaySingleTap = shouldDelaySingleTapForDoubleTap(isH5Runtime())
 
-  if (singleTapTimer && shouldTreatAsDoubleTap(lastTapTime, now, PET_DOUBLE_TAP_WINDOW_MS)) {
+  if (shouldDelaySingleTap && singleTapTimer && shouldTreatAsDoubleTap(lastTapTime, now, PET_DOUBLE_TAP_WINDOW_MS)) {
     clearTimeout(singleTapTimer)
     singleTapTimer = null
     lastTapTime = 0
     triggerDoubleInteraction()
+    return
+  }
+
+  if (!shouldDelaySingleTap) {
+    lastTapTime = 0
+    if (singleTapTimer) {
+      clearTimeout(singleTapTimer)
+      singleTapTimer = null
+    }
+    triggerSingleInteraction()
     return
   }
 
@@ -256,6 +268,13 @@ function onTouchEnd() {
     singleTapTimer = null
     lastTapTime = 0
   }, PET_SINGLE_TAP_DELAY_MS)
+}
+
+function isH5Runtime() {
+  // #ifdef H5
+  return true
+  // #endif
+  return false
 }
 
 // ── Action sheet (long press) ──

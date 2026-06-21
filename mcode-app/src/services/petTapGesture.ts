@@ -3,6 +3,10 @@ export const PET_SINGLE_TAP_DELAY_MS = 220
 export const PET_TAP_INTERACTION_DURATION_MS = 320
 export const PET_EXCITED_INTERACTION_DURATION_MS = 460
 
+export function shouldDelaySingleTapForDoubleTap(isH5Runtime: boolean): boolean {
+  return !isH5Runtime
+}
+
 export function shouldTreatAsDoubleTap(
   lastTapAt: number,
   nextTapAt: number,
