@@ -209,6 +209,33 @@ describe('conversationRuntime ACP error handling', () => {
     ])
   })
 
+  it('hydrates the in-flight user turn id from live snapshots', () => {
+    const { store, session } = prepareSession()
+
+    store.hydrateLiveSnapshot(1, {
+      event_seq: 20,
+      pending_user_message: {
+        message_id: 'u-current',
+      },
+      live_message: {
+        id: 'live-current',
+        started_at: 300,
+        content: [
+          { kind: 'text', text: 'streaming reply' },
+        ],
+      },
+    })
+
+    expect(session.inFlightUserTurnId).toBe('u-current')
+
+    store.hydrateLiveSnapshot(1, {
+      event_seq: 21,
+      pending_user_message: null,
+    })
+
+    expect(session.inFlightUserTurnId).toBeNull()
+  })
+
   it('keeps cached session state for hot conversations', () => {
     const hot = require('@/services/conversation/hotConversationCoordinator')
     hot.isHotConversation.mockReturnValue(true)
@@ -275,6 +302,26 @@ describe('conversationRuntime ACP error handling', () => {
       totalTokens: 300,
       turnCount: 1,
     })
+  })
+
+  it('applies in-flight user turn metadata from conversation detail', () => {
+    const store = useConversationRuntimeStore()
+    const session = store.getOrCreateSession(1)
+
+    const applied = store.applyConversationDetailStats(1, {
+      turns: [],
+      in_flight_user_turn_id: 'u-current',
+    } as any)
+
+    expect(applied).toBe(true)
+    expect(session.inFlightUserTurnId).toBe('u-current')
+
+    store.applyConversationDetailStats(1, {
+      turns: [],
+      in_flight_user_turn_id: null,
+    } as any)
+
+    expect(session.inFlightUserTurnId).toBeNull()
   })
 
   it('drops the promoted assistant snapshot when the same live turn is still streaming', async () => {
@@ -360,6 +407,48 @@ describe('conversationRuntime ACP error handling', () => {
 
     expect(store.getMessages(1).map((turn) => turn.id)).toEqual([
       'u-current',
+      'live-1-lm-current',
+    ])
+  })
+
+  it('uses the in-flight user turn id to suppress the covered assistant partial after that prompt', () => {
+    const store = useConversationRuntimeStore()
+    const session = store.getOrCreateSession(1)
+    session.localTurns = [
+      {
+        id: 'u-current',
+        role: 'user',
+        content: [{ type: 'text', text: 'ask' }],
+        timestamp: 100,
+        status: 'completed',
+      },
+      {
+        id: 'a-partial',
+        role: 'assistant',
+        content: [{ type: 'text', text: 'partial reply' }],
+        timestamp: 110,
+        status: 'completed',
+      },
+      {
+        id: 'u-next',
+        role: 'user',
+        content: [{ type: 'text', text: 'queued ask' }],
+        timestamp: 120,
+        status: 'completed',
+      },
+    ] as any
+    session.inFlightUserTurnId = 'u-current'
+
+    store.setLiveMessage(
+      1,
+      [{ type: 'text', text: 'partial reply with more content' }],
+      true,
+      { id: 'lm-current', timestamp: 105 }
+    )
+
+    expect(store.getMessages(1).map((turn) => turn.id)).toEqual([
+      'u-current',
+      'u-next',
       'live-1-lm-current',
     ])
   })

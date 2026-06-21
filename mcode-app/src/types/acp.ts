@@ -331,6 +331,8 @@ export interface ConversationDetail {
   createdAt: number
   updatedAt: number
   turns: MessageTurn[]
+  in_flight_user_turn_id?: string | null
+  inFlightUserTurnId?: string | null
   sessionStats?: ConversationSessionStats | null
   session_stats?: ConversationSessionStats | null
 }

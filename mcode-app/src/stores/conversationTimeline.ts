@@ -13,6 +13,7 @@ interface BuildConversationTimelineInput {
   localTurns: MessageTurn[]
   optimisticTurns: MessageTurn[]
   liveMessage: LiveMessage | null
+  inFlightUserTurnId?: string | null
 }
 
 export function buildConversationTimeline(
@@ -20,7 +21,8 @@ export function buildConversationTimeline(
 ): ConversationTimelineTurn[] {
   const visibleLocalTurns = suppressCoveredTrailingAssistantPartial(
     input.localTurns,
-    input.liveMessage
+    input.liveMessage,
+    input.inFlightUserTurnId
   )
   const completed = visibleLocalTurns.map((turn, index) => ({
     key: `completed-${input.conversationId}-${turn.id}-${index}`,
@@ -86,13 +88,51 @@ export function dedupeTurnsByRoleAndId(turns: MessageTurn[]): MessageTurn[] {
 
 function suppressCoveredTrailingAssistantPartial(
   turns: MessageTurn[],
-  liveMessage: LiveMessage | null
+  liveMessage: LiveMessage | null,
+  inFlightUserTurnId?: string | null
 ): MessageTurn[] {
   if (!liveMessage || liveMessage.isPlaceholderThinking) return turns
+
+  const anchored = suppressAnchoredAssistantPartials(
+    turns,
+    liveMessage,
+    inFlightUserTurnId
+  )
+  if (anchored !== turns) return anchored
+
   const tail = turns[turns.length - 1]
   if (!tail || tail.role !== "assistant") return turns
   if (!isContentPrefix(tail.content, liveMessage.content)) return turns
   return turns.slice(0, -1)
+}
+
+function suppressAnchoredAssistantPartials(
+  turns: MessageTurn[],
+  liveMessage: LiveMessage,
+  inFlightUserTurnId?: string | null
+) {
+  const normalizedUserId = String(inFlightUserTurnId || "").trim()
+  if (!normalizedUserId) return turns
+
+  const userIndex = turns.findIndex(
+    (turn) => turn.role === "user" && turn.id === normalizedUserId
+  )
+  if (userIndex < 0) return turns
+
+  const nextUserIndex = turns.findIndex(
+    (turn, index) => index > userIndex && turn.role === "user"
+  )
+  const endIndex = nextUserIndex < 0 ? turns.length : nextUserIndex
+  let changed = false
+  const filtered = turns.filter((turn, index) => {
+    if (index <= userIndex || index >= endIndex) return true
+    if (turn.role !== "assistant") return true
+    const covered = isContentPrefix(turn.content, liveMessage.content)
+    if (covered) changed = true
+    return !covered
+  })
+
+  return changed ? filtered : turns
 }
 
 function isContentPrefix(prefixParts: MessageTurn["content"], fullParts: MessageTurn["content"]) {

@@ -76,6 +76,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         apiRetry: null,
         pendingPermission: null,
         pendingQuestion: null,
+        inFlightUserTurnId: null,
         lastAppliedSeq: null,
         lastCompletedTurnKey: null,
         lastCompletedTurnAt: 0,
@@ -106,6 +107,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       localTurns: session.localTurns,
       optimisticTurns: session.optimisticTurns,
       liveMessage: session.liveMessage,
+      inFlightUserTurnId: session.inFlightUserTurnId,
     })
   }
 
@@ -191,6 +193,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
   function clearLiveMessage(conversationId: number) {
     const session = getOrCreateSession(conversationId)
     session.liveMessage = null
+    session.inFlightUserTurnId = null
   }
 
   function syncManagedSendPermission(conversationId: number) {
@@ -294,6 +297,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       return
     }
 
+    applySnapshotInFlightUserTurnId(session, snapshot)
     const normalizedLiveMessage = mapSnapshotLiveMessage(snapshot, session.liveMessage)
     const shouldIgnoreSnapshotLiveMessage =
       normalizedLiveMessage != null &&
@@ -359,6 +363,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       if (persisted) {
         session.optimisticTurns = []
         session.liveMessage = null
+        session.inFlightUserTurnId = null
         if (!hadOptimisticTurns && assistantTurn) {
           try {
             const replayDetail = await calibrateAfterReplayGap(conversationId)
@@ -375,9 +380,11 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         ])
         session.optimisticTurns = []
         session.liveMessage = null
+        session.inFlightUserTurnId = null
       }
     } else {
       session.liveMessage = null
+      session.inFlightUserTurnId = null
       session.pendingPermission = null
       session.pendingQuestion = null
       try {
@@ -755,6 +762,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       session.apiRetry = null
       session.pendingPermission = null
       session.pendingQuestion = null
+      session.inFlightUserTurnId = null
       session.lastCompletedTurnKey = null
       session.lastCompletedTurnAt = 0
     }
@@ -788,6 +796,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       session.apiRetry = null
       session.pendingPermission = null
       session.pendingQuestion = null
+      session.inFlightUserTurnId = null
       session.lastAppliedSeq = null
       session.lastCompletedTurnKey = null
       session.lastCompletedTurnAt = 0
@@ -854,6 +863,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     session.apiRetry = null
     session.pendingPermission = null
     session.pendingQuestion = null
+    session.inFlightUserTurnId = null
     session.lastAppliedSeq = 0
     session.lastCompletedTurnKey = null
     session.lastCompletedTurnAt = 0
@@ -926,6 +936,7 @@ interface RuntimeSession {
   apiRetry: ApiRetryEvent | null
   pendingPermission: PermissionRequest | null
   pendingQuestion: PendingQuestionState | null
+  inFlightUserTurnId: string | null
   lastAppliedSeq: number | null
   lastCompletedTurnKey: string | null
   lastCompletedTurnAt: number
@@ -1104,10 +1115,34 @@ function applyConversationDetailStatsToSession(
   session: RuntimeSession,
   detail: ConversationDetail | any
 ) {
+  const metadataApplied = applyConversationDetailMetadataToSession(session, detail)
   const nextStats = deriveSessionStatsFromConversationDetail(detail, session.stats.turnCount)
-  if (!nextStats) return false
-  session.stats = nextStats
+  if (nextStats) {
+    session.stats = nextStats
+  }
+  return metadataApplied || Boolean(nextStats)
+}
+
+function applyConversationDetailMetadataToSession(
+  session: RuntimeSession,
+  detail: ConversationDetail | any
+) {
+  if (!detail || typeof detail !== "object") return false
+  if (!hasInFlightUserTurnField(detail)) return false
+
+  const inFlightUserTurnId = firstString(
+    detail.in_flight_user_turn_id,
+    detail.inFlightUserTurnId
+  )
+  session.inFlightUserTurnId = inFlightUserTurnId || null
   return true
+}
+
+function hasInFlightUserTurnField(detail: Record<string, any>) {
+  return (
+    Object.prototype.hasOwnProperty.call(detail, "in_flight_user_turn_id") ||
+    Object.prototype.hasOwnProperty.call(detail, "inFlightUserTurnId")
+  )
 }
 
 function sumTurnUsage(turns: any[]): TurnUsageAccumulator | null {
@@ -1267,6 +1302,38 @@ function maybeBackfillExternalUserTurn(
       session.externalTurnBackfillInFlight = false
     }
   })()
+}
+
+function applySnapshotInFlightUserTurnId(session: RuntimeSession, snapshot: any) {
+  if (!snapshot || typeof snapshot !== "object") return false
+
+  const pendingUserMessage = firstObject(
+    snapshot.pending_user_message,
+    snapshot.pendingUserMessage
+  )
+  const inFlightUserTurnId = firstString(
+    pendingUserMessage?.message_id,
+    pendingUserMessage?.messageId,
+    pendingUserMessage?.id,
+    snapshot.in_flight_user_turn_id,
+    snapshot.inFlightUserTurnId
+  )
+  if (inFlightUserTurnId) {
+    session.inFlightUserTurnId = inFlightUserTurnId
+    return true
+  }
+
+  const explicitlyCleared =
+    Object.prototype.hasOwnProperty.call(snapshot, "pending_user_message") ||
+    Object.prototype.hasOwnProperty.call(snapshot, "pendingUserMessage") ||
+    Object.prototype.hasOwnProperty.call(snapshot, "in_flight_user_turn_id") ||
+    Object.prototype.hasOwnProperty.call(snapshot, "inFlightUserTurnId")
+  if (explicitlyCleared) {
+    session.inFlightUserTurnId = null
+    return true
+  }
+
+  return false
 }
 
 function mapPersistedTurnToMessage(turn: PersistedTurnWithParts): MessageTurn {
