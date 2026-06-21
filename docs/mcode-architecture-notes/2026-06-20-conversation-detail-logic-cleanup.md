@@ -45,7 +45,7 @@ Draft queue helpers now own queued draft construction, prompt block construction
 
 Attachment upload helpers now own image/file picker payload normalization, upload endpoint/header construction, and uploaded-attachment response shaping. The page still owns platform chooser calls, `uni.uploadFile`, progress mutation, toast feedback, and auth/descriptor lookup.
 
-Prompt send helpers now own deterministic draft-send payload shaping and send-failure message normalization. The page still owns ACP prompt dispatch, optimistic runtime insertion/removal, snapshot confirmation, watcher/timer lifetimes, toast display, and runtime error mutation.
+Prompt send helpers now own deterministic draft-send payload shaping, send-failure message normalization, prompt-start watch signatures, and timeout/snapshot result mapping. The page still owns ACP prompt dispatch, optimistic runtime insertion/removal, snapshot confirmation, watcher/timer lifetimes, toast display, and runtime error mutation.
 
 ## UI Behavior
 
@@ -75,7 +75,7 @@ Native clients can mirror these helpers as pure presentation/normalization utili
 - keep composer configuration UI derivation pure, then apply selected mode/options through ACP only from the page/controller layer
 - normalize slash commands from live snapshots and update composer text through pure string helpers before assigning it in the screen
 - build prompt input blocks and draft queue decisions in pure helpers, while leaving actual send/retry/runtime mutation in the screen/controller layer
-- derive prompt send payloads and failure copy in pure helpers, while leaving prompt dispatch, watcher timing, optimistic message lifecycle, and runtime session mutation in the screen/controller layer
+- derive prompt send payloads, prompt-start watch signatures, and failure copy in pure helpers, while leaving prompt dispatch, watcher timing, optimistic message lifecycle, snapshot fetch, and runtime session mutation in the screen/controller layer
 - normalize picked files and upload responses in pure helpers, while leaving platform file picking and upload tasks in the screen/controller layer
 
 Do not move ACP connection management, realtime authority, or SQLite calibration into these helpers.

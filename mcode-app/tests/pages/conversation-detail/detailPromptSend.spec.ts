@@ -1,6 +1,10 @@
 import {
   buildDraftSendPayload,
+  buildPromptStartWatchSignature,
   findLatestOptimisticTurnId,
+  resolvePromptStartSnapshotOutcome,
+  resolvePromptStartTimeoutFailure,
+  resolvePromptStartWatchOutcome,
   resolveDraftSendFailure,
 } from "@/pages/conversation-detail/detailPromptSend"
 import type { QueuedDraft, UploadedAttachment } from "@/pages/conversation-detail/detailDataNormalization"
@@ -77,6 +81,70 @@ describe("detailPromptSend", () => {
       status: "failed",
       error: "网络异常",
       toastTitle: "发送失败: 网络异常",
+    })
+  })
+
+  it("builds stable prompt-start watch signatures", () => {
+    expect(buildPromptStartWatchSignature(null)).toEqual(["", ""])
+    expect(buildPromptStartWatchSignature({
+      status: "thinking",
+      liveMessage: {
+        content: [{ type: "text", text: "hello" }],
+      },
+    })).toEqual([
+      "thinking",
+      JSON.stringify([{ type: "text", text: "hello" }]),
+    ])
+  })
+
+  it("resolves prompt-start watch outcomes", () => {
+    expect(resolvePromptStartWatchOutcome({
+      hasStarted: true,
+      draftStatus: "sending",
+    })).toEqual({ started: true })
+
+    expect(resolvePromptStartWatchOutcome({
+      hasStarted: false,
+      draftStatus: "failed",
+      draftError: "发送失败了",
+      fallbackMessage: "发送失败",
+    })).toEqual({
+      started: false,
+      error: "发送失败了",
+    })
+
+    expect(resolvePromptStartWatchOutcome({
+      hasStarted: false,
+      draftStatus: "pending",
+      fallbackMessage: "发送失败",
+    })).toBeNull()
+  })
+
+  it("resolves prompt-start timeout and snapshot outcomes", () => {
+    expect(resolvePromptStartTimeoutFailure("请求已入队，但会话没有进入运行状态")).toEqual({
+      started: false,
+      error: "请求已入队，但会话没有进入运行状态",
+    })
+
+    expect(resolvePromptStartSnapshotOutcome({
+      startedBySnapshot: true,
+      hasStartedAfterSnapshot: false,
+      timeoutMessage: "请求已入队，但会话没有进入运行状态",
+    })).toEqual({ started: true })
+
+    expect(resolvePromptStartSnapshotOutcome({
+      startedBySnapshot: false,
+      hasStartedAfterSnapshot: true,
+      timeoutMessage: "请求已入队，但会话没有进入运行状态",
+    })).toEqual({ started: true })
+
+    expect(resolvePromptStartSnapshotOutcome({
+      startedBySnapshot: false,
+      hasStartedAfterSnapshot: false,
+      timeoutMessage: "请求已入队，但会话没有进入运行状态",
+    })).toEqual({
+      started: false,
+      error: "请求已入队，但会话没有进入运行状态",
     })
   })
 

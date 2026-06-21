@@ -15,6 +15,13 @@ export interface SendAttemptResult {
   error?: string
 }
 
+export interface PromptStartWatchSessionLike {
+  status?: string
+  liveMessage?: {
+    content?: unknown
+  } | null
+}
+
 export function buildDraftSendPayload(draft: QueuedDraft): DraftSendPayload {
   const { imageAttachments, fileAttachments } = splitDraftAttachments(draft)
   return {
@@ -39,6 +46,51 @@ export function resolveDraftSendFailure(result: {
     error: message,
     toastTitle: `发送失败: ${message}`,
   }
+}
+
+export function buildPromptStartWatchSignature(
+  session: PromptStartWatchSessionLike | null | undefined
+) {
+  return [
+    session?.status || "",
+    session?.liveMessage ? JSON.stringify(session.liveMessage.content || []) : "",
+  ] as const
+}
+
+export function resolvePromptStartWatchOutcome(input: {
+  hasStarted: boolean
+  draftStatus: QueuedDraft["status"]
+  draftError?: string
+  fallbackMessage?: string
+}): SendAttemptResult | null {
+  if (input.hasStarted) {
+    return { started: true }
+  }
+  if (input.draftStatus === "failed") {
+    return {
+      started: false,
+      error: input.draftError || input.fallbackMessage || "发送失败",
+    }
+  }
+  return null
+}
+
+export function resolvePromptStartTimeoutFailure(timeoutMessage?: string): SendAttemptResult {
+  return {
+    started: false,
+    error: timeoutMessage || "请求已入队，但会话没有进入运行状态",
+  }
+}
+
+export function resolvePromptStartSnapshotOutcome(input: {
+  startedBySnapshot: boolean
+  hasStartedAfterSnapshot: boolean
+  timeoutMessage?: string
+}): SendAttemptResult {
+  if (input.startedBySnapshot || input.hasStartedAfterSnapshot) {
+    return { started: true }
+  }
+  return resolvePromptStartTimeoutFailure(input.timeoutMessage)
 }
 
 export function findLatestOptimisticTurnId(source: Array<{ id?: string | null } | null | undefined>) {

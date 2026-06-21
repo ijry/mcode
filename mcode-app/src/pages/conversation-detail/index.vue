@@ -895,7 +895,11 @@ import {
 } from "./detailDraftQueue"
 import {
   buildDraftSendPayload,
+  buildPromptStartWatchSignature,
   findLatestOptimisticTurnId,
+  resolvePromptStartSnapshotOutcome,
+  resolvePromptStartTimeoutFailure,
+  resolvePromptStartWatchOutcome,
   resolveDraftSendFailure,
   type SendAttemptResult,
 } from "./detailPromptSend"
@@ -3035,20 +3039,16 @@ async function waitForPromptStart(draft: QueuedDraft): Promise<SendAttemptResult
     }
 
     stopWatch = watch(
+      () => buildPromptStartWatchSignature(session.value),
       () => {
-        const currentSession = session.value
-        return [
-          currentSession?.status || "",
-          currentSession?.liveMessage ? JSON.stringify(currentSession.liveMessage.content || []) : "",
-        ] as const
-      },
-      () => {
-        if (hasPromptActuallyStarted()) {
-          finish({ started: true })
-          return
-        }
-        if (draft.status === "failed") {
-          finish({ started: false, error: draft.error || "发送失败" })
+        const outcome = resolvePromptStartWatchOutcome({
+          hasStarted: hasPromptActuallyStarted(),
+          draftStatus: draft.status,
+          draftError: draft.error,
+          fallbackMessage: "发送失败",
+        })
+        if (outcome) {
+          finish(outcome)
         }
       },
       { flush: "sync" }
@@ -3061,20 +3061,14 @@ async function waitForPromptStart(draft: QueuedDraft): Promise<SendAttemptResult
       }
       void confirmPromptStartFromSnapshot()
         .then((startedBySnapshot) => {
-          if (startedBySnapshot || hasPromptActuallyStarted()) {
-            finish({ started: true })
-            return
-          }
-          finish({
-            started: false,
-            error: "请求已入队，但会话没有进入运行状态",
-          })
+          finish(resolvePromptStartSnapshotOutcome({
+            startedBySnapshot,
+            hasStartedAfterSnapshot: hasPromptActuallyStarted(),
+            timeoutMessage: "请求已入队，但会话没有进入运行状态",
+          }))
         })
         .catch(() => {
-          finish({
-            started: false,
-            error: "请求已入队，但会话没有进入运行状态",
-          })
+          finish(resolvePromptStartTimeoutFailure("请求已入队，但会话没有进入运行状态"))
         })
     }, PROMPT_START_TIMEOUT_MS)
   })
