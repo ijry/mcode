@@ -1,9 +1,15 @@
 import {
+  appendQueuedDraft,
+  canContinueDraftQueue,
   buildDraftPromptBlocks,
   canProcessDraftQueue,
   createComposerDraft,
   createStandaloneDraft,
+  finalizeQueuedDraftAttempt,
+  findQueuedDraftById,
   hasPromptActuallyStarted,
+  prependFailedQueuedDraft,
+  removeQueuedDraftById,
   splitDraftAttachments,
 } from "@/pages/conversation-detail/detailDraftQueue"
 import type { QueuedDraft, UploadedAttachment } from "@/pages/conversation-detail/detailDataNormalization"
@@ -102,6 +108,19 @@ describe("detailDraftQueue", () => {
   })
 
   it("checks whether the draft queue can process", () => {
+    expect(canContinueDraftQueue({
+      isBusyForSend: false,
+      uploadingCount: 0,
+      canSendSharedLive: true,
+      draftQueueLength: 1,
+    })).toBe(true)
+    expect(canContinueDraftQueue({
+      isBusyForSend: true,
+      uploadingCount: 0,
+      canSendSharedLive: true,
+      draftQueueLength: 1,
+    })).toBe(false)
+
     expect(canProcessDraftQueue({
       processingQueue: false,
       isBusyForSend: false,
@@ -130,5 +149,27 @@ describe("detailDraftQueue", () => {
       canSendSharedLive: true,
       draftQueueLength: 0,
     })).toBe(false)
+  })
+
+  it("handles queue mutations by draft id", () => {
+    const first = draft({ id: "draft-1", status: "pending" })
+    const second = draft({ id: "draft-2", status: "sending" })
+    const queue = [first, second]
+
+    expect(appendQueuedDraft([first], second)).toEqual([first, second])
+    expect(prependFailedQueuedDraft([second], first)).toEqual([
+      { ...first, status: "failed" },
+      second,
+    ])
+    expect(findQueuedDraftById(queue, "draft-2")).toEqual(second)
+    expect(findQueuedDraftById(queue, "missing")).toBeNull()
+    expect(removeQueuedDraftById(queue, "draft-1")).toEqual([second])
+    expect(removeQueuedDraftById(queue, "missing")).toEqual(queue)
+    expect(finalizeQueuedDraftAttempt(queue, "draft-2", true)).toEqual([first])
+    expect(finalizeQueuedDraftAttempt(queue, "draft-1", false)).toEqual([
+      { ...first, status: "failed" },
+      second,
+    ])
+    expect(finalizeQueuedDraftAttempt(queue, "missing", false)).toEqual(queue)
   })
 })

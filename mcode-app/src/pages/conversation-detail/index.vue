@@ -888,10 +888,16 @@ import {
   type SlashCommandItem,
 } from "./detailSlashCommands"
 import {
+  appendQueuedDraft,
+  canContinueDraftQueue,
   canProcessDraftQueue,
   createComposerDraft,
   createStandaloneDraft as createStandaloneQueuedDraft,
+  finalizeQueuedDraftAttempt,
+  findQueuedDraftById,
   hasPromptActuallyStarted as hasPromptStarted,
+  prependFailedQueuedDraft,
+  removeQueuedDraftById,
 } from "./detailDraftQueue"
 import {
   buildDraftSendPayload,
@@ -2820,7 +2826,7 @@ function createStandaloneDraft(text: string): QueuedDraft | null {
 
 async function submitPreparedDraft(draft: QueuedDraft) {
   if (isBusyForSend.value) {
-    draftQueue.value.push(draft)
+    draftQueue.value = appendQueuedDraft(draftQueue.value, draft)
     queueExpanded.value = true
     uni.showToast({ title: "已加入待发送队列", icon: "none" })
     return
@@ -2828,8 +2834,7 @@ async function submitPreparedDraft(draft: QueuedDraft) {
 
   const ok = await sendDraft(draft)
   if (!ok) {
-    draft.status = "failed"
-    draftQueue.value.unshift(draft)
+    draftQueue.value = prependFailedQueuedDraft(draftQueue.value, draft)
     queueExpanded.value = true
   } else {
     void processDraftQueue()
@@ -3097,18 +3102,16 @@ async function processDraftQueue() {
   })) return
   processingQueue.value = true
   try {
-    while (
-      draftQueue.value.length > 0 &&
-      !isBusyForSend.value &&
-      uploadingCount.value === 0 &&
-      canSendSharedLive.value
-    ) {
+    while (canContinueDraftQueue({
+      isBusyForSend: isBusyForSend.value,
+      uploadingCount: uploadingCount.value,
+      canSendSharedLive: canSendSharedLive.value,
+      draftQueueLength: draftQueue.value.length,
+    })) {
       const item = draftQueue.value[0]
       const ok = await sendDraft(item)
-      if (ok) {
-        draftQueue.value.shift()
-      } else {
-        item.status = "failed"
+      draftQueue.value = finalizeQueuedDraftAttempt(draftQueue.value, item.id, ok)
+      if (!ok) {
         break
       }
     }
@@ -3118,8 +3121,8 @@ async function processDraftQueue() {
 }
 
 async function sendQueuedDraft(id: string) {
-  const index = draftQueue.value.findIndex((item) => item.id === id)
-  if (index < 0) return
+  const target = findQueuedDraftById(draftQueue.value, id)
+  if (!target) return
   if (!canSendSharedLive.value) {
     showSharedLiveBlockedToast()
     return
@@ -3128,19 +3131,15 @@ async function sendQueuedDraft(id: string) {
     uni.showToast({ title: "当前正在处理，请稍后", icon: "none" })
     return
   }
-  const target = draftQueue.value[index]
   const ok = await sendDraft(target)
   if (ok) {
-    draftQueue.value.splice(index, 1)
+    draftQueue.value = removeQueuedDraftById(draftQueue.value, id)
     void processDraftQueue()
   }
 }
 
 function removeDraft(id: string) {
-  const index = draftQueue.value.findIndex((item) => item.id === id)
-  if (index >= 0) {
-    draftQueue.value.splice(index, 1)
-  }
+  draftQueue.value = removeQueuedDraftById(draftQueue.value, id)
 }
 
 function showSharedLiveBlockedToast() {

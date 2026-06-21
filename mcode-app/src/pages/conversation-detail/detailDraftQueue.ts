@@ -14,6 +14,13 @@ export interface DraftQueueProcessState {
   draftQueueLength: number
 }
 
+export interface DraftQueueContinueState {
+  isBusyForSend: boolean
+  uploadingCount: number
+  canSendSharedLive: boolean
+  draftQueueLength: number
+}
+
 export function createStandaloneDraft(input: {
   text: string
   createId: DraftIdFactory
@@ -99,12 +106,59 @@ export function hasPromptActuallyStarted(input: {
   )
 }
 
-export function canProcessDraftQueue(input: DraftQueueProcessState) {
+export function canContinueDraftQueue(input: DraftQueueContinueState) {
   return (
-    !input.processingQueue &&
     !input.isBusyForSend &&
     input.uploadingCount === 0 &&
     input.canSendSharedLive &&
     input.draftQueueLength > 0
   )
+}
+
+export function canProcessDraftQueue(input: DraftQueueProcessState) {
+  return !input.processingQueue && canContinueDraftQueue({
+    isBusyForSend: input.isBusyForSend,
+    uploadingCount: input.uploadingCount,
+    canSendSharedLive: input.canSendSharedLive,
+    draftQueueLength: input.draftQueueLength,
+  })
+}
+
+export function appendQueuedDraft(queue: QueuedDraft[], draft: QueuedDraft) {
+  return [...queue, draft]
+}
+
+export function prependFailedQueuedDraft(queue: QueuedDraft[], draft: QueuedDraft) {
+  return [{
+    ...draft,
+    status: "failed" as const,
+  }, ...queue]
+}
+
+export function findQueuedDraftById(queue: QueuedDraft[], id: string) {
+  return queue.find((item) => item.id === id) || null
+}
+
+export function removeQueuedDraftById(queue: QueuedDraft[], id: string) {
+  const index = queue.findIndex((item) => item.id === id)
+  if (index < 0) return queue
+  return [...queue.slice(0, index), ...queue.slice(index + 1)]
+}
+
+export function finalizeQueuedDraftAttempt(queue: QueuedDraft[], id: string, succeeded: boolean) {
+  if (succeeded) {
+    return removeQueuedDraftById(queue, id)
+  }
+
+  let found = false
+  const nextQueue = queue.map((item) => {
+    if (item.id !== id) return item
+    found = true
+    return {
+      ...item,
+      status: "failed" as const,
+    }
+  })
+
+  return found ? nextQueue : queue
 }

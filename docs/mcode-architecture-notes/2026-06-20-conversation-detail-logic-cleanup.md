@@ -41,7 +41,7 @@ Composer presentation helpers now own detail composer summaries, active model st
 
 Slash command helpers now own slash trigger detection, filtering, default descriptions, composer text insertion, preset passthrough, and snapshot command normalization. The page still owns the composer refs and decides when to show or write command text.
 
-Draft queue helpers now own queued draft construction, prompt block construction, attachment splitting, prompt-start status checks, and queue-process eligibility. The page still owns realtime connection recovery, PC tab readiness, optimistic runtime mutation, ACP `prompt` calls, watcher lifetimes, toast feedback, and queue mutation side effects.
+Draft queue helpers now own queued draft construction, prompt block construction, attachment splitting, prompt-start status checks, queue-process eligibility, and deterministic queue mutations keyed by draft id. The page still owns realtime connection recovery, PC tab readiness, optimistic runtime mutation, ACP `prompt` calls, watcher lifetimes, toast feedback, and the actual send-loop side effects.
 
 Attachment upload helpers now own image/file picker payload normalization, upload endpoint/header construction, and uploaded-attachment response shaping. The page still owns platform chooser calls, `uni.uploadFile`, progress mutation, toast feedback, and auth/descriptor lookup.
 
@@ -74,7 +74,7 @@ Native clients can mirror these helpers as pure presentation/normalization utili
 - choose history cursors and restore-scroll targets in pure helpers, then execute actual page scrolling in the Vue screen layer
 - keep composer configuration UI derivation pure, then apply selected mode/options through ACP only from the page/controller layer
 - normalize slash commands from live snapshots and update composer text through pure string helpers before assigning it in the screen
-- build prompt input blocks and draft queue decisions in pure helpers, while leaving actual send/retry/runtime mutation in the screen/controller layer
+- build prompt input blocks, queue decisions, and queue item state transitions in pure helpers, while leaving actual send/retry/runtime mutation in the screen/controller layer
 - derive prompt send payloads, prompt-start watch signatures, and failure copy in pure helpers, while leaving prompt dispatch, watcher timing, optimistic message lifecycle, snapshot fetch, and runtime session mutation in the screen/controller layer
 - normalize picked files and upload responses in pure helpers, while leaving platform file picking and upload tasks in the screen/controller layer
 
