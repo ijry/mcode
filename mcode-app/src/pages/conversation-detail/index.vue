@@ -782,8 +782,6 @@ import {
   buildAgentConfigContextKey,
   createEmptyDetailAgentConfigState,
   createReadyDetailAgentConfigState,
-  findModeName,
-  findSelectedOptionValueName,
   persistAgentConfigCache,
   persistAgentConfigSelection,
   projectDetailConfigOptions,
@@ -872,6 +870,16 @@ import {
   restoreHistoryCursorFromCache as restoreHistoryCursorValueFromCache,
   type HistoryPageCursor,
 } from "./detailScrollState"
+import {
+  activeModelStatusLabel as resolveActiveModelStatusLabel,
+  detailAgentConfigSelectionPayload,
+  detailConfigOptionSummary,
+  detailPermissionSummary,
+  nextExpandedConfigKey,
+  pendingComposerConfigActions,
+  withSelectedDetailConfigValue,
+  withSelectedDetailMode,
+} from "./detailComposerPresentation"
 import {
   buildConnectionKey,
   buildDescriptorFromStoredConnection,
@@ -1149,34 +1157,35 @@ const hasModelOptions = computed(() => Boolean(modelOption.value))
 const hasPermissionOptions = computed(() =>
   Boolean(detailAgentConfig.value.modes?.available_modes?.length || permissionOption.value)
 )
-const modelSummary = computed(() => {
-  if (detailAgentConfig.value.status === "loading") return "加载中"
-  return findSelectedOptionValueName(modelOption.value, detailAgentConfig.value.selectedValues)
-    || detailAgentConfig.value.message
-    || "远端未提供"
-})
-const reasoningSummary = computed(() => {
-  if (detailAgentConfig.value.status === "loading") return "加载中"
-  return findSelectedOptionValueName(reasoningOption.value, detailAgentConfig.value.selectedValues)
-    || detailAgentConfig.value.message
-    || "远端未提供"
-})
-const permissionSummary = computed(() => {
-  if (detailAgentConfig.value.status === "loading") return "加载中"
-  return findModeName(detailAgentConfig.value.modes, detailAgentConfig.value.selectedModeId)
-    || findSelectedOptionValueName(permissionOption.value, detailAgentConfig.value.selectedValues)
-    || detailAgentConfig.value.message
-    || "远端未提供"
-})
-const activeModelStatusLabel = computed(() => {
-  const modelName = String(modelSummary.value || "").trim()
-  if (!modelName || modelName === "加载中" || modelName === "远端未提供") {
-    return ""
-  }
-  if (runtimeStatus.value === "thinking") return `${modelName} 思考中`
-  if (runtimeStatus.value === "running_tool") return `${modelName} 执行命令中`
-  return modelName
-})
+const modelSummary = computed(() =>
+  detailConfigOptionSummary({
+    status: detailAgentConfig.value.status,
+    option: modelOption.value,
+    selectedValues: detailAgentConfig.value.selectedValues,
+    message: detailAgentConfig.value.message,
+  })
+)
+const reasoningSummary = computed(() =>
+  detailConfigOptionSummary({
+    status: detailAgentConfig.value.status,
+    option: reasoningOption.value,
+    selectedValues: detailAgentConfig.value.selectedValues,
+    message: detailAgentConfig.value.message,
+  })
+)
+const permissionSummary = computed(() =>
+  detailPermissionSummary({
+    status: detailAgentConfig.value.status,
+    state: detailAgentConfig.value,
+    permissionOption: permissionOption.value,
+  })
+)
+const activeModelStatusLabel = computed(() =>
+  resolveActiveModelStatusLabel({
+    modelSummary: modelSummary.value,
+    runtimeStatus: runtimeStatus.value,
+  })
+)
 const detailProjectPath = computed(() => {
   const matched = detailProjectEntries.value.find((item) => Number(item?.id || 0) === folderId.value)
   return String(matched?.path || "").trim()
@@ -2738,30 +2747,35 @@ async function loadDetailAgentConfig() {
 }
 
 function toggleConfigRow(key: ComposerConfigKey) {
-  if (key === "model" && !hasModelOptions.value) return
-  if (key === "reasoning" && !reasoningOption.value) return
-  if (key === "permission" && !hasPermissionOptions.value) return
-  expandedConfigKey.value = expandedConfigKey.value === key ? "" : key
+  expandedConfigKey.value = nextExpandedConfigKey({
+    currentKey: expandedConfigKey.value,
+    targetKey: key,
+    availability: {
+      hasModelOptions: hasModelOptions.value,
+      hasReasoningOption: Boolean(reasoningOption.value),
+      hasPermissionOptions: hasPermissionOptions.value,
+    },
+  })
 }
 
 async function selectDetailMode(modeId: string) {
   if (!modeId) return
   const conn = session.value?.connectionId
   if (!conn) {
-    detailAgentConfig.value.selectedModeId = modeId
-    persistAgentConfigSelection(detailAgentConfigContextKey.value, {
-      selectedModeId: detailAgentConfig.value.selectedModeId,
-      selectedValues: detailAgentConfig.value.selectedValues,
-    })
+    detailAgentConfig.value = withSelectedDetailMode(detailAgentConfig.value, modeId)
+    persistAgentConfigSelection(
+      detailAgentConfigContextKey.value,
+      detailAgentConfigSelectionPayload(detailAgentConfig.value)
+    )
     return
   }
   try {
     await acpApi.acpSetMode(conn, modeId)
-    detailAgentConfig.value.selectedModeId = modeId
-    persistAgentConfigSelection(detailAgentConfigContextKey.value, {
-      selectedModeId: detailAgentConfig.value.selectedModeId,
-      selectedValues: detailAgentConfig.value.selectedValues,
-    })
+    detailAgentConfig.value = withSelectedDetailMode(detailAgentConfig.value, modeId)
+    persistAgentConfigSelection(
+      detailAgentConfigContextKey.value,
+      detailAgentConfigSelectionPayload(detailAgentConfig.value)
+    )
   } catch (error) {
     uni.showToast({ title: `模型切换失败: ${toErrorMessage(error)}`, icon: "none" })
   }
@@ -2771,26 +2785,28 @@ async function selectDetailConfigValue(configId: string, valueId: string) {
   if (!configId || !valueId) return
   const conn = session.value?.connectionId
   if (!conn) {
-    detailAgentConfig.value.selectedValues = {
-      ...detailAgentConfig.value.selectedValues,
-      [configId]: valueId,
-    }
-    persistAgentConfigSelection(detailAgentConfigContextKey.value, {
-      selectedModeId: detailAgentConfig.value.selectedModeId,
-      selectedValues: detailAgentConfig.value.selectedValues,
+    detailAgentConfig.value = withSelectedDetailConfigValue({
+      state: detailAgentConfig.value,
+      configId,
+      valueId,
     })
+    persistAgentConfigSelection(
+      detailAgentConfigContextKey.value,
+      detailAgentConfigSelectionPayload(detailAgentConfig.value)
+    )
     return
   }
   try {
     await acpApi.acpSetConfigOption(conn, configId, valueId)
-    detailAgentConfig.value.selectedValues = {
-      ...detailAgentConfig.value.selectedValues,
-      [configId]: valueId,
-    }
-    persistAgentConfigSelection(detailAgentConfigContextKey.value, {
-      selectedModeId: detailAgentConfig.value.selectedModeId,
-      selectedValues: detailAgentConfig.value.selectedValues,
+    detailAgentConfig.value = withSelectedDetailConfigValue({
+      state: detailAgentConfig.value,
+      configId,
+      valueId,
     })
+    persistAgentConfigSelection(
+      detailAgentConfigContextKey.value,
+      detailAgentConfigSelectionPayload(detailAgentConfig.value)
+    )
   } catch (error) {
     uni.showToast({ title: `配置切换失败: ${toErrorMessage(error)}`, icon: "none" })
   }
@@ -2800,14 +2816,13 @@ async function applyPendingComposerConfig() {
   const conn = session.value?.connectionId
   if (!conn) return
 
-  if (detailAgentConfig.value.selectedModeId) {
-    await acpApi.acpSetMode(conn, detailAgentConfig.value.selectedModeId).catch(() => {})
+  const pending = pendingComposerConfigActions(detailAgentConfig.value)
+  if (pending.modeId) {
+    await acpApi.acpSetMode(conn, pending.modeId).catch(() => {})
   }
 
-  for (const option of detailAgentConfig.value.configOptions) {
-    const selectedValueId = detailAgentConfig.value.selectedValues[option.id]
-    if (!selectedValueId) continue
-    await acpApi.acpSetConfigOption(conn, option.id, selectedValueId).catch(() => {})
+  for (const item of pending.configValues) {
+    await acpApi.acpSetConfigOption(conn, item.configId, item.valueId).catch(() => {})
   }
 }
 

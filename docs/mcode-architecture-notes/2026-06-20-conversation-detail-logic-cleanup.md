@@ -37,6 +37,8 @@ Status presentation helpers now own retry text, network reachability hints, tool
 
 Scroll state helpers now own initial turn limit selection, oldest-history cursor derivation, message anchor id normalization, render-anchor resolution for merged assistant turns, and the pure choice of initial scroll restore action. The page still owns DOM measurement, selector queries, and `uni.pageScrollTo` calls.
 
+Composer presentation helpers now own detail composer summaries, active model status labels, config-row expansion decisions, immutable selection updates, persisted-selection payload shaping, and the list of mode/config values that should be applied when a realtime connection appears. The page still owns cache reads/writes, gateway discovery, ACP `set_mode` / `set_config_option` calls, and toast feedback.
+
 ## UI Behavior
 
 There are no template, copy, style, or theme-variable changes. Message rendering still merges adjacent assistant turns the same way, plan-task badges keep the same counts and labels, permission command extraction keeps the same default text, and ask-question answers keep the same submitted payload shape.
@@ -62,5 +64,6 @@ Native clients can mirror these helpers as pure presentation/normalization utili
 - compute runtime badges, queue labels, token summaries, optimistic attachment copy, and network-failure hints with side-effect-free presentation helpers
 - derive banner, toolbar, waiting, and generating status copy from runtime status, bridge health, retry state, long-wait timers, and model labels without changing realtime behavior
 - choose history cursors and restore-scroll targets in pure helpers, then execute actual page scrolling in the Vue screen layer
+- keep composer configuration UI derivation pure, then apply selected mode/options through ACP only from the page/controller layer
 
 Do not move ACP connection management, realtime authority, or SQLite calibration into these helpers.
