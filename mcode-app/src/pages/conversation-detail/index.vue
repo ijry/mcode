@@ -838,7 +838,6 @@ import {
 } from "./detailPlanPresentation"
 import {
   buildLiveActivitySignature,
-  buildOptimisticText,
   draftSummary,
   formatQueueTime,
   formatTokenCountK,
@@ -889,13 +888,17 @@ import {
   type SlashCommandItem,
 } from "./detailSlashCommands"
 import {
-  buildDraftPromptBlocks,
   canProcessDraftQueue,
   createComposerDraft,
   createStandaloneDraft as createStandaloneQueuedDraft,
   hasPromptActuallyStarted as hasPromptStarted,
-  splitDraftAttachments,
 } from "./detailDraftQueue"
+import {
+  buildDraftSendPayload,
+  findLatestOptimisticTurnId,
+  resolveDraftSendFailure,
+  type SendAttemptResult,
+} from "./detailPromptSend"
 import {
   buildUploadTarget,
   buildUploadedAttachment,
@@ -919,11 +922,6 @@ interface UploadQueueItem {
   kind: "image" | "file"
   progress: number
   status: "uploading" | "success" | "error"
-  error?: string
-}
-
-interface SendAttemptResult {
-  started: boolean
   error?: string
 }
 
@@ -2957,14 +2955,13 @@ async function sendDraft(draft: QueuedDraft): Promise<boolean> {
     const conn = await ensureConversationReadyForSend()
     if (!conn) throw new Error("未连接到代理")
 
-    const { imageAttachments, fileAttachments } = splitDraftAttachments(draft)
+    const { imageAttachments, optimisticText, blocks } = buildDraftSendPayload(draft)
     const optimisticTurnId = runtime.addOptimisticUserMessage(
       conversationId.value,
-      buildOptimisticText(draft.text, fileAttachments),
+      optimisticText,
       imageAttachments
     )
     scheduleViewportSync(true)
-    const blocks = buildDraftPromptBlocks(draft)
     if (isViewerMode.value) {
       const liveInfo = await acpApi
         .acpFindConnectionForConversation(conversationId.value)
@@ -2978,10 +2975,14 @@ async function sendDraft(draft: QueuedDraft): Promise<boolean> {
     if (!started.started) {
       runtime.removeOptimisticUserMessage(conversationId.value, optimisticTurnId)
       runtime.clearLiveMessage(conversationId.value)
-      draft.status = "failed"
-      draft.error = started.error || "请求已发出，但智能体未开始处理"
-      runtime.setSessionError(conversationId.value, draft.error)
-      uni.showToast({ title: `发送失败: ${draft.error}`, icon: "none", duration: 3000 })
+      const failure = resolveDraftSendFailure({
+        startedResult: started,
+        fallbackMessage: "请求已发出，但智能体未开始处理",
+      })
+      draft.status = failure.status
+      draft.error = failure.error
+      runtime.setSessionError(conversationId.value, failure.error)
+      uni.showToast({ title: failure.toastTitle, icon: "none", duration: 3000 })
       return false
     }
     runtime.setSessionError(conversationId.value, null)
@@ -2989,17 +2990,17 @@ async function sendDraft(draft: QueuedDraft): Promise<boolean> {
     usePetStore().addExp('user', 5)
     return true
   } catch (error) {
-    const optimisticTurns = session.value?.optimisticTurns || []
-    const latestOptimisticTurn = optimisticTurns[optimisticTurns.length - 1]
-    if (latestOptimisticTurn?.id) {
-      runtime.removeOptimisticUserMessage(conversationId.value, latestOptimisticTurn.id)
+    const latestOptimisticTurnId = findLatestOptimisticTurnId(session.value?.optimisticTurns || [])
+    if (latestOptimisticTurnId) {
+      runtime.removeOptimisticUserMessage(conversationId.value, latestOptimisticTurnId)
     }
     runtime.clearLiveMessage(conversationId.value)
     const message = toErrorMessage(error)
-    draft.status = "failed"
-    draft.error = message
-    runtime.setSessionError(conversationId.value, message)
-    uni.showToast({ title: `发送失败: ${message}`, icon: "none", duration: 3000 })
+    const failure = resolveDraftSendFailure({ errorMessage: message })
+    draft.status = failure.status
+    draft.error = failure.error
+    runtime.setSessionError(conversationId.value, failure.error)
+    uni.showToast({ title: failure.toastTitle, icon: "none", duration: 3000 })
     return false
   } finally {
     sending.value = false
