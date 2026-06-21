@@ -1044,9 +1044,13 @@ function detailDebugLog(stage: string, payload?: Record<string, unknown>) {
   })
 }
 
-const messages = computed(() => {
+const timelineTurns = computed(() => {
   if (!conversationId.value) return []
-  return runtime.getMessages(conversationId.value)
+  return runtime.getTimelineTurns(conversationId.value)
+})
+
+const messages = computed(() => {
+  return timelineTurns.value.map((entry) => entry.turn)
 })
 
 const renderMessageItems = computed<RenderMessageItem[]>(() =>

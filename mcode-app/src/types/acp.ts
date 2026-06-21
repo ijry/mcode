@@ -68,6 +68,7 @@ export interface PlanStep {
 }
 
 export interface LiveMessage {
+  id?: string
   role: "assistant"
   content: ContentPart[]
   isStreaming: boolean

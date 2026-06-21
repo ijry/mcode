@@ -40,6 +40,12 @@ import {
   type PersistedTurnWithParts,
 } from "@/services/db/repositories/conversationRepository"
 import { buildPersistedTurnRecord } from "@/services/conversation/conversationDetailPersistence"
+import {
+  buildConversationTimeline,
+  buildLiveMessageTurnId,
+  dedupeTurnsByRoleAndId,
+  type ConversationTimelineTurn,
+} from "./conversationTimeline"
 
 /**
  * 会话运行时状态管理
@@ -88,24 +94,17 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
    * 获取会话的所有消息（包括本地、乐观、流式）
    */
   function getMessages(conversationId: number): MessageTurn[] {
+    return getTimelineTurns(conversationId).map((entry) => entry.turn)
+  }
+
+  function getTimelineTurns(conversationId: number): ConversationTimelineTurn[] {
     const session = getOrCreateSession(conversationId)
-    const messages: MessageTurn[] = [
-      ...session.localTurns,
-      ...session.optimisticTurns,
-    ]
-
-    // 如果有流式消息，添加到末尾
-    if (session.liveMessage) {
-      messages.push({
-        id: `live-${conversationId}`,
-        role: "assistant",
-        content: session.liveMessage.content,
-        timestamp: session.liveMessage.timestamp,
-        status: session.liveMessage.isStreaming ? "streaming" : "completed",
-      })
-    }
-
-    return messages
+    return buildConversationTimeline({
+      conversationId,
+      localTurns: session.localTurns,
+      optimisticTurns: session.optimisticTurns,
+      liveMessage: session.liveMessage,
+    })
   }
 
   /**
@@ -156,8 +155,9 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     }
   }
 
-  function createLiveMessage(content: ContentPart[] = [], isStreaming = true): LiveMessage {
+  function createLiveMessage(content: ContentPart[] = [], isStreaming = true, id?: string): LiveMessage {
     return {
+      id: resolveLiveMessageId(id),
       role: "assistant",
       content,
       isStreaming,
@@ -209,10 +209,20 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
   function setLiveMessage(
     conversationId: number,
     content: ContentPart[],
-    isStreaming: boolean
+    isStreaming: boolean,
+    options?: {
+      id?: string
+      timestamp?: number
+    }
   ) {
     const session = getOrCreateSession(conversationId)
-    session.liveMessage = createLiveMessage(content, isStreaming)
+    const liveMessage = createLiveMessage(
+      content,
+      isStreaming,
+      firstString(options?.id, session.liveMessage?.id) || undefined
+    )
+    liveMessage.timestamp = options?.timestamp ?? liveMessage.timestamp
+    session.liveMessage = liveMessage
   }
 
   /**
@@ -282,7 +292,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       return
     }
 
-    const normalizedLiveMessage = mapSnapshotLiveMessage(snapshot)
+    const normalizedLiveMessage = mapSnapshotLiveMessage(snapshot, session.liveMessage)
     if (normalizedLiveMessage) {
       session.liveMessage = normalizedLiveMessage
     }
@@ -339,11 +349,11 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         }
         session.localTurns = await reloadLocalTurns(session)
       } else {
-        session.localTurns.push(...session.optimisticTurns)
+        session.localTurns = dedupeTurnsByRoleAndId([
+          ...session.localTurns,
+          ...completedTurns,
+        ])
         session.optimisticTurns = []
-        if (assistantTurn) {
-          session.localTurns.push(assistantTurn)
-        }
         session.liveMessage = null
       }
     } else {
@@ -849,6 +859,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     connections,
     getOrCreateSession,
     getMessages,
+    getTimelineTurns,
     addOptimisticUserMessage,
     removeOptimisticUserMessage,
     beginPlaceholderThinking,
@@ -899,12 +910,19 @@ function buildAssistantTurn(
   return {
     id:
       firstString(eventData?.turnId, eventData?.id) ||
-      `turn-${session.conversationId}-${timestamp}`,
+      buildLiveMessageTurnId(session.conversationId, liveMessage),
     role: "assistant",
     content: cloneContentParts(liveMessage.content),
     timestamp,
     status: "completed",
   }
+}
+
+let liveMessageSequence = 0
+
+function createRuntimeLiveMessageId() {
+  liveMessageSequence += 1
+  return `lm-${Date.now()}-${liveMessageSequence}`
 }
 
 function isSharedInProgressStatus(status: RuntimeSession["status"]) {
@@ -1193,7 +1211,10 @@ function buildEmptyContentPart(contentType: string): ContentPart {
   return { type: "text", text: "" }
 }
 
-function mapSnapshotLiveMessage(snapshot: any): LiveMessage | null {
+function mapSnapshotLiveMessage(
+  snapshot: any,
+  currentLiveMessage?: LiveMessage | null
+): LiveMessage | null {
   const rawLiveMessage = snapshot?.live_message
   const rawToolCalls = Array.isArray(snapshot?.active_tool_calls) ? snapshot.active_tool_calls : []
   const toolCallMap = new Map<string, ContentPart>()
@@ -1219,6 +1240,10 @@ function mapSnapshotLiveMessage(snapshot: any): LiveMessage | null {
   if (parts.length === 0) return null
 
   return {
+    id: resolveLiveMessageId(
+      firstString(rawLiveMessage?.id, rawLiveMessage?.message_id) || undefined,
+      currentLiveMessage?.id
+    ),
     role: "assistant",
     content: parts,
     isStreaming: true,
@@ -1282,6 +1307,11 @@ function deriveRuntimeStatus(snapshot: any, liveMessage: LiveMessage | null) {
   if (status === "connected") return "connected"
   if (status === "prompting") return "thinking"
   return "idle"
+}
+
+function resolveLiveMessageId(...candidates: Array<string | null | undefined>) {
+  const normalized = firstString(...candidates)
+  return normalized || createRuntimeLiveMessageId()
 }
 
 function deriveRuntimeError(snapshot: any): string | null {

@@ -217,4 +217,89 @@ describe('conversationRuntime ACP error handling', () => {
       turnCount: 1,
     })
   })
+
+  it('drops the promoted assistant snapshot when the same live turn is still streaming', async () => {
+    const store = useConversationRuntimeStore()
+
+    store.setLiveMessage(
+      1,
+      [{ type: 'text', text: 'streaming reply' }],
+      true,
+      { id: 'lm-dup', timestamp: 100 }
+    )
+    await store.completeTurn(1)
+    store.setLiveMessage(
+      1,
+      [{ type: 'text', text: 'streaming reply' }],
+      true,
+      { id: 'lm-dup', timestamp: 100 }
+    )
+
+    const timeline = store.getTimelineTurns(1)
+    const assistantIds = timeline
+      .filter((entry) => entry.turn.role === 'assistant')
+      .map((entry) => entry.turn.id)
+
+    expect(assistantIds.filter((id) => id === 'live-1-lm-dup')).toHaveLength(1)
+    expect(timeline.find((entry) => entry.turn.id === 'live-1-lm-dup')?.phase).toBe('streaming')
+    expect(store.getMessages(1).filter((turn) => turn.id === 'live-1-lm-dup')).toHaveLength(1)
+  })
+
+  it('keeps a completed assistant turn and a different streaming turn together', async () => {
+    const store = useConversationRuntimeStore()
+
+    store.setLiveMessage(
+      1,
+      [{ type: 'text', text: 'turn A' }],
+      true,
+      { id: 'lm-a', timestamp: 100 }
+    )
+    await store.completeTurn(1)
+    store.setLiveMessage(
+      1,
+      [{ type: 'text', text: 'turn B' }],
+      true,
+      { id: 'lm-b', timestamp: 200 }
+    )
+
+    const assistantIds = store
+      .getTimelineTurns(1)
+      .filter((entry) => entry.turn.role === 'assistant')
+      .map((entry) => entry.turn.id)
+
+    expect(assistantIds).toContain('live-1-lm-a')
+    expect(assistantIds).toContain('live-1-lm-b')
+    expect(new Set(assistantIds).size).toBe(assistantIds.length)
+  })
+
+  it('does not accumulate duplicate local assistant turns after the same live turn is re-promoted', async () => {
+    const store = useConversationRuntimeStore()
+
+    store.setLiveMessage(
+      1,
+      [{ type: 'text', text: 'streaming reply' }],
+      true,
+      { id: 'lm-dup2', timestamp: 100 }
+    )
+    await store.completeTurn(1)
+    store.setLiveMessage(
+      1,
+      [{ type: 'text', text: 'streaming reply' }],
+      true,
+      { id: 'lm-dup2', timestamp: 100 }
+    )
+    await store.completeTurn(1)
+
+    const session = store.getOrCreateSession(1)
+    expect(session.liveMessage).toBeNull()
+    expect(session.localTurns.filter((turn) => turn.id === 'live-1-lm-dup2')).toHaveLength(1)
+
+    const assistantIds = store
+      .getTimelineTurns(1)
+      .filter((entry) => entry.turn.role === 'assistant')
+      .map((entry) => entry.turn.id)
+
+    expect(assistantIds.filter((id) => id === 'live-1-lm-dup2')).toHaveLength(1)
+    expect(new Set(assistantIds).size).toBe(assistantIds.length)
+  })
 })
