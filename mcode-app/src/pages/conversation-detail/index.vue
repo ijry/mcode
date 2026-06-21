@@ -792,7 +792,6 @@ import {
 } from "@/services/conversation/composerTools"
 import type {
   AgentOptionsSnapshot,
-  PromptInputBlock,
   RealtimeBridgeHealth,
   PermissionRequest,
   PendingQuestionState,
@@ -885,11 +884,18 @@ import {
   filterSlashCommands,
   insertSlashText,
   normalizeSlashCommandsFromSnapshot,
-  resolveSlashPreset,
   resolveSlashState,
   slashCommandDescription,
   type SlashCommandItem,
 } from "./detailSlashCommands"
+import {
+  buildDraftPromptBlocks,
+  canProcessDraftQueue,
+  createComposerDraft,
+  createStandaloneDraft as createStandaloneQueuedDraft,
+  hasPromptActuallyStarted as hasPromptStarted,
+  splitDraftAttachments,
+} from "./detailDraftQueue"
 import {
   buildConnectionKey,
   buildDescriptorFromStoredConnection,
@@ -2805,15 +2811,10 @@ function closeComposerPanel() {
 }
 
 function createStandaloneDraft(text: string): QueuedDraft | null {
-  const normalized = resolveSlashPreset(String(text || "").trim())
-  if (!normalized) return null
-  return {
-    id: createLocalId("draft"),
-    text: normalized,
-    attachments: [],
-    createdAt: Date.now(),
-    status: "pending",
-  }
+  return createStandaloneQueuedDraft({
+    text,
+    createId: createLocalId,
+  })
 }
 
 async function submitPreparedDraft(draft: QueuedDraft) {
@@ -2929,20 +2930,15 @@ async function sendMessage() {
 }
 
 function createDraftFromComposer(): QueuedDraft | null {
-  const text = inputText.value.trim()
-  const atts = attachments.value.map((att) => ({ ...att }))
-  if (!text && atts.length === 0) return null
-
+  const draft = createComposerDraft({
+    text: inputText.value,
+    attachments: attachments.value,
+    createId: createLocalId,
+  })
+  if (!draft) return null
   inputText.value = ""
   attachments.value = []
-
-  return {
-    id: createLocalId("draft"),
-    text: resolveSlashPreset(text),
-    attachments: atts,
-    createdAt: Date.now(),
-    status: "pending",
-  }
+  return draft
 }
 
 async function sendDraft(draft: QueuedDraft): Promise<boolean> {
@@ -2962,37 +2958,14 @@ async function sendDraft(draft: QueuedDraft): Promise<boolean> {
     const conn = await ensureConversationReadyForSend()
     if (!conn) throw new Error("未连接到代理")
 
-    const imageAtts = draft.attachments.filter((item) => item.kind === "image")
-    const fileAtts = draft.attachments.filter((item) => item.kind === "file")
+    const { imageAttachments, fileAttachments } = splitDraftAttachments(draft)
     const optimisticTurnId = runtime.addOptimisticUserMessage(
       conversationId.value,
-      buildOptimisticText(draft.text, fileAtts),
-      imageAtts
+      buildOptimisticText(draft.text, fileAttachments),
+      imageAttachments
     )
     scheduleViewportSync(true)
-    const blocks: PromptInputBlock[] = []
-    if (draft.text) {
-      blocks.push({ type: "text", text: draft.text })
-    }
-
-    draft.attachments.forEach((att) => {
-      if (att.kind === "image") {
-        blocks.push({
-          type: "image",
-          source: { type: "url", url: att.url, media_type: att.type },
-        })
-        return
-      }
-      blocks.push({
-        type: "resource",
-        resource: {
-          type: "file",
-          uri: att.url,
-          name: att.name,
-          size: att.size,
-        },
-      })
-    })
+    const blocks = buildDraftPromptBlocks(draft)
     if (isViewerMode.value) {
       const liveInfo = await acpApi
         .acpFindConnectionForConversation(conversationId.value)
@@ -3037,13 +3010,10 @@ async function sendDraft(draft: QueuedDraft): Promise<boolean> {
 function hasPromptActuallyStarted() {
   const currentSession = session.value
   if (!currentSession) return false
-  if (currentSession.liveMessage && currentSession.liveMessage.content.length > 0) return true
-  return (
-    currentSession.status === "thinking" ||
-    currentSession.status === "running_tool" ||
-    currentSession.status === "waiting_permission" ||
-    currentSession.status === "waiting_question"
-  )
+  return hasPromptStarted({
+    status: currentSession.status,
+    liveContentLength: currentSession.liveMessage?.content.length || 0,
+  })
 }
 
 async function waitForPromptStart(draft: QueuedDraft): Promise<SendAttemptResult> {
@@ -3124,13 +3094,13 @@ async function confirmPromptStartFromSnapshot() {
 }
 
 async function processDraftQueue() {
-  if (
-    processingQueue.value ||
-    isBusyForSend.value ||
-    uploadingCount.value > 0 ||
-    !canSendSharedLive.value
-  ) return
-  if (draftQueue.value.length === 0) return
+  if (!canProcessDraftQueue({
+    processingQueue: processingQueue.value,
+    isBusyForSend: isBusyForSend.value,
+    uploadingCount: uploadingCount.value,
+    canSendSharedLive: canSendSharedLive.value,
+    draftQueueLength: draftQueue.value.length,
+  })) return
   processingQueue.value = true
   try {
     while (
