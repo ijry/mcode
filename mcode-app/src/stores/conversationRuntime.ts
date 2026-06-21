@@ -77,6 +77,8 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         pendingPermission: null,
         pendingQuestion: null,
         lastAppliedSeq: null,
+        lastCompletedTurnKey: null,
+        lastCompletedTurnAt: 0,
         externalTurnBackfillInFlight: false,
         externalTurnBackfillLastAttemptAt: 0,
         stats: {
@@ -293,12 +295,20 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     }
 
     const normalizedLiveMessage = mapSnapshotLiveMessage(snapshot, session.liveMessage)
-    if (normalizedLiveMessage) {
+    const shouldIgnoreSnapshotLiveMessage =
+      normalizedLiveMessage != null &&
+      isStaleSnapshotLiveReplay(session, normalizedLiveMessage)
+    if (normalizedLiveMessage && !shouldIgnoreSnapshotLiveMessage) {
       session.liveMessage = normalizedLiveMessage
     }
     session.pendingPermission = normalizePendingPermission(snapshot?.pending_permission)
     session.pendingQuestion = normalizePendingQuestion(snapshot?.pending_question)
-    session.status = deriveRuntimeStatus(snapshot, normalizedLiveMessage ?? session.liveMessage)
+    session.status = deriveRuntimeStatus(
+      snapshot,
+      shouldIgnoreSnapshotLiveMessage
+        ? session.liveMessage
+        : normalizedLiveMessage ?? session.liveMessage
+    )
     session.inputErrorMessage = deriveRuntimeError(snapshot)
     session.apiRetry = null
     session.lastAppliedSeq = snapshotSeq ?? session.lastAppliedSeq
@@ -320,6 +330,15 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
    */
   async function completeTurn(conversationId: number, eventData?: any) {
     const session = getOrCreateSession(conversationId)
+    const completeTurnKey = buildCompleteTurnKey(session, eventData)
+    if (shouldIgnoreDuplicateCompleteTurn(session, completeTurnKey)) {
+      console.warn("[conversation-runtime] duplicate completeTurn ignored", {
+        conversationId,
+        completeTurnKey,
+      })
+      return
+    }
+    markCompleteTurnHandled(session, completeTurnKey)
     session.externalTurnBackfillInFlight = false
     session.externalTurnBackfillLastAttemptAt = 0
     const hadOptimisticTurns = session.optimisticTurns.length > 0
@@ -568,7 +587,10 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
 
       case "turn_complete":
         touchHotConversation(session.conversationId)
-        void completeTurn(session.conversationId, event.data)
+        void completeTurn(session.conversationId, {
+          ...(event.data && typeof event.data === "object" ? event.data : {}),
+          __eventSeq: event.seq,
+        })
         break
 
       case "usage_update":
@@ -637,6 +659,8 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         })
         const session = getOrCreateSession(conversationId)
         session.lastAppliedSeq = null
+        session.lastCompletedTurnKey = null
+        session.lastCompletedTurnAt = 0
       }
 
       if (!managed && discoveredConnectionId) {
@@ -730,6 +754,8 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       session.apiRetry = null
       session.pendingPermission = null
       session.pendingQuestion = null
+      session.lastCompletedTurnKey = null
+      session.lastCompletedTurnAt = 0
     }
   }
 
@@ -762,6 +788,8 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       session.pendingPermission = null
       session.pendingQuestion = null
       session.lastAppliedSeq = null
+      session.lastCompletedTurnKey = null
+      session.lastCompletedTurnAt = 0
       session.externalTurnBackfillInFlight = false
       session.externalTurnBackfillLastAttemptAt = 0
       session.status = session.connectionId ? "connected" : "idle"
@@ -826,6 +854,8 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     session.pendingPermission = null
     session.pendingQuestion = null
     session.lastAppliedSeq = 0
+    session.lastCompletedTurnKey = null
+    session.lastCompletedTurnAt = 0
     connections.value.set(managed.connectionId, managed.connection)
     syncManagedSendPermission(input.conversationId)
   }
@@ -896,6 +926,8 @@ interface RuntimeSession {
   pendingPermission: PermissionRequest | null
   pendingQuestion: PendingQuestionState | null
   lastAppliedSeq: number | null
+  lastCompletedTurnKey: string | null
+  lastCompletedTurnAt: number
   externalTurnBackfillInFlight: boolean
   externalTurnBackfillLastAttemptAt: number
   stats: SessionStats
@@ -916,6 +948,70 @@ function buildAssistantTurn(
     timestamp,
     status: "completed",
   }
+}
+
+const COMPLETE_TURN_DUPLICATE_WINDOW_MS = 3000
+
+function buildCompleteTurnKey(session: RuntimeSession, eventData?: any) {
+  const explicitTurnId = firstString(
+    eventData?.turnId,
+    eventData?.turn_id,
+    eventData?.id,
+    eventData?.messageId,
+    eventData?.message_id
+  )
+  if (explicitTurnId) return `turn:${explicitTurnId}`
+
+  const eventSeq = firstNumber(
+    eventData?.__eventSeq,
+    eventData?.event_seq,
+    eventData?.eventSeq,
+    eventData?.seq
+  )
+  if (eventSeq != null) return `seq:${eventSeq}`
+
+  const eventTimestamp = firstNumber(eventData?.timestamp, eventData?.created_at, eventData?.createdAt)
+  if (eventTimestamp != null) return `timestamp:${eventTimestamp}`
+
+  if (session.liveMessage && !session.liveMessage.isPlaceholderThinking) {
+    return `live:${buildLiveMessageTurnId(session.conversationId, session.liveMessage)}`
+  }
+
+  if (session.optimisticTurns.length > 0) {
+    return `optimistic:${session.optimisticTurns.map((turn) => turn.id).join(",")}`
+  }
+
+  return null
+}
+
+function shouldIgnoreDuplicateCompleteTurn(
+  session: RuntimeSession,
+  completeTurnKey: string | null
+) {
+  const alreadyDrained =
+    session.liveMessage === null &&
+    session.optimisticTurns.length === 0 &&
+    session.pendingPermission === null &&
+    session.pendingQuestion === null
+  if (!alreadyDrained) return false
+
+  if (completeTurnKey && completeTurnKey === session.lastCompletedTurnKey) {
+    return true
+  }
+
+  return (
+    completeTurnKey === null &&
+    session.lastCompletedTurnKey !== null &&
+    Date.now() - session.lastCompletedTurnAt < COMPLETE_TURN_DUPLICATE_WINDOW_MS
+  )
+}
+
+function markCompleteTurnHandled(
+  session: RuntimeSession,
+  completeTurnKey: string | null
+) {
+  session.lastCompletedTurnKey = completeTurnKey || `unknown:${Date.now()}`
+  session.lastCompletedTurnAt = Date.now()
 }
 
 let liveMessageSequence = 0
@@ -1274,6 +1370,41 @@ function mapSnapshotContentBlock(
     }
   }
   return null
+}
+
+function isStaleSnapshotLiveReplay(
+  session: RuntimeSession,
+  liveMessage: LiveMessage
+) {
+  if (session.liveMessage !== null) return false
+  if (session.optimisticTurns.length > 0) return false
+  if (session.pendingPermission !== null || session.pendingQuestion !== null) return false
+  if (isSharedInProgressStatus(session.status)) return false
+
+  const latestAssistant = getLatestLocalAssistantTurn(session.localTurns)
+  if (!latestAssistant) return false
+
+  const liveTurnId = buildLiveMessageTurnId(session.conversationId, liveMessage)
+  if (latestAssistant.id === liveTurnId) return true
+
+  return (
+    typeof liveMessage.timestamp === "number" &&
+    Number.isFinite(liveMessage.timestamp) &&
+    typeof latestAssistant.timestamp === "number" &&
+    Number.isFinite(latestAssistant.timestamp) &&
+    liveMessage.timestamp <= latestAssistant.timestamp
+  )
+}
+
+function getLatestLocalAssistantTurn(turns: MessageTurn[]) {
+  let latest: MessageTurn | null = null
+  for (const turn of turns) {
+    if (turn.role !== "assistant") continue
+    if (!latest || turn.timestamp > latest.timestamp) {
+      latest = turn
+    }
+  }
+  return latest
 }
 
 function buildToolCallPart(entry: any): ContentPart | null {

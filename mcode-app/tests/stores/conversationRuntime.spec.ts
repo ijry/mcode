@@ -150,6 +150,65 @@ describe('conversationRuntime ACP error handling', () => {
     expect(session.lastAppliedSeq).toBe(12)
   })
 
+  it('ignores stale snapshot live replay when completed assistant history is newer', () => {
+    const { store, session } = prepareSession()
+    session.localTurns = [
+      {
+        id: 'completed-a1',
+        role: 'assistant',
+        content: [{ type: 'text', text: 'completed reply' }],
+        timestamp: 200,
+        status: 'completed',
+      },
+    ] as any
+
+    store.hydrateLiveSnapshot(1, {
+      event_seq: 20,
+      status: 'connected',
+      live_message: {
+        id: 'old-live',
+        started_at: 100,
+        content: [
+          { kind: 'text', text: 'completed reply' },
+        ],
+      },
+    })
+
+    expect(session.liveMessage).toBeNull()
+    expect(store.getMessages(1).map((turn) => turn.id)).toEqual(['completed-a1'])
+  })
+
+  it('accepts snapshot live content when it starts after existing assistant history', () => {
+    const { store, session } = prepareSession()
+    session.localTurns = [
+      {
+        id: 'completed-a1',
+        role: 'assistant',
+        content: [{ type: 'text', text: 'completed reply' }],
+        timestamp: 100,
+        status: 'completed',
+      },
+    ] as any
+
+    store.hydrateLiveSnapshot(1, {
+      event_seq: 20,
+      status: 'prompting',
+      live_message: {
+        id: 'new-live',
+        started_at: 300,
+        content: [
+          { kind: 'text', text: 'new streaming reply' },
+        ],
+      },
+    })
+
+    expect(session.liveMessage?.id).toBe('new-live')
+    expect(store.getMessages(1).map((turn) => turn.id)).toEqual([
+      'completed-a1',
+      'live-1-new-live',
+    ])
+  })
+
   it('keeps cached session state for hot conversations', () => {
     const hot = require('@/services/conversation/hotConversationCoordinator')
     hot.isHotConversation.mockReturnValue(true)
@@ -301,5 +360,46 @@ describe('conversationRuntime ACP error handling', () => {
 
     expect(assistantIds.filter((id) => id === 'live-1-lm-dup2')).toHaveLength(1)
     expect(new Set(assistantIds).size).toBe(assistantIds.length)
+  })
+
+  it('treats a second already-drained completeTurn as a no-op', async () => {
+    const sync = require('@/services/conversation/conversationSyncService')
+    const store = useConversationRuntimeStore()
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {})
+
+    try {
+      store.setLiveMessage(
+        1,
+        [{ type: 'text', text: 'done' }],
+        true,
+        { id: 'lm-drained', timestamp: 100 }
+      )
+      await store.completeTurn(1)
+      jest.clearAllMocks()
+
+      await store.completeTurn(1)
+
+      expect(sync.calibrateAfterReplayGap).not.toHaveBeenCalled()
+      expect(sync.calibrateAfterTurnComplete).not.toHaveBeenCalled()
+      expect(store.getMessages(1).filter((turn) => turn.id === 'live-1-lm-drained')).toHaveLength(1)
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('dedupes repeated turn_complete events with the same event sequence', async () => {
+    const sync = require('@/services/conversation/conversationSyncService')
+    const store = useConversationRuntimeStore()
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {})
+
+    try {
+      await store.completeTurn(1, { __eventSeq: 44 })
+      await store.completeTurn(1, { __eventSeq: 44 })
+
+      expect(sync.calibrateAfterReplayGap).toHaveBeenCalledTimes(1)
+      expect(sync.calibrateAfterTurnComplete).toHaveBeenCalledTimes(1)
+    } finally {
+      warnSpy.mockRestore()
+    }
   })
 })
