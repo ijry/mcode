@@ -47,9 +47,11 @@ Attachment upload helpers now own image/file picker payload normalization, uploa
 
 Prompt send helpers now own deterministic draft-send payload shaping, send-failure message normalization, prompt-start watch signatures, and timeout/snapshot result mapping. The page still owns ACP prompt dispatch, optimistic runtime insertion/removal, snapshot confirmation, watcher/timer lifetimes, toast display, and runtime error mutation.
 
+Conversation detail page styles now live in `mcode-app/src/pages/conversation-detail/index.scss` and are imported by `index.vue`. This is only a file-boundary cleanup; selectors, theme variables, layout behavior, and visual output stay unchanged.
+
 ## UI Behavior
 
-There are no template, copy, style, or theme-variable changes. Message rendering still merges adjacent assistant turns the same way, plan-task badges keep the same counts and labels, permission command extraction keeps the same default text, and ask-question answers keep the same submitted payload shape.
+There are no template, copy, selector, or theme-variable changes. The page now imports the same scoped SCSS from `index.scss`, so message rendering, layout, plan-task badges, permission command extraction, and ask-question answers keep the same behavior and visual output.
 
 ## Compatibility
 
@@ -77,5 +79,6 @@ Native clients can mirror these helpers as pure presentation/normalization utili
 - build prompt input blocks, queue decisions, and queue item state transitions in pure helpers, while leaving actual send/retry/runtime mutation in the screen/controller layer
 - derive prompt send payloads, prompt-start watch signatures, and failure copy in pure helpers, while leaving prompt dispatch, watcher timing, optimistic message lifecycle, snapshot fetch, and runtime session mutation in the screen/controller layer
 - normalize picked files and upload responses in pure helpers, while leaving platform file picking and upload tasks in the screen/controller layer
+- keep large screen-level style sheets in a dedicated page-local SCSS file when native teams only need behavior notes; this does not change runtime logic and does not require native parity updates by itself
 
 Do not move ACP connection management, realtime authority, or SQLite calibration into these helpers.
