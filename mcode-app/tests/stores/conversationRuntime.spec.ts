@@ -429,6 +429,37 @@ describe('conversationRuntime ACP error handling', () => {
     expect(new Set(assistantIds).size).toBe(assistantIds.length)
   })
 
+  it('uses completion live_message payload as the authoritative completed assistant content', async () => {
+    const store = useConversationRuntimeStore()
+
+    store.setLiveMessage(
+      1,
+      [{ type: 'text', text: 'before final chunk' }],
+      true,
+      { id: 'lm-final', timestamp: 100 }
+    )
+    await store.completeTurn(1, {
+      live_message: {
+        id: 'lm-final',
+        started_at: 100,
+        content: [
+          { kind: 'text', text: 'before final chunk plus final chunk' },
+        ],
+      },
+    })
+
+    expect(store.getMessages(1)).toEqual([
+      expect.objectContaining({
+        id: 'live-1-lm-final',
+        role: 'assistant',
+        status: 'completed',
+        content: [
+          { type: 'text', text: 'before final chunk plus final chunk' },
+        ],
+      }),
+    ])
+  })
+
   it('treats a second already-drained completeTurn as a no-op', async () => {
     const sync = require('@/services/conversation/conversationSyncService')
     const store = useConversationRuntimeStore()

@@ -343,10 +343,11 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     session.externalTurnBackfillLastAttemptAt = 0
     const hadOptimisticTurns = session.optimisticTurns.length > 0
     const completedTurns = session.optimisticTurns.map(cloneMessageTurn)
-    const assistantTurn = session.liveMessage
-      && !session.liveMessage.isPlaceholderThinking
-      && session.liveMessage.content.length > 0
-      ? buildAssistantTurn(session, session.liveMessage, eventData)
+    const completionLiveMessage = resolveCompletionLiveMessage(session, eventData)
+    const assistantTurn = completionLiveMessage
+      && !completionLiveMessage.isPlaceholderThinking
+      && completionLiveMessage.content.length > 0
+      ? buildAssistantTurn(session, completionLiveMessage, eventData)
       : null
 
     if (assistantTurn) {
@@ -970,6 +971,14 @@ function buildCompleteTurnKey(session: RuntimeSession, eventData?: any) {
   )
   if (eventSeq != null) return `seq:${eventSeq}`
 
+  const eventLiveId = firstString(
+    eventData?.liveMessage?.id,
+    eventData?.live_message?.id,
+    eventData?.finalLiveMessage?.id,
+    eventData?.final_live_message?.id
+  )
+  if (eventLiveId) return `live:live-${session.conversationId}-${eventLiveId}`
+
   const eventTimestamp = firstNumber(eventData?.timestamp, eventData?.created_at, eventData?.createdAt)
   if (eventTimestamp != null) return `timestamp:${eventTimestamp}`
 
@@ -1012,6 +1021,39 @@ function markCompleteTurnHandled(
 ) {
   session.lastCompletedTurnKey = completeTurnKey || `unknown:${Date.now()}`
   session.lastCompletedTurnAt = Date.now()
+}
+
+function resolveCompletionLiveMessage(
+  session: RuntimeSession,
+  eventData?: any
+): LiveMessage | null {
+  return mapCompletionLiveMessage(session, eventData) ?? session.liveMessage
+}
+
+function mapCompletionLiveMessage(
+  session: RuntimeSession,
+  eventData?: any
+): LiveMessage | null {
+  const rawLiveMessage = firstObject(
+    eventData?.liveMessage,
+    eventData?.live_message,
+    eventData?.finalLiveMessage,
+    eventData?.final_live_message
+  )
+  if (!rawLiveMessage) return null
+
+  const mapped = mapSnapshotLiveMessage(
+    {
+      live_message: rawLiveMessage,
+      active_tool_calls: eventData?.active_tool_calls ?? eventData?.activeToolCalls,
+    },
+    session.liveMessage
+  )
+  if (!mapped) return null
+  return {
+    ...mapped,
+    isStreaming: false,
+  }
 }
 
 let liveMessageSequence = 0

@@ -906,6 +906,13 @@ class AcpApiClient {
             sessionId: firstString(record.session_id, record.sessionId),
             stopReason: firstString(record.stop_reason, record.stopReason),
             agentType: firstString(record.agent_type, record.agentType),
+            timestamp: firstNumber(record.timestamp, record.created_at, record.createdAt),
+            liveMessage:
+              record.live_message ||
+              record.liveMessage ||
+              record.final_live_message ||
+              record.finalLiveMessage ||
+              null,
           },
         }
       case "usage_update":
