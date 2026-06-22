@@ -11,3 +11,9 @@
 - Every mcode change must include or update a Markdown note under `docs/mcode-architecture-notes/`.
 - The note should describe the architecture, protocol/data-flow changes, UI behavior, compatibility considerations, and native iOS/Android replication guidance.
 - Keep notes concise but concrete enough that an AI agent can reimplement the same behavior in native clients without reading the full web/uni-app implementation.
+
+## 对接 xycloud
+
+- 当我说"对接 xycloud"时，指的是对接位于 `../.././xystack/back-end/xycloud` 的 xycloud 后端源码。
+- xycloud 模块通常位于 `app/_app/<module>`，接口路由约定为 `/v1/<module>/<controller>/<action>`（例如待办：`/v1/todo/item/lists`）。
+- mcode-app 调用 xycloud 接口时复用与账号、圈子相同的域名（`resolveXycloudBaseUrl()`）与账号 token（`useAccountStore().token` 作为 `Authorization` 头）。

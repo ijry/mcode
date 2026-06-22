@@ -40,23 +40,40 @@
       </view>
 
       <view v-else class="todo-body">
-        <TodoSectionBlock title="进行中">
-          <TodoCardList
-            :items="[]"
-            mode="cloud-placeholder"
-            emptyText=""
-            @placeholderAction="openCreatePopup"
-          />
-        </TodoSectionBlock>
+        <view v-if="!isLoggedIn" class="todo-empty-card todo-empty-card--actionable" @click="goLogin">
+          <text class="todo-empty-card__title">登录后查看云端待办</text>
+          <text class="todo-empty-card__desc">云端待办与你的账号、圈子使用同一账号体系。</text>
+        </view>
 
-        <TodoSectionBlock title="已完成" actionText="清除全部" @action="clearCompletedTodos">
-          <TodoCardList
-            :items="[]"
-            mode="cloud-placeholder"
-            emptyText=""
-            @placeholderAction="clearCompletedTodos"
-          />
-        </TodoSectionBlock>
+        <template v-else>
+          <TodoSectionBlock title="进行中">
+            <TodoCardList
+              :items="cloudInProgressTodos"
+              mode="in-progress"
+              :emptyText="cloudLoading ? '加载中...' : '暂无进行中的待办'"
+              @toggle="toggleCloudTodo"
+              @edit="startCloudEdit"
+              @send="openSendSheet"
+              @menu="openCloudTodoMenu"
+            />
+          </TodoSectionBlock>
+
+          <TodoSectionBlock
+            title="已完成"
+            actionText="清除全部"
+            :disabled="cloudCompletedTodos.length === 0"
+            @action="clearCloudCompletedTodos"
+          >
+            <TodoCardList
+              :items="cloudCompletedTodos"
+              mode="completed"
+              :emptyText="cloudLoading ? '加载中...' : '暂无已完成待办'"
+              @toggle="toggleCloudTodo"
+              @send="openSendSheet"
+              @menu="openCloudTodoMenu"
+            />
+          </TodoSectionBlock>
+        </template>
       </view>
     </view>
 
@@ -172,19 +189,30 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from "vue"
+import { ref, computed, onMounted, watch } from "vue"
 import { onShow } from "@dcloudio/uni-app"
 import TodoCardList from "./components/TodoCardList.vue"
 import TodoCreatePopup from "./components/TodoCreatePopup.vue"
 import TodoPageHeader from "./components/TodoPageHeader.vue"
 import TodoSectionBlock from "./components/TodoSectionBlock.vue"
 import { useAuthStore } from "@/stores/auth"
+import { useAccountStore } from "@/stores/account"
 import { createGateway } from "@/services/gateway"
 import { getDirectToken } from "@/services/gateway/directTokenStore"
 import { toErrorMessage } from "@/services/gateway/error"
 import type { RelaySessionInfo } from "@/services/gateway"
 import type { ConnectionInfo } from "@/types/acp"
 import { usePetStore } from "@/stores/pet"
+import { XycloudApiError } from "@/services/xycloudAuth"
+import {
+  CLOUD_TODO_STATUS_DONE,
+  CLOUD_TODO_STATUS_PENDING,
+  createCloudTodo,
+  deleteCloudTodo,
+  fetchCloudTodos,
+  updateCloudTodo,
+  type CloudTodoItem,
+} from "@/services/cloudTodo"
 import {
   applyTodoEdit,
   createTodoItem,
@@ -224,6 +252,7 @@ interface ConnectionGroup {
 /* ===== 基础待办 ===== */
 const STORAGE_KEY = "mcode_todos"
 const auth = useAuthStore()
+const account = useAccountStore()
 
 const todos = ref<TodoItem[]>([])
 const activeTab = ref<TodoTab>("local")
@@ -232,6 +261,14 @@ const editingId = ref<string | null>(null)
 const editingText = ref("")
 const showCreatePopup = ref(false)
 const showEditPopup = ref(false)
+
+/* ===== 云端待办 ===== */
+const cloudTodos = ref<CloudTodoItem[]>([])
+const cloudLoading = ref(false)
+const cloudLoaded = ref(false)
+const editingCloudId = ref<string | null>(null)
+const currentTodoIsCloud = ref(false)
+const isLoggedIn = computed(() => account.isLoggedIn)
 
 /* ===== 发送到新会话 ===== */
 const showSendDialog = ref(false)
@@ -273,6 +310,25 @@ const localSections = computed(() =>
 const localInProgressTodos = computed(() => localSections.value.inProgress)
 const localCompletedTodos = computed(() => localSections.value.completed)
 
+/* 云端待办映射为通用 TodoItem 后复用同一套区块/卡片组件 */
+function cloudToTodoItem(item: CloudTodoItem): TodoItem {
+  return {
+    id: item.id,
+    text: item.title,
+    completed: item.completed,
+    createdAt: item.createTime * 1000,
+    completedAt: item.doneTime ? item.doneTime * 1000 : null,
+    hidden: false,
+    hiddenAt: null,
+  }
+}
+
+const cloudSections = computed(() =>
+  getVisibleTodoSections(cloudTodos.value.map(cloudToTodoItem), searchKeyword.value)
+)
+const cloudInProgressTodos = computed(() => cloudSections.value.inProgress)
+const cloudCompletedTodos = computed(() => cloudSections.value.completed)
+
 const projectColumns = computed(() => [
   (selectedConnectionGroup.value?.projects || []).map((p) => ({
     text: p.name || p.path || "未命名项目",
@@ -298,6 +354,15 @@ onMounted(() => {
 
 onShow(() => {
   loadTodos()
+  if (activeTab.value === "cloud" && isLoggedIn.value) {
+    void loadCloudTodos()
+  }
+})
+
+watch(activeTab, (tab) => {
+  if (tab === "cloud" && isLoggedIn.value && !cloudLoaded.value) {
+    void loadCloudTodos()
+  }
 })
 
 /* ===== 待办增删改查 ===== */
@@ -320,14 +385,18 @@ function saveTodos() {
 }
 
 function openCreatePopup() {
-  if (activeTab.value === "cloud") {
-    uni.showToast({ title: "云端待办即将上线", icon: "none" })
+  if (activeTab.value === "cloud" && !isLoggedIn.value) {
+    goLogin()
     return
   }
   showCreatePopup.value = true
 }
 
-function createTodoFromPopup(text: string) {
+async function createTodoFromPopup(text: string) {
+  if (activeTab.value === "cloud") {
+    await createCloudTodoFromPopup(text)
+    return
+  }
   todos.value.unshift(createTodoItem(text, Date.now()))
   saveTodos()
 }
@@ -369,6 +438,10 @@ function startEdit(item: TodoItem) {
 }
 
 function finishEdit(value: string) {
+  if (editingCloudId.value) {
+    void finishCloudEdit(value)
+    return
+  }
   if (!editingId.value) return
   editingText.value = value
   todos.value = applyTodoEdit(todos.value, editingId.value, editingText.value)
@@ -385,6 +458,7 @@ function deleteTodo(id: string) {
 
 function openTodoMenu(item: TodoItem) {
   currentTodo.value = item
+  currentTodoIsCloud.value = false
   showTodoActionSheet.value = true
 }
 
@@ -415,6 +489,10 @@ function confirmDeleteTodo(item: TodoItem) {
     content: "确定要删除这个待办吗？此操作不可恢复。",
     success: (res) => {
       if (!res.confirm) return
+      if (currentTodoIsCloud.value) {
+        void deleteCloudTodoById(item.id)
+        return
+      }
       deleteTodo(item.id)
       uni.showToast({ title: "删除成功", icon: "success" })
     },
@@ -433,6 +511,130 @@ function handleTodoActionSelect(e: any) {
   if (action === "删除") {
     confirmDeleteTodo(item)
   }
+}
+
+/* ===== 云端待办：与账号、圈子同域名（resolveXycloudBaseUrl），同账号 token ===== */
+function goLogin() {
+  uni.navigateTo({ url: "/pages/auth/login" })
+}
+
+function handleCloudError(error: unknown, fallback: string) {
+  if (error instanceof XycloudApiError) {
+    uni.showToast({ title: "登录已失效，请重新登录", icon: "none" })
+    account.logout()
+    goLogin()
+    return
+  }
+  uni.showToast({ title: toErrorMessage(error) || fallback, icon: "none" })
+}
+
+async function loadCloudTodos() {
+  if (!isLoggedIn.value) return
+  cloudLoading.value = true
+  try {
+    cloudTodos.value = await fetchCloudTodos()
+    cloudLoaded.value = true
+  } catch (error) {
+    handleCloudError(error, "加载云端待办失败")
+  } finally {
+    cloudLoading.value = false
+  }
+}
+
+async function createCloudTodoFromPopup(text: string) {
+  const title = text.trim()
+  if (!title) return
+  try {
+    await createCloudTodo({ title })
+    await loadCloudTodos()
+  } catch (error) {
+    handleCloudError(error, "创建云端待办失败")
+  }
+}
+
+async function toggleCloudTodo(id: string) {
+  const target = cloudTodos.value.find((item) => item.id === id)
+  if (!target) return
+  const nextStatus = target.completed ? CLOUD_TODO_STATUS_PENDING : CLOUD_TODO_STATUS_DONE
+  // 乐观更新
+  target.completed = !target.completed
+  target.status = nextStatus
+  try {
+    await updateCloudTodo({ id, status: nextStatus })
+    if (nextStatus === CLOUD_TODO_STATUS_DONE) {
+      const petStore = usePetStore()
+      petStore.addExp("user", 15)
+      petStore.recordStat("totalTodosCompleted")
+    }
+  } catch (error) {
+    target.completed = !target.completed
+    target.status = target.completed ? CLOUD_TODO_STATUS_DONE : CLOUD_TODO_STATUS_PENDING
+    handleCloudError(error, "更新云端待办失败")
+  }
+}
+
+function startCloudEdit(item: TodoItem) {
+  if (item.completed) return
+  editingCloudId.value = item.id
+  editingText.value = item.text
+  showEditPopup.value = true
+}
+
+async function finishCloudEdit(value: string) {
+  const id = editingCloudId.value
+  showEditPopup.value = false
+  editingCloudId.value = null
+  editingText.value = ""
+  const title = value.trim()
+  if (!id) return
+  if (!title) {
+    await deleteCloudTodoById(id)
+    return
+  }
+  try {
+    await updateCloudTodo({ id, title })
+    await loadCloudTodos()
+  } catch (error) {
+    handleCloudError(error, "更新云端待办失败")
+  }
+}
+
+function openCloudTodoMenu(item: TodoItem) {
+  currentTodo.value = item
+  currentTodoIsCloud.value = true
+  showTodoActionSheet.value = true
+}
+
+async function deleteCloudTodoById(id: string) {
+  try {
+    await deleteCloudTodo(id)
+    cloudTodos.value = cloudTodos.value.filter((item) => item.id !== id)
+    uni.showToast({ title: "删除成功", icon: "success" })
+  } catch (error) {
+    handleCloudError(error, "删除云端待办失败")
+  }
+}
+
+function clearCloudCompletedTodos() {
+  const completedIds = cloudCompletedTodos.value.map((item) => item.id)
+  if (completedIds.length === 0) return
+  uni.showModal({
+    title: "清除已完成",
+    content: `确定删除 ${completedIds.length} 条已完成的云端待办吗？此操作不可恢复。`,
+    success: async (res) => {
+      if (!res.confirm) return
+      try {
+        for (const id of completedIds) {
+          await deleteCloudTodo(id)
+        }
+        cloudTodos.value = cloudTodos.value.filter((item) => !completedIds.includes(item.id))
+        uni.showToast({ title: "已清除", icon: "success" })
+      } catch (error) {
+        handleCloudError(error, "清除云端待办失败")
+        await loadCloudTodos()
+      }
+    },
+  })
 }
 
 /* ===== 连接相关工具函数 ===== */
