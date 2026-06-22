@@ -361,6 +361,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     if (completedTurns.length > 0) {
       const persisted = await persistCompletedTurns(session, completedTurns)
       if (persisted) {
+        session.localTurns = await reloadLocalTurns(session)
         session.optimisticTurns = []
         session.liveMessage = null
         session.inFlightUserTurnId = null
@@ -368,11 +369,11 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
           try {
             const replayDetail = await calibrateAfterReplayGap(conversationId)
             applyConversationDetailStats(conversationId, replayDetail)
+            session.localTurns = await reloadLocalTurns(session)
           } catch (error) {
             console.warn("turn_complete external-user backfill skipped", error)
           }
         }
-        session.localTurns = await reloadLocalTurns(session)
       } else {
         session.localTurns = dedupeTurnsByRoleAndId([
           ...session.localTurns,

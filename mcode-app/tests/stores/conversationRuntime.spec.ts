@@ -549,6 +549,75 @@ describe('conversationRuntime ACP error handling', () => {
     ])
   })
 
+  it('keeps the completed assistant visible while replay-gap calibration is pending', async () => {
+    const sync = require('@/services/conversation/conversationSyncService')
+    const repo = require('@/services/db/repositories/conversationRepository')
+    const store = useConversationRuntimeStore()
+    const session = store.getOrCreateSession(1)
+    session.instanceKey = 'test-instance'
+    let resolveReplayGap: (value: any) => void = () => {}
+
+    repo.getNewestTurns.mockReturnValue([
+      {
+        id: 'persisted-assistant',
+        conversationId: 1,
+        instanceKey: 'test-instance',
+        dedupeKey: 'remote:live-1-lm-gap',
+        role: 'assistant',
+        createdAt: 100,
+        seq: 100,
+        sortKey: 100,
+        status: 'completed',
+        version: 1,
+        parts: [
+          {
+            id: 'persisted-assistant:0',
+            turnId: 'persisted-assistant',
+            conversationId: 1,
+            partIndex: 0,
+            type: 'text',
+            payloadJson: JSON.stringify({ text: 'streaming reply' }),
+            updatedAt: 100,
+          },
+        ],
+      },
+    ])
+    sync.calibrateAfterReplayGap.mockReturnValue(
+      new Promise((resolve) => {
+        resolveReplayGap = resolve
+      })
+    )
+
+    store.setLiveMessage(
+      1,
+      [{ type: 'text', text: 'streaming reply' }],
+      true,
+      { id: 'lm-gap', timestamp: 100 }
+    )
+    const completion = store.completeTurn(1)
+
+    try {
+      for (let i = 0; i < 10 && sync.calibrateAfterReplayGap.mock.calls.length === 0; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      }
+
+      expect(sync.calibrateAfterReplayGap).toHaveBeenCalled()
+      expect(store.getMessages(1)).toEqual([
+        expect.objectContaining({
+          id: 'persisted-assistant',
+          role: 'assistant',
+          status: 'completed',
+          content: [{ type: 'text', text: 'streaming reply' }],
+        }),
+      ])
+    } finally {
+      resolveReplayGap({ turns: [] })
+      await completion
+      sync.calibrateAfterReplayGap.mockReset()
+      repo.getNewestTurns.mockReturnValue([])
+    }
+  })
+
   it('treats a second already-drained completeTurn as a no-op', async () => {
     const sync = require('@/services/conversation/conversationSyncService')
     const store = useConversationRuntimeStore()
