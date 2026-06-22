@@ -419,8 +419,17 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       (s) => s.connectionId === event.connectionId
     )
     if (!session) return
-    if (typeof event.seq === "number" && Number.isFinite(event.seq)) {
-      session.lastAppliedSeq = Math.max(session.lastAppliedSeq || 0, event.seq)
+    const eventSeq = firstNumber(event.seq)
+    if (eventSeq != null) {
+      const currentSeq = session.lastAppliedSeq
+      if (
+        typeof currentSeq === "number" &&
+        Number.isFinite(currentSeq) &&
+        eventSeq <= currentSeq
+      ) {
+        return
+      }
+      session.lastAppliedSeq = eventSeq
     }
 
     switch (event.type) {

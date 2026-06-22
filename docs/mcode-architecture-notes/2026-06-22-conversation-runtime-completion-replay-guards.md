@@ -32,12 +32,15 @@ Snapshot live replay is ignored only when all of these are true:
 
 New live snapshots that start after existing history remain visible.
 
+Realtime event replay is also guarded by event sequence. After snapshot hydration sets the runtime `lastAppliedSeq`, any later envelope with `seq <= lastAppliedSeq` is ignored before it can mutate live state. This prevents an attach/reconnect snapshot that already contains accumulated live text from being followed by replayed text deltas for the same sequence range, which would otherwise duplicate paragraphs in the active assistant bubble.
+
 ## UI Behavior
 
 The visible detail page behavior is unchanged except for duplicate prevention:
 
 - repeated `turn_complete` events do not trigger extra replay/calibration work
 - stale reconnect snapshots do not append an already completed reply as a live assistant message
+- replayed stream events already covered by the snapshot do not append duplicate text
 - legitimate new in-flight live replies after existing history still render at the tail
 
 ## Compatibility
@@ -54,4 +57,5 @@ Native clients should mirror the same runtime-level behavior:
 - treat duplicate completion events as no-ops only after live/optimistic/pending buffers are drained
 - include realtime event sequence in the local completion key when the backend payload has no turn id
 - reject reconnect snapshot live messages whose start time is not newer than the latest completed assistant message
+- drop realtime envelopes whose sequence is less than or equal to the runtime's last applied sequence
 - keep this logic outside message-cell rendering; cells should consume an already projected and deduped timeline

@@ -121,7 +121,7 @@ describe('conversationRuntime ACP error handling', () => {
     store.handleEvent({
       type: 'stream_batch',
       connectionId: 'conn-1',
-      seq: 12,
+      seq: 13,
       data: {
         delta: ' newer tail',
         contentType: 'text',
@@ -147,7 +147,7 @@ describe('conversationRuntime ACP error handling', () => {
       type: 'text',
       text: ' newer tail',
     })
-    expect(session.lastAppliedSeq).toBe(12)
+    expect(session.lastAppliedSeq).toBe(13)
   })
 
   it('ignores stale snapshot live replay when completed assistant history is newer', () => {
@@ -234,6 +234,49 @@ describe('conversationRuntime ACP error handling', () => {
     })
 
     expect(session.inFlightUserTurnId).toBeNull()
+  })
+
+  it('ignores realtime stream events already covered by the hydrated snapshot seq', () => {
+    const { store } = prepareSession()
+
+    store.hydrateLiveSnapshot(1, {
+      event_seq: 10,
+      live_message: {
+        id: 'live-current',
+        started_at: 300,
+        content: [
+          { kind: 'text', text: 'paragraph one\n\nparagraph two' },
+        ],
+      },
+    })
+
+    store.handleEvent({
+      connectionId: 'conn-1',
+      seq: 10,
+      type: 'stream_batch',
+      data: {
+        delta: '\n\nparagraph two',
+        contentType: 'text',
+      },
+    } as any)
+
+    expect(store.getMessages(1)[0]?.content).toEqual([
+      { type: 'text', text: 'paragraph one\n\nparagraph two' },
+    ])
+
+    store.handleEvent({
+      connectionId: 'conn-1',
+      seq: 11,
+      type: 'stream_batch',
+      data: {
+        delta: '\n\nparagraph three',
+        contentType: 'text',
+      },
+    } as any)
+
+    expect(store.getMessages(1)[0]?.content).toEqual([
+      { type: 'text', text: 'paragraph one\n\nparagraph two\n\nparagraph three' },
+    ])
   })
 
   it('keeps cached session state for hot conversations', () => {
