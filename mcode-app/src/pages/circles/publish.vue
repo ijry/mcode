@@ -10,15 +10,21 @@
       @leftClick="handleBack"
     >
       <template #center>
-        <text class="publish-navbar__title">发布动态</text>
+        <text class="publish-navbar__title">{{ navbarTitle }}</text>
       </template>
     </up-navbar>
 
     <view class="publish-shell">
+      <view v-if="loadingPost" class="publish-loading" :style="upThemeCardStyle">
+        <up-loading-icon mode="circle" size="24" :color="upThemeVar('--up-primary', '#2979ff')"></up-loading-icon>
+        <text>加载动态内容...</text>
+      </view>
+
+      <template v-else>
       <view class="publish-hero">
         <text class="publish-hero__eyebrow">CIRCLE POST</text>
-        <text class="publish-hero__title">先写正文，长内容再补标题</text>
-        <text class="publish-hero__desc">正文超过 200 字后，标题输入框会自动出现；标题仍然是选填。</text>
+        <text class="publish-hero__title">{{ isEditMode ? "修改内容后直接保存" : "先写正文，长内容再补标题" }}</text>
+        <text class="publish-hero__desc">{{ isEditMode ? "标题、正文、话题和图片都会原位更新。" : "正文超过 200 字后，标题输入框会自动出现；标题仍然是选填。" }}</text>
       </view>
 
       <view class="publish-card" :style="upThemeCardStyle">
@@ -119,10 +125,11 @@
 
         <view class="publish-actions">
           <up-button type="primary" shape="circle" :loading="submitting || uploadingImages || markdownImageUploading" @click="submitPost">
-            {{ submitting ? "发布中..." : uploadingImages || markdownImageUploading ? "图片上传中..." : "发布" }}
+            {{ submitting ? (isEditMode ? "保存中..." : "发布中...") : uploadingImages || markdownImageUploading ? "图片上传中..." : submitButtonText }}
           </up-button>
         </view>
       </view>
+      </template>
     </view>
   </view>
 </template>
@@ -132,8 +139,10 @@ import { computed, ref } from "vue"
 import { onLoad } from "@dcloudio/uni-app"
 
 import {
+  fetchCirclePost,
   fetchCircleTopics,
   publishCirclePost,
+  updateCirclePost,
   uploadCircleImage,
   type CircleTopic,
 } from "@/services/circle"
@@ -144,9 +153,11 @@ import {
 
 const title = ref("")
 const content = ref("")
+const editingPostId = ref(0)
 const topics = ref<CircleTopic[]>([])
 const selectedTopicIds = ref<number[]>([])
 const images = ref<string[]>([])
+const loadingPost = ref(false)
 const topicsLoading = ref(false)
 const topicsError = ref("")
 const submitting = ref(false)
@@ -154,6 +165,9 @@ const uploadingImages = ref(false)
 const markdownImageUploading = ref(false)
 const contentCursor = ref<number | null>(null)
 
+const isEditMode = computed(() => editingPostId.value > 0)
+const navbarTitle = computed(() => isEditMode.value ? "编辑动态" : "发布动态")
+const submitButtonText = computed(() => isEditMode.value ? "保存" : "发布")
 const showTitleInput = computed(() => content.value.length > 200)
 const fieldInputStyle = {
   width: "100%",
@@ -161,8 +175,12 @@ const fieldInputStyle = {
   background: "var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6))",
 }
 
-onLoad(() => {
+onLoad((options) => {
+  editingPostId.value = normalizeId(options?.id)
   loadTopics()
+  if (editingPostId.value) {
+    loadEditingPost()
+  }
 })
 
 async function loadTopics() {
@@ -175,6 +193,22 @@ async function loadTopics() {
     topicsError.value = normalizeErrorMessage(error)
   } finally {
     topicsLoading.value = false
+  }
+}
+
+async function loadEditingPost() {
+  if (!editingPostId.value) return
+  loadingPost.value = true
+  try {
+    const post = await fetchCirclePost(editingPostId.value)
+    title.value = post.title || ""
+    content.value = post.content || ""
+    selectedTopicIds.value = [...post.topicIds]
+    images.value = [...post.images]
+  } catch (error) {
+    uni.showToast({ title: normalizeErrorMessage(error), icon: "none", duration: 2500 })
+  } finally {
+    loadingPost.value = false
   }
 }
 
@@ -266,21 +300,31 @@ async function submitPost() {
 
   submitting.value = true
   try {
-    await publishCirclePost({
-      title: showTitleInput.value ? title.value.trim() : "",
-      content: normalizedContent,
-      topicIds: selectedTopicIds.value,
-      images: images.value,
-    })
+    if (isEditMode.value) {
+      await updateCirclePost({
+        id: editingPostId.value,
+        title: showTitleInput.value ? title.value.trim() : "",
+        content: normalizedContent,
+        topicIds: selectedTopicIds.value,
+        images: images.value,
+      })
+    } else {
+      await publishCirclePost({
+        title: showTitleInput.value ? title.value.trim() : "",
+        content: normalizedContent,
+        topicIds: selectedTopicIds.value,
+        images: images.value,
+      })
+    }
     uni.setStorageSync("mcode_circle_should_refresh", "1")
-    uni.showToast({ title: "发布成功", icon: "success" })
+    uni.showToast({ title: isEditMode.value ? "保存成功" : "发布成功", icon: "success" })
     setTimeout(() => {
       handleBack()
     }, 350)
   } catch (error) {
     const message = normalizeErrorMessage(error)
     if (message.includes("未登录")) {
-      uni.showToast({ title: "请先登录后再发布", icon: "none" })
+      uni.showToast({ title: isEditMode.value ? "请先登录后再编辑" : "请先登录后再发布", icon: "none" })
       uni.navigateTo({ url: "/pages/auth/login" })
       return
     }
@@ -303,6 +347,11 @@ function normalizeErrorMessage(error: unknown) {
     return String((error as { message?: unknown }).message || "圈子接口请求失败")
   }
   return "圈子接口请求失败"
+}
+
+function normalizeId(value: unknown) {
+  const parsed = Number(Array.isArray(value) ? value[0] : value)
+  return Number.isFinite(parsed) ? Math.max(0, Math.trunc(parsed)) : 0
 }
 </script>
 
@@ -330,6 +379,16 @@ function normalizeErrorMessage(error: unknown) {
 
 .publish-shell {
   padding: 24rpx 28rpx 48rpx;
+}
+
+.publish-loading {
+  min-height: 280rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16rpx;
+  border-radius: 32rpx;
 }
 
 .publish-hero {

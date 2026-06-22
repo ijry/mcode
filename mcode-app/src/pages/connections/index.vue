@@ -364,6 +364,7 @@ import {
   buildConnectionAgentsRoute,
   buildModelProvidersRoute,
 } from "@/services/remoteSettings"
+import { openGuardedExternalUrl } from "@/services/externalLinkGuard"
 
 declare const plus: any
 
@@ -574,26 +575,14 @@ function openTutorialPopup() {
   showTutorialPopup.value = true
 }
 
-function openDeploymentGuideLink() {
-  try {
-    if (isH5WebSocketRuntime()) {
-      window.open(DEPLOYMENT_GUIDE_URL, "_blank", "noopener,noreferrer")
-      return
-    }
-
-    if (typeof plus !== "undefined" && plus?.runtime?.openURL) {
-      plus.runtime.openURL(DEPLOYMENT_GUIDE_URL)
-      return
-    }
-
-    throw new Error("unsupported runtime")
-  } catch {
-    uni.showToast({
-      title: "打开链接失败，请手动访问",
-      icon: "none",
-      duration: 2500,
-    })
-  }
+async function openDeploymentGuideLink() {
+  const result = await openGuardedExternalUrl(DEPLOYMENT_GUIDE_URL)
+  if (result !== "unsupported") return
+  uni.showToast({
+    title: "打开链接失败，请手动访问",
+    icon: "none",
+    duration: 2500,
+  })
 }
 
 async function submitConnection() {

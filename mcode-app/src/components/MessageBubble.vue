@@ -35,7 +35,7 @@
         <view v-for="(part, index) in displayParts" :key="index" class="part-wrap">
           <!-- 文本 -->
           <view v-if="part.type === 'text'" class="part-text">
-            <up-markdown :content="part.text || ''"></up-markdown>
+            <GuardedMarkdown :content="part.text || ''"></GuardedMarkdown>
           </view>
 
           <!-- 思考 -->
@@ -310,45 +310,43 @@ function normalizeAgentType(raw?: string) {
 }
 
 .part-text {
+  --guarded-markdown-link-color: var(--up-primary, #2979ff);
   font-size: 13px;
   line-height: 1.2;
   color: var(--up-main-color, #303133);
 
-  :deep(.up-markdown) {
+  :deep(.guarded-markdown) {
     padding: 1px 2px !important;
     font-size: 13px !important;
     line-height: 1.2 !important;
     color: inherit !important;
   }
 
-  :deep(.up-markdown p) {
+  :deep(.guarded-markdown p) {
     margin: 1px 0 !important;
     line-height: 1.2 !important;
     font-size: 13px !important;
   }
 
-  :deep(.up-markdown text) {
+  :deep(.guarded-markdown text) {
     line-height: 1.2 !important;
     font-size: 13px !important;
     color: inherit !important;
   }
 
-  :deep(.up-markdown ._root) {
+  :deep(.guarded-markdown ._root) {
     color: inherit !important;
   }
 
-  :deep(.up-markdown rich-text) {
+  :deep(.guarded-markdown rich-text) {
     color: inherit !important;
     font-size: 13px !important;
     line-height: 1.2 !important;
-  }
-
-  :deep(.up-markdown ._a) {
-    color: inherit !important;
   }
 
   // 用户消息文本颜色（up-markdown 在 user 气泡内需白色）
   .bubble--user & {
+    --guarded-markdown-link-color: #ffffff;
     color: #ffffff;
     :deep(*) { color: #ffffff !important; }
   }

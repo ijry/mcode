@@ -56,11 +56,14 @@
               </view>
               <text class="detail-author__time">{{ post.timeText }} · {{ post.viewCount }} 浏览</text>
             </view>
+            <view class="detail-author__menu" @click="openPostActions(post)">
+              <up-icon name="more-dot-fill" size="18" :color="upThemeVar('--up-tips-color', '#8b93a5')"></up-icon>
+            </view>
           </view>
 
           <text v-if="post.title.trim()" class="detail-title">{{ post.title }}</text>
           <view class="detail-markdown">
-            <up-markdown :content="post.content"></up-markdown>
+            <GuardedMarkdown :content="post.content"></GuardedMarkdown>
           </view>
 
           <view v-if="post.topicTitles.length" class="detail-topics">
@@ -172,12 +175,21 @@
         <text>{{ commentSubmitting ? "发送中" : "发送" }}</text>
       </view>
     </view>
+
+    <u-action-sheet
+      :show="showPostActionSheet"
+      :actions="postActionSheetItems"
+      @select="handlePostActionSelect"
+      @close="closePostActionSheet"
+    ></u-action-sheet>
   </view>
 </template>
 
 <script setup lang="ts">
 import { computed, ref } from "vue"
 import { onLoad, onPullDownRefresh, onReachBottom, onShareAppMessage, onShareTimeline } from "@dcloudio/uni-app"
+import { useAccountStore } from "@/stores/account"
+import { buildCircleShareText, resolveCirclePostMenuItems } from "./postActions"
 
 import {
   fetchCircleComments,
@@ -190,6 +202,7 @@ import {
 
 const postId = ref(0)
 const post = ref<CirclePost | null>(null)
+const showPostActionSheet = ref(false)
 const loading = ref(false)
 const error = ref("")
 const comments = ref<CircleComment[]>([])
@@ -208,6 +221,12 @@ const commentReplyTarget = ref<{
   topCommentId: string
   author: string
 } | null>(null)
+const account = useAccountStore()
+const currentUserId = computed(() => {
+  const raw = (account.userInfo as Record<string, unknown> | null)?.id
+  const parsed = Number(raw)
+  return Number.isFinite(parsed) ? Math.max(0, Math.trunc(parsed)) : 0
+})
 
 const canSubmitComment = computed(() => commentDraft.value.trim().length >= 5 && !commentSubmitting.value)
 const commentInputPlaceholder = computed(() => commentReplyTarget.value
@@ -220,6 +239,16 @@ const commentLoadMoreText = computed(() => {
 })
 const shareTitle = computed(() => post.value?.title.trim() || excerptText(post.value?.content || "圈子动态", 24))
 const sharePath = computed(() => `/pages/circles/detail?id=${postId.value}`)
+const postActionSheetItems = computed(() => {
+  if (!post.value) return []
+  return resolveCirclePostMenuItems({
+    post: post.value,
+    currentUserId: currentUserId.value,
+  }).map((key) => ({
+    key,
+    name: key === "share" ? "分享" : "编辑",
+  }))
+})
 
 onLoad((options: Record<string, unknown>) => {
   postId.value = normalizeId(options?.id)
@@ -405,22 +434,30 @@ function focusCommentInput() {
 
 function sharePost() {
   if (!post.value) return
-  const content = `${shareTitle.value} ${sharePath.value}`
-  if (typeof uni.share === "function") {
-    uni.share({
-      provider: "weixin",
-      scene: "WXSceneSession",
-      type: 0,
-      title: shareTitle.value,
-      summary: excerptText(post.value.content, 80),
-      href: sharePath.value,
-    })
+  uni.setClipboardData({
+    data: buildCircleShareText(post.value),
+    success: () => uni.showToast({ title: "分享文案已复制", icon: "none" }),
+    fail: () => uni.showToast({ title: "复制失败", icon: "none" }),
+  })
+}
+
+function openPostActions(currentPost: CirclePost) {
+  if (!currentPost) return
+  showPostActionSheet.value = true
+}
+
+function closePostActionSheet() {
+  showPostActionSheet.value = false
+}
+
+function handlePostActionSelect(item: { key?: string; name?: string }) {
+  closePostActionSheet()
+  if (!post.value) return
+  if (item.key === "edit") {
+    uni.navigateTo({ url: `/pages/circles/publish?id=${post.value.id}` })
     return
   }
-  uni.setClipboardData({
-    data: content,
-    success: () => uni.showToast({ title: "分享链接已复制", icon: "none" }),
-  })
+  sharePost()
 }
 
 function handleBack() {
@@ -610,21 +647,18 @@ function excerptText(value: string, maxLength: number) {
 }
 
 .detail-markdown {
+  --guarded-markdown-link-color: var(--up-primary, #2979ff);
   color: var(--circle-content);
 }
 
-.detail-markdown :deep(.up-markdown),
-.detail-markdown :deep(.up-markdown p),
-.detail-markdown :deep(.up-markdown text),
-.detail-markdown :deep(.up-markdown ._root),
-.detail-markdown :deep(.up-markdown rich-text) {
+.detail-markdown :deep(.guarded-markdown),
+.detail-markdown :deep(.guarded-markdown p),
+.detail-markdown :deep(.guarded-markdown text),
+.detail-markdown :deep(.guarded-markdown ._root),
+.detail-markdown :deep(.guarded-markdown rich-text) {
   color: var(--circle-content);
   font-size: 28rpx;
   line-height: 1.72;
-}
-
-.detail-markdown :deep(.up-markdown ._a) {
-  color: var(--circle-primary);
 }
 
 .detail-topics {

@@ -8,6 +8,7 @@ import {
   publishCircleComment,
   publishCirclePost,
   toggleCircleAction,
+  updateCirclePost,
   uploadCircleImage,
 } from "@/services/circle"
 import { XYCLOUD_DEFAULT_BASE_URL } from "@/services/xycloudAuth"
@@ -124,7 +125,7 @@ describe("circle service", () => {
 
     expect(uni.request).toHaveBeenCalledWith(
       expect.objectContaining({
-        url: "https://xycloud.example.com/v1/circle/post/info?id=101",
+        url: "https://xycloud.example.com/v1/circle/post/info/101",
         method: "GET",
       })
     )
@@ -218,6 +219,35 @@ describe("circle service", () => {
         },
       })
     )
+  })
+
+  it("updates a circle post through the edit API", async () => {
+    uni.request.mockResolvedValue({
+      statusCode: 200,
+      data: { code: 200, msg: "ok", data: { id: 101 } },
+    })
+
+    const result = await updateCirclePost({
+      id: 101,
+      title: "更新标题",
+      content: "更新正文",
+      topicIds: [1, 3],
+      images: ["https://cdn.example.com/a.png"],
+    })
+
+    expect(uni.request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: "https://xycloud.example.com/v1/circle/post/edit/101",
+        method: "POST",
+        data: {
+          title: "更新标题",
+          content: "更新正文",
+          topicIds: "1,3",
+          images: ["https://cdn.example.com/a.png"],
+        },
+      })
+    )
+    expect(result).toEqual({ id: 101 })
   })
 
   it("uploads circle images through the shared xycloud upload endpoint", async () => {

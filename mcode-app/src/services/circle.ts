@@ -152,7 +152,7 @@ export async function fetchCircleTopics(params: {
 
 export async function fetchCirclePost(postId: number): Promise<CirclePost> {
   const id = toNumber(postId)
-  const data = await requestCircle("GET", "/v1/circle/post/info", undefined, { id })
+  const data = await requestCircle("GET", `/v1/circle/post/info/${id}`)
   const payload = normalizeRecord(data)
   return normalizePost(payload.post || payload.info || payload)
 }
@@ -166,6 +166,18 @@ export async function publishCirclePost(payload: CirclePublishPayload): Promise<
   })
   const record = normalizeRecord(data)
   return { id: toNumber(record.id) }
+}
+
+export async function updateCirclePost(payload: CirclePublishPayload & { id: number }): Promise<{ id: number }> {
+  const id = Math.max(0, Math.trunc(Number(payload.id || 0)))
+  const data = await requestCircle("POST", `/v1/circle/post/edit/${id}`, {
+    title: String(payload.title || "").trim(),
+    content: payload.content.trim(),
+    topicIds: (payload.topicIds || []).filter((topicId) => Number.isFinite(topicId) && topicId > 0).join(","),
+    images: payload.images || [],
+  })
+  const record = normalizeRecord(data)
+  return { id: toNumber(record.id) || id }
 }
 
 export async function uploadCircleImage(filePath: string): Promise<CircleImageUploadResult> {

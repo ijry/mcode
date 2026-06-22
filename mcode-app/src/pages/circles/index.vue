@@ -93,13 +93,15 @@
                 </view>
                 <text class="post-card__time">{{ post.timeText }}</text>
               </view>
-              <up-icon name="more-dot-fill" size="18" :color="upThemeVar('--up-tips-color', '#8b93a5')"></up-icon>
+              <view class="post-card__author-action" @click.stop="openPostActions(post)">
+                <up-icon name="more-dot-fill" size="18" :color="upThemeVar('--up-tips-color', '#8b93a5')"></up-icon>
+              </view>
             </view>
 
             <view class="post-card__body" @click="openPostDetail(post)">
               <text v-if="post.title.trim()" class="post-card__title">{{ post.title }}</text>
               <view class="post-card__content">
-                <up-markdown :content="post.content"></up-markdown>
+                <GuardedMarkdown :content="post.content"></GuardedMarkdown>
               </view>
             </view>
 
@@ -266,12 +268,21 @@
         </view>
       </view>
     </up-popup>
+
+    <u-action-sheet
+      :show="showPostActionSheet"
+      :actions="postActionSheetItems"
+      @select="handlePostActionSelect"
+      @close="closePostActionSheet"
+    ></u-action-sheet>
   </view>
 </template>
 
 <script setup lang="ts">
 import { computed, onUnmounted, ref } from "vue"
 import { onLoad, onPullDownRefresh, onReachBottom, onShow } from "@dcloudio/uni-app"
+import { useAccountStore } from "@/stores/account"
+import { buildCircleShareText, resolveCirclePostMenuItems } from "./postActions"
 
 import {
   fetchCircleComments,
@@ -310,6 +321,8 @@ const hotError = ref("")
 const topicsError = ref("")
 const selectedTopicId = ref(0)
 const showCommentPanel = ref(false)
+const showPostActionSheet = ref(false)
+const actionPost = ref<CirclePost | null>(null)
 const commentPost = ref<CirclePost | null>(null)
 const comments = ref<CircleComment[]>([])
 const commentTotal = ref(0)
@@ -328,6 +341,12 @@ const commentReplyTarget = ref<{
 } | null>(null)
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 let commentRequestId = 0
+const account = useAccountStore()
+const currentUserId = computed(() => {
+  const raw = (account.userInfo as Record<string, unknown> | null)?.id
+  const parsed = Number(raw)
+  return Number.isFinite(parsed) ? Math.max(0, Math.trunc(parsed)) : 0
+})
 
 const activePosts = computed(() => activeTab.value === 0 ? latestPosts.value : hotPosts.value)
 const activeLoading = computed(() => activeTab.value === 0 ? latestLoading.value : hotLoading.value)
@@ -348,6 +367,16 @@ const commentHasMore = computed(() => comments.value.length < commentTotal.value
 const commentLoadMoreText = computed(() => {
   if (commentsLoadingMore.value) return "加载更多评论..."
   return commentHasMore.value ? "上拉查看更多评论" : "没有更多评论了"
+})
+const postActionSheetItems = computed(() => {
+  if (!actionPost.value) return []
+  return resolveCirclePostMenuItems({
+    post: actionPost.value,
+    currentUserId: currentUserId.value,
+  }).map((key) => ({
+    key,
+    name: key === "share" ? "分享" : "编辑",
+  }))
 })
 
 onLoad(async () => {
@@ -545,6 +574,34 @@ async function openCommentPanel(post: CirclePost) {
 
 function closeCommentPanel() {
   showCommentPanel.value = false
+}
+
+function openPostActions(post: CirclePost) {
+  actionPost.value = post
+  showPostActionSheet.value = true
+}
+
+function closePostActionSheet() {
+  showPostActionSheet.value = false
+}
+
+function handlePostActionSelect(item: { key?: string; name?: string }) {
+  const post = actionPost.value
+  closePostActionSheet()
+  if (!post) return
+  if (item.key === "edit") {
+    uni.navigateTo({ url: `/pages/circles/publish?id=${post.id}` })
+    return
+  }
+  copyPostShareText(post)
+}
+
+function copyPostShareText(post: CirclePost) {
+  uni.setClipboardData({
+    data: buildCircleShareText(post),
+    success: () => uni.showToast({ title: "分享文案已复制", icon: "none" }),
+    fail: () => uni.showToast({ title: "复制失败", icon: "none" }),
+  })
 }
 
 async function reloadComments() {
@@ -1012,23 +1069,20 @@ function formatCompactCount(value: number) {
 }
 
 .post-card__content {
+  --guarded-markdown-link-color: var(--up-primary, #2979ff);
   font-size: 26rpx;
   line-height: 1.62;
   color: var(--circle-content);
 }
 
-.post-card__content :deep(.up-markdown),
-.post-card__content :deep(.up-markdown p),
-.post-card__content :deep(.up-markdown text),
-.post-card__content :deep(.up-markdown ._root),
-.post-card__content :deep(.up-markdown rich-text) {
+.post-card__content :deep(.guarded-markdown),
+.post-card__content :deep(.guarded-markdown p),
+.post-card__content :deep(.guarded-markdown text),
+.post-card__content :deep(.guarded-markdown ._root),
+.post-card__content :deep(.guarded-markdown rich-text) {
   color: var(--circle-content);
   font-size: 26rpx;
   line-height: 1.62;
-}
-
-.post-card__content :deep(.up-markdown ._a) {
-  color: var(--circle-primary);
 }
 
 .post-card__topics {
