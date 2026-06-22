@@ -2,6 +2,7 @@ import { createPinia, setActivePinia } from "pinia"
 
 import {
   fetchCircleComments,
+  fetchCirclePost,
   fetchCirclePosts,
   fetchCircleTopics,
   publishCircleComment,
@@ -90,6 +91,82 @@ describe("circle service", () => {
       })
     )
     expect(result.total).toBe(1)
+  })
+
+  it("loads a shareable circle post detail by id", async () => {
+    uni.request.mockResolvedValue({
+      statusCode: 200,
+      data: {
+        code: 200,
+        msg: "ok",
+        data: {
+          id: "101",
+          uid: "2",
+          title: "详情标题",
+          content: "正文 **Markdown**",
+          images: ["https://cdn.example.com/a.png"],
+          topicIdsFormat: "1,3",
+          topicList: [
+            { id: 1, title: "产品共创" },
+            { id: 3, title: "AI 编程现场" },
+          ],
+          userInfo: { nickname: "林屿" },
+          likeCount: 12,
+          favoriteCount: 3,
+          commentCount: 4,
+          viewCount: 88,
+          postTime: 1781923680,
+        },
+      },
+    })
+
+    const result = await fetchCirclePost(101)
+
+    expect(uni.request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: "https://xycloud.example.com/v1/circle/post/info?id=101",
+        method: "GET",
+      })
+    )
+    expect(result).toEqual(
+      expect.objectContaining({
+        id: 101,
+        title: "详情标题",
+        content: "正文 **Markdown**",
+        topicIds: [1, 3],
+        topicTitles: ["产品共创", "AI 编程现场"],
+      })
+    )
+  })
+
+  it("loads a circle post detail from wrapped info payloads", async () => {
+    uni.request.mockResolvedValue({
+      statusCode: 200,
+      data: {
+        code: 200,
+        msg: "ok",
+        data: {
+          info: {
+            id: "102",
+            uid: "3",
+            title: "包装详情",
+            content: "包装正文",
+            userInfo: { nickname: "南栀" },
+          },
+        },
+      },
+    })
+
+    const result = await fetchCirclePost(102)
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        id: 102,
+        author: "南栀",
+        title: "包装详情",
+        content: "包装正文",
+      })
+    )
   })
 
   it("falls back to the production mcode API domain for circle requests", async () => {
@@ -291,5 +368,44 @@ describe("circle service", () => {
       })
     )
     expect(result.content).toBe("新的评论内容")
+  })
+
+  it("publishes a nested circle comment reply with parent and thread ids", async () => {
+    uni.request.mockResolvedValue({
+      statusCode: 200,
+      data: {
+        code: 200,
+        msg: "ok",
+        data: {
+          comment: {
+            id: "mcode-circle-reply",
+            uid: "2",
+            content: "回复内容",
+            createTime: 1781924000,
+          },
+        },
+      },
+    })
+
+    await publishCircleComment({
+      postId: 101,
+      content: "  回复内容  ",
+      pid: "reply-parent-1",
+      tpid: "top-comment-1",
+    })
+
+    expect(uni.request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: "https://xycloud.example.com/v1/comment/comment/add",
+        method: "POST",
+        data: {
+          dataModel: "circle_post",
+          dataId: 101,
+          content: "回复内容",
+          pid: "reply-parent-1",
+          tpid: "top-comment-1",
+        },
+      })
+    )
   })
 })

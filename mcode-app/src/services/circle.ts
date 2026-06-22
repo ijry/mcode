@@ -150,6 +150,13 @@ export async function fetchCircleTopics(params: {
   }
 }
 
+export async function fetchCirclePost(postId: number): Promise<CirclePost> {
+  const id = toNumber(postId)
+  const data = await requestCircle("GET", "/v1/circle/post/info", undefined, { id })
+  const payload = normalizeRecord(data)
+  return normalizePost(payload.post || payload.info || payload)
+}
+
 export async function publishCirclePost(payload: CirclePublishPayload): Promise<{ id: number }> {
   const data = await requestCircle("POST", "/v1/circle/post/add", {
     title: String(payload.title || "").trim(),
@@ -244,16 +251,24 @@ export async function fetchCircleComments(params: {
 export async function publishCircleComment(params: {
   postId: number
   content: string
+  pid?: string | number
+  tpid?: string | number
 }): Promise<CircleComment> {
   const data = await requestCircle("POST", "/v1/comment/comment/add", {
     dataModel: "circle_post",
     dataId: params.postId,
     content: params.content.trim(),
-    pid: 0,
-    tpid: 0,
+    pid: normalizeCommentRef(params.pid),
+    tpid: normalizeCommentRef(params.tpid),
   })
   const record = normalizeRecord(data)
   return normalizeComment(record.comment || record)
+}
+
+function normalizeCommentRef(value: unknown): string | number {
+  if (typeof value === "number" && Number.isFinite(value)) return Math.max(0, Math.trunc(value))
+  if (typeof value === "string" && value.trim()) return value.trim()
+  return 0
 }
 
 function normalizePost(value: unknown): CirclePost {

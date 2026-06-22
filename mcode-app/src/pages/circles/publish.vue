@@ -40,6 +40,18 @@
             <text class="field__label">正文</text>
             <text :class="['field__counter', content.length > 200 && 'field__counter--active']">{{ content.length }}/2000</text>
           </view>
+          <view class="markdown-toolbar">
+            <text class="markdown-toolbar__item" @click="insertMarkdown('**加粗文字**')">加粗</text>
+            <text class="markdown-toolbar__item" @click="insertMarkdown('*斜体文字*')">斜体</text>
+            <text class="markdown-toolbar__item" @click="insertMarkdown('`代码`')">代码</text>
+            <text class="markdown-toolbar__item" @click="insertMarkdown('[链接文字](https://example.com)')">链接</text>
+            <text
+              :class="['markdown-toolbar__item', markdownImageUploading && 'markdown-toolbar__item--disabled']"
+              @click="insertMarkdownImage"
+            >
+              {{ markdownImageUploading ? "上传中" : "图片" }}
+            </text>
+          </view>
           <textarea
             v-model="content"
             class="content-textarea"
@@ -47,6 +59,7 @@
             placeholder="分享你的使用场景、问题复盘或产品建议"
             placeholder-class="content-textarea__placeholder"
             auto-height
+            @blur="handleContentBlur"
           />
         </view>
 
@@ -105,8 +118,8 @@
         </view>
 
         <view class="publish-actions">
-          <up-button type="primary" shape="circle" :loading="submitting || uploadingImages" @click="submitPost">
-            {{ submitting ? "发布中..." : uploadingImages ? "图片上传中..." : "发布" }}
+          <up-button type="primary" shape="circle" :loading="submitting || uploadingImages || markdownImageUploading" @click="submitPost">
+            {{ submitting ? "发布中..." : uploadingImages || markdownImageUploading ? "图片上传中..." : "发布" }}
           </up-button>
         </view>
       </view>
@@ -124,6 +137,10 @@ import {
   uploadCircleImage,
   type CircleTopic,
 } from "@/services/circle"
+import {
+  createMarkdownImageSnippet,
+  insertMarkdownSnippet,
+} from "./markdownTools"
 
 const title = ref("")
 const content = ref("")
@@ -134,6 +151,8 @@ const topicsLoading = ref(false)
 const topicsError = ref("")
 const submitting = ref(false)
 const uploadingImages = ref(false)
+const markdownImageUploading = ref(false)
+const contentCursor = ref<number | null>(null)
 
 const showTitleInput = computed(() => content.value.length > 200)
 const fieldInputStyle = {
@@ -197,13 +216,50 @@ function removeImage(index: number) {
   images.value = images.value.filter((_, currentIndex) => currentIndex !== index)
 }
 
+function handleContentBlur(event: { detail?: { cursor?: number } }) {
+  const cursor = event?.detail?.cursor
+  contentCursor.value = typeof cursor === "number" && Number.isFinite(cursor) ? cursor : null
+}
+
+function insertMarkdown(snippet: string) {
+  const result = insertMarkdownSnippet({
+    value: content.value,
+    snippet,
+    cursor: contentCursor.value,
+  })
+  content.value = result.value.slice(0, 2000)
+  contentCursor.value = Math.min(result.cursor, content.value.length)
+}
+
+function insertMarkdownImage() {
+  if (markdownImageUploading.value) return
+  uni.chooseImage({
+    count: 1,
+    sizeType: ["compressed"],
+    sourceType: ["album", "camera"],
+    success: async (res) => {
+      const tempPaths = Array.isArray(res.tempFilePaths) ? res.tempFilePaths : []
+      if (tempPaths.length === 0) return
+      markdownImageUploading.value = true
+      try {
+        const result = await uploadCircleImage(tempPaths[0])
+        insertMarkdown(createMarkdownImageSnippet(result.url))
+      } catch (error) {
+        uni.showToast({ title: normalizeErrorMessage(error), icon: "none", duration: 2500 })
+      } finally {
+        markdownImageUploading.value = false
+      }
+    },
+  })
+}
+
 async function submitPost() {
   const normalizedContent = content.value.trim()
   if (!normalizedContent) {
     uni.showToast({ title: "请填写正文", icon: "none" })
     return
   }
-  if (uploadingImages.value) {
+  if (uploadingImages.value || markdownImageUploading.value) {
     uni.showToast({ title: "图片上传完成后再发布", icon: "none" })
     return
   }
@@ -340,6 +396,25 @@ function normalizeErrorMessage(error: unknown) {
 .field__counter--active {
   color: var(--circle-primary);
   font-weight: 700;
+}
+
+.markdown-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10rpx;
+}
+
+.markdown-toolbar__item {
+  padding: 10rpx 16rpx;
+  border-radius: 999rpx;
+  background: color-mix(in srgb, var(--circle-primary) 10%, var(--circle-card-bg) 90%);
+  color: var(--circle-primary);
+  font-size: 22rpx;
+  font-weight: 800;
+}
+
+.markdown-toolbar__item--disabled {
+  opacity: 0.58;
 }
 
 .content-textarea {

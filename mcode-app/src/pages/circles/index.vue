@@ -96,8 +96,12 @@
               <up-icon name="more-dot-fill" size="18" :color="upThemeVar('--up-tips-color', '#8b93a5')"></up-icon>
             </view>
 
-            <text v-if="post.title.trim()" class="post-card__title">{{ post.title }}</text>
-            <text class="post-card__content">{{ post.content }}</text>
+            <view class="post-card__body" @click="openPostDetail(post)">
+              <text v-if="post.title.trim()" class="post-card__title">{{ post.title }}</text>
+              <view class="post-card__content">
+                <up-markdown :content="post.content"></up-markdown>
+              </view>
+            </view>
 
             <view v-if="post.topicTitles.length" class="post-card__topics">
               <text
@@ -120,15 +124,15 @@
             </view>
 
             <view class="post-card__actions">
-              <view :class="['post-action', post.liked && 'post-action--active']" @click="togglePostLike(post)">
+              <view :class="['post-action', post.liked && 'post-action--active']" @click.stop="togglePostLike(post)">
                 <up-icon :name="post.liked ? 'heart-fill' : 'heart'" size="16" :color="post.liked ? '#ff3b30' : upThemeVar('--up-tips-color', '#8b93a5')"></up-icon>
                 <text>{{ post.likeCount }}</text>
               </view>
-              <view class="post-action" @click="openCommentPanel(post)">
+              <view class="post-action" @click.stop="openCommentPanel(post)">
                 <up-icon name="chat" size="16" :color="upThemeVar('--up-tips-color', '#8b93a5')"></up-icon>
                 <text>{{ post.commentCount }}</text>
               </view>
-              <view :class="['post-action', post.favorited && 'post-action--active']" @click="togglePostFavorite(post)">
+              <view :class="['post-action', post.favorited && 'post-action--active']" @click.stop="togglePostFavorite(post)">
                 <up-icon :name="post.favorited ? 'star-fill' : 'star'" size="16" :color="post.favorited ? '#ff9f0a' : upThemeVar('--up-tips-color', '#8b93a5')"></up-icon>
                 <text>{{ post.favoriteCount }}</text>
               </view>
@@ -220,14 +224,18 @@
                     <text class="comment-item__time">{{ comment.timeText }}</text>
                   </view>
                   <text class="comment-item__content">{{ comment.content }}</text>
+                  <view class="comment-item__actions">
+                    <text @click="setCommentReplyTarget(comment)">回复</text>
+                  </view>
                   <view v-if="comment.children.length" class="comment-replies">
-                    <text
+                    <view
                       v-for="reply in comment.children"
                       :key="reply.id"
                       class="comment-reply"
                     >
-                      {{ reply.author }}：{{ reply.content }}
-                    </text>
+                      <text class="comment-reply__content">{{ reply.author }}：{{ reply.content }}</text>
+                      <text class="comment-reply__action" @click="setCommentReplyTarget(reply, comment)">回复</text>
+                    </view>
                   </view>
                 </view>
               </view>
@@ -243,12 +251,15 @@
           <input
             v-model="commentDraft"
             class="comment-composer__input"
-            placeholder="写下你的评论，至少 5 个字"
+            :placeholder="commentInputPlaceholder"
             placeholder-class="comment-composer__placeholder"
             maxlength="300"
             confirm-type="send"
             @confirm="submitComment"
           />
+          <view v-if="commentReplyTarget" class="comment-composer__cancel" @click="clearCommentReplyTarget">
+            <text>取消</text>
+          </view>
           <view :class="['comment-composer__send', canSubmitComment && 'comment-composer__send--active']" @click="submitComment">
             <text>{{ commentSubmitting ? "发送中" : "发送" }}</text>
           </view>
@@ -309,6 +320,12 @@ const commentsLoadingMore = ref(false)
 const commentsError = ref("")
 const commentDraft = ref("")
 const commentSubmitting = ref(false)
+const commentReplyTarget = ref<{
+  pid: string | number
+  tpid: string | number
+  topCommentId: string
+  author: string
+} | null>(null)
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 let commentRequestId = 0
 
@@ -324,6 +341,9 @@ const activeLoadMoreText = computed(() => {
   return activeHasMore.value ? "上拉加载更多" : "没有更多了"
 })
 const canSubmitComment = computed(() => commentDraft.value.trim().length >= 5 && !commentSubmitting.value)
+const commentInputPlaceholder = computed(() => commentReplyTarget.value
+  ? `回复 ${commentReplyTarget.value.author}，至少 5 个字`
+  : "写下你的评论，至少 5 个字")
 const commentHasMore = computed(() => comments.value.length < commentTotal.value)
 const commentLoadMoreText = computed(() => {
   if (commentsLoadingMore.value) return "加载更多评论..."
@@ -519,6 +539,7 @@ async function openCommentPanel(post: CirclePost) {
   commentPage.value = 1
   commentsError.value = ""
   commentDraft.value = ""
+  commentReplyTarget.value = null
   await reloadComments()
 }
 
@@ -577,18 +598,26 @@ async function submitComment() {
   if (!commentPost.value || !canSubmitComment.value) return
   const post = commentPost.value
   const content = commentDraft.value.trim()
+  const replyTarget = commentReplyTarget.value
   commentSubmitting.value = true
   try {
     const comment = await publishCircleComment({
       postId: post.id,
       content,
+      pid: replyTarget?.pid || 0,
+      tpid: replyTarget?.tpid || 0,
     })
     commentDraft.value = ""
-    comments.value = [comment, ...comments.value]
+    if (replyTarget) {
+      appendReplyToCommentThread(replyTarget.topCommentId, comment)
+      clearCommentReplyTarget()
+    } else {
+      comments.value = [comment, ...comments.value]
+    }
     commentTotal.value += 1
     post.commentCount += 1
     syncPostCommentCount(post.id, post.commentCount)
-    uni.showToast({ title: "评论已发布", icon: "success" })
+    uni.showToast({ title: replyTarget ? "回复已发布" : "评论已发布", icon: "success" })
   } catch (error) {
     const message = normalizeErrorMessage(error)
     if (message.includes("未登录")) {
@@ -600,6 +629,29 @@ async function submitComment() {
   } finally {
     commentSubmitting.value = false
   }
+}
+
+function setCommentReplyTarget(comment: CircleComment, topComment?: CircleComment) {
+  commentReplyTarget.value = {
+    pid: comment.id,
+    tpid: topComment ? topComment.id : 0,
+    topCommentId: topComment?.id || comment.id,
+    author: comment.author,
+  }
+}
+
+function clearCommentReplyTarget() {
+  commentReplyTarget.value = null
+}
+
+function appendReplyToCommentThread(topCommentId: string, reply: CircleComment) {
+  const target = comments.value.find((comment) => comment.id === topCommentId)
+  if (!target) {
+    comments.value = [reply, ...comments.value]
+    return
+  }
+  target.children = [...target.children, reply]
+  target.replyCount += 1
 }
 
 function syncPostCommentCount(postId: number, nextCount: number) {
@@ -649,6 +701,12 @@ function mergeHotTopics(nextTopics: CircleTopic[]) {
 function goPublish() {
   uni.navigateTo({
     url: "/pages/circles/publish",
+  })
+}
+
+function openPostDetail(post: CirclePost) {
+  uni.navigateTo({
+    url: `/pages/circles/detail?id=${post.id}`,
   })
 }
 
@@ -954,10 +1012,23 @@ function formatCompactCount(value: number) {
 }
 
 .post-card__content {
-  display: block;
   font-size: 26rpx;
   line-height: 1.62;
   color: var(--circle-content);
+}
+
+.post-card__content :deep(.up-markdown),
+.post-card__content :deep(.up-markdown p),
+.post-card__content :deep(.up-markdown text),
+.post-card__content :deep(.up-markdown ._root),
+.post-card__content :deep(.up-markdown rich-text) {
+  color: var(--circle-content);
+  font-size: 26rpx;
+  line-height: 1.62;
+}
+
+.post-card__content :deep(.up-markdown ._a) {
+  color: var(--circle-primary);
 }
 
 .post-card__topics {
@@ -1190,6 +1261,13 @@ function formatCompactCount(value: number) {
   color: var(--circle-content);
 }
 
+.comment-item__actions {
+  margin-top: 10rpx;
+  color: var(--circle-primary);
+  font-size: 22rpx;
+  font-weight: 800;
+}
+
 .comment-replies {
   margin-top: 14rpx;
   padding: 14rpx 16rpx;
@@ -1201,9 +1279,25 @@ function formatCompactCount(value: number) {
 }
 
 .comment-reply {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14rpx;
+}
+
+.comment-reply__content {
+  flex: 1;
+  min-width: 0;
   font-size: 22rpx;
   line-height: 1.45;
   color: var(--circle-content);
+}
+
+.comment-reply__action {
+  flex-shrink: 0;
+  color: var(--circle-primary);
+  font-size: 21rpx;
+  font-weight: 800;
 }
 
 .comment-composer {
@@ -1228,6 +1322,17 @@ function formatCompactCount(value: number) {
 
 .comment-composer__placeholder {
   color: var(--circle-tips);
+}
+
+.comment-composer__cancel {
+  height: 64rpx;
+  padding: 0 12rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--circle-tips);
+  font-size: 22rpx;
+  font-weight: 800;
 }
 
 .comment-composer__send {

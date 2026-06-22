@@ -55,6 +55,14 @@
       }
     },
     {
+      "path": "pages/circles/detail",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "动态详情",
+        "enablePullDownRefresh": true
+      }
+    },
+    {
       "path": "pages/profile/index",
       "style": {
         "navigationBarTitleText": "我的",
