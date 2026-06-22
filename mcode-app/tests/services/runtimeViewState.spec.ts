@@ -1,4 +1,5 @@
 import {
+  hasInFlightConversationDetail,
   hasRenderableRuntimeState,
   hasVolatileRuntimeState,
 } from '@/services/conversation/runtimeViewState'
@@ -87,5 +88,28 @@ describe('hasVolatileRuntimeState', () => {
         pendingQuestion: { question_id: 'question-1' },
       })
     ).toBe(true)
+  })
+})
+
+describe('hasInFlightConversationDetail', () => {
+  it('detects snake_case and camelCase in-flight detail ids', () => {
+    expect(hasInFlightConversationDetail({
+      in_flight_user_turn_id: 'user-1',
+    })).toBe(true)
+
+    expect(hasInFlightConversationDetail({
+      inFlightUserTurnId: 'user-2',
+    })).toBe(true)
+  })
+
+  it('ignores missing, null, and empty in-flight detail ids', () => {
+    expect(hasInFlightConversationDetail(null)).toBe(false)
+    expect(hasInFlightConversationDetail({})).toBe(false)
+    expect(hasInFlightConversationDetail({
+      in_flight_user_turn_id: null,
+    })).toBe(false)
+    expect(hasInFlightConversationDetail({
+      inFlightUserTurnId: '   ',
+    })).toBe(false)
   })
 })

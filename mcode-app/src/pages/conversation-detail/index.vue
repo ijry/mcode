@@ -769,6 +769,7 @@ import { persistConversationDetailSnapshot } from "@/services/conversation/conve
 import { ensureConversationTabForPrompt } from "@/services/conversation/pcTabSyncService"
 import { touchHotConversation } from "@/services/conversation/hotConversationCoordinator"
 import {
+  hasInFlightConversationDetail,
   hasRenderableRuntimeState,
   hasVolatileRuntimeState,
 } from "@/services/conversation/runtimeViewState"
@@ -2255,6 +2256,16 @@ async function reconcileRemoteTurnsAfterLocalHydrate(
     })
     applyRemoteDetailStats(result)
     detailDebugLog("local-hydrate-remote-reconcile", summarizeDetailTurns(result))
+    if (hasInFlightConversationDetail(result) || hasVolatileRuntimeState(runtimeSession)) {
+      await persistConversationDetailSnapshot({
+        instanceKey: resolveDetailInstanceKey(),
+        conversationId: conversationId.value,
+        detail: result,
+        fallbackFolderId: folderId.value,
+        persistTurns: false,
+      })
+      return
+    }
     await persistConversationDetailSnapshot({
       instanceKey: resolveDetailInstanceKey(),
       conversationId: conversationId.value,
@@ -2861,6 +2872,16 @@ async function reconcileRemoteTurnsAfterResume(
     })
     applyRemoteDetailStats(result)
     detailDebugLog("resume-remote-reconcile", summarizeDetailTurns(result))
+    if (hasInFlightConversationDetail(result) || hasVolatileRuntimeState(runtimeSession)) {
+      await persistConversationDetailSnapshot({
+        instanceKey: resolveDetailInstanceKey(),
+        conversationId: conversationId.value,
+        detail: result,
+        fallbackFolderId: folderId.value,
+        persistTurns: false,
+      })
+      return
+    }
     await persistConversationDetailSnapshot({
       instanceKey: resolveDetailInstanceKey(),
       conversationId: conversationId.value,

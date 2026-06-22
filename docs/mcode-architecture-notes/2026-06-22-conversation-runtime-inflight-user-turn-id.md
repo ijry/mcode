@@ -17,6 +17,10 @@ Detail metadata only changes runtime state when the response explicitly contains
 
 Snapshot hydration follows the same rule, but older reconnect snapshots that are rejected by `event_seq` do not update this field. Runtime cleanup paths clear it when live state is cleared, a turn completes, a session is disconnected, or cached runtime state is reset.
 
+`mcode-relay` remains a transparent command/event tunnel. It must pass through `get_folder_conversation` responses and ACP snapshots unchanged; it must not infer `in_flight_user_turn_id` from content because relay snapshots do not carry the backend's pending-user-message start timestamp. The authoritative correlation belongs on the desktop/backend side, where pending user message state and parsed persisted turns can be compared safely.
+
+When the detail page receives a remote detail that carries an in-flight id during a reconcile pass, it applies runtime metadata/stat updates but does not refresh the current runtime turn buffer from persisted storage. The snapshot is still allowed to update summary/session metadata, but persisted turns are skipped for that reconcile. This mirrors the codeg-main race guard: mid-turn detail is a partial view and must not clobber live/local buffers that may already contain a more complete promoted reply.
+
 Timeline projection now works in two stages:
 
 1. If `inFlightUserTurnId` matches a local user turn, only assistant turns after that user and before the next user are candidates for suppression.
@@ -44,5 +48,6 @@ Native clients should mirror this in their runtime timeline layer:
 - hydrate it from conversation detail and live snapshot metadata only when the field is explicitly present
 - ignore stale reconnect snapshots before applying the id
 - clear it when live state is cleared or a turn completes
+- treat in-flight detail refreshes as partial views: update metadata, but do not replace live/local runtime buffers from persisted turns while a turn is running
 - when projecting messages, suppress covered assistant partials only in the segment after the matching user turn and before the next user turn
 - keep the old tail-only suppression as a fallback for older servers that do not send the id
