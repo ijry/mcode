@@ -454,6 +454,56 @@ describe('conversationRuntime ACP error handling', () => {
     ])
   })
 
+  it('suppresses a persisted text partial when structured live content covers its text', () => {
+    const store = useConversationRuntimeStore()
+    const session = store.getOrCreateSession(1)
+    session.localTurns = [
+      {
+        id: 'u-current',
+        role: 'user',
+        content: [{ type: 'text', text: 'ask' }],
+        timestamp: 100,
+        status: 'completed',
+      },
+      {
+        id: 'a-partial',
+        role: 'assistant',
+        content: [
+          {
+            type: 'text',
+            text: 'I will create the worktree.\n\nUsing systematic debugging for baseline failure.',
+          },
+        ],
+        timestamp: 110,
+        status: 'completed',
+      },
+    ] as any
+
+    store.setLiveMessage(
+      1,
+      [
+        { type: 'text', text: 'I will create the worktree.\n\n' },
+        {
+          type: 'tool_call',
+          tool_call: {
+            id: 'tool-1',
+            name: 'shell_command',
+            input: {},
+            status: 'running',
+          },
+        },
+        { type: 'text', text: 'Using systematic debugging for baseline failure. More text.' },
+      ],
+      true,
+      { id: 'lm-current', timestamp: 105 }
+    )
+
+    expect(store.getMessages(1).map((turn) => turn.id)).toEqual([
+      'u-current',
+      'live-1-lm-current',
+    ])
+  })
+
   it('uses the in-flight user turn id to suppress the covered assistant partial after that prompt', () => {
     const store = useConversationRuntimeStore()
     const session = store.getOrCreateSession(1)

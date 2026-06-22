@@ -34,6 +34,8 @@ New live snapshots that start after existing history remain visible.
 
 Realtime event replay is also guarded by event sequence. After snapshot hydration sets the runtime `lastAppliedSeq`, any later envelope with `seq <= lastAppliedSeq` is ignored before it can mutate live state. This prevents an attach/reconnect snapshot that already contains accumulated live text from being followed by replayed text deltas for the same sequence range, which would otherwise duplicate paragraphs in the active assistant bubble.
 
+Timeline partial suppression also compares text projections. A persisted assistant partial that contains only accumulated text can be covered by a structured live message whose content interleaves text with tool-call blocks. In that case the runtime hides the persisted partial and renders only the structured live turn, preventing one raw-text copy and one markdown/tool-card copy from appearing together.
+
 ## UI Behavior
 
 The visible detail page behavior is unchanged except for duplicate prevention:
@@ -41,6 +43,7 @@ The visible detail page behavior is unchanged except for duplicate prevention:
 - repeated `turn_complete` events do not trigger extra replay/calibration work
 - stale reconnect snapshots do not append an already completed reply as a live assistant message
 - replayed stream events already covered by the snapshot do not append duplicate text
+- text-only persisted partials covered by a structured live turn do not render as a second assistant block
 - legitimate new in-flight live replies after existing history still render at the tail
 
 ## Compatibility
@@ -58,4 +61,5 @@ Native clients should mirror the same runtime-level behavior:
 - include realtime event sequence in the local completion key when the backend payload has no turn id
 - reject reconnect snapshot live messages whose start time is not newer than the latest completed assistant message
 - drop realtime envelopes whose sequence is less than or equal to the runtime's last applied sequence
+- when deciding whether a persisted assistant partial is covered by live content, compare both full part signatures and a text-only projection so tool-call blocks do not break duplicate suppression
 - keep this logic outside message-cell rendering; cells should consume an already projected and deduped timeline

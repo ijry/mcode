@@ -138,7 +138,10 @@ function suppressAnchoredAssistantPartials(
 function isContentPrefix(prefixParts: MessageTurn["content"], fullParts: MessageTurn["content"]) {
   const prefix = buildContentSignature(prefixParts)
   const full = buildContentSignature(fullParts)
-  return prefix.length > 0 && full.length >= prefix.length && full.startsWith(prefix)
+  if (prefix.length > 0 && full.length >= prefix.length && full.startsWith(prefix)) {
+    return true
+  }
+  return isTextProjectionPrefix(prefixParts, fullParts)
 }
 
 function buildContentSignature(parts: MessageTurn["content"]) {
@@ -164,6 +167,35 @@ function buildPartSignature(part: MessageTurn["content"][number]) {
   if (part.type === "image") return `image:${part.image?.url || ""}`
   if (part.type === "plan") return `plan:${stableStringify(part.plan || {})}`
   return ""
+}
+
+function isTextProjectionPrefix(
+  prefixParts: MessageTurn["content"],
+  fullParts: MessageTurn["content"]
+) {
+  if (prefixParts.length === 0) return false
+  if (!prefixParts.every(isTextualContentPart)) return false
+  const prefixText = buildTextProjection(prefixParts)
+  const fullText = buildTextProjection(fullParts)
+  return (
+    prefixText.length > 0 &&
+    fullText.length >= prefixText.length &&
+    fullText.startsWith(prefixText)
+  )
+}
+
+function isTextualContentPart(part: MessageTurn["content"][number]) {
+  return part.type === "text" || part.type === "thinking"
+}
+
+function buildTextProjection(parts: MessageTurn["content"]) {
+  return parts
+    .map((part) => {
+      if (part.type === "text") return part.text || ""
+      if (part.type === "thinking") return part.thinking || ""
+      return ""
+    })
+    .join("")
 }
 
 function stableStringify(value: unknown): string {
