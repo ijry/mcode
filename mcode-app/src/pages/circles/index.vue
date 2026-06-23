@@ -359,10 +359,10 @@ const activeLoadMoreText = computed(() => {
   if (activeLoadingMore.value) return "加载更多..."
   return activeHasMore.value ? "上拉加载更多" : "没有更多了"
 })
-const canSubmitComment = computed(() => commentDraft.value.trim().length >= 5 && !commentSubmitting.value)
+const canSubmitComment = computed(() => commentDraft.value.trim().length >= 2 && !commentSubmitting.value)
 const commentInputPlaceholder = computed(() => commentReplyTarget.value
-  ? `回复 ${commentReplyTarget.value.author}，至少 5 个字`
-  : "写下你的评论，至少 5 个字")
+  ? `回复 ${commentReplyTarget.value.author}，至少 2 个字`
+  : "写下你的评论，至少 2 个字")
 const commentHasMore = computed(() => comments.value.length < commentTotal.value)
 const commentLoadMoreText = computed(() => {
   if (commentsLoadingMore.value) return "加载更多评论..."
@@ -652,28 +652,28 @@ async function loadMoreComments() {
 }
 
 async function submitComment() {
-  if (!commentPost.value || !canSubmitComment.value) return
+  if (!commentPost.value) return
+  if (commentSubmitting.value) return
   const post = commentPost.value
   const content = commentDraft.value.trim()
+  if (content.length < 2) {
+    uni.showToast({ title: "评论至少 2 个字", icon: "none" })
+    return
+  }
   const replyTarget = commentReplyTarget.value
   commentSubmitting.value = true
   try {
-    const comment = await publishCircleComment({
+    await publishCircleComment({
       postId: post.id,
       content,
       pid: replyTarget?.pid || 0,
       tpid: replyTarget?.tpid || 0,
     })
     commentDraft.value = ""
-    if (replyTarget) {
-      appendReplyToCommentThread(replyTarget.topCommentId, comment)
-      clearCommentReplyTarget()
-    } else {
-      comments.value = [comment, ...comments.value]
-    }
-    commentTotal.value += 1
+    clearCommentReplyTarget()
     post.commentCount += 1
     syncPostCommentCount(post.id, post.commentCount)
+    await reloadComments()
     uni.showToast({ title: replyTarget ? "回复已发布" : "评论已发布", icon: "success" })
   } catch (error) {
     const message = normalizeErrorMessage(error)
@@ -691,7 +691,7 @@ async function submitComment() {
 function setCommentReplyTarget(comment: CircleComment, topComment?: CircleComment) {
   commentReplyTarget.value = {
     pid: comment.id,
-    tpid: topComment ? topComment.id : 0,
+    tpid: topComment ? topComment.id : comment.id,
     topCommentId: topComment?.id || comment.id,
     author: comment.author,
   }
@@ -699,16 +699,6 @@ function setCommentReplyTarget(comment: CircleComment, topComment?: CircleCommen
 
 function clearCommentReplyTarget() {
   commentReplyTarget.value = null
-}
-
-function appendReplyToCommentThread(topCommentId: string, reply: CircleComment) {
-  const target = comments.value.find((comment) => comment.id === topCommentId)
-  if (!target) {
-    comments.value = [reply, ...comments.value]
-    return
-  }
-  target.children = [...target.children, reply]
-  target.replyCount += 1
 }
 
 function syncPostCommentCount(postId: number, nextCount: number) {

@@ -204,7 +204,7 @@ export async function uploadCircleImage(filePath: string): Promise<CircleImageUp
 
   const statusCode = toNumber(response.statusCode)
   const body = normalizeRecord(parseUploadResponseData(response.data))
-  const bodyCode = toNumber(body.code || statusCode)
+  const bodyCode = resolveResponseCode(body, statusCode)
   if (bodyCode !== 200) {
     throw new CircleApiError(firstString(body.msg, body.message, response.errMsg, `图片上传失败(${bodyCode})`), {
       code: bodyCode,
@@ -387,7 +387,7 @@ async function requestCircle(
 
   const statusCode = toNumber(response.statusCode)
   const body = normalizeRecord(response.data)
-  const bodyCode = toNumber(body.code || statusCode)
+  const bodyCode = resolveResponseCode(body, statusCode)
   if (bodyCode !== 200) {
     const message = firstString(body.msg, body.message, response.errMsg, `圈子接口请求失败(${bodyCode})`)
     if (bodyCode === 401 || bodyCode === 402) {
@@ -421,6 +421,13 @@ function normalizeQueryValue(value: unknown): string {
   if (typeof value === "number" && Number.isFinite(value)) return String(value)
   if (typeof value === "string" && value.trim()) return value.trim()
   return ""
+}
+
+function resolveResponseCode(body: Record<string, any>, statusCode: number): number {
+  if (Object.prototype.hasOwnProperty.call(body, "code")) {
+    return toNumber(body.code)
+  }
+  return statusCode
 }
 
 function normalizeRecord(value: unknown): Record<string, any> {
