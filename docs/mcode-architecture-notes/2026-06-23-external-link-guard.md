@@ -2,14 +2,15 @@
 
 ## Architecture
 
-mcode now routes Markdown link taps and explicit outbound-link actions through a
+mcode routes Markdown link taps and explicit outbound-link actions through a
 shared `externalLinkGuard` service. The service derives the trusted site host
 from `resolveXycloudBaseUrl()`, classifies absolute `http` and `https` links,
 and decides whether to open directly or require user confirmation.
 
-Markdown rendering is wrapped by a reusable `GuardedMarkdown` component. It
-uses `up-markdown` with `copy-link=false` so the app, not `uview-plus`, owns
-external-link behavior.
+Markdown content continues to render through `up-markdown -> up-parse`. The
+link guard is injected at the `u-parse/node.vue` anchor-tap branch, so the app
+owns external-link behavior without adding a separate wrapper component around
+`up-markdown`.
 
 ## Protocol And Data Flow
 
@@ -17,13 +18,14 @@ No backend API changed.
 
 The guard flow is:
 
-1. `up-markdown` emits `linktap` with `href`.
-2. `GuardedMarkdown` forwards the URL to `openGuardedExternalUrl()`.
-3. The service normalizes the URL and compares its hostname with the current
+1. `up-markdown` renders HTML through `up-parse`.
+2. `u-parse/node.vue` intercepts anchor taps for absolute external links.
+3. The component forwards the URL to `openGuardedExternalUrl()`.
+4. The service normalizes the URL and compares its hostname with the current
    xycloud site hostname.
-4. Same-host absolute links open immediately.
-5. Non-site absolute links show a confirmation modal before opening.
-6. Non-HTTP(S) links are ignored by the guard and are not auto-opened.
+5. Same-host absolute links open immediately.
+6. Non-site absolute links show a confirmation modal before opening.
+7. Non-HTTP(S) links are ignored by the guard and are not auto-opened.
 
 The same service is reused by the connections deployment-guide link, so the
 confirmation policy stays consistent outside Markdown too.

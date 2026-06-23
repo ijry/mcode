@@ -63,7 +63,7 @@
 
           <text v-if="post.title.trim()" class="detail-title">{{ post.title }}</text>
           <view class="detail-markdown">
-            <GuardedMarkdown :content="post.content"></GuardedMarkdown>
+            <up-markdown :content="post.content"></up-markdown>
           </view>
 
           <view v-if="post.topicTitles.length" class="detail-topics">
@@ -647,18 +647,25 @@ function excerptText(value: string, maxLength: number) {
 }
 
 .detail-markdown {
-  --guarded-markdown-link-color: var(--up-primary, #2979ff);
   color: var(--circle-content);
 }
 
-.detail-markdown :deep(.guarded-markdown),
-.detail-markdown :deep(.guarded-markdown p),
-.detail-markdown :deep(.guarded-markdown text),
-.detail-markdown :deep(.guarded-markdown ._root),
-.detail-markdown :deep(.guarded-markdown rich-text) {
+.detail-markdown :deep(.up-markdown),
+.detail-markdown :deep(.up-markdown p),
+.detail-markdown :deep(.up-markdown text),
+.detail-markdown :deep(.up-markdown ._root),
+.detail-markdown :deep(.up-markdown rich-text) {
   color: var(--circle-content);
   font-size: 28rpx;
   line-height: 1.72;
+}
+
+.detail-markdown :deep(.up-markdown ._a) {
+  color: var(--circle-primary);
+  font-weight: 700;
+  text-decoration: underline;
+  text-decoration-thickness: 0.08em;
+  text-underline-offset: 0.12em;
 }
 
 .detail-topics {

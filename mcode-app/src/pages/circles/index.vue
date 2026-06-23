@@ -101,7 +101,7 @@
             <view class="post-card__body" @click="openPostDetail(post)">
               <text v-if="post.title.trim()" class="post-card__title">{{ post.title }}</text>
               <view class="post-card__content">
-                <GuardedMarkdown :content="post.content"></GuardedMarkdown>
+                <up-markdown :content="post.content"></up-markdown>
               </view>
             </view>
 
@@ -1069,20 +1069,23 @@ function formatCompactCount(value: number) {
 }
 
 .post-card__content {
-  --guarded-markdown-link-color: var(--up-primary, #2979ff);
   font-size: 26rpx;
   line-height: 1.62;
   color: var(--circle-content);
 }
 
-.post-card__content :deep(.guarded-markdown),
-.post-card__content :deep(.guarded-markdown p),
-.post-card__content :deep(.guarded-markdown text),
-.post-card__content :deep(.guarded-markdown ._root),
-.post-card__content :deep(.guarded-markdown rich-text) {
+.post-card__content :deep(.up-markdown),
+.post-card__content :deep(.up-markdown p),
+.post-card__content :deep(.up-markdown text),
+.post-card__content :deep(.up-markdown ._root),
+.post-card__content :deep(.up-markdown rich-text) {
   color: var(--circle-content);
   font-size: 26rpx;
   line-height: 1.62;
+}
+
+.post-card__content :deep(.up-markdown ._a) {
+  color: var(--circle-primary);
 }
 
 .post-card__topics {
