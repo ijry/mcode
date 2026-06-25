@@ -36,6 +36,7 @@
 - 旧 `mode = relay` 迁移为 `targetAgent = codeg`、`routeMode = gateway`、`gatewayProvider = official`
 - 新二维码 / 配置码写 `version: 2`
 - app 继续兼容读取 `version: 1`
+- 当前 `mcode-app` 的 Task 1 落地会在 `version: 2` 记录旁临时保留 `mode` / `url` / `relaySession` 兼容别名，直到连接页和详情页全部切到 `targetAgent` / `routeMode`
 
 网关协议变化：
 
@@ -87,6 +88,7 @@ desktop 运行方式：
 - 历史 relay 连接默认按 `codeg` 网关连接处理；如果后续刷新拿到新的 `targetAgent`，静默更新本地缓存。
 - `mcode-relay` 是服务名，app 文案统一显示为 `网关`。
 - 首版正式新增入口重点支持 `mcode-desktop/gateway`；历史 `codeg/gateway` 仍保留兼容路径。
+- 原生新实现不需要复制 web 端这层旧字段别名；只有在同一个客户端里仍存在旧页面或旧路由读取逻辑时，才需要做相同兼容桥接。
 
 ## Native iOS/Android Replication Guidance
 
