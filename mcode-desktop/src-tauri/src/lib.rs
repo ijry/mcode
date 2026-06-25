@@ -1,5 +1,9 @@
 pub mod app_state;
+pub mod bridge;
+pub mod gateway;
+pub mod runtime;
 pub mod tray;
+pub mod tunnel;
 
 use app_state::AppState;
 use tauri::AppHandle;

@@ -56,6 +56,8 @@
 - relay 侧的 `PairingStore` 已保存 `targetAgent`、`capabilities`、`protocolVersion`；`pair_offer` 和 `desktop_hello` 从 desktop 上游同步这些字段，历史调用缺省按 `codeg` / protocol `1` 兼容。
 - `/v1/events` 推送统一包装为 `{ eventId, channel, payload, controllerId? }`，relay 为每个 target 维护有限 replay buffer；mobile 重连时可带 `lastEventId` / `last_event_id` 查询参数补收缺失事件。
 - `/v1/tunnel/:targetId/:port/*` 是 mobile 到 desktop 本地 HTTP 服务的网关入口。relay 校验 access token 中的 `targetId` 必须等于 path target，再向 desktop upstream 发送 `tunnel_request`，desktop 以 `tunnel_response` 返回 status/headers/body。
+- desktop upstream hello 使用 `targetAgent = "mcode-desktop"` 与 `protocolVersion = "1"`，不再使用旧的 `targetType` 命名；序列化到 JSON 时字段名保持 camelCase。
+- desktop capability keys 当前固定为 `desktop.runtime.codex-cli`、`desktop.runtime.claude-cli`、`desktop.tunnel.available`。原生端展示层应只把认识的 key 映射成标签，未知 key 保留给后续扩展。
 
 desktop 外网接入流程：
 
@@ -70,6 +72,7 @@ desktop 运行方式：
 - 用户从 tray 或主窗口恢复、停止、重启 bridge
 - 官方 CLI 子进程由 Tauri backend 统一监管，不要求用户手工执行命令行
 - 初始 Tauri scaffold 暴露 `show_window`、`hide_window`、`shutdown_runtime` 命令，tray 菜单使用相同 command id，原生客户端复制时需要保持“窗口可隐藏但 runtime 可继续存在”的生命周期语义。
+- bridge/runtime scaffold 已拆分为 `bridge`、`runtime`、`gateway`、`tunnel` 模块：CLI adapter 先提供命令分发边界，gateway 先提供 upstream hello/control-frame 解析边界，tunnel 默认把 Code 预览绑定到 `127.0.0.1:1080`。
 
 ## UI Behavior
 
