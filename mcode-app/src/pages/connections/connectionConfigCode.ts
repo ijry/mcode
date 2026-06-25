@@ -71,7 +71,7 @@ export function parseConnectionConfigCodeToConnection(code: string): ParsedConfi
   const version = Number((payload as { version?: number }).version || 1)
   const record =
     version === 2
-      ? normalizeV2ConfigCodePayload(payload as Record<string, unknown>)
+      ? normalizeV2ConfigCodePayload(payload as unknown as Record<string, unknown>)
       : migrateConnectionRecord(projectConfigCodePayloadToLegacyConnection(payload as ConfigCodePayload))
 
   if (!record) {
@@ -97,10 +97,10 @@ function buildConnectionConfigPayload(connection: ConfigCodeConnection): ConfigC
     if (!normalized.directToken) throw new Error("直连配置缺少 token")
   } else {
     if (!normalized.gatewayBaseUrl && normalized.gatewayProvider === "custom") {
-      throw new Error("中继配置缺少地址")
+      throw new Error("网关配置缺少地址")
     }
     if (!gatewaySession && !(normalized.pairCode && normalized.pairSecret)) {
-      throw new Error("中继配置缺少会话或配对信息")
+      throw new Error("网关配置缺少会话或配对信息")
     }
   }
 
@@ -157,9 +157,9 @@ function projectConfigCodePayloadToLegacyConnection(payload: ConfigCodePayload):
     const pairCode = String(payload.pairCode || "").trim()
     const pairSecret = String(payload.pairSecret || "").trim()
     const relaySession = normalizeImportedRelaySession(payload.relaySession)
-    if (!url) throw new Error("配置码缺少中继地址")
+    if (!url) throw new Error("配置码缺少网关地址")
     if (!relaySession && (!pairCode || !pairSecret)) {
-      throw new Error("配置码缺少中继凭据")
+      throw new Error("配置码缺少网关凭据")
     }
     return {
       name,
@@ -221,7 +221,7 @@ function getBufferCtor():
 
 function normalizeConfigCodeConnection(connection: ConfigCodeConnection): ConnectionRecordV2 | null {
   if (!connection || typeof connection !== "object") return null
-  const raw = connection as Record<string, unknown>
+  const raw = connection as unknown as Record<string, unknown>
 
   const v2 = normalizeConnectionRecordV2({
     version: 2,
@@ -250,5 +250,5 @@ function assertConfigCodeCredentials(record: ConnectionRecordV2) {
 
   if (record.gatewaySession?.accessToken) return
   if (record.pairCode && record.pairSecret) return
-  throw new Error("配置码缺少中继凭据")
+  throw new Error("配置码缺少网关凭据")
 }

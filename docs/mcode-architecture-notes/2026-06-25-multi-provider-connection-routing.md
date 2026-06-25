@@ -81,6 +81,8 @@ desktop 运行方式：
 - 连接卡片同时展示目标类型和路由方式。
 - `MCode Desktop` 连接可显示能力标签，如 `Codex CLI`、`Claude CLI`、`内网穿透`。
 - 网关模式下 target metadata 以 pair/refresh 返回值为准，UI 不强信本地旧值。
+- web/uni-app 新增连接表单已经使用 `routeMode`、`targetAgent`、`gatewayProvider` 作为主状态；`mode`、`url`、`relaySession` 只作为当前网关运行时代码的兼容别名保留。
+- `MCode 官方网关` 不展示域名输入框，构建时从 `VITE_MCODE_OFFICIAL_GATEWAY_BASE_URL` 读取默认网关地址；如果未配置，保存时提示“官方网关地址未配置”。选择 `自定义` 时必须填写 `gatewayBaseUrl`。
 
 ## Compatibility
 

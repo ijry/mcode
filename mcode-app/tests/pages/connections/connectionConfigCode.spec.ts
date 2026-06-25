@@ -130,7 +130,7 @@ describe("connection config code", () => {
     ).toThrow("直连配置缺少 token")
   })
 
-  it("rejects relay config codes without usable credentials", () => {
+  it("rejects relay config codes without usable gateway credentials", () => {
     const code = Buffer.from(
       JSON.stringify({
         version: 1,
@@ -145,6 +145,6 @@ describe("connection config code", () => {
       .replace(/\//g, "_")
       .replace(/=+$/g, "")
 
-    expect(() => parseConnectionConfigCodeToConnection(code)).toThrow("配置码缺少中继凭据")
+    expect(() => parseConnectionConfigCodeToConnection(code)).toThrow("配置码缺少网关凭据")
   })
 })
