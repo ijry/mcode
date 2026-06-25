@@ -1,4 +1,4 @@
-import type { GatewayMode, RelaySessionInfo } from "@/services/gateway"
+import type { GatewayMode, PairTargetMetadata, RelaySessionInfo } from "@/services/gateway"
 import {
   toConnectionRuntimeContext,
   type ConnectionRuntimeContext,
@@ -10,7 +10,9 @@ import {
   migrateConnectionRecord,
   normalizeConnectionBaseUrl,
   normalizeConnectionRecordV2,
+  normalizePairTargetProfile,
   type ConnectionRecordV2,
+  type ConnectionTargetAgent,
 } from "./connectionSchema"
 
 export interface LegacyConnectionContextInput {
@@ -88,6 +90,44 @@ export function persistResolvedConnection(connection: ConnectionContextLike, loo
   uni.setStorageSync("mcode_connections", savedConnections.map((item) => sanitizeConnectionContext(item)))
 }
 
+export function applyPairMetadata(
+  connection: ConnectionContextLike,
+  session: RelaySessionInfo | null,
+  target: PairTargetMetadata | null
+): ConnectionContext {
+  const normalized = normalizeConnectionContext(connection)
+  if (!normalized) {
+    throw new Error("连接信息无效")
+  }
+
+  const normalizedTarget = normalizePairTargetProfile({
+    ...(session || {}),
+    ...(target || {}),
+  })
+  const targetAgent =
+    normalizedTarget?.targetAgent ||
+    normalizeTargetAgent(session?.targetAgent) ||
+    normalized.targetAgent
+  const targetProfile = normalizedTarget || normalized.targetProfile || null
+  const gatewaySession = session
+    ? {
+        ...session,
+        ...(targetProfile?.targetId ? { targetId: targetProfile.targetId } : {}),
+        ...(targetProfile?.targetAgent ? { targetAgent: targetProfile.targetAgent } : {}),
+        ...(targetProfile?.displayName ? { displayName: targetProfile.displayName } : {}),
+        ...(targetProfile?.capabilities ? { capabilities: targetProfile.capabilities } : {}),
+        ...(targetProfile?.protocolVersion ? { protocolVersion: targetProfile.protocolVersion } : {}),
+      }
+    : normalized.gatewaySession || null
+
+  return toConnectionContext({
+    ...normalized,
+    targetAgent,
+    ...(gatewaySession ? { gatewaySession } : {}),
+    ...(targetProfile ? { targetProfile } : {}),
+  })
+}
+
 export function readStoredConnections(): ConnectionContext[] {
   const raw = uni.getStorageSync("mcode_connections")
   if (!Array.isArray(raw)) return []
@@ -125,4 +165,10 @@ function normalizeConnectionRecordInput(input: unknown): ConnectionRecordV2 | nu
 
 function toConnectionContext(record: ConnectionRecordV2): ConnectionContext {
   return toConnectionRuntimeContext(record)
+}
+
+function normalizeTargetAgent(value: unknown): ConnectionTargetAgent | null {
+  return value === "codeg" || value === "opencode" || value === "mcode-desktop"
+    ? value
+    : null
 }

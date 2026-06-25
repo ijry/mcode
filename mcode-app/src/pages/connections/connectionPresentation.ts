@@ -47,6 +47,19 @@ export function getConnectionBadgeText(isOnline: boolean): string {
   return isOnline ? "CONNECTED" : "OFFLINE"
 }
 
+export function getConnectionCapabilityChips(
+  connection: Pick<ConnectionRecordV2, "targetAgent" | "targetProfile">
+): string[] {
+  const capabilities = connection.targetProfile?.capabilities || []
+  const labels = capabilities.flatMap((value) => {
+    if (value === "desktop.runtime.codex-cli") return ["Codex CLI"]
+    if (value === "desktop.runtime.claude-cli") return ["Claude CLI"]
+    if (value === "desktop.tunnel.available") return ["内网穿透"]
+    return []
+  })
+  return Array.from(new Set(labels))
+}
+
 function normalizeBaseUrl(url: string): string {
   return String(url || "").trim().replace(/\/+$/, "")
 }

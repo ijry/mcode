@@ -1,7 +1,53 @@
-import { persistResolvedConnection } from "@/services/connectionContext"
+import { applyPairMetadata, persistResolvedConnection } from "@/services/connectionContext"
 import { buildConnectionRecordKey } from "@/services/connectionSchema"
 
 describe("connectionContext", () => {
+  it("applies pair target metadata to session and target profile", () => {
+    const connection = {
+      version: 2 as const,
+      name: "Desktop Gateway",
+      targetAgent: "codeg" as const,
+      routeMode: "gateway" as const,
+      gatewayProvider: "official" as const,
+      gatewayBaseUrl: "https://relay.example.com",
+    }
+
+    expect(
+      applyPairMetadata(
+        connection as any,
+        {
+          accessToken: "access-token",
+          refreshToken: "refresh-token",
+        },
+        {
+          targetId: "desktop-1",
+          targetAgent: "mcode-desktop",
+          displayName: "Workstation",
+          capabilities: ["desktop.runtime.codex-cli", "desktop.tunnel.available"],
+          protocolVersion: "1",
+        }
+      )
+    ).toMatchObject({
+      targetAgent: "mcode-desktop",
+      gatewaySession: {
+        accessToken: "access-token",
+        refreshToken: "refresh-token",
+        targetId: "desktop-1",
+        targetAgent: "mcode-desktop",
+        displayName: "Workstation",
+        capabilities: ["desktop.runtime.codex-cli", "desktop.tunnel.available"],
+        protocolVersion: "1",
+      },
+      targetProfile: {
+        targetAgent: "mcode-desktop",
+        targetId: "desktop-1",
+        displayName: "Workstation",
+        capabilities: ["desktop.runtime.codex-cli", "desktop.tunnel.available"],
+        protocolVersion: "1",
+      },
+    })
+  })
+
   it("upgrades legacy gateway records in place when pair metadata changes target agent", () => {
     const storedRecord = {
       version: 2 as const,

@@ -92,6 +92,16 @@
               {{ getConnectionSubtitle(conn) }}
             </text>
 
+            <view v-if="getConnectionCapabilityChips(conn).length" class="connection-card__chips">
+              <text
+                v-for="chip in getConnectionCapabilityChips(conn)"
+                :key="chip"
+                class="connection-card__chip"
+              >
+                {{ chip }}
+              </text>
+            </view>
+
             <text
               v-if="getConnectionHealthDetail(conn)"
               class="connection-card__health-detail"
@@ -398,7 +408,10 @@ import {
   type ConnectionRouteMode,
   type ConnectionTargetAgent,
 } from "@/services/connectionSchema"
-import { getConnectionSubtitle } from "./connectionPresentation"
+import {
+  getConnectionCapabilityChips,
+  getConnectionSubtitle,
+} from "./connectionPresentation"
 import {
   buildConnectionAgentsRoute,
   buildModelProvidersRoute,
@@ -1989,6 +2002,22 @@ function persistConnectedMap() {
   line-height: 1.5;
   color: var(--up-content-color, #606266);
   word-break: break-all;
+}
+
+.connection-card__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10rpx;
+}
+
+.connection-card__chip {
+  padding: 8rpx 14rpx;
+  border-radius: 999rpx;
+  border: 1rpx solid color-mix(in srgb, var(--up-primary, #2979ff) 24%, var(--up-border-color, #dadbde) 76%);
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 10%, var(--up-card-bg-color, #ffffff) 90%);
+  color: var(--up-primary, #2979ff);
+  font-size: 20rpx;
+  font-weight: 600;
 }
 
 .connection-card__health-detail {

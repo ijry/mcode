@@ -53,6 +53,7 @@
 - relay 只转发 payload，不做 target-specific 改写
 - desktop / relay 握手需带协议版本，并支持 ACK 序号、重放窗口和断线后短时会话保留
 - app 侧把上述 metadata 同时归一到 `gatewaySession` 与 `targetProfile`；pair 和 refresh 任一返回了新值，都可以覆盖本地旧的 target 展示信息和能力列表。
+- app 侧新增 `applyPairMetadata(connection, session, target)` 作为 pair/refresh metadata 回写边界：`targetAgent` 以 target metadata 优先，`gatewaySession` 保留 token 并合并 target metadata，`targetProfile` 用于 UI 展示和能力判断。
 - relay 侧的 `PairingStore` 已保存 `targetAgent`、`capabilities`、`protocolVersion`；`pair_offer` 和 `desktop_hello` 从 desktop 上游同步这些字段，历史调用缺省按 `codeg` / protocol `1` 兼容。
 - `/v1/events` 推送统一包装为 `{ eventId, channel, payload, controllerId? }`，relay 为每个 target 维护有限 replay buffer；mobile 重连时可带 `lastEventId` / `last_event_id` 查询参数补收缺失事件。
 - `/v1/tunnel/:targetId/:port/*` 是 mobile 到 desktop 本地 HTTP 服务的网关入口。relay 校验 access token 中的 `targetId` 必须等于 path target，再向 desktop upstream 发送 `tunnel_request`，desktop 以 `tunnel_response` 返回 status/headers/body。
@@ -91,6 +92,7 @@ desktop 运行方式：
 - 用户可见文案统一用 `网关`，不再新增 `中继` 文案。
 - 连接卡片同时展示目标类型和路由方式。
 - `MCode Desktop` 连接可显示能力标签，如 `Codex CLI`、`Claude CLI`、`内网穿透`。
+- web/uni-app 连接卡片通过 `getConnectionCapabilityChips()` 从 `targetProfile.capabilities` 映射能力标签；当前只展示认识的 desktop capability，未知 key 不展示但保留在数据层。
 - 网关模式下 target metadata 以 pair/refresh 返回值为准，UI 不强信本地旧值。
 - web/uni-app 新增连接表单已经使用 `routeMode`、`targetAgent`、`gatewayProvider` 作为主状态；`mode`、`url`、`relaySession` 只作为当前网关运行时代码的兼容别名保留。
 - `MCode 官方网关` 不展示域名输入框，构建时从 `VITE_MCODE_OFFICIAL_GATEWAY_BASE_URL` 读取默认网关地址；如果未配置，保存时提示“官方网关地址未配置”。选择 `自定义` 时必须填写 `gatewayBaseUrl`。

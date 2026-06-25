@@ -1,5 +1,6 @@
 import {
   getConnectionBadgeText,
+  getConnectionCapabilityChips,
   getConnectionProviderLabel,
   getConnectionRouteLabel,
   getConnectionSubtitle,
@@ -51,5 +52,17 @@ describe("connection presentation", () => {
   it("maps online state to badge text", () => {
     expect(getConnectionBadgeText(true)).toBe("CONNECTED")
     expect(getConnectionBadgeText(false)).toBe("OFFLINE")
+  })
+
+  it("exposes desktop capability chips from target metadata", () => {
+    expect(
+      getConnectionCapabilityChips({
+        targetAgent: "mcode-desktop",
+        targetProfile: {
+          targetAgent: "mcode-desktop",
+          capabilities: ["desktop.runtime.codex-cli", "desktop.tunnel.available"],
+        },
+      } as any)
+    ).toEqual(["Codex CLI", "内网穿透"])
   })
 })
