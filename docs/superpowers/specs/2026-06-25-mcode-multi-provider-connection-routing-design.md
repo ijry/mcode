@@ -76,7 +76,7 @@
 
 把连接模型拆成：
 
-- `targetType = codeg | opencode | mcode-desktop`
+- `targetAgent = codeg | opencode | mcode-desktop`
 - `routeMode = direct | gateway`
 - `gatewayProvider = official | custom`
 
@@ -144,14 +144,14 @@
 推荐结构：
 
 ```ts
-type ConnectionTargetType = "codeg" | "opencode" | "mcode-desktop"
+type ConnectionTargetAgent = "codeg" | "opencode" | "mcode-desktop"
 type ConnectionRouteMode = "direct" | "gateway"
 type GatewayProvider = "official" | "custom"
 
 interface ConnectionItemV2 {
   version: 2
   name: string
-  targetType: ConnectionTargetType
+  targetAgent: ConnectionTargetAgent
   routeMode: ConnectionRouteMode
 
   directBaseUrl?: string
@@ -168,7 +168,7 @@ interface ConnectionItemV2 {
   }
 
   targetProfile?: {
-    targetType: ConnectionTargetType
+    targetAgent: ConnectionTargetAgent
     targetId?: string
     displayName?: string
     capabilities?: string[]
@@ -181,7 +181,7 @@ interface ConnectionItemV2 {
 - `directBaseUrl` 只在 `routeMode = direct` 时有效。
 - `gatewayProvider` / `gatewayBaseUrl` / `pairCode` / `pairSecret` / `gatewaySession` 只在 `routeMode = gateway` 时有效。
 - `targetProfile` 是配对或探测后的缓存信息，优先信任服务端返回值。
-- `targetType` 是上层 UI 和页面路由使用的主字段；如果配对结果与已存值不一致，以服务端回传覆盖本地旧值。
+- `targetAgent` 是上层 UI 和页面路由使用的主字段；如果配对结果与已存值不一致，以服务端回传覆盖本地旧值。
 
 ### 3. Legacy Migration
 
@@ -189,13 +189,13 @@ interface ConnectionItemV2 {
 
 - `mode = "direct"`:
   - 升级为 `version = 2`
-  - `targetType = "codeg"`
+  - `targetAgent = "codeg"`
   - `routeMode = "direct"`
   - `directBaseUrl = old.url`
   - `directToken = old.directToken`
 - `mode = "relay"`:
   - 升级为 `version = 2`
-  - `targetType = "codeg"`
+  - `targetAgent = "codeg"`
   - `routeMode = "gateway"`
   - `gatewayProvider = "official"`
   - `gatewayBaseUrl = old.url`
@@ -206,7 +206,7 @@ interface ConnectionItemV2 {
 说明：
 
 - 存量 `relay` 连接先按 `codeg` 历史网关连接处理，保证不丢兼容性。
-- 如果旧网关连接实际已切到新的 desktop 上游，后续以配对返回的 `targetProfile.targetType` 覆盖旧值。
+- 如果旧网关连接实际已切到新的 desktop 上游，后续以配对返回的 `targetProfile.targetAgent` 覆盖旧值。
 - `mcode-app` 必须继续兼容读取旧的路由参数和配置码，直到所有入口都迁到 `version: 2`。
 
 ### 4. Connection Wizard UI
@@ -255,7 +255,7 @@ interface ConnectionItemV2 {
 
 - `MCode 官方网关` 默认使用 app 配置里的官方网关域名，不要求用户再手填。
 - `自定义` 时必须输入完整域名，优先要求 `https://`，仅本地开发允许 `http://127.0.0.1` 或局域网地址。
-- 网关模式创建成功后，target type 以配对响应为准。
+- 网关模式创建成功后，`targetAgent` 以配对响应为准。
 - 首版 UI 正式引导的网关目标是 `mcode-desktop`；历史 `codeg` 网关连接继续可用，但不作为新增主路径强调。
 
 #### 4.3 Connection Card Presentation
@@ -277,7 +277,7 @@ interface ConnectionItemV2 {
 
 `version: 2` 增加：
 
-- `targetType`
+- `targetAgent`
 - `routeMode`
 - `gatewayProvider`
 - `gatewayBaseUrl`
@@ -289,7 +289,7 @@ interface ConnectionItemV2 {
 {
   "version": 2,
   "name": "Office Desktop",
-  "targetType": "mcode-desktop",
+  "targetAgent": "mcode-desktop",
   "routeMode": "gateway",
   "gatewayProvider": "official",
   "pairCode": "ABCD-1234",
@@ -317,24 +317,24 @@ interface ConnectionItemV2 {
 建议结构：
 
 - `connectionContext` 负责解析、迁移、持久化、编码路由参数
-- `connectionDriverRegistry` 负责根据 `targetType + routeMode` 选择 driver
+- `connectionDriverRegistry` 负责根据 `targetAgent + routeMode` 选择 driver
 - 每个 driver 实现同一套 app-facing 命令/事件契约
 
 前端目录约束：
 
-- `mcode-app` 中不同 `targetType` 的逻辑和组件必须按 target 独立分目录组织。
+- `mcode-app` 中不同 `targetAgent` 的逻辑和组件必须按 agent 独立分目录组织。
 - 推荐目录：
-  - `mcode-app/src/targets/codeg/`
-  - `mcode-app/src/targets/opencode/`
-  - `mcode-app/src/targets/mcode-desktop/`
-  - `mcode-app/src/targets/shared/`
-- target 自己的目录负责：
+  - `mcode-app/src/agents/codeg/`
+  - `mcode-app/src/agents/opencode/`
+  - `mcode-app/src/agents/mcode-desktop/`
+  - `mcode-app/src/agents/shared/`
+- agent 自己的目录负责：
   - connection driver
-  - target-specific RPC 适配
-  - target-specific UI 组件
-  - target-specific presentation / capability 映射
-- shared 目录只保留真正跨 target 的 contract、类型和无差异工具函数。
-- 例如后续增加 `opencode` 支持，应优先在 `src/targets/opencode/` 下补充实现，而不是继续把判断分支塞回通用连接页或 `services/gateway` 大杂烩文件。
+  - agent-specific RPC 适配
+  - agent-specific UI 组件
+  - agent-specific presentation / capability 映射
+- shared 目录只保留真正跨 agent 的 contract、类型和无差异工具函数。
+- 例如后续增加 `opencode` 支持，应优先在 `src/agents/opencode/` 下补充实现，而不是继续把判断分支塞回通用连接页或 `services/gateway` 大杂烩文件。
 
 关键点：
 
@@ -434,7 +434,7 @@ Desktop 内部应拆为：
   - 长任务状态
   - 会话映射
 
-`mcode-app` 看到的是 `targetType = mcode-desktop`，以及 desktop 回传的能力列表，例如：
+`mcode-app` 看到的是 `targetAgent = mcode-desktop`，以及 desktop 回传的能力列表，例如：
 
 - `desktop.runtime.codex-cli`
 - `desktop.runtime.claude-cli`
@@ -471,7 +471,7 @@ Desktop 内部应拆为：
   "refreshToken": "refresh",
   "target": {
     "targetId": "target-123",
-    "targetType": "mcode-desktop",
+    "targetAgent": "mcode-desktop",
     "displayName": "Work Mac Mini",
     "capabilities": [
       "desktop.runtime.codex-cli",
@@ -518,7 +518,7 @@ Desktop 内部应拆为：
 ### 12. Error Handling
 
 - 如果 `gatewayProvider = custom` 且域名格式非法，保存前阻止提交。
-- 如果 pair 成功但未返回 `targetType`，历史兼容分支默认回退为 `codeg`，同时标记为兼容模式。
+- 如果 pair 成功但未返回 `targetAgent`，历史兼容分支默认回退为 `codeg`，同时标记为兼容模式。
 - 如果 desktop 返回 capability 缺失，app 应展示“不支持”而不是允许进入后失败。
 - 如果 direct target 鉴权方式与默认字段不兼容，adapter 负责在配置校验阶段给出明确错误。
 - 如果历史 `relay` 连接刷新后 target 元数据变化，应静默更新本地缓存，避免旧标签长期错误。
@@ -538,7 +538,7 @@ Desktop 内部应拆为：
 #### Phase 1. App connection model upgrade
 
 - `mcode-app` 引入 `version: 2` 连接模型
-- 完成旧 `direct/relay` 到 `targetType/routeMode/gatewayProvider` 的迁移
+- 完成旧 `direct/relay` 到 `targetAgent/routeMode/gatewayProvider` 的迁移
 - UI 文案从 `中继` 统一改为 `网关`
 - 配置码兼容 `v1` 读、`v2` 写
 
@@ -585,7 +585,7 @@ Desktop 内部应拆为：
    - `v2` 可读可写
    - desktop 网关二维码可直接导入
 3. app 路由解析
-   - `targetType + routeMode` 正确选择 driver
+   - `targetAgent + routeMode` 正确选择 driver
 4. relay 协议
    - pair / refresh 都返回 target metadata
    - events / proxy 在 desktop 上行断开后有明确错误
@@ -600,6 +600,6 @@ Desktop 内部应拆为：
 - 用户可以通过 `mcode-desktop` 直连或网关连接官方 CLI 能力。
 - 新增连接 UI 支持：
   - `直连` 下的 `Codeg` / `OpenCode` / `MCode Desktop`
-  - `中转（网关）` 下的 `MCode 官方网关` / `自定义`
+- `中转（网关）` 下的 `MCode 官方网关` / `自定义`
 - `mcode-relay`、`mcode-desktop`、`mcode-app` 对 target metadata 和 pair/session 协议保持一致。
 - 旧连接和旧配置码仍然可用，且新连接统一写入 `version: 2` 结构。

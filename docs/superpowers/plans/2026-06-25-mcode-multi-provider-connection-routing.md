@@ -2,23 +2,23 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Upgrade `mcode-app`, `mcode-relay`, and a new `mcode-desktop` Tauri app so MCode can model target type separately from route mode, support direct `codeg` / `opencode`, and support `mcode-desktop` direct or gateway connections for official CLI proxying and tunnel exposure.
+**Goal:** Upgrade `mcode-app`, `mcode-relay`, and a new `mcode-desktop` Tauri app so MCode can model `targetAgent` separately from route mode, support direct `codeg` / `opencode`, and support `mcode-desktop` direct or gateway connections for official CLI proxying and tunnel exposure.
 
-**Architecture:** Keep `mcode-app` pages consuming one app-facing remote contract, but resolve connections through `targetType + routeMode` instead of the old `direct | relay` split. Extend `mcode-relay` to return target metadata, protocol version, and replay-capable event streams, then introduce `mcode-desktop` as a Tauri host that manages CLI adapters, local bridge service, tray lifecycle, and relay upstream registration.
+**Architecture:** Keep `mcode-app` pages consuming one app-facing remote contract, but resolve connections through `targetAgent + routeMode` instead of the old `direct | relay` split. Extend `mcode-relay` to return target metadata, protocol version, and replay-capable event streams, then introduce `mcode-desktop` as a Tauri host that manages CLI adapters, local bridge service, tray lifecycle, and relay upstream registration.
 
 **Tech Stack:** `mcode-app` (Vue 3, uni-app, uview-plus, TypeScript, Jest), `mcode-relay` (Node.js, Fastify, TypeScript, Vitest, ws), `mcode-desktop` (Tauri, Rust, Vue 3, Vite, TypeScript, Vitest, Cargo test)
 
 ## Global Constraints
 
 - Preserve the ability to run without `mcode-desktop`: `codeg` and `opencode` must remain valid direct targets.
-- Treat `codex` official CLI and `claude` official CLI as `mcode-desktop` capabilities, not standalone mobile-side target types.
+- Treat `codex` official CLI and `claude` official CLI as `mcode-desktop` capabilities, not standalone mobile-side agents.
 - User-visible copy must prefer `网关`; do not add new `中继` copy while keeping legacy storage compatibility.
 - Read legacy connection/config-code `version: 1`; write new records and exported config codes as `version: 2`.
-- `mcode-relay`, `mcode-app`, and `mcode-desktop` protocol changes must stay in sync for `targetType`, capability metadata, and pair/session refresh payloads.
+- `mcode-relay`, `mcode-app`, and `mcode-desktop` protocol changes must stay in sync for `targetAgent`, capability metadata, and pair/session refresh payloads.
 - `mcode-desktop` must be implemented as a Tauri desktop app with tray/background lifecycle, not a CLI-first product.
 - Runtime mechanics for `mcode-desktop` should mirror the approved `LinkShell`-inspired behavior: protocol version handshake, ACK/replay buffering, reconnect, single-controller state, and tunnel preview support.
 - Any `mcode-app` UI edits must keep using `uview-plus` runtime `--up-*` theme variables; do not add new `--mcode-*` theme aliases.
-- `mcode-app` target-specific frontend logic/components must live in target-specific directories such as `src/targets/opencode/`; do not keep expanding generic shared files with per-target branching.
+- `mcode-app` agent-specific frontend logic/components must live in agent-specific directories such as `src/agents/opencode/`; do not keep expanding generic shared files with per-agent branching.
 - Every code change in this feature set must keep [2026-06-25-multi-provider-connection-routing.md](/D:/Repos/xyito/lingyun/mcode/docs/mcode-architecture-notes/2026-06-25-multi-provider-connection-routing.md) aligned with the implemented behavior.
 - Do not touch unrelated worktree changes in `mcode-app/src/pages/conversation-detail/detailStatusPresentation.ts` or `mcode-app/src/pages/conversation-detail/index.vue`.
 
@@ -30,13 +30,13 @@
   - Owns `version: 1` -> `version: 2` migration, normalized record types, storage keys, and capability metadata helpers.
 - `mcode-app/src/services/connectionContext.ts`
   - Resolves stored connection records into live gateway/driver instances and persists refreshed tokens/sessions/target metadata.
-- `mcode-app/src/targets/shared/*`
-  - Holds cross-target contracts and helpers that are genuinely reusable.
-- `mcode-app/src/targets/codeg/*`
+- `mcode-app/src/agents/shared/*`
+  - Holds cross-agent contracts and helpers that are genuinely reusable.
+- `mcode-app/src/agents/codeg/*`
   - Holds `codeg`-specific driver and presentation glue.
-- `mcode-app/src/targets/opencode/*`
-  - Holds `opencode`-specific driver, capability mapping, and future target UI components.
-- `mcode-app/src/targets/mcode-desktop/*`
+- `mcode-app/src/agents/opencode/*`
+  - Holds `opencode`-specific driver, capability mapping, and future agent UI components.
+- `mcode-app/src/agents/mcode-desktop/*`
   - Holds `mcode-desktop` direct/gateway drivers and desktop-only UI helpers.
 - `mcode-app/src/pages/connections/connectionConfigCode.ts`
   - Encodes/decodes import/export payloads and keeps backward compatibility with v1 config codes.
@@ -45,9 +45,9 @@
 - `mcode-app/src/pages/connections/index.vue`
   - Updates the add-connection flow to the new `直连` vs `中转（网关）` information architecture.
 - `mcode-app/src/services/gateway/connectionDriverRegistry.ts`
-  - Chooses the correct driver from `targetType + routeMode`.
-- `mcode-app/src/targets/*/driver.ts`
-  - Implements target-specific direct/gateway adapters without changing page-level call sites.
+  - Chooses the correct driver from `targetAgent + routeMode`.
+- `mcode-app/src/agents/*/driver.ts`
+  - Implements agent-specific direct/gateway adapters without changing page-level call sites.
 - `mcode-relay/src/protocol/*.ts`
   - Defines relay-specific target metadata, upstream/mobile event frames, ACK/replay state, and tunnel route validation.
 - `mcode-relay/src/server.ts`
@@ -55,7 +55,7 @@
 - `mcode-relay/src/tunnel/hub.ts`
   - Tracks online desktops, pending proxy calls, mobile subscribers, replay windows, and controller state.
 - `mcode-relay/src/pairing/store.ts`
-  - Persists target type, display name, capabilities, preferred mode, protocol version, and session timestamps.
+  - Persists `targetAgent`, display name, capabilities, preferred mode, protocol version, and session timestamps.
 - `mcode-desktop/src/*`
   - Vue/Tauri frontend pages for connection state, CLI capability status, tunnel management, QR/pair flows, and diagnostics.
 - `mcode-desktop/src-tauri/src/*`
@@ -73,13 +73,13 @@
 **Interfaces:**
 - Consumes: existing `mcode_connections` storage payloads and legacy `ConfigCodePayload.version === 1`
 - Produces:
-  - `export type ConnectionTargetType = "codeg" | "opencode" | "mcode-desktop"`
+  - `export type ConnectionTargetAgent = "codeg" | "opencode" | "mcode-desktop"`
   - `export type ConnectionRouteMode = "direct" | "gateway"`
   - `export type ConnectionGatewayProvider = "official" | "custom"`
   - `export interface ConnectionRecordV2`
   - `export function normalizeConnectionRecordV2(input: Record<string, unknown>): ConnectionRecordV2 | null`
   - `export function migrateConnectionRecord(input: unknown): ConnectionRecordV2 | null`
-  - `export function buildConnectionRecordKey(record: Pick<ConnectionRecordV2, "targetType" | "routeMode" | "directBaseUrl" | "gatewayBaseUrl">): string`
+  - `export function buildConnectionRecordKey(record: Pick<ConnectionRecordV2, "targetAgent" | "routeMode" | "directBaseUrl" | "gatewayBaseUrl">): string`
   - `export function normalizePairTargetProfile(input: unknown): ConnectionTargetProfile | null`
   - `export function normalizeV2ConfigCodePayload(input: ConfigCodePayloadV2): ConnectionRecordV2`
 
@@ -105,7 +105,7 @@ describe("connectionSchema", () => {
     ).toEqual({
       version: 2,
       name: "Legacy Direct",
-      targetType: "codeg",
+      targetAgent: "codeg",
       routeMode: "direct",
       directBaseUrl: "http://127.0.0.1:3089",
       directToken: "token-1",
@@ -114,13 +114,13 @@ describe("connectionSchema", () => {
 
   it("builds different keys for direct and gateway routes of the same target", () => {
     const direct = buildConnectionRecordKey({
-      targetType: "mcode-desktop",
+      targetAgent: "mcode-desktop",
       routeMode: "direct",
       directBaseUrl: "http://10.0.0.8:3089",
     } as ConnectionRecordV2)
 
     const gateway = buildConnectionRecordKey({
-      targetType: "mcode-desktop",
+      targetAgent: "mcode-desktop",
       routeMode: "gateway",
       gatewayBaseUrl: "https://relay.example.com",
     } as ConnectionRecordV2)
@@ -135,7 +135,7 @@ describe("connectionSchema", () => {
 it("encodes and decodes v2 desktop gateway config codes", () => {
   const code = buildConnectionConfigCode({
     name: "Desk Relay",
-    targetType: "mcode-desktop",
+    targetAgent: "mcode-desktop",
     routeMode: "gateway",
     gatewayProvider: "official",
     pairCode: "ABCD-1234",
@@ -145,7 +145,7 @@ it("encodes and decodes v2 desktop gateway config codes", () => {
   expect(parseConnectionConfigCodeToConnection(code)).toEqual({
     version: 2,
     name: "Desk Relay",
-    targetType: "mcode-desktop",
+    targetAgent: "mcode-desktop",
     routeMode: "gateway",
     gatewayProvider: "official",
     pairCode: "ABCD-1234",
@@ -165,7 +165,7 @@ Expected: FAIL with missing `connectionSchema` module or missing `version: 2` pa
 ```ts
 // mcode-app/src/services/connectionSchema.ts
 export interface ConnectionTargetProfile {
-  targetType: ConnectionTargetType
+  targetAgent: ConnectionTargetAgent
   targetId?: string
   displayName?: string
   capabilities?: string[]
@@ -175,7 +175,7 @@ export interface ConnectionTargetProfile {
 export interface ConnectionRecordV2 {
   version: 2
   name: string
-  targetType: ConnectionTargetType
+  targetAgent: ConnectionTargetAgent
   routeMode: ConnectionRouteMode
   directBaseUrl?: string
   directToken?: string
@@ -197,7 +197,7 @@ export function migrateConnectionRecord(input: unknown): ConnectionRecordV2 | nu
     return normalizeConnectionRecordV2({
       version: 2,
       name: raw.name,
-      targetType: "codeg",
+      targetAgent: "codeg",
       routeMode: "direct",
       directBaseUrl: raw.url,
       directToken: raw.directToken,
@@ -207,7 +207,7 @@ export function migrateConnectionRecord(input: unknown): ConnectionRecordV2 | nu
     return normalizeConnectionRecordV2({
       version: 2,
       name: raw.name,
-      targetType: "codeg",
+      targetAgent: "codeg",
       routeMode: "gateway",
       gatewayProvider: "official",
       gatewayBaseUrl: raw.url,
@@ -225,7 +225,7 @@ export function migrateConnectionRecord(input: unknown): ConnectionRecordV2 | nu
 export interface ConfigCodePayloadV2 {
   version: 2
   name: string
-  targetType: ConnectionTargetType
+  targetAgent: ConnectionTargetAgent
   routeMode: ConnectionRouteMode
   directBaseUrl?: string
   directToken?: string
@@ -322,13 +322,13 @@ import {
 
 it("renders desktop gateway subtitles with provider context", () => {
   const subtitle = getConnectionSubtitle({
-    targetType: "mcode-desktop",
+    targetAgent: "mcode-desktop",
     routeMode: "gateway",
     gatewayProvider: "official",
     gatewayBaseUrl: "https://relay.example.com",
   } as any)
 
-  expect(getConnectionTargetLabel({ targetType: "mcode-desktop" } as any)).toBe("MCode Desktop")
+  expect(getConnectionTargetLabel({ targetAgent: "mcode-desktop" } as any)).toBe("MCode Desktop")
   expect(getConnectionRouteLabel({ routeMode: "gateway" } as any)).toBe("网关")
   expect(getConnectionProviderLabel({ gatewayProvider: "official" } as any)).toBe("MCode 官方网关")
   expect(subtitle).toContain("MCode Desktop")
@@ -346,9 +346,9 @@ Expected: FAIL because the current helpers only know `direct | relay`.
 
 ```ts
 // mcode-app/src/pages/connections/connectionPresentation.ts
-export function getConnectionTargetLabel(connection: Pick<ConnectionRecordV2, "targetType">): string {
-  if (connection.targetType === "opencode") return "OpenCode"
-  if (connection.targetType === "mcode-desktop") return "MCode Desktop"
+export function getConnectionTargetLabel(connection: Pick<ConnectionRecordV2, "targetAgent">): string {
+  if (connection.targetAgent === "opencode") return "OpenCode"
+  if (connection.targetAgent === "mcode-desktop") return "MCode Desktop"
   return "Codeg"
 }
 
@@ -358,7 +358,7 @@ export function getConnectionRouteLabel(connection: Pick<ConnectionRecordV2, "ro
 
 export function getConnectionSubtitle(connection: Pick<
   ConnectionRecordV2,
-  "targetType" | "routeMode" | "gatewayProvider" | "directBaseUrl" | "gatewayBaseUrl"
+  "targetAgent" | "routeMode" | "gatewayProvider" | "directBaseUrl" | "gatewayBaseUrl"
 >): string {
   const parts = [getConnectionTargetLabel(connection), getConnectionRouteLabel(connection)]
   const provider = getConnectionProviderLabel(connection)
@@ -386,7 +386,7 @@ const gatewayProviderOptions = [
 const form = ref({
   name: "",
   routeMode: "direct" as ConnectionRouteMode,
-  targetType: "codeg" as ConnectionTargetType,
+  targetAgent: "codeg" as ConnectionTargetAgent,
   directBaseUrl: "",
   directToken: "",
   gatewayProvider: "official" as ConnectionGatewayProvider,
@@ -441,12 +441,12 @@ git commit -m "feat(app): redesign connection form for targets and gateway provi
 
 **Files:**
 - Create: `mcode-app/src/services/gateway/connectionDriverRegistry.ts`
-- Create: `mcode-app/src/targets/shared/driverTypes.ts`
-- Create: `mcode-app/src/targets/codeg/driver.ts`
-- Create: `mcode-app/src/targets/opencode/driver.ts`
-- Create: `mcode-app/src/targets/mcode-desktop/directDriver.ts`
-- Create: `mcode-app/src/targets/mcode-desktop/gatewayDriver.ts`
-- Create: `mcode-app/src/targets/codeg/legacyGatewayDriver.ts`
+- Create: `mcode-app/src/agents/shared/driverTypes.ts`
+- Create: `mcode-app/src/agents/codeg/driver.ts`
+- Create: `mcode-app/src/agents/opencode/driver.ts`
+- Create: `mcode-app/src/agents/mcode-desktop/directDriver.ts`
+- Create: `mcode-app/src/agents/mcode-desktop/gatewayDriver.ts`
+- Create: `mcode-app/src/agents/codeg/legacyGatewayDriver.ts`
 - Modify: `mcode-app/src/services/gateway/types.ts`
 - Modify: `mcode-app/src/services/gateway/index.ts`
 - Modify: `mcode-app/src/services/connectionContext.ts`
@@ -467,7 +467,7 @@ git commit -m "feat(app): redesign connection form for targets and gateway provi
   - `export const legacyGatewayDriver: ConnectionDriver`
   - `resolveConnectionContext(record): Promise<ResolvedConnectionContext>`
 
-- [ ] **Step 1: Write failing registry tests for targetType + routeMode dispatch**
+- [ ] **Step 1: Write failing registry tests for targetAgent + routeMode dispatch**
 
 ```ts
 // mcode-app/tests/services/connectionDriverRegistry.spec.ts
@@ -478,7 +478,7 @@ describe("connectionDriverRegistry", () => {
     const driver = resolveConnectionDriver({
       version: 2,
       name: "Desktop Relay",
-      targetType: "mcode-desktop",
+      targetAgent: "mcode-desktop",
       routeMode: "gateway",
       gatewayProvider: "official",
       gatewayBaseUrl: "https://relay.example.com",
@@ -491,7 +491,7 @@ describe("connectionDriverRegistry", () => {
     const driver = resolveConnectionDriver({
       version: 2,
       name: "Legacy Relay",
-      targetType: "codeg",
+      targetAgent: "codeg",
       routeMode: "gateway",
       gatewayProvider: "official",
       gatewayBaseUrl: "https://relay.example.com",
@@ -514,7 +514,7 @@ Expected: FAIL because the registry and driver identifiers do not exist yet.
 // mcode-app/src/services/gateway/types.ts
 export interface PairTargetMetadata {
   targetId?: string
-  targetType?: "codeg" | "opencode" | "mcode-desktop"
+  targetAgent?: "codeg" | "opencode" | "mcode-desktop"
   displayName?: string
   capabilities?: string[]
   protocolVersion?: string
@@ -524,7 +524,7 @@ export interface RelaySessionInfo {
   accessToken: string
   refreshToken?: string
   targetId?: string
-  targetType?: string
+  targetAgent?: string
   displayName?: string
   capabilities?: string[]
   protocolVersion?: string
@@ -549,9 +549,9 @@ export interface ConnectionDriver {
 ```ts
 // mcode-app/src/services/gateway/connectionDriverRegistry.ts
 export function resolveConnectionDriver(connection: ConnectionRecordV2): ConnectionDriver {
-  if (connection.routeMode === "direct" && connection.targetType === "opencode") return opencodeDirectDriver
-  if (connection.routeMode === "direct" && connection.targetType === "mcode-desktop") return desktopDirectDriver
-  if (connection.routeMode === "gateway" && connection.targetType === "mcode-desktop") return desktopGatewayDriver
+  if (connection.routeMode === "direct" && connection.targetAgent === "opencode") return opencodeDirectDriver
+  if (connection.routeMode === "direct" && connection.targetAgent === "mcode-desktop") return desktopDirectDriver
+  if (connection.routeMode === "gateway" && connection.targetAgent === "mcode-desktop") return desktopGatewayDriver
   if (connection.routeMode === "gateway") return legacyGatewayDriver
   return codegDirectDriver
 }
@@ -579,7 +579,7 @@ Expected: PASS with connection resolution shifted behind the driver registry and
 git add mcode-app/src/services/gateway/types.ts \
   mcode-app/src/services/gateway/index.ts \
   mcode-app/src/services/gateway/connectionDriverRegistry.ts \
-  mcode-app/src/targets \
+  mcode-app/src/agents \
   mcode-app/src/services/connectionContext.ts \
   mcode-app/tests/services/connectionDriverRegistry.spec.ts
 git commit -m "feat(app): add connection driver registry"
@@ -609,19 +609,19 @@ git commit -m "feat(app): add connection driver registry"
   - `export interface TunnelHttpResponse`
   - `buildTunnelProxyPath(targetId: string, port: number, pathname?: string): string`
   - `RelayHub.sendTunnelRequest(targetId: string, request: TunnelHttpRequest): Promise<TunnelHttpResponse>`
-  - `/v1/pair` and `/v1/session/refresh` responses with `target.targetType`, `displayName`, `capabilities`, `protocolVersion`
+  - `/v1/pair` and `/v1/session/refresh` responses with `target.targetAgent`, `displayName`, `capabilities`, `protocolVersion`
 
 - [ ] **Step 1: Write failing relay tests for target metadata and replay**
 
 ```ts
 // mcode-relay/test/relay.test.ts
-it("returns target type and capabilities in pair responses", async () => {
+it("returns target agent and capabilities in pair responses", async () => {
   store.addOffer({
     code: "123456",
     secret: "secret",
     targetId: "desktop-1",
     targetName: "Work Mac Mini",
-    targetType: "mcode-desktop",
+    targetAgent: "mcode-desktop",
     capabilities: ["desktop.runtime.codex-cli"],
     protocolVersion: "1",
     ttlSeconds: 300,
@@ -631,7 +631,7 @@ it("returns target type and capabilities in pair responses", async () => {
     .post("/v1/pair")
     .send({ code: "123456", secret: "secret" })
 
-  expect(res.body.target.targetType).toBe("mcode-desktop")
+  expect(res.body.target.targetAgent).toBe("mcode-desktop")
   expect(res.body.target.capabilities).toContain("desktop.runtime.codex-cli")
   expect(res.body.target.protocolVersion).toBe("1")
 })
@@ -663,7 +663,7 @@ it("builds tunnel proxy paths under the desktop target", () => {
 
 Run: `cd mcode-relay && npm test -- test/relay.test.ts test/replayBuffer.test.ts test/httpProxy.test.ts`
 
-Expected: FAIL because `targetType`, `capabilities`, and replay helpers are not implemented.
+Expected: FAIL because `targetAgent`, `capabilities`, and replay helpers are not implemented.
 
 - [ ] **Step 3: Extend the relay store and protocol types**
 
@@ -671,7 +671,7 @@ Expected: FAIL because `targetType`, `capabilities`, and replay helpers are not 
 // mcode-relay/src/protocol/types.ts
 export interface TargetMetadata {
   targetId: string
-  targetType: "codeg" | "opencode" | "mcode-desktop"
+  targetAgent: "codeg" | "opencode" | "mcode-desktop"
   displayName: string | null
   capabilities: string[]
   protocolVersion: string
@@ -690,7 +690,7 @@ export interface RelayEventFrame {
 export interface TargetRecord {
   targetId: string
   targetName: string | null
-  targetType: "codeg" | "opencode" | "mcode-desktop"
+  targetAgent: "codeg" | "opencode" | "mcode-desktop"
   capabilities: string[]
   protocolVersion: string
   relayUrl: string | null
@@ -768,7 +768,7 @@ Expected: PASS with:
 - pair/refresh returning full target metadata
 - `/v1/events` replaying missed events after `lastEventId`
 - `/v1/tunnel/:targetId/:port/*` validating target ownership and forwarding request metadata
-- store and hub keeping target type/capability/protocol version in sync
+- store and hub keeping `targetAgent`/capability/protocol version in sync
 
 - [ ] **Step 6: Commit**
 
@@ -830,7 +830,7 @@ it("builds a v2 desktop gateway QR payload", () => {
   ).toEqual({
     version: 2,
     name: "Work Mac Mini",
-    targetType: "mcode-desktop",
+    targetAgent: "mcode-desktop",
     routeMode: "gateway",
     gatewayProvider: "official",
     pairCode: "ABCD-1234",
@@ -852,7 +852,7 @@ Expected: FAIL because the desktop workspace and pairing helper do not exist yet
 export const useDesktopRuntimeStore = defineStore("desktopRuntime", {
   state: () => ({
     relayStatus: "offline" as "offline" | "connecting" | "online",
-    activeTargetType: "mcode-desktop" as const,
+    activeTargetAgent: "mcode-desktop" as const,
     capabilities: [] as string[],
     pairCode: "",
     pairSecret: "",
@@ -883,7 +883,7 @@ export function buildGatewayQrPayload(input: {
   return {
     version: 2,
     name: input.name,
-    targetType: "mcode-desktop" as const,
+    targetAgent: "mcode-desktop" as const,
     routeMode: "gateway" as const,
     gatewayProvider: input.gatewayProvider,
     ...(input.gatewayBaseUrl ? { gatewayBaseUrl: input.gatewayBaseUrl } : {}),
@@ -937,7 +937,7 @@ git commit -m "feat(desktop): scaffold tauri host shell"
   - desktop `AppState`
 - Produces:
   - local bridge routes for project/session/event commands
-  - upstream registration message with `targetType = "mcode-desktop"`
+  - upstream registration message with `targetAgent = "mcode-desktop"`
   - capability list containing `desktop.runtime.codex-cli`, `desktop.runtime.claude-cli`, `desktop.tunnel.available`
   - `detect_capabilities(codex_path, claude_path): Vec<String>`
   - `TunnelBinding::for_code_preview(port, upstream_origin) -> TunnelBinding`
@@ -1103,7 +1103,7 @@ git commit -m "feat(desktop): add bridge runtime and relay upstream"
 
 **Interfaces:**
 - Consumes:
-  - relay pair/refresh `targetType`, `displayName`, `capabilities`, `protocolVersion`
+  - relay pair/refresh `targetAgent`, `displayName`, `capabilities`, `protocolVersion`
   - desktop-generated v2 QR payloads
 - Produces:
   - `applyPairMetadata(connection, session, target): ConnectionContext`
@@ -1119,9 +1119,9 @@ git commit -m "feat(desktop): add bridge runtime and relay upstream"
 it("exposes desktop capability chips from target metadata", () => {
   expect(
     getConnectionCapabilityChips({
-      targetType: "mcode-desktop",
+      targetAgent: "mcode-desktop",
       targetProfile: {
-        targetType: "mcode-desktop",
+        targetAgent: "mcode-desktop",
         capabilities: ["desktop.runtime.codex-cli", "desktop.tunnel.available"],
       },
     } as any)
@@ -1148,11 +1148,11 @@ function applyPairMetadata(
 ): ConnectionContext {
   return {
     ...connection,
-    targetType: (target?.targetType as ConnectionTargetType) || connection.targetType,
+    targetAgent: (target?.targetAgent as ConnectionTargetAgent) || connection.targetAgent,
     gatewaySession: session
       ? {
           ...session,
-          targetType: target?.targetType,
+          targetAgent: target?.targetAgent,
           displayName: target?.displayName,
           capabilities: target?.capabilities,
           protocolVersion: target?.protocolVersion,
@@ -1165,7 +1165,7 @@ function applyPairMetadata(
 
 ```ts
 // mcode-app/src/pages/connections/connectionPresentation.ts
-export function getConnectionCapabilityChips(connection: Pick<ConnectionRecordV2, "targetType" | "targetProfile">): string[] {
+export function getConnectionCapabilityChips(connection: Pick<ConnectionRecordV2, "targetAgent" | "targetProfile">): string[] {
   const capabilities = connection.targetProfile?.capabilities || []
   return capabilities.flatMap((value) => {
     if (value === "desktop.runtime.codex-cli") return ["Codex CLI"]
@@ -1182,7 +1182,7 @@ export function getConnectionCapabilityChips(connection: Pick<ConnectionRecordV2
 <!-- mcode-relay/README.md -->
 ## Pair Response Contract
 
-- `target.targetType`
+- `target.targetAgent`
 - `target.displayName`
 - `target.capabilities`
 - `target.protocolVersion`

@@ -4,7 +4,7 @@
 
 `mcode` 的连接体系从单一 `direct | relay` 升级为双维模型：
 
-- `targetType = codeg | opencode | mcode-desktop`
+- `targetAgent = codeg | opencode | mcode-desktop`
 - `routeMode = direct | gateway`
 - `gatewayProvider = official | custom`
 
@@ -16,13 +16,13 @@
 - `mcode-app` 继续消费统一的远端命令/事件契约；direct target adapter 和 `mcode-desktop` bridge 各自把实现映射到这套契约。
 - `mcode-desktop` 明确采用 Tauri 形态：前端提供连接/配对/隧道/诊断 UI，后端托管 bridge server、CLI adapters、gateway upstream 和后台守护生命周期。
 - `mcode-desktop` 的宿主机制参考 `LinkShell`：本地桥接、可拆分网关、共享协议、ACK 缓冲、重连恢复、单控制者模型、tunnel 预览。
-- `mcode-app` 的 target 支持必须按目录隔离；推荐 `src/targets/codeg`、`src/targets/opencode`、`src/targets/mcode-desktop`、`src/targets/shared`，避免把所有 target 判断继续堆在共享服务里。
+- `mcode-app` 的前端支持必须按 agent 目录隔离；推荐 `src/agents/codeg`、`src/agents/opencode`、`src/agents/mcode-desktop`、`src/agents/shared`，避免把所有 agent 判断继续堆在共享服务里。
 
 ## Protocol And Data Flow
 
 持久化连接记录升级为 `version: 2`，新增字段：
 
-- `targetType`
+- `targetAgent`
 - `routeMode`
 - `directBaseUrl`
 - `gatewayProvider`
@@ -32,8 +32,8 @@
 
 兼容规则：
 
-- 旧 `mode = direct` 迁移为 `targetType = codeg`、`routeMode = direct`
-- 旧 `mode = relay` 迁移为 `targetType = codeg`、`routeMode = gateway`、`gatewayProvider = official`
+- 旧 `mode = direct` 迁移为 `targetAgent = codeg`、`routeMode = direct`
+- 旧 `mode = relay` 迁移为 `targetAgent = codeg`、`routeMode = gateway`、`gatewayProvider = official`
 - 新二维码 / 配置码写 `version: 2`
 - app 继续兼容读取 `version: 1`
 
@@ -41,7 +41,7 @@
 
 - `POST /v1/pair` 和 `/v1/session/refresh` 返回 target metadata
   - `targetId`
-  - `targetType`
+  - `targetAgent`
   - `displayName`
   - `capabilities`
 - `/v1/proxy/:command` 和 `/v1/events` 保持统一转发入口
@@ -84,7 +84,7 @@ desktop 运行方式：
 ## Compatibility
 
 - 旧连接继续可用，不要求用户重建。
-- 历史 relay 连接默认按 `codeg` 网关连接处理；如果后续刷新拿到新的 `targetType`，静默更新本地缓存。
+- 历史 relay 连接默认按 `codeg` 网关连接处理；如果后续刷新拿到新的 `targetAgent`，静默更新本地缓存。
 - `mcode-relay` 是服务名，app 文案统一显示为 `网关`。
 - 首版正式新增入口重点支持 `mcode-desktop/gateway`；历史 `codeg/gateway` 仍保留兼容路径。
 
@@ -92,11 +92,11 @@ desktop 运行方式：
 
 原生端应完全复刻以下规则：
 
-- 连接模型必须同时保存 `targetType` 与 `routeMode`，不要再用单字段 `mode` 代替。
+- 连接模型必须同时保存 `targetAgent` 与 `routeMode`，不要再用单字段 `mode` 代替。
 - direct token 与 gateway session 分开存储，且 direct token 只按 direct base URL 作用。
 - 二维码 / 配置码必须支持 `version: 1` 读取和 `version: 2` 写入。
-- 网关连接创建后，以 pair/refresh 响应中的 `targetType`、`displayName`、`capabilities` 覆盖本地缓存。
-- 连接驱动选择必须基于 `targetType + routeMode`，而不是只看 URL 或旧 `mode`。
+- 网关连接创建后，以 pair/refresh 响应中的 `targetAgent`、`displayName`、`capabilities` 覆盖本地缓存。
+- 连接驱动选择必须基于 `targetAgent + routeMode`，而不是只看 URL 或旧 `mode`。
 - desktop capability 缺失时，应在入口层阻止进入而不是等 RPC 调用失败。
 - 对 desktop gateway 连接，原生端要准备好消费 ACK/重放式事件流与单控制者状态，而不是假设永远只有单设备在线。
-- 前端代码组织也应按 target 分目录，target-specific 组件和适配逻辑不要回灌到共享大文件。
+- 前端代码组织也应按 agent 分目录，agent-specific 组件和适配逻辑不要回灌到共享大文件。
