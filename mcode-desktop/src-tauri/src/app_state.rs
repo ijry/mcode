@@ -1,8 +1,9 @@
 use std::sync::RwLock;
+use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 use crate::runtime::CAPABILITY_TUNNEL_AVAILABLE;
-use crate::tunnel::LocalServiceConfig;
+use crate::tunnel::{default_code_service, LocalServiceConfig};
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -60,6 +61,20 @@ impl AppState {
     pub fn new_for_test() -> Self {
         Self::default()
     }
+
+    pub fn push_diagnostic(&self, level: impl Into<String>, message: impl Into<String>) {
+        if let Ok(mut diagnostics) = self.diagnostics.write() {
+            diagnostics.push(DiagnosticEntry {
+                level: level.into(),
+                message: message.into(),
+                created_at_ms: now_ms(),
+            });
+            if diagnostics.len() > 50 {
+                let excess = diagnostics.len() - 50;
+                diagnostics.drain(0..excess);
+            }
+        }
+    }
 }
 
 impl Default for AppState {
@@ -74,7 +89,14 @@ impl Default for AppState {
             capabilities: RwLock::new(vec![CAPABILITY_TUNNEL_AVAILABLE.to_string()]),
             display_name: RwLock::new("MCode Desktop".to_string()),
             diagnostics: RwLock::new(Vec::new()),
-            local_services: RwLock::new(Vec::new()),
+            local_services: RwLock::new(vec![default_code_service()]),
         }
     }
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
 }

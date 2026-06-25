@@ -1,4 +1,4 @@
-use crate::app_state::{AppState, GatewayProvider, PairOffer, UpstreamStatus};
+use crate::app_state::{AppState, DiagnosticEntry, GatewayProvider, PairOffer, UpstreamStatus};
 use crate::tunnel::LocalServiceConfig;
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
@@ -15,6 +15,7 @@ pub struct DesktopHealthSnapshot {
     pub capabilities: Vec<String>,
     pub pair_offer: Option<PairOffer>,
     pub local_services: Vec<LocalServiceConfig>,
+    pub diagnostics: Vec<DiagnosticEntry>,
 }
 
 pub fn desktop_version() -> &'static str {
@@ -61,6 +62,11 @@ pub fn build_health_snapshot(state: &AppState) -> DesktopHealthSnapshot {
         pair_offer: state.pair_offer.read().ok().and_then(|value| value.clone()),
         local_services: state
             .local_services
+            .read()
+            .map(|value| value.clone())
+            .unwrap_or_default(),
+        diagnostics: state
+            .diagnostics
             .read()
             .map(|value| value.clone())
             .unwrap_or_default(),

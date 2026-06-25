@@ -8,6 +8,7 @@ use tokio_tungstenite::{connect_async, tungstenite::Message};
 use url::Url;
 
 use crate::app_state::{AppState, GatewayConfig, GatewayProvider, PairOffer, UpstreamStatus};
+use crate::tunnel::{serve_tunnel_request, TunnelHttpRequest, TunnelHttpResponse};
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct DesktopUpstreamHello {
@@ -65,7 +66,7 @@ pub enum RelayControlFrame {
     TunnelRequest {
         #[serde(rename = "requestId")]
         request_id: String,
-        request: serde_json::Value,
+        request: TunnelHttpRequest,
     },
     #[serde(rename = "controller_attached")]
     ControllerAttached {
@@ -106,6 +107,28 @@ pub fn build_pair_offer_frame(
         "code": offer.code,
         "secret": offer.secret,
     })
+}
+
+pub fn build_tunnel_response_frame(
+    request_id: &str,
+    result: Result<TunnelHttpResponse, String>,
+) -> serde_json::Value {
+    match result {
+        Ok(response) => json!({
+            "type": "tunnel_response",
+            "requestId": request_id,
+            "ok": true,
+            "status": response.status,
+            "headers": response.headers,
+            "body": response.body,
+        }),
+        Err(error) => json!({
+            "type": "tunnel_response",
+            "requestId": request_id,
+            "ok": false,
+            "error": error,
+        }),
+    }
 }
 
 pub async fn connect_upstream(state: Arc<AppState>) -> Result<()> {
@@ -166,7 +189,21 @@ pub async fn connect_upstream(state: Arc<AppState>) -> Result<()> {
         let message = message?;
         if message.is_text() {
             let frame = parse_upstream_frame(message.to_text()?)?;
-            handle_upstream_frame(&state, frame).await?;
+            match frame {
+                RelayControlFrame::TunnelRequest {
+                    request_id,
+                    request,
+                } => {
+                    let result = serve_tunnel_request(&state, request)
+                        .await
+                        .map_err(|error| error.to_string());
+                    let response = build_tunnel_response_frame(&request_id, result);
+                    writer
+                        .send(Message::Text(response.to_string().into()))
+                        .await?;
+                }
+                other => handle_upstream_frame(&state, other).await?,
+            }
         }
     }
 

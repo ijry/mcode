@@ -18,7 +18,7 @@ export function buildLocalServiceConfig(input: {
   const port = Math.trunc(Number(input.port))
 
   if (!name) throw new Error("服务名称不能为空")
-  if (host !== "127.0.0.1") throw new Error("P3 only allows 127.0.0.1")
+  if (host !== "127.0.0.1") throw new Error("只允许 127.0.0.1")
   if (!Number.isInteger(port) || port <= 0 || port > 65535) throw new Error("端口无效")
 
   return {

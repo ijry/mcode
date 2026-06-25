@@ -12,7 +12,7 @@ it("builds the default loopback code service", () => {
 
 it("rejects non-loopback hosts in P3", () => {
   expect(() => buildLocalServiceConfig({ name: "Unsafe", host: "0.0.0.0", port: 1080 })).toThrow(
-    "P3 only allows 127.0.0.1"
+    "只允许 127.0.0.1"
   )
 })
 

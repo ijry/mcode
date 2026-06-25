@@ -7,6 +7,7 @@ import {
   OFFICIAL_GATEWAY_BASE_URL,
   saveLocalService,
   type DesktopHealthSnapshot,
+  type DiagnosticEntry,
   type GatewayProvider,
   type PairOffer,
   type UpstreamStatus,
@@ -41,6 +42,7 @@ export const useDesktopRuntimeStore = defineStore("desktopRuntime", {
     qrPayload: "",
     tunnelBind: "127.0.0.1:1080",
     localService: createDefaultService(),
+    diagnostics: [] as DiagnosticEntry[],
     lastMessage: "",
   }),
   actions: {
@@ -67,6 +69,7 @@ export const useDesktopRuntimeStore = defineStore("desktopRuntime", {
         this.localService = health.localServices[0]
         this.tunnelBind = describeServiceBind(this.localService)
       }
+      this.diagnostics = health.diagnostics || []
     },
     async refreshHealth() {
       try {
@@ -118,6 +121,7 @@ export const useDesktopRuntimeStore = defineStore("desktopRuntime", {
       const saved = await saveLocalService(config)
       this.localService = saved
       this.tunnelBind = describeServiceBind(saved)
+      await this.refreshHealth()
       return saved
     },
   },

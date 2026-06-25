@@ -10,9 +10,16 @@ Tauri desktop host for MCode P3.
 - Report desktop health, version, gateway state, capabilities, pair offer, and local service config.
 - Configure loopback-only HTTP services such as `127.0.0.1:1080`.
 
+## P4 HTTP Tunnel
+
+- Relay sends `tunnel_request` frames to the desktop upstream WebSocket.
+- Desktop validates the requested port against enabled loopback services.
+- Desktop proxies HTTP requests to `http://127.0.0.1:<port>` and replies with `tunnel_response`.
+- Recent proxy success/error entries are exposed through desktop health diagnostics.
+
 ## Not In P3
 
-- Streaming TCP/HTTP tunnel transport.
+- Raw TCP byte-stream tunnel transport.
 - Claude official CLI adapter.
 - Codex official CLI adapter.
 - Enterprise gateway operations features.

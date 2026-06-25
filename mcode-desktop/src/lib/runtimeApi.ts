@@ -10,6 +10,12 @@ export interface PairOffer {
   qrPayload: string
 }
 
+export interface DiagnosticEntry {
+  level: "info" | "error" | string
+  message: string
+  createdAtMs: number
+}
+
 export interface DesktopHealthSnapshot {
   targetAgent: "mcode-desktop"
   targetId: string
@@ -22,6 +28,7 @@ export interface DesktopHealthSnapshot {
   capabilities: string[]
   pairOffer?: PairOffer | null
   localServices: LocalServiceConfig[]
+  diagnostics: DiagnosticEntry[]
 }
 
 export const OFFICIAL_GATEWAY_BASE_URL = normalizeGatewayBaseUrl(

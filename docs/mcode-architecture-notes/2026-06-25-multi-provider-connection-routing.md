@@ -151,3 +151,33 @@ P3 原生端复制规则：
 - 移动端扫码读取 desktop QR 时仍按普通 v2 网关连接保存，不能因为来源是 desktop 而跳过 `targetAgent + routeMode` 驱动选择。
 - 原生端展示 desktop capability 时应以 gateway pair/refresh 返回的 metadata 为准；二维码里的本地端口只用于展示或服务入口，不是可直连地址。
 - 如果后续实现原生 desktop host，必须复刻 `/v1/tunnel/desktop` upstream、`desktop_hello`、`pair_offer` 和 loopback-only 服务校验，不要直接暴露 `0.0.0.0`。
+
+## P4 HTTP Tunnel Behavior
+
+P4 已打通 desktop loopback HTTP 服务访问链路：
+
+```text
+MCode app -> mcode-relay /v1/tunnel/:targetId/:port/* -> desktop upstream tunnel_request -> 127.0.0.1:<port> -> tunnel_response -> relay HTTP response
+```
+
+协议边界：
+
+- `mcode-relay` 继续负责 access token 校验和 targetId path 校验。
+- relay 向 desktop WebSocket 发送 `tunnel_request`，包含 `requestId` 与 `request = { port, method, path, query, headers, body }`。
+- desktop 只接受已启用的 `LocalServiceConfig`，且 host 必须是 `127.0.0.1`。
+- desktop 代理 HTTP 后返回 `tunnel_response = { requestId, ok, status, headers, body, error? }`。
+- desktop 会过滤 `authorization`、`host`、`content-length`、`connection`、`transfer-encoding` 等不应转发的 header。
+- JSON 响应按 JSON 回传；非 JSON 响应以字符串 body 回传。
+
+UI 行为：
+
+- “内网穿透”页现在显示 P4 HTTP 状态，不再标记为配置占位。
+- 用户可保存服务名称、`127.0.0.1` host、port、启用状态。
+- desktop health 暴露最近 tunnel 成功/失败 diagnostics，页面“最近访问”列表展示这些记录。
+
+兼容与限制：
+
+- P4 当前实现的是 `tunnel.http` 请求/响应，不是原始 TCP 字节流。
+- `0.0.0.0`、LAN IP 或公网 host 仍被拒绝；开放非 loopback 必须等后续阶段加入明确确认与安全策略。
+- 原生 iOS/Android 侧不能直接访问二维码里的本地端口，必须通过 relay authenticated tunnel URL。
+- 原生 desktop host 复制时必须使用同样的 loopback-only 校验和 header 过滤策略。

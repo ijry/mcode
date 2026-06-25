@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { reactive, ref, watch } from "vue"
+import { computed, reactive, ref, watch } from "vue"
 import { buildLocalServiceConfig } from "../lib/localServices"
 import { useDesktopRuntimeStore } from "../stores/desktopRuntime"
 
 const runtime = useDesktopRuntimeStore()
 const saving = ref(false)
 const message = ref("")
+const latestDiagnostics = computed(() => runtime.diagnostics.slice().reverse().slice(0, 6))
 
 const form = reactive({
   name: runtime.localService.name,
@@ -35,7 +36,7 @@ async function saveService() {
       enabled: form.enabled,
     })
     await runtime.saveService(config)
-    message.value = "本地服务已保存，移动端扫码后可看到该服务入口。"
+    message.value = "本地服务已保存，网关收到请求后会代理到该 loopback HTTP 服务。"
   } catch (error) {
     message.value = error instanceof Error ? error.message : String(error)
   } finally {
@@ -50,8 +51,8 @@ async function saveService() {
       <p class="kicker">Tunnel Preview</p>
       <h2>本地服务通过网关暴露给 MCode</h2>
       <p>
-        P3 先提供本机 HTTP 服务配置和配对流程，不实现 P4 的流式 tunnel 转发。默认只允许
-        `127.0.0.1`，开放 `0.0.0.0` 会被拒绝。
+        P4 已支持 HTTP 本地端口访问：MCode 经网关访问 `/v1/tunnel/:targetId/:port/*` 后，
+        desktop 会代理到配置的 `127.0.0.1:&lt;port&gt;`。原始 TCP 字节流仍是后续阶段。
       </p>
     </div>
 
@@ -67,7 +68,7 @@ async function saveService() {
           <p class="section-label">Local Service</p>
           <h3>配置本机 HTTP 服务</h3>
         </div>
-        <span class="badge">P3 config only</span>
+        <span class="badge">P4 HTTP</span>
       </div>
 
       <div class="form-grid">
@@ -100,11 +101,32 @@ async function saveService() {
         <button class="primary" type="button" :disabled="saving" @click="saveService">
           {{ saving ? "保存中..." : "保存本地服务" }}
         </button>
+        <button type="button" :disabled="saving" @click="runtime.refreshHealth()">
+          刷新日志
+        </button>
       </div>
 
-      <p v-if="message" class="message" :class="{ error: message.includes('P3 only') || message.includes('无效') }">
+      <p v-if="message" class="message" :class="{ error: message.includes('only') || message.includes('无效') }">
         {{ message }}
       </p>
+    </section>
+
+    <section class="service-card logs-card">
+      <div class="service-header">
+        <div>
+          <p class="section-label">Access Logs</p>
+          <h3>最近访问</h3>
+        </div>
+      </div>
+
+      <ul v-if="latestDiagnostics.length" class="logs">
+        <li v-for="entry in latestDiagnostics" :key="`${entry.createdAtMs}-${entry.message}`" :class="entry.level">
+          <span>{{ new Date(entry.createdAtMs).toLocaleTimeString() }}</span>
+          <strong>{{ entry.level }}</strong>
+          <p>{{ entry.message }}</p>
+        </li>
+      </ul>
+      <p v-else class="empty-log">还没有 tunnel 请求。移动端访问服务后，这里会显示最近代理记录。</p>
     </section>
   </article>
 </template>
@@ -271,6 +293,44 @@ button:disabled {
   color: #87351e;
 }
 
+.logs {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.logs li {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  gap: 10px;
+  align-items: center;
+  border-radius: 16px;
+  padding: 12px 14px;
+  background: rgba(31, 52, 29, 0.08);
+}
+
+.logs li.error {
+  background: rgba(153, 46, 18, 0.1);
+}
+
+.logs span {
+  color: #69755f;
+  font-size: 12px;
+}
+
+.logs strong {
+  color: #20341d;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.logs p,
+.empty-log {
+  margin: 0;
+}
+
 @media (max-width: 800px) {
   .form-grid {
     grid-template-columns: 1fr;
@@ -278,6 +338,10 @@ button:disabled {
 
   .service-header {
     display: grid;
+  }
+
+  .logs li {
+    grid-template-columns: 1fr;
   }
 }
 </style>
