@@ -320,6 +320,22 @@ interface ConnectionItemV2 {
 - `connectionDriverRegistry` 负责根据 `targetType + routeMode` 选择 driver
 - 每个 driver 实现同一套 app-facing 命令/事件契约
 
+前端目录约束：
+
+- `mcode-app` 中不同 `targetType` 的逻辑和组件必须按 target 独立分目录组织。
+- 推荐目录：
+  - `mcode-app/src/targets/codeg/`
+  - `mcode-app/src/targets/opencode/`
+  - `mcode-app/src/targets/mcode-desktop/`
+  - `mcode-app/src/targets/shared/`
+- target 自己的目录负责：
+  - connection driver
+  - target-specific RPC 适配
+  - target-specific UI 组件
+  - target-specific presentation / capability 映射
+- shared 目录只保留真正跨 target 的 contract、类型和无差异工具函数。
+- 例如后续增加 `opencode` 支持，应优先在 `src/targets/opencode/` 下补充实现，而不是继续把判断分支塞回通用连接页或 `services/gateway` 大杂烩文件。
+
 关键点：
 
 - app 顶层页面继续面向统一契约，例如项目列表、会话列表、会话详情、事件流。

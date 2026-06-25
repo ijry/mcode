@@ -18,6 +18,7 @@
 - `mcode-desktop` must be implemented as a Tauri desktop app with tray/background lifecycle, not a CLI-first product.
 - Runtime mechanics for `mcode-desktop` should mirror the approved `LinkShell`-inspired behavior: protocol version handshake, ACK/replay buffering, reconnect, single-controller state, and tunnel preview support.
 - Any `mcode-app` UI edits must keep using `uview-plus` runtime `--up-*` theme variables; do not add new `--mcode-*` theme aliases.
+- `mcode-app` target-specific frontend logic/components must live in target-specific directories such as `src/targets/opencode/`; do not keep expanding generic shared files with per-target branching.
 - Every code change in this feature set must keep [2026-06-25-multi-provider-connection-routing.md](/D:/Repos/xyito/lingyun/mcode/docs/mcode-architecture-notes/2026-06-25-multi-provider-connection-routing.md) aligned with the implemented behavior.
 - Do not touch unrelated worktree changes in `mcode-app/src/pages/conversation-detail/detailStatusPresentation.ts` or `mcode-app/src/pages/conversation-detail/index.vue`.
 
@@ -29,6 +30,14 @@
   - Owns `version: 1` -> `version: 2` migration, normalized record types, storage keys, and capability metadata helpers.
 - `mcode-app/src/services/connectionContext.ts`
   - Resolves stored connection records into live gateway/driver instances and persists refreshed tokens/sessions/target metadata.
+- `mcode-app/src/targets/shared/*`
+  - Holds cross-target contracts and helpers that are genuinely reusable.
+- `mcode-app/src/targets/codeg/*`
+  - Holds `codeg`-specific driver and presentation glue.
+- `mcode-app/src/targets/opencode/*`
+  - Holds `opencode`-specific driver, capability mapping, and future target UI components.
+- `mcode-app/src/targets/mcode-desktop/*`
+  - Holds `mcode-desktop` direct/gateway drivers and desktop-only UI helpers.
 - `mcode-app/src/pages/connections/connectionConfigCode.ts`
   - Encodes/decodes import/export payloads and keeps backward compatibility with v1 config codes.
 - `mcode-app/src/pages/connections/connectionPresentation.ts`
@@ -37,8 +46,8 @@
   - Updates the add-connection flow to the new `直连` vs `中转（网关）` information architecture.
 - `mcode-app/src/services/gateway/connectionDriverRegistry.ts`
   - Chooses the correct driver from `targetType + routeMode`.
-- `mcode-app/src/services/gateway/drivers/*.ts`
-  - Implements direct/gateway adapters without changing page-level call sites.
+- `mcode-app/src/targets/*/driver.ts`
+  - Implements target-specific direct/gateway adapters without changing page-level call sites.
 - `mcode-relay/src/protocol/*.ts`
   - Defines relay-specific target metadata, upstream/mobile event frames, ACK/replay state, and tunnel route validation.
 - `mcode-relay/src/server.ts`
@@ -432,12 +441,12 @@ git commit -m "feat(app): redesign connection form for targets and gateway provi
 
 **Files:**
 - Create: `mcode-app/src/services/gateway/connectionDriverRegistry.ts`
-- Create: `mcode-app/src/services/gateway/drivers/shared.ts`
-- Create: `mcode-app/src/services/gateway/drivers/codegDirectDriver.ts`
-- Create: `mcode-app/src/services/gateway/drivers/opencodeDirectDriver.ts`
-- Create: `mcode-app/src/services/gateway/drivers/desktopDirectDriver.ts`
-- Create: `mcode-app/src/services/gateway/drivers/desktopGatewayDriver.ts`
-- Create: `mcode-app/src/services/gateway/drivers/legacyGatewayDriver.ts`
+- Create: `mcode-app/src/targets/shared/driverTypes.ts`
+- Create: `mcode-app/src/targets/codeg/driver.ts`
+- Create: `mcode-app/src/targets/opencode/driver.ts`
+- Create: `mcode-app/src/targets/mcode-desktop/directDriver.ts`
+- Create: `mcode-app/src/targets/mcode-desktop/gatewayDriver.ts`
+- Create: `mcode-app/src/targets/codeg/legacyGatewayDriver.ts`
 - Modify: `mcode-app/src/services/gateway/types.ts`
 - Modify: `mcode-app/src/services/gateway/index.ts`
 - Modify: `mcode-app/src/services/connectionContext.ts`
@@ -570,7 +579,7 @@ Expected: PASS with connection resolution shifted behind the driver registry and
 git add mcode-app/src/services/gateway/types.ts \
   mcode-app/src/services/gateway/index.ts \
   mcode-app/src/services/gateway/connectionDriverRegistry.ts \
-  mcode-app/src/services/gateway/drivers \
+  mcode-app/src/targets \
   mcode-app/src/services/connectionContext.ts \
   mcode-app/tests/services/connectionDriverRegistry.spec.ts
 git commit -m "feat(app): add connection driver registry"

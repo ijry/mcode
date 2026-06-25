@@ -16,6 +16,7 @@
 - `mcode-app` 继续消费统一的远端命令/事件契约；direct target adapter 和 `mcode-desktop` bridge 各自把实现映射到这套契约。
 - `mcode-desktop` 明确采用 Tauri 形态：前端提供连接/配对/隧道/诊断 UI，后端托管 bridge server、CLI adapters、gateway upstream 和后台守护生命周期。
 - `mcode-desktop` 的宿主机制参考 `LinkShell`：本地桥接、可拆分网关、共享协议、ACK 缓冲、重连恢复、单控制者模型、tunnel 预览。
+- `mcode-app` 的 target 支持必须按目录隔离；推荐 `src/targets/codeg`、`src/targets/opencode`、`src/targets/mcode-desktop`、`src/targets/shared`，避免把所有 target 判断继续堆在共享服务里。
 
 ## Protocol And Data Flow
 
@@ -98,3 +99,4 @@ desktop 运行方式：
 - 连接驱动选择必须基于 `targetType + routeMode`，而不是只看 URL 或旧 `mode`。
 - desktop capability 缺失时，应在入口层阻止进入而不是等 RPC 调用失败。
 - 对 desktop gateway 连接，原生端要准备好消费 ACK/重放式事件流与单控制者状态，而不是假设永远只有单设备在线。
+- 前端代码组织也应按 target 分目录，target-specific 组件和适配逻辑不要回灌到共享大文件。
