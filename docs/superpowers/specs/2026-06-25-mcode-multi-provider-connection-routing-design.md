@@ -108,6 +108,11 @@
 
 这里的“统一契约”只解决页面如何复用，不改变最终部署拓扑。部署拓扑上，`codeg` / `opencode` 仍然可以不经过 desktop。
 
+补充决定：
+
+- `mcode-desktop` 明确采用 **Tauri 桌面应用** 形态，而不是另起一个 CLI-first 产品。
+- `mcode-desktop` 的桥接、网关和可靠性机制参考 `LinkShell` 已验证的宿主思路，但落地为 Tauri 壳 + 后台受管运行时，而不是直接复刻其命令行交互。
+
 ## Detailed Design
 
 ### 1. Concept Model
@@ -352,6 +357,54 @@ Desktop 内部应拆为：
 - `tunnel manager`
   - 把本地服务绑定到 loopback 再发布为扫码可接入的网关目标
 
+#### 7.1 Tauri Host Shell
+
+`mcode-desktop` 采用 Tauri，职责拆分为：
+
+- **Tauri frontend**
+  - 连接管理
+  - 官方 CLI 状态面板
+  - 内网穿透页
+  - 配对二维码与诊断页
+- **Tauri backend**
+  - 启停本地 bridge server
+  - 管理 `codex` / `claude` CLI 子进程或 sidecar
+  - 托管 gateway upstream 会话
+  - 处理系统托盘、自启动、权限申请、日志采集
+- **managed runtime workers**
+  - 长连接、缓冲、重连、port tunnel、屏幕/浏览器预览等长生命周期任务
+
+设计约束：
+
+- 用户感知的是桌面应用，不要求打开命令行执行 `start` 或 `daemon`。
+- 但运行时能力必须等价于“后台守护进程 + 本地桥接 + 可选远程网关”。
+- Tauri 后端应具备把 bridge/gateway 运行时最小化驻留到托盘的能力，避免用户关闭窗口就中断会话。
+
+#### 7.2 LinkShell-Inspired Runtime Mechanics
+
+`mcode-desktop` 参考 `LinkShell` 的宿主机制，明确吸收以下做法：
+
+- **本地桥接 + 可拆分网关**
+  - desktop 既能本机直接开 bridge，也能连接远程 `mcode-relay`
+- **共享协议与版本协商**
+  - app / desktop / relay 共享消息 schema 和版本协商，避免灰度发布时直接断链
+- **ACK + 双层缓冲**
+  - desktop 本地缓冲 + relay 边缘缓冲两层确认，保证手机重连后能补齐最近事件
+- **指数退避自动重连**
+  - desktop 上行断线与 app 下行断线都走统一退避策略
+- **单控制者模型**
+  - 一个会话同一时刻只允许一个主动输入控制端，避免多端同时操作 `codex` / `claude` CLI 造成状态错乱
+- **tunnel/preview 通道**
+  - 内网穿透不仅传终端/Agent 事件，还要支持本地 dev server 的 HTTP/WebSocket 预览
+- **后台守护**
+  - bridge 与 gateway upstream 必须支持窗口关闭后继续运行，由 Tauri 托盘入口恢复和停止
+
+不照搬的部分：
+
+- 不直接复刻 `LinkShell` 的 CLI 命令体系。
+- 不把“宿主”命名成 CLI；在 `mcode` 体系里它就是 `mcode-desktop`。
+- 网页控制台可以作为诊断能力保留，但不是首版必须交付的主入口。
+
 ### 8. Official CLI Handling
 
 `codex` 官方 CLI 和 `claude` 官方 CLI 的移动端接入策略固定为：
@@ -420,6 +473,14 @@ Desktop 内部应拆为：
 - `/v1/proxy/:command` 继续作为命令转发入口
 - `/v1/events` 继续作为统一事件流
 - relay 只转发 payload，不做 target-specific 解释
+- 预留 `/v1/tunnel/:targetId/:port/**` 或等价 tunnel 路由，供 desktop 预览本地 dev server 和浏览器类场景
+
+可靠性要求：
+
+- 命令和事件帧包含协议版本，desktop 与 relay 在握手阶段协商兼容范围
+- event stream 支持 ACK 序号与重放窗口
+- desktop 断线 60 秒内，relay 应保留会话与最近缓冲，便于 app 重连恢复
+- 控制权相关事件至少包含 `controllerId`、`acquiredAt`、`expiresAt` 或等价字段
 
 ### 11. Desktop Tunnel Flow
 
@@ -474,9 +535,10 @@ Desktop 内部应拆为：
 
 #### Phase 3. Desktop bridge and official CLI adapters
 
-- `mcode-desktop` 建立统一 bridge server
+- `mcode-desktop` 建立 Tauri 桌面壳与统一 bridge server
 - 接入 `codex` 官方 CLI adapter
 - 接入 `claude` 官方 CLI adapter
+- 接入托盘后台驻留与守护生命周期
 - 输出 capability 描述接口
 
 #### Phase 4. Relay synchronized rollout
@@ -484,7 +546,7 @@ Desktop 内部应拆为：
 - `mcode-relay` 接受 desktop 上行注册
 - pair / refresh 返回 target metadata
 - app 打通 `mcode-desktop/gateway`
-- desktop 打通二维码导入与内网穿透页
+- desktop 打通二维码导入、内网穿透页和 tunnel 预览链路
 
 #### Phase 5. Gateway provider hardening
 
