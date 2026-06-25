@@ -1,6 +1,6 @@
 import Fastify from "fastify"
 import websocket from "@fastify/websocket"
-import type { FastifyInstance, FastifyRequest } from "fastify"
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify"
 import WebSocket from "ws"
 import { pathToFileURL } from "node:url"
 import { loadConfig, type RelayConfig } from "./config.js"
@@ -11,7 +11,10 @@ import {
   verifyRefreshToken,
 } from "./auth/tokens.js"
 import { PairingStore } from "./pairing/store.js"
+import type { TargetRecord } from "./pairing/store.js"
 import { RelayHub } from "./tunnel/hub.js"
+import { normalizeTunnelPath } from "./tunnel/httpProxy.js"
+import type { TargetAgent, TargetMetadata, TunnelHttpResponse } from "./protocol/types.js"
 
 export interface RelayAppContext {
   config: RelayConfig
@@ -71,6 +74,81 @@ function sendJson(socket: WebSocket, value: unknown): void {
   socket.send(JSON.stringify(value))
 }
 
+function normalizeTargetAgent(value: unknown, fallback: TargetAgent = "codeg"): TargetAgent {
+  return value === "codeg" || value === "opencode" || value === "mcode-desktop"
+    ? value
+    : fallback
+}
+
+function normalizeCapabilities(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  return Array.from(
+    new Set(
+      value
+        .map((item) => String(item || "").trim())
+        .filter(Boolean)
+    )
+  )
+}
+
+function normalizeProtocolVersion(value: unknown): string | undefined {
+  const protocolVersion = String(value || "").trim()
+  return protocolVersion || undefined
+}
+
+function pickDisplayName(message: Record<string, unknown>, fallback?: string | null): string | null {
+  const displayName = String(message.displayName || message.targetName || fallback || "").trim()
+  return displayName || null
+}
+
+function toTargetMetadata(target: TargetRecord): TargetMetadata {
+  return {
+    targetId: target.targetId,
+    targetAgent: target.targetAgent,
+    displayName: target.targetName,
+    capabilities: target.capabilities,
+    protocolVersion: target.protocolVersion,
+  }
+}
+
+function toTargetResponse(target: TargetRecord, context: RelayAppContext) {
+  const metadata = toTargetMetadata(target)
+  return {
+    ...metadata,
+    targetName: target.targetName,
+    relayUrl: target.relayUrl,
+    preferredMode: target.preferredMode,
+    online: context.hub.isDesktopOnline(target.targetId),
+  }
+}
+
+function normalizeLastEventId(req: FastifyRequest): number {
+  const query = req.query && typeof req.query === "object" ? (req.query as Record<string, unknown>) : {}
+  const raw = query.lastEventId ?? query.last_event_id ?? 0
+  const value = Number(raw)
+  return Number.isFinite(value) && value > 0 ? Math.trunc(value) : 0
+}
+
+function normalizeTunnelHeaders(headers: FastifyRequest["headers"]) {
+  const result: Record<string, string | string[] | undefined> = {}
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === "authorization") continue
+    result[key] = value
+  }
+  return result
+}
+
+function applyTunnelResponse(reply: FastifyReply, response: TunnelHttpResponse) {
+  for (const [key, value] of Object.entries(response.headers ?? {})) {
+    const lower = key.toLowerCase()
+    if (lower === "content-length" || lower === "transfer-encoding" || lower === "connection") {
+      continue
+    }
+    reply.header(key, value)
+  }
+  return reply.status(response.status || 200).send(response.body ?? null)
+}
+
 export async function buildRelayApp(context = createRelayContext()): Promise<FastifyInstance> {
   const app = Fastify({ logger: false })
   await app.register(websocket)
@@ -99,6 +177,9 @@ export async function buildRelayApp(context = createRelayContext()): Promise<Fas
     const target = context.store.upsertTarget({
       targetId: offer.targetId,
       targetName: offer.targetName,
+      targetAgent: offer.targetAgent,
+      capabilities: offer.capabilities,
+      protocolVersion: offer.protocolVersion,
       relayUrl: offer.relayUrl,
       preferredMode: mode,
     })
@@ -125,13 +206,7 @@ export async function buildRelayApp(context = createRelayContext()): Promise<Fas
     return reply.send({
       accessToken,
       refreshToken,
-      target: {
-        targetId: target.targetId,
-        targetName: target.targetName,
-        relayUrl: target.relayUrl,
-        preferredMode: target.preferredMode,
-        online: context.hub.isDesktopOnline(target.targetId),
-      },
+      target: toTargetResponse(target, context),
     })
   })
 
@@ -170,6 +245,7 @@ export async function buildRelayApp(context = createRelayContext()): Promise<Fas
       return reply.send({
         accessToken,
         refreshToken: nextRefreshToken,
+        ...(target ? { target: toTargetResponse(target, context) } : {}),
       })
     } catch {
       return reply.code(401).send({ error: "invalid refresh token" })
@@ -184,11 +260,8 @@ export async function buildRelayApp(context = createRelayContext()): Promise<Fas
       return reply.code(401).send({ error: error instanceof Error ? error.message : "Unauthorized" })
     }
     const targets = context.store.listTargets().map((target) => ({
-      targetId: target.targetId,
-      targetName: target.targetName,
+      ...toTargetResponse(target, context),
       relayUrl: target.relayUrl,
-      preferredMode: target.preferredMode,
-      online: context.hub.isDesktopOnline(target.targetId),
       pairedAt: target.pairedAt,
       lastSeenAt: target.lastSeenAt,
     }))
@@ -246,11 +319,59 @@ export async function buildRelayApp(context = createRelayContext()): Promise<Fas
     return reply.send({ ok: true, mode })
   })
 
+  app.all("/v1/tunnel/:targetId/:port/*", async (req, reply) => {
+    let claims: Awaited<ReturnType<typeof authenticate>>
+    try {
+      claims = await authenticate(req, context.config)
+    } catch (error) {
+      return reply.code(401).send({ error: error instanceof Error ? error.message : "Unauthorized" })
+    }
+
+    const params = req.params as { targetId: string; port: string; "*": string }
+    const targetId = String(params.targetId || "").trim()
+    if (!targetId || claims.targetId !== targetId) {
+      return reply.code(403).send({ error: "target mismatch" })
+    }
+
+    const port = Number(params.port)
+    if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+      return reply.code(400).send({ error: "invalid tunnel port" })
+    }
+
+    try {
+      const response = await context.hub.sendTunnelRequest(
+        targetId,
+        {
+          port,
+          method: req.method,
+          path: normalizeTunnelPath(params["*"] || "/"),
+          query:
+            req.query && typeof req.query === "object"
+              ? { ...(req.query as Record<string, unknown>) }
+              : {},
+          headers: normalizeTunnelHeaders(req.headers),
+          body: req.body,
+        },
+        30_000
+      )
+      return applyTunnelResponse(reply, response)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (message.includes("offline")) {
+        return reply.code(503).send({ error: message })
+      }
+      if (message.includes("timeout")) {
+        return reply.code(504).send({ error: message })
+      }
+      return reply.code(500).send({ error: message })
+    }
+  })
+
   app.get("/v1/events", { websocket: true }, async (connection, req) => {
     try {
       const claims = await authenticate(req, context.config)
       const socket = connection
-      context.hub.attachMobileSubscriber(claims.targetId, socket)
+      context.hub.attachMobileSubscriber(claims.targetId, socket, normalizeLastEventId(req))
       socket.send(JSON.stringify({ type: "ready", targetId: claims.targetId }))
       socket.on("close", () => {
         context.hub.detachMobileSubscriber(claims.targetId, socket)
@@ -280,7 +401,17 @@ export async function buildRelayApp(context = createRelayContext()): Promise<Fas
       if (message?.type === "desktop_hello") {
         activeTargetId = String(message.targetId ?? activeTargetId ?? "").trim()
         if (!activeTargetId) return
-        context.hub.registerDesktop(activeTargetId, socket, message.targetName ?? null)
+        const targetName = pickDisplayName(message, null)
+        context.hub.registerDesktop(activeTargetId, socket, targetName)
+        context.store.upsertTarget({
+          targetId: activeTargetId,
+          targetName,
+          targetAgent: normalizeTargetAgent(message.targetAgent, "mcode-desktop"),
+          capabilities: normalizeCapabilities(message.capabilities),
+          protocolVersion: normalizeProtocolVersion(message.protocolVersion),
+          relayUrl: typeof message.relayUrl === "string" ? message.relayUrl : null,
+          preferredMode: "relay",
+        })
         context.store.markTargetSeen(activeTargetId)
         return
       }
@@ -299,11 +430,15 @@ export async function buildRelayApp(context = createRelayContext()): Promise<Fas
         const code = String(message.code ?? "").trim()
         const secret = String(message.secret ?? "").trim()
         if (!code || !secret) return
+        const targetName = pickDisplayName(message, null)
         context.store.addOffer({
           code,
           secret,
           targetId: activeTargetId,
-          targetName: typeof message.targetName === "string" ? message.targetName : null,
+          targetName,
+          targetAgent: normalizeTargetAgent(message.targetAgent, "mcode-desktop"),
+          capabilities: normalizeCapabilities(message.capabilities),
+          protocolVersion: normalizeProtocolVersion(message.protocolVersion),
           relayUrl: typeof message.relayUrl === "string" ? message.relayUrl : null,
           ttlSeconds: context.config.PAIRING_CODE_TTL_SECONDS,
         })
@@ -320,6 +455,21 @@ export async function buildRelayApp(context = createRelayContext()): Promise<Fas
           requestId: String(message.requestId ?? ""),
           ok: Boolean(message.ok),
           status: typeof message.status === "number" ? message.status : undefined,
+          body: message.body,
+          error: typeof message.error === "string" ? message.error : null,
+        })
+        return
+      }
+
+      if (message?.type === "tunnel_response") {
+        context.hub.handleDesktopTunnelResponse({
+          requestId: String(message.requestId ?? ""),
+          ok: Boolean(message.ok),
+          status: typeof message.status === "number" ? message.status : undefined,
+          headers:
+            message.headers && typeof message.headers === "object"
+              ? (message.headers as Record<string, string>)
+              : undefined,
           body: message.body,
           error: typeof message.error === "string" ? message.error : null,
         })

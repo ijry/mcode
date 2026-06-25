@@ -1,11 +1,18 @@
 import { randomUUID } from "node:crypto"
 import { sha256Hex } from "../auth/tokens.js"
+import type { TargetAgent } from "../protocol/types.js"
+
+const DEFAULT_TARGET_AGENT: TargetAgent = "codeg"
+const DEFAULT_PROTOCOL_VERSION = "1"
 
 export interface PairOfferRecord {
   code: string
   secretHash: string
   targetId: string
   targetName: string | null
+  targetAgent: TargetAgent
+  capabilities: string[]
+  protocolVersion: string
   relayUrl: string | null
   expiresAt: number
   consumedAt: number | null
@@ -14,6 +21,9 @@ export interface PairOfferRecord {
 export interface TargetRecord {
   targetId: string
   targetName: string | null
+  targetAgent: TargetAgent
+  capabilities: string[]
+  protocolVersion: string
   relayUrl: string | null
   pairedAt: number
   lastSeenAt: number | null
@@ -39,6 +49,9 @@ export class PairingStore {
     secret: string
     targetId: string
     targetName?: string | null
+    targetAgent?: TargetAgent
+    capabilities?: string[]
+    protocolVersion?: string
     relayUrl?: string | null
     ttlSeconds: number
   }): PairOfferRecord {
@@ -48,6 +61,9 @@ export class PairingStore {
       secretHash: sha256Hex(input.secret),
       targetId: input.targetId,
       targetName: input.targetName ?? null,
+      targetAgent: input.targetAgent ?? DEFAULT_TARGET_AGENT,
+      capabilities: normalizeCapabilities(input.capabilities),
+      protocolVersion: normalizeProtocolVersion(input.protocolVersion),
       relayUrl: input.relayUrl ?? null,
       expiresAt: now + input.ttlSeconds * 1000,
       consumedAt: null,
@@ -70,6 +86,9 @@ export class PairingStore {
   upsertTarget(input: {
     targetId: string
     targetName?: string | null
+    targetAgent?: TargetAgent
+    capabilities?: string[]
+    protocolVersion?: string
     relayUrl?: string | null
     preferredMode?: "relay" | "direct"
   }): TargetRecord {
@@ -77,6 +96,9 @@ export class PairingStore {
     const record: TargetRecord = {
       targetId: input.targetId,
       targetName: input.targetName ?? existing?.targetName ?? null,
+      targetAgent: input.targetAgent ?? existing?.targetAgent ?? DEFAULT_TARGET_AGENT,
+      capabilities: normalizeCapabilities(input.capabilities ?? existing?.capabilities),
+      protocolVersion: normalizeProtocolVersion(input.protocolVersion ?? existing?.protocolVersion),
       relayUrl: input.relayUrl ?? existing?.relayUrl ?? null,
       pairedAt: existing?.pairedAt ?? Date.now(),
       lastSeenAt: existing?.lastSeenAt ?? null,
@@ -147,4 +169,19 @@ export class PairingStore {
   listSessions(): PairSessionRecord[] {
     return [...this.sessions.values()]
   }
+}
+
+function normalizeCapabilities(input?: string[]): string[] {
+  if (!Array.isArray(input)) return []
+  return Array.from(
+    new Set(
+      input
+        .map((item) => String(item || "").trim())
+        .filter(Boolean)
+    )
+  )
+}
+
+function normalizeProtocolVersion(input?: string): string {
+  return String(input || "").trim() || DEFAULT_PROTOCOL_VERSION
 }

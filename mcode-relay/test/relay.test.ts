@@ -1,5 +1,5 @@
 import request from "supertest"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { buildRelayApp } from "../src/server.js"
 import { PairingStore } from "../src/pairing/store.js"
 import { RelayHub } from "../src/tunnel/hub.js"
@@ -26,11 +26,13 @@ async function createTestApp() {
 describe("relay api", () => {
   let app: Awaited<ReturnType<typeof createTestApp>>["app"]
   let store: PairingStore
+  let hub: RelayHub
 
   beforeEach(async () => {
     const built = await createTestApp()
     app = built.app
     store = built.store
+    hub = built.hub
   })
 
   afterEach(async () => {
@@ -59,6 +61,30 @@ describe("relay api", () => {
     expect(res.body.target.targetId).toBe("target-1")
   })
 
+  it("returns target agent and capabilities in pair responses", async () => {
+    store.addOffer({
+      code: "123456",
+      secret: "secret",
+      targetId: "desktop-1",
+      targetName: "Work Mac Mini",
+      targetAgent: "mcode-desktop",
+      capabilities: ["desktop.runtime.codex-cli"],
+      protocolVersion: "1",
+      ttlSeconds: 300,
+    })
+
+    const res = await request(app.server)
+      .post("/v1/pair")
+      .send({ code: "123456", secret: "secret" })
+
+    expect(res.status).toBe(200)
+    expect(res.body.target.targetId).toBe("desktop-1")
+    expect(res.body.target.targetAgent).toBe("mcode-desktop")
+    expect(res.body.target.displayName).toBe("Work Mac Mini")
+    expect(res.body.target.capabilities).toContain("desktop.runtime.codex-cli")
+    expect(res.body.target.protocolVersion).toBe("1")
+  })
+
   it("rejects pairing with an invalid secret", async () => {
     store.addOffer({
       code: "123456",
@@ -79,6 +105,10 @@ describe("relay api", () => {
       code: "123456",
       secret: "secret",
       targetId: "target-1",
+      targetAgent: "mcode-desktop",
+      targetName: "Work Mac Mini",
+      capabilities: ["desktop.runtime.claude-cli"],
+      protocolVersion: "1",
       ttlSeconds: 300,
     })
     const pair = await request(app.server)
@@ -92,6 +122,13 @@ describe("relay api", () => {
     expect(res.status).toBe(200)
     expect(res.body.accessToken).toBeTruthy()
     expect(res.body.refreshToken).toBeTruthy()
+    expect(res.body.target).toMatchObject({
+      targetId: "target-1",
+      targetAgent: "mcode-desktop",
+      displayName: "Work Mac Mini",
+      capabilities: ["desktop.runtime.claude-cli"],
+      protocolVersion: "1",
+    })
   })
 
   it("rejects invalid refresh tokens", async () => {
@@ -108,5 +145,63 @@ describe("relay api", () => {
       .send({})
 
     expect(res.status).toBe(401)
+  })
+
+  it("forwards authorized tunnel HTTP requests to the target desktop", async () => {
+    store.addOffer({
+      code: "123456",
+      secret: "secret",
+      targetId: "desktop-1",
+      targetAgent: "mcode-desktop",
+      ttlSeconds: 300,
+    })
+    const pair = await request(app.server)
+      .post("/v1/pair")
+      .send({ code: "123456", secret: "secret" })
+
+    const sendTunnelRequest = vi.spyOn(hub, "sendTunnelRequest").mockResolvedValue({
+      status: 202,
+      headers: { "x-relay-test": "ok" },
+      body: { proxied: true },
+    })
+
+    const res = await request(app.server)
+      .post("/v1/tunnel/desktop-1/1080/preview?tab=1")
+      .set("authorization", `Bearer ${pair.body.accessToken}`)
+      .send({ hello: "world" })
+
+    expect(res.status).toBe(202)
+    expect(res.headers["x-relay-test"]).toBe("ok")
+    expect(res.body).toEqual({ proxied: true })
+    expect(sendTunnelRequest).toHaveBeenCalledWith(
+      "desktop-1",
+      expect.objectContaining({
+        port: 1080,
+        method: "POST",
+        path: "/preview",
+        query: { tab: "1" },
+        body: { hello: "world" },
+      }),
+      expect.any(Number)
+    )
+  })
+
+  it("blocks tunnel HTTP requests for a different target", async () => {
+    store.addOffer({
+      code: "123456",
+      secret: "secret",
+      targetId: "desktop-1",
+      targetAgent: "mcode-desktop",
+      ttlSeconds: 300,
+    })
+    const pair = await request(app.server)
+      .post("/v1/pair")
+      .send({ code: "123456", secret: "secret" })
+
+    const res = await request(app.server)
+      .get("/v1/tunnel/other-target/1080/preview")
+      .set("authorization", `Bearer ${pair.body.accessToken}`)
+
+    expect(res.status).toBe(403)
   })
 })

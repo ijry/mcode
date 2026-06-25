@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto"
 import WebSocket from "ws"
+import { ReplayBuffer } from "../protocol/replayBuffer.js"
+import type { RelayEventFrame, TunnelHttpRequest, TunnelHttpResponse } from "../protocol/types.js"
 
 export interface DesktopConnection {
   socket: WebSocket
@@ -15,10 +17,21 @@ interface PendingProxyRequest {
   timer: NodeJS.Timeout
 }
 
+interface PendingTunnelRequest {
+  resolve: (value: TunnelHttpResponse) => void
+  reject: (reason: Error) => void
+  timer: NodeJS.Timeout
+}
+
+const DEFAULT_REPLAY_WINDOW = 200
+
 export class RelayHub {
   private readonly desktops = new Map<string, DesktopConnection>()
   private readonly mobileSubscribers = new Map<string, Set<WebSocket>>()
   private readonly pendingProxy = new Map<string, PendingProxyRequest>()
+  private readonly pendingTunnel = new Map<string, PendingTunnelRequest>()
+  private readonly replayBuffers = new Map<string, ReplayBuffer>()
+  private readonly eventSequences = new Map<string, number>()
 
   registerDesktop(targetId: string, socket: WebSocket, targetName: string | null): DesktopConnection {
     const existing = this.desktops.get(targetId)
@@ -70,10 +83,16 @@ export class RelayHub {
     this.desktops.set(targetId, connection)
   }
 
-  attachMobileSubscriber(targetId: string, socket: WebSocket): void {
+  attachMobileSubscriber(targetId: string, socket: WebSocket, lastEventId = 0): void {
     const set = this.mobileSubscribers.get(targetId) ?? new Set<WebSocket>()
     set.add(socket)
     this.mobileSubscribers.set(targetId, set)
+
+    for (const frame of this.getReplayFrames(targetId, lastEventId)) {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify(frame))
+      }
+    }
 
     socket.on("close", () => {
       this.detachMobileSubscriber(targetId, socket)
@@ -89,15 +108,19 @@ export class RelayHub {
     }
   }
 
-  broadcastEvent(targetId: string, event: unknown): void {
-    const payload = JSON.stringify(event)
+  broadcastEvent(targetId: string, event: unknown): RelayEventFrame {
+    const frame = this.createEventFrame(targetId, event)
+    this.getReplayBuffer(targetId).push(frame)
+    const payload = JSON.stringify(frame)
     const subscribers = this.mobileSubscribers.get(targetId)
-    if (!subscribers) return
-    for (const socket of subscribers) {
-      if (socket.readyState === WebSocket.OPEN) {
-        socket.send(payload)
+    if (subscribers) {
+      for (const socket of subscribers) {
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.send(payload)
+        }
       }
     }
+    return frame
   }
 
   async sendProxyRequest(
@@ -156,5 +179,113 @@ export class RelayHub {
       return
     }
     pending.reject(new Error(message.error ?? "proxy request failed"))
+  }
+
+  async sendTunnelRequest(
+    targetId: string,
+    request: TunnelHttpRequest,
+    timeoutMs = 30_000
+  ): Promise<TunnelHttpResponse> {
+    const desktop = this.desktops.get(targetId)
+    if (!desktop || desktop.socket.readyState !== WebSocket.OPEN) {
+      throw new Error("target offline")
+    }
+
+    const requestId = randomUUID()
+    const body = JSON.stringify({
+      type: "tunnel_request",
+      requestId,
+      request,
+    })
+
+    return await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingTunnel.delete(requestId)
+        reject(new Error("tunnel request timeout"))
+      }, timeoutMs)
+
+      this.pendingTunnel.set(requestId, { resolve, reject, timer })
+
+      try {
+        desktop.socket.send(body)
+      } catch (error) {
+        clearTimeout(timer)
+        this.pendingTunnel.delete(requestId)
+        reject(error instanceof Error ? error : new Error(String(error)))
+      }
+    })
+  }
+
+  handleDesktopTunnelResponse(message: {
+    requestId: string
+    ok: boolean
+    status?: number
+    headers?: Record<string, string>
+    body?: unknown
+    error?: string | null
+  }): void {
+    const pending = this.pendingTunnel.get(message.requestId)
+    if (!pending) return
+    clearTimeout(pending.timer)
+    this.pendingTunnel.delete(message.requestId)
+    if (message.ok) {
+      pending.resolve({
+        status: message.status ?? 200,
+        headers: message.headers ?? {},
+        body: message.body ?? null,
+      })
+      return
+    }
+    pending.reject(new Error(message.error ?? "tunnel request failed"))
+  }
+
+  getReplayFrames(targetId: string, lastEventId = 0): RelayEventFrame[] {
+    return this.getReplayBuffer(targetId).after(lastEventId)
+  }
+
+  private getReplayBuffer(targetId: string): ReplayBuffer {
+    const existing = this.replayBuffers.get(targetId)
+    if (existing) return existing
+    const created = new ReplayBuffer(DEFAULT_REPLAY_WINDOW)
+    this.replayBuffers.set(targetId, created)
+    return created
+  }
+
+  private createEventFrame(targetId: string, event: unknown): RelayEventFrame {
+    const nextEventId = (this.eventSequences.get(targetId) ?? 0) + 1
+    this.eventSequences.set(targetId, nextEventId)
+    const normalized = normalizeEventPayload(event)
+    return {
+      eventId: nextEventId,
+      channel: normalized.channel,
+      payload: normalized.payload,
+      ...(normalized.controllerId ? { controllerId: normalized.controllerId } : {}),
+    }
+  }
+}
+
+function normalizeEventPayload(event: unknown): {
+  channel: string
+  payload: unknown
+  controllerId?: string | null
+} {
+  if (event && typeof event === "object") {
+    const record = event as Record<string, unknown>
+    const channel = typeof record.channel === "string" ? record.channel.trim() : ""
+    if (channel) {
+      return {
+        channel,
+        payload: "payload" in record ? record.payload : event,
+        controllerId:
+          typeof record.controllerId === "string" && record.controllerId.trim()
+            ? record.controllerId.trim()
+            : null,
+      }
+    }
+  }
+
+  return {
+    channel: "acp://event",
+    payload: event,
   }
 }

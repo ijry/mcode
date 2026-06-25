@@ -52,6 +52,9 @@
 - relay 只转发 payload，不做 target-specific 改写
 - desktop / relay 握手需带协议版本，并支持 ACK 序号、重放窗口和断线后短时会话保留
 - app 侧把上述 metadata 同时归一到 `gatewaySession` 与 `targetProfile`；pair 和 refresh 任一返回了新值，都可以覆盖本地旧的 target 展示信息和能力列表。
+- relay 侧的 `PairingStore` 已保存 `targetAgent`、`capabilities`、`protocolVersion`；`pair_offer` 和 `desktop_hello` 从 desktop 上游同步这些字段，历史调用缺省按 `codeg` / protocol `1` 兼容。
+- `/v1/events` 推送统一包装为 `{ eventId, channel, payload, controllerId? }`，relay 为每个 target 维护有限 replay buffer；mobile 重连时可带 `lastEventId` / `last_event_id` 查询参数补收缺失事件。
+- `/v1/tunnel/:targetId/:port/*` 是 mobile 到 desktop 本地 HTTP 服务的网关入口。relay 校验 access token 中的 `targetId` 必须等于 path target，再向 desktop upstream 发送 `tunnel_request`，desktop 以 `tunnel_response` 返回 status/headers/body。
 
 desktop 外网接入流程：
 
@@ -108,3 +111,5 @@ desktop 运行方式：
 - desktop capability 缺失时，应在入口层阻止进入而不是等 RPC 调用失败。
 - 对 desktop gateway 连接，原生端要准备好消费 ACK/重放式事件流与单控制者状态，而不是假设永远只有单设备在线。
 - 前端代码组织也应按 agent 分目录，agent-specific 组件和适配逻辑不要回灌到共享大文件。
+- relay event wrapper 中 `eventId` 是按 target 递增的 relay 序号；原生端断线重连时应保存最后处理成功的 id，并用 `lastEventId` 重新连接 `/v1/events`。
+- tunnel HTTP 预览必须走 authenticated gateway URL，原生端不能直接信任二维码里的本地端口；只有 relay token 所属 target 能访问对应 `/v1/tunnel/:targetId/:port/*`。
