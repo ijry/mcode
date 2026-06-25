@@ -628,7 +628,7 @@
         </view>
 
         <view v-if="showNetworkReachabilityFeedback" class="input-feedback input-feedback--network">
-          <up-icon name="alert-circle" size="14" color="#fa8c16"></up-icon>
+          <up-icon name="error-circle" size="14" color="#fa8c16"></up-icon>
           <text class="input-feedback__text">{{ networkReachabilityFeedbackText }}</text>
         </view>
 

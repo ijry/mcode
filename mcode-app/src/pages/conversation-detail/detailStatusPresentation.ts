@@ -150,7 +150,7 @@ export function buildDetailStatusState(input: {
       code: "waiting_permission",
       severity: "warning",
       text: "智能体正在等待你的授权",
-      icon: "alert-circle",
+      icon: "error-circle",
       iconColor: color("--up-warning", "#f9ae3d"),
       loading: false,
     }
