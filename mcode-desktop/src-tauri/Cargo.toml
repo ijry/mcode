@@ -1,0 +1,23 @@
+[package]
+name = "mcode-desktop"
+version = "0.1.0"
+description = "MCode desktop bridge and gateway host"
+authors = ["MCode"]
+edition = "2021"
+default-run = "mcode-desktop"
+
+[lib]
+name = "mcode_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "mcode-desktop"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = ["tray-icon"] }

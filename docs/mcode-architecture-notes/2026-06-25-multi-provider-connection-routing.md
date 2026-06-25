@@ -15,6 +15,7 @@
 - `mcode-relay` 是网关服务，负责配对、转发、事件流和 session refresh，不负责 CLI 语义归一化。
 - `mcode-app` 继续消费统一的远端命令/事件契约；direct target adapter 和 `mcode-desktop` bridge 各自把实现映射到这套契约。
 - `mcode-desktop` 明确采用 Tauri 形态：前端提供连接/配对/隧道/诊断 UI，后端托管 bridge server、CLI adapters、gateway upstream 和后台守护生命周期。
+- `mcode-desktop` 初始工程已经落为独立 Tauri + Vue workspace：前端用 Pinia 保存 relay 状态、pair code/secret、capabilities 和 tunnel bind；Rust 后端用 `AppState` 保存 relay URL、当前 pair offer 与 capability 列表。
 - `mcode-desktop` 的宿主机制参考 `LinkShell`：本地桥接、可拆分网关、共享协议、ACK 缓冲、重连恢复、单控制者模型、tunnel 预览。
 - `mcode-app` 的前端支持必须按 agent 目录隔离；推荐 `src/agents/codeg`、`src/agents/opencode`、`src/agents/mcode-desktop`、`src/agents/shared`，避免把所有 agent 判断继续堆在共享服务里。
 - `mcode-app` 现已通过 `src/services/gateway/connectionDriverRegistry.ts` 按 `targetAgent + routeMode` 选择 driver；各 agent 目录只保留自己的入口文件，共享直连/网关接线逻辑放在 `src/agents/shared/driverTypes.ts`。
@@ -68,6 +69,7 @@ desktop 运行方式：
 - 桌面窗口关闭后，bridge / upstream 可继续在托盘中运行
 - 用户从 tray 或主窗口恢复、停止、重启 bridge
 - 官方 CLI 子进程由 Tauri backend 统一监管，不要求用户手工执行命令行
+- 初始 Tauri scaffold 暴露 `show_window`、`hide_window`、`shutdown_runtime` 命令，tray 菜单使用相同 command id，原生客户端复制时需要保持“窗口可隐藏但 runtime 可继续存在”的生命周期语义。
 
 ## UI Behavior
 
