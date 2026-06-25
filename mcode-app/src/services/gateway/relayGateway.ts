@@ -1,4 +1,4 @@
-import type { CodegGateway, EventChannelConnection, RelaySessionInfo } from "./types"
+import type { CodegGateway, EventChannelConnection, PairTargetMetadata, RelaySessionInfo } from "./types"
 import { toErrorMessage, toResponseErrorMessage } from "./error"
 import { buildRemoteInstanceKey } from "@/services/realtime/instance-key"
 import { decodeSocketPayload } from "./socketPayload"
@@ -29,6 +29,30 @@ function isH5WebSocketRuntime() {
   return false
 }
 
+function normalizePairTargetMetadata(input: unknown): PairTargetMetadata {
+  if (!input || typeof input !== "object") return {}
+  const raw = input as Record<string, unknown>
+  const capabilities = Array.isArray(raw.capabilities)
+    ? raw.capabilities
+        .map((item) => (typeof item === "string" ? item.trim() : ""))
+        .filter(Boolean)
+    : undefined
+
+  return {
+    ...(typeof raw.targetId === "string" && raw.targetId.trim() ? { targetId: raw.targetId.trim() } : {}),
+    ...(raw.targetAgent === "codeg" || raw.targetAgent === "opencode" || raw.targetAgent === "mcode-desktop"
+      ? { targetAgent: raw.targetAgent }
+      : {}),
+    ...(typeof raw.displayName === "string" && raw.displayName.trim()
+      ? { displayName: raw.displayName.trim() }
+      : {}),
+    ...(capabilities?.length ? { capabilities: Array.from(new Set(capabilities)) } : {}),
+    ...(typeof raw.protocolVersion === "string" && raw.protocolVersion.trim()
+      ? { protocolVersion: raw.protocolVersion.trim() }
+      : {}),
+  }
+}
+
 export class RelayGateway implements CodegGateway {
   readonly mode = "relay" as const
 
@@ -56,16 +80,21 @@ export class RelayGateway implements CodegGateway {
     const raw = res.data as {
       accessToken?: string
       refreshToken?: string
-      target?: { targetId?: string }
+      target?: unknown
     }
+    const target = normalizePairTargetMetadata(raw.target)
     const data: RelaySessionInfo = {
       accessToken: raw.accessToken ?? "",
       refreshToken: raw.refreshToken,
-      targetId: raw.target?.targetId,
+      ...target,
     }
     this.session.accessToken = data.accessToken
     this.session.refreshToken = data.refreshToken
     this.session.targetId = data.targetId
+    this.session.targetAgent = data.targetAgent
+    this.session.displayName = data.displayName
+    this.session.capabilities = data.capabilities
+    this.session.protocolVersion = data.protocolVersion
     return data
   }
 
@@ -254,12 +283,31 @@ export class RelayGateway implements CodegGateway {
       data: { refreshToken: this.session.refreshToken },
       header: { "content-type": "application/json" },
     })
-    const data = res.data as Partial<RelaySessionInfo>
+    const raw = res.data as Partial<RelaySessionInfo> & { target?: unknown }
+    const data: Partial<RelaySessionInfo> = {
+      ...raw,
+      ...normalizePairTargetMetadata(raw.target),
+    }
     if (data.accessToken) {
       this.session.accessToken = data.accessToken
     }
     if (data.refreshToken) {
       this.session.refreshToken = data.refreshToken
+    }
+    if (data.targetId) {
+      this.session.targetId = data.targetId
+    }
+    if (data.targetAgent) {
+      this.session.targetAgent = data.targetAgent
+    }
+    if (data.displayName) {
+      this.session.displayName = data.displayName
+    }
+    if (data.capabilities) {
+      this.session.capabilities = data.capabilities
+    }
+    if (data.protocolVersion) {
+      this.session.protocolVersion = data.protocolVersion
     }
   }
 

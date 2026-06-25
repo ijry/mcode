@@ -48,6 +48,14 @@ export function normalizeRelaySessionInfo(input: unknown): RelaySessionInfo | nu
   const accessToken = pickString(raw.accessToken)
   const refreshToken = pickString(raw.refreshToken) || undefined
   const targetId = pickString(raw.targetId) || undefined
+  const targetAgent = pickString(raw.targetAgent) || undefined
+  const displayName = pickString(raw.displayName) || undefined
+  const capabilities = Array.isArray(raw.capabilities)
+    ? raw.capabilities
+        .map((item) => pickString(item))
+        .filter((item): item is string => Boolean(item))
+    : undefined
+  const protocolVersion = pickString(raw.protocolVersion) || undefined
 
   if (!accessToken && !refreshToken && !targetId) return null
 
@@ -55,6 +63,10 @@ export function normalizeRelaySessionInfo(input: unknown): RelaySessionInfo | nu
     accessToken,
     ...(refreshToken ? { refreshToken } : {}),
     ...(targetId ? { targetId } : {}),
+    ...(targetAgent ? { targetAgent } : {}),
+    ...(displayName ? { displayName } : {}),
+    ...(capabilities?.length ? { capabilities: Array.from(new Set(capabilities)) } : {}),
+    ...(protocolVersion ? { protocolVersion } : {}),
   }
 }
 

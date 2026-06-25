@@ -27,4 +27,17 @@ export function createGateway(params: {
   )
 }
 
-export type { CodegGateway, GatewayMode, PairParams, RelaySessionInfo, TargetProfile } from "./types"
+export { resolveConnectionDriver } from "./connectionDriverRegistry"
+export type {
+  ConnectionDriver,
+  ConnectionDriverId,
+  PairResultMetadata,
+} from "./connectionDriverRegistry"
+export type {
+  CodegGateway,
+  GatewayMode,
+  PairParams,
+  PairTargetMetadata,
+  RelaySessionInfo,
+  TargetProfile,
+} from "./types"

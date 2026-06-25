@@ -17,6 +17,7 @@
 - `mcode-desktop` 明确采用 Tauri 形态：前端提供连接/配对/隧道/诊断 UI，后端托管 bridge server、CLI adapters、gateway upstream 和后台守护生命周期。
 - `mcode-desktop` 的宿主机制参考 `LinkShell`：本地桥接、可拆分网关、共享协议、ACK 缓冲、重连恢复、单控制者模型、tunnel 预览。
 - `mcode-app` 的前端支持必须按 agent 目录隔离；推荐 `src/agents/codeg`、`src/agents/opencode`、`src/agents/mcode-desktop`、`src/agents/shared`，避免把所有 agent 判断继续堆在共享服务里。
+- `mcode-app` 现已通过 `src/services/gateway/connectionDriverRegistry.ts` 按 `targetAgent + routeMode` 选择 driver；各 agent 目录只保留自己的入口文件，共享直连/网关接线逻辑放在 `src/agents/shared/driverTypes.ts`。
 
 ## Protocol And Data Flow
 
@@ -45,10 +46,12 @@
   - `targetAgent`
   - `displayName`
   - `capabilities`
+  - `protocolVersion`
 - `/v1/proxy/:command` 和 `/v1/events` 保持统一转发入口
 - 预留 tunnel 转发入口供 desktop 暴露本地 dev server 预览
 - relay 只转发 payload，不做 target-specific 改写
 - desktop / relay 握手需带协议版本，并支持 ACK 序号、重放窗口和断线后短时会话保留
+- app 侧把上述 metadata 同时归一到 `gatewaySession` 与 `targetProfile`；pair 和 refresh 任一返回了新值，都可以覆盖本地旧的 target 展示信息和能力列表。
 
 desktop 外网接入流程：
 
@@ -91,6 +94,7 @@ desktop 运行方式：
 - `mcode-relay` 是服务名，app 文案统一显示为 `网关`。
 - 首版正式新增入口重点支持 `mcode-desktop/gateway`；历史 `codeg/gateway` 仍保留兼容路径。
 - 原生新实现不需要复制 web 端这层旧字段别名；只有在同一个客户端里仍存在旧页面或旧路由读取逻辑时，才需要做相同兼容桥接。
+- 当历史 `codeg/gateway` 记录在 pair 后被识别成 `mcode-desktop` 时，持久化必须按“配对前的连接键”回写同一条记录，再把新 `targetAgent` 保存进去；否则会因为主键从 `codeg` 变成 `mcode-desktop` 而丢失升级结果。
 
 ## Native iOS/Android Replication Guidance
 

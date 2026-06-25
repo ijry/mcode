@@ -2,10 +2,22 @@ import type { RemoteInstanceDescriptor } from "@/services/realtime/types"
 
 export type GatewayMode = "relay" | "direct"
 
+export interface PairTargetMetadata {
+  targetId?: string
+  targetAgent?: "codeg" | "opencode" | "mcode-desktop"
+  displayName?: string
+  capabilities?: string[]
+  protocolVersion?: string
+}
+
 export interface RelaySessionInfo {
   accessToken: string
   refreshToken?: string
   targetId?: string
+  targetAgent?: string
+  displayName?: string
+  capabilities?: string[]
+  protocolVersion?: string
 }
 
 export interface PairParams {
