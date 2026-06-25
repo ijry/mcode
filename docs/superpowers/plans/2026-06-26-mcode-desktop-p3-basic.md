@@ -527,11 +527,11 @@ use tokio_tungstenite::accept_async;
 fn p3_builds_gateway_upstream_websocket_url() {
     assert_eq!(
         build_upstream_ws_url("https://relay.example.com").unwrap(),
-        "wss://relay.example.com/v1/desktop"
+        "wss://relay.example.com/v1/tunnel/desktop"
     );
     assert_eq!(
         build_upstream_ws_url("http://127.0.0.1:8787/").unwrap(),
-        "ws://127.0.0.1:8787/v1/desktop"
+        "ws://127.0.0.1:8787/v1/tunnel/desktop"
     );
 }
 
@@ -636,7 +636,7 @@ pub fn build_upstream_ws_url(base_url: &str) -> Result<String> {
         other => return Err(anyhow!("unsupported gateway scheme: {other}")),
     };
     url.set_scheme(scheme).map_err(|_| anyhow!("invalid gateway scheme"))?;
-    url.set_path("/v1/desktop");
+    url.set_path("/v1/tunnel/desktop");
     url.set_query(None);
     Ok(url.to_string())
 }

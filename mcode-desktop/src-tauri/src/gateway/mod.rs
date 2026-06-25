@@ -1,6 +1,7 @@
 pub mod upstream;
 
 pub use upstream::{
-    connect_upstream, handle_upstream_frame, open_upstream_socket, parse_upstream_frame,
-    DesktopUpstreamHello, RelayControlFrame, UpstreamSocket,
+    build_pair_offer_frame, build_upstream_ws_url, connect_upstream, handle_upstream_frame,
+    mark_upstream_connecting, mark_upstream_error, mark_upstream_online, parse_upstream_frame,
+    DesktopUpstreamHello, RelayControlFrame,
 };

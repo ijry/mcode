@@ -40,7 +40,7 @@ export function buildGatewayQrPayload(input: GatewayQrPayloadInput): DesktopGate
     pairSecret: input.pairSecret,
   }
 
-  const gatewayBaseUrl = input.gatewayBaseUrl?.trim()
+  const gatewayBaseUrl = input.gatewayBaseUrl?.trim().replace(/\/+$/, "")
   if (gatewayBaseUrl) {
     payload.gatewayBaseUrl = gatewayBaseUrl
   }

@@ -120,3 +120,34 @@ desktop 运行方式：
 - 前端代码组织也应按 agent 分目录，agent-specific 组件和适配逻辑不要回灌到共享大文件。
 - relay event wrapper 中 `eventId` 是按 target 递增的 relay 序号；原生端断线重连时应保存最后处理成功的 id，并用 `lastEventId` 重新连接 `/v1/events`。
 - tunnel HTTP 预览必须走 authenticated gateway URL，原生端不能直接信任二维码里的本地端口；只有 relay token 所属 target 能访问对应 `/v1/tunnel/:targetId/:port/*`。
+
+## P3 Desktop Basic Behavior
+
+`mcode-desktop` P3 已从静态 Tauri shell 升级为可配置桌面宿主。Rust 后端通过 `AppState` 保存 `targetId`、`displayName`、网关配置、upstream 状态、当前 `PairOffer`、capabilities 和本地服务配置；前端通过 Tauri commands 读取同一份状态，不再使用硬编码 pair code 或静态 tunnel bind。
+
+P3 Tauri command 边界：
+
+- `desktop_get_health` 返回 `targetAgent = "mcode-desktop"`、`targetId`、版本、网关状态、能力列表、pair offer 和本地服务列表。
+- `desktop_configure_gateway` 保存 `gatewayProvider = official | custom` 与规范化后的 `gatewayBaseUrl`。
+- `desktop_generate_pair_offer` 生成 `version: 2` 网关二维码 payload，字段使用 `targetAgent`、`routeMode = "gateway"`、`gatewayProvider`、`pairCode`、`pairSecret`。
+- `desktop_connect_gateway` 启动后台 WebSocket upstream，连接到网关的 `/v1/tunnel/desktop`，发送 `desktop_hello`，并在已有 pair offer 时发送 `pair_offer`。
+- `desktop_save_local_service` 保存本机 HTTP 服务配置，但 P3 只做配置和校验。
+
+P3 本地服务规则：
+
+- 默认服务为 `Code`，绑定 `127.0.0.1:1080`，协议为 `http`。
+- P3 只允许 `127.0.0.1`。`0.0.0.0` 或其他 host 会被前端和后端同时拒绝。
+- P3 不实现 P4 的 stream/tcp tunnel 数据转发；relay 发来的 `tunnel_request` 仍属于后续阶段处理范围。
+- P3 不实现 Claude/Codex 官方 CLI adapter；capability 与命令边界保留给 P5。
+
+P3 Desktop UI 行为：
+
+- “连接”页显示网关状态、target id、capabilities、网关服务商、网关地址、配对码和 QR payload。
+- “连接网关”会先保存网关配置，必要时生成 pair offer，再启动 upstream。
+- “内网穿透”页提供本地服务名称、host、port、启用开关；保存后只更新配置和展示入口，不承诺端口流量已经可访问。
+
+P3 原生端复制规则：
+
+- 移动端扫码读取 desktop QR 时仍按普通 v2 网关连接保存，不能因为来源是 desktop 而跳过 `targetAgent + routeMode` 驱动选择。
+- 原生端展示 desktop capability 时应以 gateway pair/refresh 返回的 metadata 为准；二维码里的本地端口只用于展示或服务入口，不是可直连地址。
+- 如果后续实现原生 desktop host，必须复刻 `/v1/tunnel/desktop` upstream、`desktop_hello`、`pair_offer` 和 loopback-only 服务校验，不要直接暴露 `0.0.0.0`。

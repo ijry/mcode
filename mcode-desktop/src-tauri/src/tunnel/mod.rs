@@ -1,6 +1,55 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LocalServiceProtocol {
+    Http,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalServiceConfig {
+    pub name: String,
+    pub host: String,
+    pub port: u16,
+    pub protocol: LocalServiceProtocol,
+    pub enabled: bool,
+}
+
+pub fn default_code_service() -> LocalServiceConfig {
+    LocalServiceConfig {
+        name: "Code".to_string(),
+        host: "127.0.0.1".to_string(),
+        port: 1080,
+        protocol: LocalServiceProtocol::Http,
+        enabled: true,
+    }
+}
+
+pub fn validate_local_service_config(config: LocalServiceConfig) -> Result<LocalServiceConfig> {
+    let name = config.name.trim();
+    let host = config.host.trim();
+
+    if name.is_empty() {
+        return Err(anyhow!("service name is required"));
+    }
+    if host != "127.0.0.1" {
+        return Err(anyhow!("P3 only allows loopback host 127.0.0.1"));
+    }
+    if config.port == 0 {
+        return Err(anyhow!("service port is required"));
+    }
+
+    Ok(LocalServiceConfig {
+        name: name.to_string(),
+        host: host.to_string(),
+        port: config.port,
+        protocol: config.protocol,
+        enabled: config.enabled,
+    })
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct TunnelBinding {

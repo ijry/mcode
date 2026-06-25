@@ -18,3 +18,21 @@ it("builds a v2 desktop gateway QR payload", () => {
     pairSecret: "pair-secret",
   })
 })
+
+it("includes normalized custom gateway base url in v2 desktop payloads", () => {
+  expect(
+    buildGatewayQrPayload({
+      name: "Workstation",
+      gatewayProvider: "custom",
+      gatewayBaseUrl: "https://gateway.example.com/",
+      pairCode: "WXYZ-6789",
+      pairSecret: "secret",
+    })
+  ).toMatchObject({
+    version: 2,
+    targetAgent: "mcode-desktop",
+    routeMode: "gateway",
+    gatewayProvider: "custom",
+    gatewayBaseUrl: "https://gateway.example.com",
+  })
+})
