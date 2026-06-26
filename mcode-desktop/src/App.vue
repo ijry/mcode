@@ -1,17 +1,21 @@
 <script setup lang="ts">
 import { computed, ref } from "vue"
+import AgentsPage from "./pages/AgentsPage.vue"
 import ConnectionsPage from "./pages/ConnectionsPage.vue"
 import TunnelPage from "./pages/TunnelPage.vue"
 
 const tabs = [
   { key: "connections", label: "连接" },
+  { key: "agents", label: "智能体" },
   { key: "tunnel", label: "内网穿透" },
 ] as const
 
 const activeTab = ref<(typeof tabs)[number]["key"]>("connections")
-const activeComponent = computed(() =>
-  activeTab.value === "tunnel" ? TunnelPage : ConnectionsPage
-)
+const activeComponent = computed(() => {
+  if (activeTab.value === "agents") return AgentsPage
+  if (activeTab.value === "tunnel") return TunnelPage
+  return ConnectionsPage
+})
 </script>
 
 <template>

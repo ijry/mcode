@@ -1,4 +1,5 @@
 use crate::app_state::{AppState, DiagnosticEntry, GatewayProvider, PairOffer, UpstreamStatus};
+use crate::runtime::CliRuntimeStatus;
 use crate::tunnel::LocalServiceConfig;
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
@@ -13,6 +14,7 @@ pub struct DesktopHealthSnapshot {
     pub gateway_provider: Option<GatewayProvider>,
     pub gateway_base_url: Option<String>,
     pub capabilities: Vec<String>,
+    pub cli_runtimes: Vec<CliRuntimeStatus>,
     pub pair_offer: Option<PairOffer>,
     pub local_services: Vec<LocalServiceConfig>,
     pub diagnostics: Vec<DiagnosticEntry>,
@@ -56,6 +58,11 @@ pub fn build_health_snapshot(state: &AppState) -> DesktopHealthSnapshot {
         gateway_base_url: gateway_config.map(|config| config.base_url),
         capabilities: state
             .capabilities
+            .read()
+            .map(|value| value.clone())
+            .unwrap_or_default(),
+        cli_runtimes: state
+            .cli_runtimes
             .read()
             .map(|value| value.clone())
             .unwrap_or_default(),

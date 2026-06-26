@@ -8,6 +8,7 @@ use tokio_tungstenite::{connect_async, tungstenite::Message};
 use url::Url;
 
 use crate::app_state::{AppState, GatewayConfig, GatewayProvider, PairOffer, UpstreamStatus};
+use crate::runtime::{dispatch_desktop_proxy, refresh_cli_status_into_state};
 use crate::tunnel::{serve_tunnel_request, TunnelHttpRequest, TunnelHttpResponse};
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -67,6 +68,14 @@ pub enum RelayControlFrame {
         #[serde(rename = "requestId")]
         request_id: String,
         request: TunnelHttpRequest,
+    },
+    #[serde(rename = "proxy_request")]
+    ProxyRequest {
+        #[serde(rename = "requestId")]
+        request_id: String,
+        command: String,
+        #[serde(default)]
+        payload: serde_json::Value,
     },
     #[serde(rename = "controller_attached")]
     ControllerAttached {
@@ -131,6 +140,26 @@ pub fn build_tunnel_response_frame(
     }
 }
 
+pub fn build_proxy_response_frame(
+    request_id: &str,
+    result: std::result::Result<serde_json::Value, String>,
+) -> serde_json::Value {
+    match result {
+        Ok(body) => json!({
+            "type": "proxy_response",
+            "requestId": request_id,
+            "ok": true,
+            "body": body,
+        }),
+        Err(error) => json!({
+            "type": "proxy_response",
+            "requestId": request_id,
+            "ok": false,
+            "error": error,
+        }),
+    }
+}
+
 pub async fn connect_upstream(state: Arc<AppState>) -> Result<()> {
     let relay_url = state
         .relay_url
@@ -163,6 +192,8 @@ pub async fn connect_upstream(state: Arc<AppState>) -> Result<()> {
         .read()
         .map(|value| value.clone())
         .unwrap_or_else(|_| "MCode Desktop".to_string());
+    refresh_cli_status_into_state(&state).await;
+
     let capabilities = state
         .capabilities
         .read()
@@ -198,6 +229,19 @@ pub async fn connect_upstream(state: Arc<AppState>) -> Result<()> {
                         .await
                         .map_err(|error| error.to_string());
                     let response = build_tunnel_response_frame(&request_id, result);
+                    writer
+                        .send(Message::Text(response.to_string().into()))
+                        .await?;
+                }
+                RelayControlFrame::ProxyRequest {
+                    request_id,
+                    command,
+                    payload,
+                } => {
+                    let result = dispatch_desktop_proxy(&command, payload)
+                        .await
+                        .map_err(|error| error.to_string());
+                    let response = build_proxy_response_frame(&request_id, result);
                     writer
                         .send(Message::Text(response.to_string().into()))
                         .await?;

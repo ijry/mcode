@@ -13,6 +13,7 @@ import {
   generateDesktopPairOffer,
   getDesktopHealth,
   normalizeGatewayBaseUrl,
+  refreshCliStatus,
   saveLocalService,
 } from "./runtimeApi"
 
@@ -25,6 +26,18 @@ it("loads desktop health through the tauri command boundary", async () => {
 
   await expect(getDesktopHealth()).resolves.toMatchObject({ targetAgent: "mcode-desktop" })
   expect(invokeMock).toHaveBeenCalledWith("desktop_get_health")
+})
+
+it("refreshes cli runtime status through tauri", async () => {
+  invokeMock.mockResolvedValue({
+    targetAgent: "mcode-desktop",
+    cliRuntimes: [{ id: "codex-cli", installed: true }],
+  })
+
+  await expect(refreshCliStatus()).resolves.toMatchObject({
+    cliRuntimes: [{ id: "codex-cli", installed: true }],
+  })
+  expect(invokeMock).toHaveBeenCalledWith("desktop_refresh_cli_status")
 })
 
 it("configures custom gateway through tauri", async () => {

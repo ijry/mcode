@@ -50,6 +50,7 @@ pub fn run() {
             hide_window,
             shutdown_runtime,
             commands::desktop_get_health,
+            commands::desktop_refresh_cli_status,
             commands::desktop_configure_gateway,
             commands::desktop_connect_gateway,
             commands::desktop_generate_pair_offer,

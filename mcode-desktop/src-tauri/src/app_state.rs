@@ -2,7 +2,7 @@ use std::sync::RwLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
-use crate::runtime::CAPABILITY_TUNNEL_AVAILABLE;
+use crate::runtime::{CliRuntimeStatus, CAPABILITY_TUNNEL_AVAILABLE};
 use crate::tunnel::{default_code_service, LocalServiceConfig};
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
@@ -52,6 +52,7 @@ pub struct AppState {
     pub upstream_error: RwLock<Option<String>>,
     pub pair_offer: RwLock<Option<PairOffer>>,
     pub capabilities: RwLock<Vec<String>>,
+    pub cli_runtimes: RwLock<Vec<CliRuntimeStatus>>,
     pub display_name: RwLock<String>,
     pub diagnostics: RwLock<Vec<DiagnosticEntry>>,
     pub local_services: RwLock<Vec<LocalServiceConfig>>,
@@ -87,6 +88,7 @@ impl Default for AppState {
             upstream_error: RwLock::new(None),
             pair_offer: RwLock::new(None),
             capabilities: RwLock::new(vec![CAPABILITY_TUNNEL_AVAILABLE.to_string()]),
+            cli_runtimes: RwLock::new(Vec::new()),
             display_name: RwLock::new("MCode Desktop".to_string()),
             diagnostics: RwLock::new(Vec::new()),
             local_services: RwLock::new(vec![default_code_service()]),

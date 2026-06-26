@@ -1,8 +1,8 @@
 # mcode-desktop
 
-Tauri desktop host for MCode P3.
+Tauri desktop host for MCode gateway pairing, local tunnels, and optional official CLI adapters.
 
-## P3 Scope
+## Scope
 
 - Connect to an official or custom MCode gateway.
 - Generate MCode v2 gateway QR payloads for `targetAgent = "mcode-desktop"`.
@@ -17,11 +17,22 @@ Tauri desktop host for MCode P3.
 - Desktop proxies HTTP requests to `http://127.0.0.1:<port>` and replies with `tunnel_response`.
 - Recent proxy success/error entries are exposed through desktop health diagnostics.
 
-## Not In P3
+## P5 Official CLI Adapter Foundation
+
+- `desktop_refresh_cli_status` detects `codex --version` and `claude --version`.
+- Health snapshots include `cliRuntimes` and installed runtime capabilities.
+- Relay `proxy_request` frames are routed to desktop adapters and answered with `proxy_response`.
+- `acp_list_agents` and `acp_describe_agent_options` expose Codex/Claude entries through the same gateway proxy path.
+- Codex prompt execution uses `codex exec --json` for a basic non-interactive first slice.
+- Claude prompt execution is intentionally not enabled until its command semantics are verified.
+- Official CLI credentials stay local to the desktop machine.
+
+## Not Included Yet
 
 - Raw TCP byte-stream tunnel transport.
-- Claude official CLI adapter.
-- Codex official CLI adapter.
+- Full ACP session lifecycle for official CLIs.
+- Streaming event normalization from Codex/Claude output.
+- Permission request mediation and session restore for official CLIs.
 - Enterprise gateway operations features.
 
 ## Commands

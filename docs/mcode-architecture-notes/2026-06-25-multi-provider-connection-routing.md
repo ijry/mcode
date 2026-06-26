@@ -181,3 +181,34 @@ UI 行为：
 - `0.0.0.0`、LAN IP 或公网 host 仍被拒绝；开放非 loopback 必须等后续阶段加入明确确认与安全策略。
 - 原生 iOS/Android 侧不能直接访问二维码里的本地端口，必须通过 relay authenticated tunnel URL。
 - 原生 desktop host 复制时必须使用同样的 loopback-only 校验和 header 过滤策略。
+
+## P5 Official CLI Adapter Foundation
+
+P5 第一版把官方 CLI 适配边界落在 `mcode-desktop`，而不是让 app 或 relay 直接依赖 Codex/Claude CLI 的本机细节：
+
+- desktop Rust 后端维护 `cliRuntimes`，每项包含 `runtime`、`binary`、`installed`、`version`、`capability`、`status`、`error`。
+- `desktop_refresh_cli_status` 会在本机执行 `<binary> --version`，刷新 health snapshot 与 capabilities。
+- desktop 连接网关前会刷新 CLI 状态，`desktop_hello` 发布已安装 runtime 对应的 `desktop.runtime.codex-cli` / `desktop.runtime.claude-cli` capability。
+- relay 发送 `proxy_request = { requestId, command, payload }`，desktop 返回 `proxy_response = { requestId, ok, body?, error? }`。
+- `acp_list_agents` 返回 `codex` 与 `claude_code` 两个 agent 条目；是否 available 取决于本机 CLI 检测结果。
+- `acp_describe_agent_options` 返回空配置快照：`modes = null`、`config_options = []`，表示 P5 第一版还没有远端可调的 CLI session mode。
+- `acp_prompt` 只有 payload 明确带 `agentType` 时才会路由到对应 adapter；Codex 当前使用 `codex exec --json [--cd <workingDir>] <prompt>` 做非交互执行，Claude 当前只返回明确的未支持/未安装错误。
+
+安全边界：
+
+- 官方 CLI token、账号态和本机凭据只留在 desktop 所在机器。
+- app 与 relay 只看到统一 proxy 命令结果，不接触官方 token。
+- relay 仍然只做网关鉴权、target 查找和帧转发，不理解 Codex/Claude 的 CLI 输出语义。
+
+UI 行为：
+
+- desktop 新增“智能体”页，显示 Codex CLI / Claude CLI 的安装状态、版本、binary、capability 和错误信息。
+- “刷新 CLI 状态”只触发本机检测，不自动发起官方 CLI prompt。
+- 页面文案明确说明 P5 第一版不包含完整会话恢复、权限请求处理和流式事件归一化。
+
+兼容与限制：
+
+- 当前 P5 不改变 mcode-app 的 `targetAgent + routeMode` 连接模型；官方 CLI 仍作为 `mcode-desktop` capability 暴露。
+- 当前 P5 不实现 `acp_connect` 会话生命周期，也不把官方 CLI 输出归一成完整 ACP event stream。
+- 原生 iOS/Android 复制时只需要消费 desktop gateway 连接的 capability 与 proxy 结果；不要在移动端实现官方 CLI 凭据管理。
+- 如果后续官方 CLI 提供稳定 SDK 或服务接口，应只替换 desktop adapter 内部实现，外部 `proxy_request` / `proxy_response` 协议保持不变。

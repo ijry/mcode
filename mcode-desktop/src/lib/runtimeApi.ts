@@ -3,6 +3,7 @@ import type { LocalServiceConfig } from "./localServices"
 
 export type GatewayProvider = "official" | "custom"
 export type UpstreamStatus = "offline" | "connecting" | "online" | "error"
+export type CliRuntimeKind = "codex-cli" | "claude-cli"
 
 export interface PairOffer {
   code: string
@@ -16,6 +17,18 @@ export interface DiagnosticEntry {
   createdAtMs: number
 }
 
+export interface CliRuntimeStatus {
+  runtime: CliRuntimeKind
+  id: CliRuntimeKind | string
+  displayName: string
+  binary: string
+  installed: boolean
+  version?: string | null
+  capability: string
+  status: "available" | "missing" | string
+  error?: string | null
+}
+
 export interface DesktopHealthSnapshot {
   targetAgent: "mcode-desktop"
   targetId: string
@@ -26,6 +39,7 @@ export interface DesktopHealthSnapshot {
   gatewayProvider?: GatewayProvider | null
   gatewayBaseUrl?: string | null
   capabilities: string[]
+  cliRuntimes: CliRuntimeStatus[]
   pairOffer?: PairOffer | null
   localServices: LocalServiceConfig[]
   diagnostics: DiagnosticEntry[]
@@ -41,6 +55,10 @@ export function normalizeGatewayBaseUrl(value: string): string {
 
 export function getDesktopHealth() {
   return invoke<DesktopHealthSnapshot>("desktop_get_health")
+}
+
+export function refreshCliStatus() {
+  return invoke<DesktopHealthSnapshot>("desktop_refresh_cli_status")
 }
 
 export function configureGateway(input: { provider: GatewayProvider; baseUrl: string }) {

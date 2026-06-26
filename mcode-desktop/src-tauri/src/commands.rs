@@ -6,11 +6,20 @@ use crate::app_state::{AppState, GatewayConfig, GatewayProvider, PairOffer};
 use crate::gateway::upstream::{connect_upstream, mark_upstream_connecting, mark_upstream_error};
 use crate::health::{build_health_snapshot, DesktopHealthSnapshot};
 use crate::pairing::{generate_pair_offer, PairOfferRequest};
+use crate::runtime::refresh_cli_status_into_state;
 use crate::tunnel::{validate_local_service_config, LocalServiceConfig};
 
 #[tauri::command]
 pub fn desktop_get_health(state: State<'_, Arc<AppState>>) -> DesktopHealthSnapshot {
     build_health_snapshot(state.inner().as_ref())
+}
+
+#[tauri::command]
+pub async fn desktop_refresh_cli_status(
+    state: State<'_, Arc<AppState>>,
+) -> Result<DesktopHealthSnapshot, String> {
+    refresh_cli_status_into_state(state.inner().as_ref()).await;
+    Ok(build_health_snapshot(state.inner().as_ref()))
 }
 
 #[tauri::command]

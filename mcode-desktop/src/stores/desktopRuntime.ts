@@ -5,7 +5,9 @@ import {
   generateDesktopPairOffer,
   getDesktopHealth,
   OFFICIAL_GATEWAY_BASE_URL,
+  refreshCliStatus as refreshCliStatusCommand,
   saveLocalService,
+  type CliRuntimeStatus,
   type DesktopHealthSnapshot,
   type DiagnosticEntry,
   type GatewayProvider,
@@ -37,6 +39,7 @@ export const useDesktopRuntimeStore = defineStore("desktopRuntime", {
     gatewayProvider: "official" as GatewayProvider,
     gatewayBaseUrl: OFFICIAL_GATEWAY_BASE_URL,
     capabilities: ["desktop.tunnel.available"] as string[],
+    cliRuntimes: [] as CliRuntimeStatus[],
     pairCode: "",
     pairSecret: "",
     qrPayload: "",
@@ -54,6 +57,7 @@ export const useDesktopRuntimeStore = defineStore("desktopRuntime", {
       this.displayName = health.displayName
       this.version = health.version
       this.capabilities = health.capabilities
+      this.cliRuntimes = health.cliRuntimes || []
       if (health.gatewayProvider) {
         this.gatewayProvider = health.gatewayProvider
       }
@@ -77,6 +81,16 @@ export const useDesktopRuntimeStore = defineStore("desktopRuntime", {
       } catch (error) {
         this.relayStatus = "error"
         this.upstreamError = error instanceof Error ? error.message : String(error)
+      }
+    },
+    async refreshCliStatus() {
+      try {
+        const health = await refreshCliStatusCommand()
+        this.applyHealthSnapshot(health)
+        return health
+      } catch (error) {
+        this.upstreamError = error instanceof Error ? error.message : String(error)
+        throw error
       }
     },
     async setGatewayProvider(provider: GatewayProvider) {
