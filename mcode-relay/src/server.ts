@@ -12,6 +12,7 @@ import {
 } from "./auth/tokens.js"
 import { PairingStore } from "./pairing/store.js"
 import type { TargetRecord } from "./pairing/store.js"
+import { buildGatewayHealth, buildGatewayInfo } from "./gateway/info.js"
 import { RelayHub } from "./tunnel/hub.js"
 import { normalizeTunnelPath } from "./tunnel/httpProxy.js"
 import type { TargetAgent, TargetMetadata, TunnelHttpResponse } from "./protocol/types.js"
@@ -153,7 +154,9 @@ export async function buildRelayApp(context = createRelayContext()): Promise<Fas
   const app = Fastify({ logger: false })
   await app.register(websocket)
 
-  app.get("/health", async () => ({ status: "ok" }))
+  app.get("/health", async () => buildGatewayHealth(context))
+
+  app.get("/v1/gateway/info", async () => buildGatewayInfo(context))
 
   app.post("/v1/pair", async (req, reply) => {
     const body = req.body as {

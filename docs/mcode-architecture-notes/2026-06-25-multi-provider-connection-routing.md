@@ -106,6 +106,24 @@ desktop 运行方式：
 - 原生新实现不需要复制 web 端这层旧字段别名；只有在同一个客户端里仍存在旧页面或旧路由读取逻辑时，才需要做相同兼容桥接。
 - 当历史 `codeg/gateway` 记录在 pair 后被识别成 `mcode-desktop` 时，持久化必须按“配对前的连接键”回写同一条记录，再把新 `targetAgent` 保存进去；否则会因为主键从 `codeg` 变成 `mcode-desktop` 而丢失升级结果。
 
+## P6 Enterprise Gateway Behavior
+
+P6 第一版只做企业自部署网关的最小闭环，不引入租户、设备管理或连接吊销后台：
+
+- `mcode-relay` 继续沿用现有 pair / session refresh / proxy / events / tunnel 协议。
+- 新增公开诊断接口 `GET /health` 和 `GET /v1/gateway/info`，用于部署检查、版本检查和客户端兼容诊断。
+- 公开健康信息只暴露网关名称、`PUBLIC_BASE_URL`、`DEPLOYMENT_ENV`、`LOG_POLICY`、`AUDIT_POLICY`、版本、协议版本、统计和安全警告。
+- `productionReady` 仅表示当前部署满足最小生产安全条件，不代表已经具备租户隔离、设备吊销或审计后台。
+- 自部署网关与官方网关在协议上保持一致；区别只在部署位置、域名、TLS 和运维策略。
+- 原生 iOS/Android 复制时，只把 `/v1/gateway/info` 当作可选诊断信息，不应把它变成连接必需依赖。
+
+安全与可观测边界：
+
+- 公共健康/信息接口不得泄露 secret、token、pair code、session id、target name 或客户端 IP。
+- `JWT_SECRET` 默认值、缺失 `PUBLIC_BASE_URL`、以及 `ALLOW_DEV_SECRETS=true` 都应在健康接口里显式给出 warning。
+- `stats` 只统计 targets、sessions 和在线 desktop 数量，不增加用户/设备维度。
+- 如果未来需要租户、设备、吊销和访问策略，这些应单独进入下一阶段，不回灌到 P6 的公共接口里。
+
 ## Native iOS/Android Replication Guidance
 
 原生端应完全复刻以下规则：

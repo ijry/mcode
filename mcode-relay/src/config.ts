@@ -1,5 +1,17 @@
 import { z } from "zod"
 
+const gatewayProviderSchema = z.enum(["official", "custom"])
+const deploymentEnvSchema = z.enum(["development", "staging", "production"])
+
+const booleanEnvSchema = z.preprocess((value) => {
+  if (value === undefined || value === "") return undefined
+  if (typeof value !== "string") return value
+  const normalized = value.trim().toLowerCase()
+  if (["true", "1", "yes", "on"].includes(normalized)) return true
+  if (["false", "0", "no", "off"].includes(normalized)) return false
+  return value
+}, z.boolean())
+
 const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(8787),
   HOST: z.string().default("0.0.0.0"),
@@ -7,6 +19,13 @@ const envSchema = z.object({
   PAIRING_CODE_TTL_SECONDS: z.coerce.number().int().positive().default(300),
   ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(900),
   REFRESH_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(60 * 60 * 24 * 14),
+  GATEWAY_NAME: z.string().trim().min(1).default("MCode Gateway"),
+  PUBLIC_BASE_URL: z.string().trim().transform((value) => value.replace(/\/+$/, "")).default(""),
+  GATEWAY_PROVIDER: gatewayProviderSchema.default("custom"),
+  DEPLOYMENT_ENV: deploymentEnvSchema.default("development"),
+  LOG_POLICY: z.string().trim().min(1).default("standard"),
+  AUDIT_POLICY: z.string().trim().min(1).default("disabled"),
+  ALLOW_DEV_SECRETS: booleanEnvSchema.default(true),
 })
 
 export type RelayConfig = z.infer<typeof envSchema>
