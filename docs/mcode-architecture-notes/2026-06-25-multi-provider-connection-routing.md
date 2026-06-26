@@ -1,5 +1,9 @@
 # 2026-06-25 Multi-Provider Connection Routing
 
+## Roadmap Status
+
+The original conversation-level roadmap was P1-P6. The first `2026-06-25` implementation plan covered the foundation, but P3-P6 were later split into separate `2026-06-26` plans. Use `docs/superpowers/plans/2026-06-25-mcode-p1-p6-roadmap-status.md` as the canonical phase-status index.
+
 ## Architecture
 
 `mcode` 的连接体系从单一 `direct | relay` 升级为双维模型：
