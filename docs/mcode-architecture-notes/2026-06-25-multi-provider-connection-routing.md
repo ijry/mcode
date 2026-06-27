@@ -802,6 +802,7 @@ P18 第一版应采用保守的 process streaming adapter：
 P19 计划补齐 P10/P13 之后仍偏 first-slice 的可靠性边界，目标是让 Desktop gateway 模式在断线、relay 重启、Desktop 重启后具备明确恢复语义和诊断状态。外部连接模型不变：移动端仍连接 `targetAgent = mcode-desktop`，relay 仍不理解 Codex/Claude 语义。
 
 设计文档：`docs/superpowers/specs/2026-06-28-mcode-p19-desktop-relay-recovery-design.md`。
+实施计划：`docs/superpowers/plans/2026-06-28-mcode-p19-desktop-relay-recovery.md`。
 
 建议分三层实现：
 
