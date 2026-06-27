@@ -820,3 +820,4 @@ P19 implementation progress:
 
 - Task 1 已完成 relay replay primitives：`RelayEventFrame` 增加可选 `localEventId`，`ReplayBuffer` 支持 metadata、window miss 查询、snapshot/restore，`ReplayStore` 以 `schema = "mcode.relay.replay.v1"` 做 bounded JSON 持久化基础，`REPLAY_STORE_PATH` 成为独立配置项。
 - Task 2 已完成 relay recovery protocol integration：`RelayHub` 可从 replay store 恢复并持久化 replay window，`/v1/events` ready frame 暴露 replay metadata 并在窗口缺失时发送 `replay_miss`，desktop `event_push.localEventId` 会被 relay ACK 回传；proxy/tunnel/TCP 运行时失败使用 `target_offline`、`desktop_replaced`、`request_timeout` 等分类 code。
+- Task 3 已完成 desktop recovery queue primitives：新增 `recovery.rs`，提供 bounded `OutboundEventQueue`、`QueuedOutboundEvent`、`localEventId` ACK 记录和 overflow 统计；Desktop health/Pinia/runtimeApi 暴露 recovery storage、queued event、last ACK local id、last relay event id、replay support、interrupted session 和 stale interaction 诊断字段。

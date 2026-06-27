@@ -53,6 +53,14 @@ export const useDesktopRuntimeStore = defineStore("desktopRuntime", {
     upstreamReconnectAttempt: 0,
     upstreamNextRetryDelayMs: null as number | null,
     lastAckEventId: null as number | null,
+    recoveryStorageMode: "memory",
+    queuedOutboundEventCount: 0,
+    oldestQueuedLocalEventId: null as number | null,
+    lastAckLocalEventId: null as number | null,
+    lastRelayEventId: null as number | null,
+    replaySupported: false,
+    interruptedSessionCount: 0,
+    stalePendingInteractionCount: 0,
     activeControllerId: "",
     shutdownRequested: false,
     lastMessage: "",
@@ -87,7 +95,15 @@ export const useDesktopRuntimeStore = defineStore("desktopRuntime", {
       this.diagnostics = health.diagnostics || []
       this.upstreamReconnectAttempt = health.upstreamReconnectAttempt || 0
       this.upstreamNextRetryDelayMs = health.upstreamNextRetryDelayMs ?? null
-      this.lastAckEventId = health.lastAckEventId ?? null
+      this.recoveryStorageMode = health.recoveryStorageMode || "memory"
+      this.queuedOutboundEventCount = health.queuedOutboundEventCount || 0
+      this.oldestQueuedLocalEventId = health.oldestQueuedLocalEventId ?? null
+      this.lastAckLocalEventId = health.lastAckLocalEventId ?? null
+      this.lastRelayEventId = health.lastRelayEventId ?? health.lastAckEventId ?? null
+      this.replaySupported = Boolean(health.replaySupported)
+      this.interruptedSessionCount = health.interruptedSessionCount || 0
+      this.stalePendingInteractionCount = health.stalePendingInteractionCount || 0
+      this.lastAckEventId = this.lastRelayEventId
       this.activeControllerId = health.activeControllerId || ""
       this.shutdownRequested = Boolean(health.shutdownRequested)
     },

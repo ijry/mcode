@@ -7,6 +7,7 @@ use tokio::sync::oneshot;
 use tokio::sync::Mutex as AsyncMutex;
 use uuid::Uuid;
 
+use crate::recovery::{OutboundEventQueue, DEFAULT_OUTBOUND_QUEUE_LIMIT};
 use crate::runtime::{
     codex_cli::CodexAppServerSession, CliPendingInteraction, CliRuntimeSession, CliRuntimeStatus,
     CAPABILITY_TUNNEL_AVAILABLE,
@@ -87,6 +88,11 @@ pub struct AppState {
     pub upstream_reconnect_attempt: RwLock<u32>,
     pub upstream_next_retry_delay_ms: RwLock<Option<u64>>,
     pub last_ack_event_id: RwLock<Option<u64>>,
+    pub last_ack_local_event_id: RwLock<Option<u64>>,
+    pub last_relay_event_id: RwLock<Option<u64>>,
+    pub outbound_event_queue: Mutex<OutboundEventQueue>,
+    pub recovery_storage_path: RwLock<Option<String>>,
+    pub replay_supported: RwLock<bool>,
     pub active_controller_id: RwLock<Option<String>>,
     pub shutdown_requested: AtomicBool,
 }
@@ -133,6 +139,16 @@ impl Default for AppState {
             upstream_reconnect_attempt: RwLock::new(0),
             upstream_next_retry_delay_ms: RwLock::new(None),
             last_ack_event_id: RwLock::new(None),
+            last_ack_local_event_id: RwLock::new(None),
+            last_relay_event_id: RwLock::new(None),
+            outbound_event_queue: Mutex::new(OutboundEventQueue::new(DEFAULT_OUTBOUND_QUEUE_LIMIT)),
+            recovery_storage_path: RwLock::new(
+                std::env::var("MCODE_DESKTOP_STATE_PATH")
+                    .ok()
+                    .map(|value| value.trim().to_string())
+                    .filter(|value| !value.is_empty()),
+            ),
+            replay_supported: RwLock::new(false),
             active_controller_id: RwLock::new(None),
             shutdown_requested: AtomicBool::new(false),
         }

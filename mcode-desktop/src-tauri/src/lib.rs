@@ -4,6 +4,7 @@ pub mod commands;
 pub mod gateway;
 pub mod health;
 pub mod pairing;
+pub mod recovery;
 pub mod runtime;
 pub mod tray;
 pub mod tunnel;

@@ -1,7 +1,9 @@
 use std::sync::atomic::Ordering;
 
 use crate::app_state::{AppState, DiagnosticEntry, GatewayProvider, PairOffer, UpstreamStatus};
-use crate::runtime::{CliPendingInteraction, CliRuntimeSession, CliRuntimeStatus};
+use crate::runtime::{
+    CliPendingInteraction, CliRuntimeSession, CliRuntimeStatus, CliSessionStatus,
+};
 use crate::tunnel::LocalServiceConfig;
 
 #[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
@@ -25,6 +27,14 @@ pub struct DesktopHealthSnapshot {
     pub upstream_reconnect_attempt: u32,
     pub upstream_next_retry_delay_ms: Option<u64>,
     pub last_ack_event_id: Option<u64>,
+    pub recovery_storage_mode: String,
+    pub queued_outbound_event_count: usize,
+    pub oldest_queued_local_event_id: Option<u64>,
+    pub last_ack_local_event_id: Option<u64>,
+    pub last_relay_event_id: Option<u64>,
+    pub replay_supported: bool,
+    pub interrupted_session_count: usize,
+    pub stale_pending_interaction_count: usize,
     pub active_controller_id: Option<String>,
     pub shutdown_requested: bool,
 }
@@ -39,6 +49,37 @@ pub fn build_health_snapshot(state: &AppState) -> DesktopHealthSnapshot {
         .read()
         .ok()
         .and_then(|value| value.clone());
+    let cli_sessions = state
+        .cli_sessions
+        .read()
+        .map(|value| value.clone())
+        .unwrap_or_default();
+    let cli_pending_interactions = state
+        .cli_pending_interactions
+        .read()
+        .map(|value| value.clone())
+        .unwrap_or_default();
+    let queue_snapshot = state.outbound_event_queue.lock().ok().map(|queue| {
+        (
+            queue.pending().len(),
+            queue.oldest_local_event_id(),
+            queue.last_ack_local_event_id(),
+            queue.last_relay_event_id(),
+        )
+    });
+    let last_relay_event_id = state
+        .last_relay_event_id
+        .read()
+        .map(|value| *value)
+        .unwrap_or(None)
+        .or_else(|| queue_snapshot.as_ref().and_then(|(_, _, _, relay_id)| *relay_id))
+        .or_else(|| {
+            state
+                .last_ack_event_id
+                .read()
+                .map(|value| *value)
+                .unwrap_or(None)
+        });
 
     DesktopHealthSnapshot {
         target_agent: "mcode-desktop".to_string(),
@@ -77,16 +118,8 @@ pub fn build_health_snapshot(state: &AppState) -> DesktopHealthSnapshot {
             .read()
             .map(|value| value.clone())
             .unwrap_or_default(),
-        cli_sessions: state
-            .cli_sessions
-            .read()
-            .map(|value| value.clone())
-            .unwrap_or_default(),
-        cli_pending_interactions: state
-            .cli_pending_interactions
-            .read()
-            .map(|value| value.clone())
-            .unwrap_or_default(),
+        cli_sessions: cli_sessions.clone(),
+        cli_pending_interactions: cli_pending_interactions.clone(),
         pair_offer: state.pair_offer.read().ok().and_then(|value| value.clone()),
         local_services: state
             .local_services
@@ -113,6 +146,40 @@ pub fn build_health_snapshot(state: &AppState) -> DesktopHealthSnapshot {
             .read()
             .map(|value| *value)
             .unwrap_or(None),
+        recovery_storage_mode: if state
+            .recovery_storage_path
+            .read()
+            .ok()
+            .and_then(|value| value.clone())
+            .is_some()
+        {
+            "json-file".to_string()
+        } else {
+            "memory".to_string()
+        },
+        queued_outbound_event_count: queue_snapshot
+            .as_ref()
+            .map(|(count, _, _, _)| *count)
+            .unwrap_or(0),
+        oldest_queued_local_event_id: queue_snapshot
+            .as_ref()
+            .and_then(|(_, oldest, _, _)| *oldest),
+        last_ack_local_event_id: state
+            .last_ack_local_event_id
+            .read()
+            .map(|value| *value)
+            .unwrap_or(None)
+            .or_else(|| queue_snapshot.as_ref().and_then(|(_, _, local_id, _)| *local_id)),
+        last_relay_event_id,
+        replay_supported: state.replay_supported.read().map(|value| *value).unwrap_or(false),
+        interrupted_session_count: cli_sessions
+            .iter()
+            .filter(|session| session.status == CliSessionStatus::Interrupted)
+            .count(),
+        stale_pending_interaction_count: cli_pending_interactions
+            .iter()
+            .filter(|interaction| interaction.status == "stale")
+            .count(),
         active_controller_id: state
             .active_controller_id
             .read()

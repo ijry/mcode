@@ -11,6 +11,7 @@ export type CliSessionStatus =
   | "canceled"
   | "disconnected"
   | "error"
+  | "interrupted"
 
 export interface PairOffer {
   code: string
@@ -85,6 +86,14 @@ export interface DesktopHealthSnapshot {
   upstreamReconnectAttempt: number
   upstreamNextRetryDelayMs?: number | null
   lastAckEventId?: number | null
+  recoveryStorageMode?: "memory" | "json-file" | string
+  queuedOutboundEventCount?: number
+  oldestQueuedLocalEventId?: number | null
+  lastAckLocalEventId?: number | null
+  lastRelayEventId?: number | null
+  replaySupported?: boolean
+  interruptedSessionCount?: number
+  stalePendingInteractionCount?: number
   activeControllerId?: string | null
   shutdownRequested: boolean
 }

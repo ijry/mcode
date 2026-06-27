@@ -89,6 +89,7 @@ pub enum CliSessionStatus {
     Canceled,
     Disconnected,
     Error,
+    Interrupted,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
