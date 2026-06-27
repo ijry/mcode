@@ -1,4 +1,5 @@
 import type { ConnectionRecordV2 } from "@/services/connectionSchema"
+import { getDesktopCapabilityLabels } from "@/agents/mcode-desktop/capabilities"
 
 export function getConnectionTargetLabel(
   connection: Pick<ConnectionRecordV2, "targetAgent">
@@ -51,10 +52,10 @@ export function getConnectionCapabilityChips(
   connection: Pick<ConnectionRecordV2, "targetAgent" | "targetProfile">
 ): string[] {
   const capabilities = connection.targetProfile?.capabilities || []
+  if (connection.targetAgent === "mcode-desktop") {
+    return getDesktopCapabilityLabels(capabilities)
+  }
   const labels = capabilities.flatMap((value) => {
-    if (value === "desktop.runtime.codex-cli") return ["Codex CLI"]
-    if (value === "desktop.runtime.claude-cli") return ["Claude CLI"]
-    if (value === "desktop.tunnel.available") return ["内网穿透"]
     return []
   })
   return Array.from(new Set(labels))
