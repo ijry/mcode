@@ -796,3 +796,21 @@ P18 第一版应采用保守的 process streaming adapter：
 - 原生端仍只通过 desktop gateway 调用 `acp_connect`、`acp_prompt`、`acp_cancel`、`acp_disconnect` 和 interaction response commands。
 - 不需要直接启动 Claude CLI，也不需要理解 Claude 输出格式。
 - 对 `protocol = claude-cli-stdio` 或后续更具体协议名只做诊断展示，不作为业务分支条件。
+
+## P19 Planned Desktop/Relay Recovery Layer
+
+P19 计划补齐 P10/P13 之后仍偏 first-slice 的可靠性边界，目标是让 Desktop gateway 模式在断线、relay 重启、Desktop 重启后具备明确恢复语义和诊断状态。外部连接模型不变：移动端仍连接 `targetAgent = mcode-desktop`，relay 仍不理解 Codex/Claude 语义。
+
+设计文档：`docs/superpowers/specs/2026-06-28-mcode-p19-desktop-relay-recovery-design.md`。
+
+建议分三层实现：
+
+- relay replay 增强：保留现有 per-target ReplayBuffer，增加 replay metadata、`replay_miss`、`REPLAY_STORE_PATH` 可选 JSON 持久化和 replay storage health/info。
+- desktop outbound queue：runtime event 先进入带 `localEventId` 的本地队列，再发送 `event_push`；relay 回 ACK 时带回 `localEventId` 和 relay `eventId`，desktop 只按本地 id 删除已确认事件，重连后按顺序 replay 未 ACK 事件。
+- desktop runtime snapshot：`MCODE_DESKTOP_STATE_PATH` 可选持久化 target/gateway/local services、CLI session metadata、pending interactions、`lastAckLocalEventId`、`lastRelayEventId`、bounded diagnostics；Desktop 重启后 running session 标记为 interrupted，不假装 live process 可恢复。
+
+兼容要求：
+
+- 现有 `event_push`、`ack`、`proxy_response` 继续可用；新增字段只能是 additive。
+- 不持久化官方 CLI token、app/relay access token、pair code 或 live process handle。
+- 原生 iOS/Android 如收到 `replay_miss`，应提示“部分事件可能缺失，刷新会话状态”，而不是把 Codex/Claude 当 direct target 重连。
