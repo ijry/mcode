@@ -1,4 +1,4 @@
-# MCode P7-P17 Roadmap Status
+# MCode P7-P18 Roadmap Status
 
 ## Purpose
 
@@ -21,6 +21,7 @@ that was intentionally left out of the first P1-P6 slices.
 | P15 | Official CLI interaction responses: capture permission/question pending state and resolve through MCode proxy commands without depending on unstable CLI stdin protocols. | Implemented first slice. Desktop records pending permission/question events, exposes `acp_respond_permission` and `acp_respond_question`, emits resolved ACP events, and shows pending interaction diagnostics. |
 | P16 | Codex app-server JSON-RPC control channel: use `codex app-server --listen stdio://` for live interactive permission/question flows while keeping `codex exec --json` fallback. | Implemented first slice. Desktop has a newline JSON-RPC stdio transport, optional Codex app-server path, live interaction waiters, and app-server notification to ACP event conversion. |
 | P17 | Codex app-server session reuse: keep one app-server client per Desktop CLI session, reuse provider thread ids, and cancel active turns through `turn/interrupt`. | Implemented first slice. Desktop stores per-session Codex app-server handles, reuses `thread/start` results across prompts, exposes provider thread/turn diagnostics, interrupts active turns on `acp_cancel`, and stops the process on `acp_disconnect`. |
+| P18 | Claude CLI streaming session adapter: execute Claude official CLI prompts through Desktop with stdout event streaming, cancellation, diagnostics, and P15 pending-interaction integration. | Implemented first slice. Desktop runs Claude print-mode through a process-based adapter, streams normalized events, kills active Claude prompts on `acp_cancel`, and keeps live-control write-back disabled until a stable Claude control channel is verified. |
 
 ## P7 Implemented Scope
 
@@ -486,6 +487,67 @@ Current limitations:
   validated outside tests.
 - Only Codex uses the live app-server control channel; Claude remains on the
   conservative adapter path.
+
+## P18 Implemented Scope
+
+P18 makes the Claude official CLI adapter usable without changing MCode app or
+relay protocols. Claude still remains a Desktop capability under
+`targetAgent = mcode-desktop`; it is not a mobile-side direct target.
+
+Default command behavior:
+
+- Production binary defaults to `claude`.
+- Test override uses `MCODE_DESKTOP_TEST_CLAUDE_COMMAND`.
+- Deployment override uses `MCODE_DESKTOP_CLAUDE_COMMAND`.
+- Desktop builds the default print-mode shape as `claude -p <prompt>
+  --output-format stream-json --verbose --include-partial-messages`.
+- If the payload includes `permissionMode` / `permission_mode`, Desktop maps it
+  to Claude `--permission-mode`.
+
+Implemented behavior:
+
+- `acp_prompt` works for `agentType = claude_code`.
+- Desktop reads Claude stdout line by line and emits normalized ACP-style events
+  through the existing realtime event sink.
+- Final proxy responses include `runtime = "claude-cli"`,
+  `protocol = "claude-cli-stdio"`, `status`, `canceled`, `exitCode`,
+  `stderrPreview`, `stdout`, `stderr`, `events`, `eventCount`, and
+  `streamedEventCount`.
+- `acp_cancel` uses the existing `cli_processes` cancel registry to terminate
+  an active Claude child process.
+- Session snapshots record the protocol, last event time, exit code, stderr
+  preview, and canceled/completed status through the existing P8/P14 session
+  diagnostics.
+- Permission/question records recognized in Claude output are captured into
+  P15 `cliPendingInteractions`.
+- `acp_respond_permission` and `acp_respond_question` resolve the MCode-visible
+  pending state and emit resolved events, with `liveResolved = false`.
+
+Compatibility:
+
+- Relay wire protocol is unchanged.
+- MCode app continues to consume `/v1/events` and `/v1/proxy/:command`.
+- No official Claude credentials are sent to app or relay.
+- Codex streaming and Codex app-server behavior remain unchanged.
+
+Current limitations:
+
+- P18 does not implement live write-back into Claude stdin or a Claude server
+  protocol.
+- The adapter relies on Claude CLI print-mode output remaining compatible enough
+  for defensive normalization.
+- A future phase can replace the internal process adapter with a verified
+  Claude SDK/server protocol without changing app or relay.
+
+Native iOS/Android guidance:
+
+- Native clients should treat Claude exactly like other Desktop runtime
+  sessions: `acp_connect`, `acp_prompt`, `/v1/events`, `acp_cancel`,
+  interaction response commands, and `acp_disconnect`.
+- Native clients should display `protocol = claude-cli-stdio` only as
+  diagnostics, not as a business-logic branch.
+- Native clients must not start Claude CLI directly or manage official Claude
+  credentials.
 
 ## Tracking Rules
 

@@ -757,13 +757,13 @@ UI 行为：
 - 用户断开 desktop CLI session 时应调用 `acp_disconnect`，以便 desktop 释放本机官方 CLI process。
 - 如果 session snapshot 显示 `appServerActive = false` 但连接仍有效，原生端可以提示下一次 prompt 会自动重建本机 Codex app-server。
 
-## P18 Planned Claude CLI Streaming Session Adapter
+## P18 Claude CLI Streaming Session Adapter Behavior
 
-P18 计划把 Claude 官方 CLI adapter 从“检测 + unsupported error”推进到可用的 Desktop runtime。外部连接模型不变：Claude 官方 CLI 仍是 `targetAgent = mcode-desktop` 下的 capability，不新增移动端 `targetAgent = claude`，官方凭据和本机进程仍只留在 desktop。
+P18 把 Claude 官方 CLI adapter 从“检测 + unsupported error”推进到可用的 Desktop runtime。外部连接模型不变：Claude 官方 CLI 仍是 `targetAgent = mcode-desktop` 下的 capability，不新增移动端 `targetAgent = claude`，官方凭据和本机进程仍只留在 desktop。
 
 Implementation plan: `docs/superpowers/plans/2026-06-28-mcode-p18-claude-cli-streaming.md`。Claude 默认 print-mode 命令参考 Anthropic Claude Code CLI reference：`claude -p`、`--output-format stream-json`、`--verbose`、`--include-partial-messages` 和 `--permission-mode`。
 
-建议链路：
+执行链路：
 
 ```text
 MCode app acp_connect(agentType=claude_code)
@@ -777,17 +777,18 @@ MCode app acp_prompt(sessionId, agentType=claude_code)
 
 P18 第一版应采用保守的 process streaming adapter：
 
-- 支持测试覆盖 `MCODE_DESKTOP_TEST_CLAUDE_COMMAND`，生产默认 binary 仍是 `claude`。
+- 支持测试覆盖 `MCODE_DESKTOP_TEST_CLAUDE_COMMAND`，部署覆盖 `MCODE_DESKTOP_CLAUDE_COMMAND`，生产默认 binary 仍是 `claude`。
 - `acp_prompt` 对 `claude_code` 执行真实 Claude CLI prompt，不再返回 unsupported。
+- 默认参数为 `-p <prompt> --output-format stream-json --verbose --include-partial-messages`；payload 的 `permissionMode` / `permission_mode` 会映射到 Claude `--permission-mode`。
 - stdout 按行实时归一化为 `stream_batch`、`tool_call`、`tool_call_update`、`permission_request`、`question_request`、`usage_update`、`status_changed`、`turn_complete` 等既有事件。
-- stderr 进入 session diagnostics，最终 response 包含 `exitCode`、`stderrPreview`、`eventCount`、`streamedEventCount`、`canceled`。
+- stderr 进入 session diagnostics，最终 response 包含 `runtime = claude-cli`、`protocol = claude-cli-stdio`、`exitCode`、`stderrPreview`、`eventCount`、`streamedEventCount`、`canceled`。
 - `acp_cancel` 复用 `cli_processes` 注册表终止活动 Claude 子进程。
 - 如果 Claude 输出里出现 permission/question request，desktop 复用 P15 的 `cliPendingInteractions` 和 response proxy commands 形成 MCode 可见闭环。
 
 兼容与限制：
 
 - relay wire protocol 不变，仍只转发 `proxy_request`、`proxy_response` 和 `event_push`。
-- P18 不猜测 Claude stdin/live-control 私有协议；如果没有验证稳定控制通道，`acp_respond_permission` / `acp_respond_question` 只解析 MCode 可见 pending 状态并发 resolved event，`liveResolved = false`。
+- P18 不猜测 Claude stdin/live-control 私有协议；`acp_respond_permission` / `acp_respond_question` 只解析 MCode 可见 pending 状态并发 resolved event，`liveResolved = false`。
 - P18 不要求 Claude 达到 Codex app-server 的 session reuse 能力；如果后续 Claude 提供稳定 SDK、stdio server 或 live-control 协议，应在 desktop adapter 内部替换实现，不影响 app/relay。
 
 原生 iOS/Android 复制时：
