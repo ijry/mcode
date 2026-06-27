@@ -9,7 +9,13 @@ pub const MENU_ID_SHUTDOWN_RUNTIME: &str = "shutdown_runtime";
 const TRAY_ICON_ID: &str = "mcode-desktop-tray";
 
 pub fn build_tray_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
-    let show_item = MenuItem::with_id(app, MENU_ID_SHOW_WINDOW, "Show MCode Desktop", true, None::<&str>)?;
+    let show_item = MenuItem::with_id(
+        app,
+        MENU_ID_SHOW_WINDOW,
+        "Show MCode Desktop",
+        true,
+        None::<&str>,
+    )?;
     let hide_item = MenuItem::with_id(app, MENU_ID_HIDE_WINDOW, "Hide Window", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
     let shutdown_item = MenuItem::with_id(

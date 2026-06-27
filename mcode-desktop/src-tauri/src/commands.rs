@@ -3,7 +3,9 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
 
 use crate::app_state::{AppState, GatewayConfig, GatewayProvider, PairOffer};
-use crate::gateway::upstream::{connect_upstream, mark_upstream_connecting, mark_upstream_error};
+use crate::gateway::upstream::{
+    connect_upstream_until_stopped, mark_upstream_connecting, mark_upstream_error,
+};
 use crate::health::{build_health_snapshot, DesktopHealthSnapshot};
 use crate::pairing::{generate_pair_offer, PairOfferRequest};
 use crate::runtime::refresh_cli_status_into_state;
@@ -61,7 +63,7 @@ pub async fn desktop_connect_gateway(
     let response_state = Arc::clone(&state);
     let runner = Arc::clone(&state);
     tauri::async_runtime::spawn(async move {
-        if let Err(error) = connect_upstream(runner).await {
+        if let Err(error) = connect_upstream_until_stopped(runner).await {
             let message = error.to_string();
             mark_upstream_error(state.as_ref(), message.clone()).await;
             app.emit("desktop-upstream-error", message).ok();

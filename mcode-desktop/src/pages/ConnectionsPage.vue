@@ -24,6 +24,10 @@ const formattedQrPayload = computed(() => {
   }
 })
 
+const retryDelayText = computed(() =>
+  runtime.upstreamNextRetryDelayMs === null ? "无" : `${runtime.upstreamNextRetryDelayMs}ms`
+)
+
 async function runAction(action: "refresh" | "pair" | "connect", task: () => Promise<unknown>) {
   busyAction.value = action
   runtime.lastMessage = ""
@@ -63,6 +67,23 @@ onMounted(() => {
         <span>Target ID</span>
         <strong>{{ runtime.targetId || "待生成" }}</strong>
       </div>
+      <div class="status-card">
+        <span>Reconnect</span>
+        <strong>{{ runtime.upstreamReconnectAttempt }}</strong>
+      </div>
+      <div class="status-card">
+        <span>Next Retry</span>
+        <strong>{{ retryDelayText }}</strong>
+      </div>
+      <div class="status-card">
+        <span>Last ACK</span>
+        <strong>{{ runtime.lastAckEventId ?? "无" }}</strong>
+      </div>
+    </section>
+
+    <section class="diagnostic-strip">
+      <span>Controller: {{ runtime.activeControllerId || "未绑定" }}</span>
+      <span>Shutdown: {{ runtime.shutdownRequested ? "requested" : "running" }}</span>
     </section>
 
     <section class="panel-card">
@@ -222,6 +243,19 @@ p {
   overflow-wrap: anywhere;
   color: #22351d;
   font-size: 22px;
+}
+
+.diagnostic-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  border: 1px solid rgba(45, 68, 39, 0.12);
+  border-radius: 18px;
+  padding: 14px 16px;
+  background: rgba(255, 255, 255, 0.46);
+  color: #44543e;
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .pair-card strong {

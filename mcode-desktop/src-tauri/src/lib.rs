@@ -11,7 +11,7 @@ pub mod tunnel;
 use std::sync::Arc;
 
 use app_state::AppState;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 
 #[tauri::command]
 fn show_window(app: AppHandle) -> Result<(), String> {
@@ -25,6 +25,9 @@ fn hide_window(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 fn shutdown_runtime(app: AppHandle) {
+    if let Some(state) = app.try_state::<Arc<AppState>>() {
+        gateway::request_upstream_shutdown(state.inner().as_ref());
+    }
     app.exit(0)
 }
 
@@ -42,7 +45,12 @@ pub fn run() {
             tray::MENU_ID_HIDE_WINDOW => {
                 let _ = tray::hide_main_window(app);
             }
-            tray::MENU_ID_SHUTDOWN_RUNTIME => app.exit(0),
+            tray::MENU_ID_SHUTDOWN_RUNTIME => {
+                if let Some(state) = app.try_state::<Arc<AppState>>() {
+                    gateway::request_upstream_shutdown(state.inner().as_ref());
+                }
+                app.exit(0);
+            }
             _ => {}
         })
         .invoke_handler(tauri::generate_handler![
