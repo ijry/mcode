@@ -285,7 +285,9 @@ async fn dispatch_prompt_with_event_sink(
         CliRuntimeKind::CodexCli => {
             codex_cli::dispatch_codex_proxy("acp_prompt", payload, event_sink).await
         }
-        CliRuntimeKind::ClaudeCli => claude_cli::dispatch_claude_proxy("acp_prompt", payload).await,
+        CliRuntimeKind::ClaudeCli => {
+            claude_cli::dispatch_claude_proxy("acp_prompt", payload, event_sink).await
+        }
     }
 }
 
@@ -489,7 +491,9 @@ async fn dispatch_session_prompt(
         CliRuntimeKind::CodexCli => {
             codex_cli::run_codex_prompt_with_state(state, payload, event_sink).await
         }
-        CliRuntimeKind::ClaudeCli => claude_cli::dispatch_claude_proxy("acp_prompt", payload).await,
+        CliRuntimeKind::ClaudeCli => {
+            claude_cli::run_claude_prompt_with_state(state, payload, event_sink).await
+        }
     }
 }
 
@@ -503,7 +507,9 @@ async fn dispatch_session_prompt_arc(
         CliRuntimeKind::CodexCli => {
             codex_cli::run_codex_prompt_with_arc_state(state, payload, event_sink).await
         }
-        CliRuntimeKind::ClaudeCli => claude_cli::dispatch_claude_proxy("acp_prompt", payload).await,
+        CliRuntimeKind::ClaudeCli => {
+            claude_cli::run_claude_prompt_with_state(state.as_ref(), payload, event_sink).await
+        }
     }
 }
 
