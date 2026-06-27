@@ -1,15 +1,17 @@
 use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
-use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
-use tokio::process::Command;
 use tokio::sync::{oneshot, Mutex as AsyncMutex};
 
-use super::events::{normalize_cli_output_events, normalize_cli_output_line_events};
 use super::json_rpc::{
     JsonRpcInboundRequestHandler, JsonRpcNotificationHandler, JsonRpcStdioTransport,
+};
+use super::process_stdio::{
+    command_parts_from_env, extract_connection_id as process_extract_connection_id,
+    extract_prompt_text as process_extract_prompt_text,
+    extract_working_dir as process_extract_working_dir, run_streaming_cli_process,
+    StreamingCliProcessRequest,
 };
 use super::{
     register_live_interaction_waiter, update_session_provider_diagnostics, AcpEventEnvelope,
@@ -90,88 +92,42 @@ async fn run_codex_exec_prompt(
     payload: Value,
     event_sink: Option<CliEventSink>,
 ) -> Result<Value> {
-    let prompt = extract_prompt_text(&payload)?;
-    let (binary, prefix_args) = codex_command_parts();
-    let mut command = Command::new(binary);
-    for arg in prefix_args {
-        command.arg(arg);
+    let prompt = process_extract_prompt_text(&payload)?;
+    let (binary, mut args) = codex_command_parts();
+    args.push("exec".to_string());
+    args.push("--json".to_string());
+    if let Some(working_dir) = process_extract_working_dir(&payload) {
+        args.push("--cd".to_string());
+        args.push(working_dir);
     }
-    command.arg("exec").arg("--json");
+    args.push(prompt);
 
-    if let Some(working_dir) = extract_working_dir(&payload) {
-        command.arg("--cd").arg(working_dir);
-    }
-
-    command.arg(prompt);
-    command.stdout(Stdio::piped()).stderr(Stdio::piped());
-
-    let mut child = command.spawn()?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| anyhow!("codex stdout pipe unavailable"))?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| anyhow!("codex stderr pipe unavailable"))?;
-    let connection_id = extract_connection_id(&payload).unwrap_or_else(|| "codex-cli".to_string());
-    let (cancel_tx, cancel_rx) = oneshot::channel::<()>();
-    let registered = state
-        .and_then(|state| register_process_control(state, &connection_id, &payload, cancel_tx).ok())
-        .is_some();
-
-    let stdout_task = tokio::spawn(read_stdout_events(
-        stdout,
-        connection_id.clone(),
-        event_sink.clone(),
-    ));
-    let stderr_task = tokio::spawn(read_pipe_text(stderr));
-
-    let mut canceled = false;
-    let status = tokio::select! {
-        status = child.wait() => status?,
-        _ = cancel_rx => {
-            canceled = true;
-            let _ = child.kill().await;
-            child.wait().await?
-        }
-    };
-
-    if registered {
-        if let Some(state) = state {
-            unregister_process_control(state, &connection_id);
-        }
-    }
-
-    let (stdout, streamed_event_count) = stdout_task
-        .await
-        .map_err(|error| anyhow!("codex stdout task failed: {error}"))??;
-    let stderr = stderr_task
-        .await
-        .map_err(|error| anyhow!("codex stderr task failed: {error}"))??;
-    let exit_code = status.code();
-    let stderr_preview = first_non_empty_line(&stderr);
-
-    if !status.success() && !canceled {
-        return Err(anyhow!(
-            "codex exec failed: {}",
-            first_non_empty_line(&stderr).unwrap_or_else(|| "unknown error".to_string())
-        ));
-    }
-
-    let events = normalize_cli_output_events("codex-cli", &connection_id, &stdout);
+    let connection_id = process_extract_connection_id(&payload, "codex-cli");
+    let output = run_streaming_cli_process(StreamingCliProcessRequest {
+        state,
+        runtime: "codex-cli",
+        protocol: "codex-cli-exec",
+        connection_id,
+        binary,
+        args,
+        working_dir: None,
+        payload: &payload,
+        event_sink,
+    })
+    .await?;
+    let event_count = output.events.len();
 
     Ok(json!({
         "runtime": "codex-cli",
-        "status": if canceled { "canceled" } else { "completed" },
-        "canceled": canceled,
-        "exitCode": exit_code,
-        "stderrPreview": stderr_preview,
-        "stdout": stdout,
-        "stderr": stderr,
-        "events": events,
-        "eventCount": events.len(),
-        "streamedEventCount": streamed_event_count,
+        "status": if output.canceled { "canceled" } else { "completed" },
+        "canceled": output.canceled,
+        "exitCode": output.exit_code,
+        "stderrPreview": output.stderr_preview,
+        "stdout": output.stdout,
+        "stderr": output.stderr,
+        "events": output.events,
+        "eventCount": event_count,
+        "streamedEventCount": output.streamed_event_count,
     }))
 }
 
@@ -1000,43 +956,6 @@ fn decode_base64_text(value: &str) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-async fn read_stdout_events<R>(
-    stdout: R,
-    connection_id: String,
-    event_sink: Option<CliEventSink>,
-) -> Result<(String, usize)>
-where
-    R: AsyncRead + Unpin,
-{
-    let mut reader = BufReader::new(stdout).lines();
-    let mut stdout = String::new();
-    let mut streamed_event_count = 0_usize;
-    while let Some(line) = reader.next_line().await? {
-        stdout.push_str(&line);
-        stdout.push('\n');
-        if let Some(sink) = event_sink.as_ref() {
-            for event in normalize_cli_output_line_events("codex-cli", &connection_id, &line) {
-                sink(event);
-                streamed_event_count += 1;
-            }
-        }
-    }
-    Ok((stdout, streamed_event_count))
-}
-
-async fn read_pipe_text<R>(pipe: R) -> Result<String>
-where
-    R: AsyncRead + Unpin,
-{
-    let mut reader = BufReader::new(pipe).lines();
-    let mut output = String::new();
-    while let Some(line) = reader.next_line().await? {
-        output.push_str(&line);
-        output.push('\n');
-    }
-    Ok(output)
-}
-
 fn register_process_control(
     state: &AppState,
     session_id: &str,
@@ -1065,13 +984,7 @@ fn unregister_process_control(state: &AppState, session_id: &str) {
 }
 
 fn codex_command_parts() -> (String, Vec<String>) {
-    if let Ok(command) = std::env::var("MCODE_DESKTOP_TEST_CODEX_COMMAND") {
-        let parts = split_command_line(&command);
-        if let Some((binary, args)) = parts.split_first() {
-            return (binary.clone(), args.to_vec());
-        }
-    }
-    ("codex".to_string(), Vec::new())
+    command_parts_from_env(&["MCODE_DESKTOP_TEST_CODEX_COMMAND"], "codex")
 }
 
 fn codex_app_server_command_parts() -> (String, Vec<String>) {
@@ -1152,30 +1065,6 @@ fn extract_request_id(payload: &Value) -> Option<String> {
         .map(ToString::to_string)
 }
 
-fn extract_prompt_text(payload: &Value) -> Result<String> {
-    if let Some(text) = payload.get("prompt").and_then(Value::as_str) {
-        let text = text.trim();
-        if !text.is_empty() {
-            return Ok(text.to_string());
-        }
-    }
-
-    let blocks = payload
-        .get("blocks")
-        .and_then(Value::as_array)
-        .ok_or_else(|| anyhow!("acp_prompt requires prompt text or blocks"))?;
-    let text = blocks
-        .iter()
-        .filter_map(extract_block_text)
-        .collect::<Vec<_>>()
-        .join("\n");
-    let text = text.trim();
-    if text.is_empty() {
-        return Err(anyhow!("acp_prompt blocks did not contain text"));
-    }
-    Ok(text.to_string())
-}
-
 fn extract_block_text(block: &Value) -> Option<String> {
     if let Some(text) = block.as_str() {
         return Some(text.to_string());
@@ -1187,14 +1076,6 @@ fn extract_block_text(block: &Value) -> Option<String> {
         }
     }
     None
-}
-
-fn first_non_empty_line(value: &str) -> Option<String> {
-    value
-        .lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty())
-        .map(ToString::to_string)
 }
 
 fn now_ms() -> u64 {
