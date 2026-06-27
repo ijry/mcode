@@ -242,6 +242,7 @@ pub fn queue_event_for_upstream(
     if overflow_count > 0 {
         state.push_diagnostic("error", "recovery_queue_overflow");
     }
+    let _ = crate::recovery::save_recovery_snapshot(state);
     Ok(queued)
 }
 
@@ -576,6 +577,7 @@ pub async fn handle_upstream_frame(state: &AppState, frame: RelayControlFrame) -
             if let Ok(mut last_relay_event_id) = state.last_relay_event_id.write() {
                 *last_relay_event_id = Some(event_id);
             }
+            let _ = crate::recovery::save_recovery_snapshot(state);
             Ok(())
         }
         RelayControlFrame::ControllerAttached { controller_id } => {

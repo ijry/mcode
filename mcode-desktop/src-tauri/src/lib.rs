@@ -34,7 +34,7 @@ fn shutdown_runtime(app: AppHandle) {
 
 pub fn run() {
     tauri::Builder::default()
-        .manage(Arc::new(AppState::default()))
+        .manage(Arc::new(load_initial_app_state()))
         .setup(|app| {
             tray::install_tray_icon(app.handle())?;
             Ok(())
@@ -67,4 +67,28 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("failed to run MCode Desktop")
+}
+
+fn load_initial_app_state() -> AppState {
+    let state = AppState::default();
+    let path = std::env::var("MCODE_DESKTOP_STATE_PATH")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    if let Some(path) = path {
+        if let Ok(mut storage_path) = state.recovery_storage_path.write() {
+            *storage_path = Some(path.clone());
+        }
+        match recovery::load_recovery_snapshot(&path) {
+            Ok(Some(snapshot)) => {
+                let _ = recovery::apply_recovery_snapshot(&state, snapshot);
+                state.push_diagnostic("info", "recovery snapshot loaded");
+            }
+            Ok(None) => {}
+            Err(error) => {
+                state.push_diagnostic("error", format!("recovery snapshot load failed: {error}"));
+            }
+        }
+    }
+    state
 }

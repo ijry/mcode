@@ -8,6 +8,7 @@ use crate::gateway::upstream::{
 };
 use crate::health::{build_health_snapshot, DesktopHealthSnapshot};
 use crate::pairing::{generate_pair_offer, PairOfferRequest};
+use crate::recovery::save_recovery_snapshot;
 use crate::runtime::refresh_cli_status_into_state;
 use crate::tunnel::{validate_local_service_config, LocalServiceConfig};
 
@@ -39,6 +40,7 @@ pub fn desktop_configure_gateway(
     if let Ok(mut relay_url) = state.inner().relay_url.write() {
         *relay_url = Some(config.base_url);
     }
+    save_recovery_snapshot(state.inner().as_ref()).map_err(|error| error.to_string())?;
 
     Ok(build_health_snapshot(state.inner().as_ref()))
 }
@@ -92,6 +94,7 @@ pub fn desktop_generate_pair_offer(
     if let Ok(mut pair_offer) = state.inner().pair_offer.write() {
         *pair_offer = Some(offer.clone());
     }
+    save_recovery_snapshot(state.inner().as_ref()).map_err(|error| error.to_string())?;
 
     Ok(offer)
 }
@@ -106,6 +109,7 @@ pub fn desktop_save_local_service(
         services.retain(|service| service.name != config.name);
         services.push(config.clone());
     }
+    save_recovery_snapshot(state.inner().as_ref()).map_err(|error| error.to_string())?;
     Ok(config)
 }
 
@@ -139,6 +143,7 @@ fn ensure_pair_offer(state: &AppState) -> Result<(), String> {
     if let Ok(mut pair_offer) = state.pair_offer.write() {
         *pair_offer = Some(offer);
     }
+    save_recovery_snapshot(state).map_err(|error| error.to_string())?;
     Ok(())
 }
 

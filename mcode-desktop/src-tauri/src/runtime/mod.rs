@@ -347,6 +347,7 @@ fn connect_cli_session(state: &AppState, payload: Value) -> Result<Value> {
     };
 
     upsert_cli_session(state, session.clone())?;
+    let _ = crate::recovery::save_recovery_snapshot(state);
     Ok(session_response(&session))
 }
 
@@ -387,6 +388,7 @@ async fn close_cli_session(
     if status == CliSessionStatus::Disconnected {
         codex_cli::stop_codex_app_server_session(state, &session_id).await;
     }
+    let _ = crate::recovery::save_recovery_snapshot(state);
 
     Ok(json!({
         "id": session.session_id,
@@ -575,7 +577,10 @@ fn mark_prompt_started(
     session.exit_code = None;
     session.stderr_preview = None;
     session.active_turn_id = None;
-    Ok(session.clone())
+    let session = session.clone();
+    drop(sessions);
+    let _ = crate::recovery::save_recovery_snapshot(state);
+    Ok(session)
 }
 
 fn mark_session_completed(
@@ -661,7 +666,10 @@ fn update_session_after_prompt(
     if has_events {
         session.last_event_at_ms = Some(now_ms());
     }
-    Ok(session.clone())
+    let session = session.clone();
+    drop(sessions);
+    let _ = crate::recovery::save_recovery_snapshot(state);
+    Ok(session)
 }
 
 pub fn update_session_provider_diagnostics(
@@ -696,6 +704,7 @@ pub fn update_session_provider_diagnostics(
             session.updated_at_ms = now_ms();
         }
     }
+    let _ = crate::recovery::save_recovery_snapshot(state);
 }
 
 pub fn mark_session_event(state: &AppState, session_id: &str) {
@@ -708,6 +717,7 @@ pub fn mark_session_event(state: &AppState, session_id: &str) {
             session.updated_at_ms = now_ms();
         }
     }
+    let _ = crate::recovery::save_recovery_snapshot(state);
 }
 
 fn cancel_active_process(state: &AppState, session_id: &str) {
@@ -748,6 +758,7 @@ pub fn capture_pending_interaction(state: &AppState, session_id: &str, event: &A
             interactions.drain(0..excess);
         }
     }
+    let _ = crate::recovery::save_recovery_snapshot(state);
 }
 
 pub fn register_live_interaction_waiter(
@@ -815,6 +826,7 @@ fn capture_pending_interactions_from_response(state: &AppState, session_id: &str
             },
         );
     }
+    let _ = crate::recovery::save_recovery_snapshot(state);
 }
 
 fn respond_permission(state: &AppState, payload: Value) -> Result<Value> {
@@ -1057,7 +1069,10 @@ fn mark_interaction_resolved(
     interaction.resolved_at_ms = Some(now);
     interaction.decision = Some(decision);
     interaction.value = value;
-    Ok(interaction.clone())
+    let interaction = interaction.clone();
+    drop(interactions);
+    let _ = crate::recovery::save_recovery_snapshot(state);
+    Ok(interaction)
 }
 
 fn resolved_interaction_event(
