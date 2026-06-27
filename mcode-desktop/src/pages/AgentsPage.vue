@@ -172,8 +172,13 @@ onMounted(() => {
         Codex CLI adapter 支持 `codex --version` 检测与 `codex exec --json` prompt。
         P8 已加入 session 生命周期，P9 已加入 CLI 输出到 ACP-style events 的第一版归一化；P14
         开始支持 Codex stdout 实时事件推送与 acp_cancel 进程取消。P15 会记录 permission/question
-        pending 状态，并通过移动端 proxy 命令回传 resolved 事件；Claude prompt 执行仍保持明确未支持状态。
+        pending 状态，并通过移动端 proxy 命令回传 resolved 事件；P18 已支持 Claude print-mode
+        streaming，P19 会把 Desktop 重启中断的会话标记为 interrupted。
       </p>
+      <div class="recovery-diagnostics">
+        <span>Interrupted sessions：{{ runtime.interruptedSessionCount }}</span>
+        <span>Stale interactions：{{ runtime.stalePendingInteractionCount }}</span>
+      </div>
       <button class="primary" type="button" :disabled="refreshing" @click="refresh">
         {{ refreshing ? "检测中..." : "刷新 CLI 状态" }}
       </button>
@@ -339,6 +344,16 @@ dd {
   color: #6f321e;
   font-size: 12px;
   overflow-wrap: anywhere;
+}
+
+.recovery-diagnostics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  grid-column: 1 / -1;
+  color: #41533c;
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .adapter-note {

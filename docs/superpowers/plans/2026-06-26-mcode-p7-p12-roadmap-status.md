@@ -1,4 +1,4 @@
-# MCode P7-P18 Roadmap Status
+# MCode P7-P19 Roadmap Status
 
 ## Purpose
 
@@ -22,6 +22,7 @@ that was intentionally left out of the first P1-P6 slices.
 | P16 | Codex app-server JSON-RPC control channel: use `codex app-server --listen stdio://` for live interactive permission/question flows while keeping `codex exec --json` fallback. | Implemented first slice. Desktop has a newline JSON-RPC stdio transport, optional Codex app-server path, live interaction waiters, and app-server notification to ACP event conversion. |
 | P17 | Codex app-server session reuse: keep one app-server client per Desktop CLI session, reuse provider thread ids, and cancel active turns through `turn/interrupt`. | Implemented first slice. Desktop stores per-session Codex app-server handles, reuses `thread/start` results across prompts, exposes provider thread/turn diagnostics, interrupts active turns on `acp_cancel`, and stops the process on `acp_disconnect`. |
 | P18 | Claude CLI streaming session adapter: execute Claude official CLI prompts through Desktop with stdout event streaming, cancellation, diagnostics, and P15 pending-interaction integration. | Implemented first slice. Desktop runs Claude print-mode through a process-based adapter, streams normalized events, kills active Claude prompts on `acp_cancel`, and keeps live-control write-back disabled until a stable Claude control channel is verified. |
+| P19 | Desktop/Relay recovery layer: relay replay persistence/miss signaling, Desktop outbound ACK queue, runtime snapshot, classified request failures, and recovery diagnostics. | Implemented first slice. Relay persists bounded replay windows when `REPLAY_STORE_PATH` is set, Desktop queues unacked event pushes with `localEventId`, Desktop snapshots recoverable runtime state through `MCODE_DESKTOP_STATE_PATH`, and health/UI expose recovery status. |
 
 ## P7 Implemented Scope
 
@@ -548,6 +549,53 @@ Native iOS/Android guidance:
   diagnostics, not as a business-logic branch.
 - Native clients must not start Claude CLI directly or manage official Claude
   credentials.
+
+## P19 Implemented Scope
+
+P19 adds the first recovery layer for Desktop gateway connections without
+changing the external agent model. Codex and Claude remain Desktop capabilities
+under `targetAgent = mcode-desktop`.
+
+Relay recovery behavior:
+
+- `REPLAY_STORE_PATH` enables bounded JSON replay persistence with schema
+  `mcode.relay.replay.v1`.
+- `/v1/events` sends ready metadata containing replay window information and
+  emits `replay_miss` when the requested checkpoint is outside the retained
+  window.
+- `event_push.localEventId` is stored in relay event frames and echoed in
+  `ack.localEventId` so Desktop can remove confirmed local queue entries.
+- Runtime proxy, tunnel, and TCP failures use classified request failure codes:
+  `target_offline`, `desktop_replaced`, `session_revoked`, `request_timeout`,
+  and `gateway_shutdown`.
+
+Desktop recovery behavior:
+
+- Desktop has a bounded outbound event queue with default limit 500.
+- Realtime CLI event sink and proxy response `events[]` enqueue before sending
+  `event_push`.
+- Upstream reconnect replays unacked events in local order.
+- `MCODE_DESKTOP_STATE_PATH` enables JSON runtime snapshots with schema
+  `mcode.desktop.state.v1`.
+- Snapshots include recoverable target/gateway/local service state, ACK
+  checkpoints, queued outbound events, CLI session metadata, pending
+  interactions, and bounded diagnostics.
+- Running sessions restore as `interrupted`; pending interactions for those
+  sessions restore as `stale`.
+- Snapshots exclude pair offers, pair secrets, app/relay access tokens, refresh
+  tokens, official CLI credentials, and live process handles.
+
+UI and client behavior:
+
+- Desktop connection UI displays local ACK id, relay event id, queued event
+  count, recovery storage mode, replay support, and oldest queued local event.
+- Desktop agent UI displays interrupted session and stale interaction counts.
+- Native clients should store the last processed relay `eventId` per gateway
+  connection and pass it as `lastEventId` on `/v1/events` reconnect.
+- When `replay_miss` arrives, clients should show a recoverable warning and
+  refresh session state; they must not reconnect as `codex` or `claude`.
+- `target_offline` and `request_timeout` are retryable operation failures;
+  `session_revoked` means the gateway session must be reset.
 
 ## Tracking Rules
 

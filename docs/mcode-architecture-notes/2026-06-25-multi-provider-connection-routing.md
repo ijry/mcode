@@ -797,29 +797,52 @@ P18 第一版应采用保守的 process streaming adapter：
 - 不需要直接启动 Claude CLI，也不需要理解 Claude 输出格式。
 - 对 `protocol = claude-cli-stdio` 或后续更具体协议名只做诊断展示，不作为业务分支条件。
 
-## P19 Planned Desktop/Relay Recovery Layer
+## P19 Desktop/Relay Recovery Layer Behavior
 
-P19 计划补齐 P10/P13 之后仍偏 first-slice 的可靠性边界，目标是让 Desktop gateway 模式在断线、relay 重启、Desktop 重启后具备明确恢复语义和诊断状态。外部连接模型不变：移动端仍连接 `targetAgent = mcode-desktop`，relay 仍不理解 Codex/Claude 语义。
+P19 补齐 Desktop gateway 模式在移动端重连、relay 重启、Desktop upstream 重连和 Desktop 进程重启后的第一层恢复语义。外部连接模型不变：移动端仍连接 `targetAgent = mcode-desktop`，Codex/Claude 官方 CLI 仍只是 Desktop capabilities，relay 不理解官方 CLI 语义。
 
 设计文档：`docs/superpowers/specs/2026-06-28-mcode-p19-desktop-relay-recovery-design.md`。
 实施计划：`docs/superpowers/plans/2026-06-28-mcode-p19-desktop-relay-recovery.md`。
 
-建议分三层实现：
+relay recovery 行为：
 
-- relay replay 增强：保留现有 per-target ReplayBuffer，增加 replay metadata、`replay_miss`、`REPLAY_STORE_PATH` 可选 JSON 持久化和 replay storage health/info。
-- desktop outbound queue：runtime event 先进入带 `localEventId` 的本地队列，再发送 `event_push`；relay 回 ACK 时带回 `localEventId` 和 relay `eventId`，desktop 只按本地 id 删除已确认事件，重连后按顺序 replay 未 ACK 事件。
-- desktop runtime snapshot：`MCODE_DESKTOP_STATE_PATH` 可选持久化 target/gateway/local services、CLI session metadata、pending interactions、`lastAckLocalEventId`、`lastRelayEventId`、bounded diagnostics；Desktop 重启后 running session 标记为 interrupted，不假装 live process 可恢复。
+- `RelayEventFrame` 增加可选 `localEventId`，旧 mobile client 可忽略该字段。
+- `ReplayBuffer` 支持 metadata、window miss 查询、snapshot 和 restore。
+- `REPLAY_STORE_PATH` 启用 `schema = "mcode.relay.replay.v1"` 的 bounded JSON replay persistence；为空时保持 in-memory。
+- `/v1/events` ready frame 暴露 replay metadata；当 `lastEventId` 超出保留窗口时发送 `replay_miss`。
+- Desktop 发送 `event_push.localEventId` 后，relay 会在 ACK 中回传 `ack.localEventId` 和 relay `eventId`。
+- proxy/tunnel/TCP 运行时失败使用分类 code：`target_offline`、`desktop_replaced`、`session_revoked`、`request_timeout`、`gateway_shutdown`。
+- `/health` 和 `/v1/gateway/info` 暴露 replay storage mode，但不暴露本地文件路径。
 
-兼容要求：
+Desktop recovery 行为：
 
-- 现有 `event_push`、`ack`、`proxy_response` 继续可用；新增字段只能是 additive。
-- 不持久化官方 CLI token、app/relay access token、pair code 或 live process handle。
-- 原生 iOS/Android 如收到 `replay_miss`，应提示“部分事件可能缺失，刷新会话状态”，而不是把 Codex/Claude 当 direct target 重连。
+- `recovery.rs` 提供 bounded `OutboundEventQueue`，默认上限 500，按本地递增 `localEventId` 记录未确认 outbound event。
+- Desktop upstream 的实时 CLI event sink 和 proxy response `events[]` 都先进入 outbound queue，再发送 `event_push.localEventId`。
+- 收到 `ack.localEventId` 后，Desktop 按本地 id 删除对应 queued event；旧 ACK 仍更新兼容的 relay event id。
+- upstream 重连后按本地顺序 replay 未 ACK queued events。
+- `MCODE_DESKTOP_STATE_PATH` 启用 `schema = "mcode.desktop.state.v1"` 的 runtime snapshot；为空时只保留内存态。
+- snapshot 保存 target/gateway/local services、ACK checkpoint、queued outbound events、CLI session metadata、pending interactions 和 bounded diagnostics。
+- Desktop 启动时加载 snapshot；重启前处于 `running` 的 CLI session 恢复为 `interrupted`，对应 pending interaction 标记为 `stale`。
+- gateway 配置、本地服务、CLI session 状态、pending interaction、outbound queue enqueue/ACK 等可恢复状态变更后都会触发 best-effort 落盘。
 
-P19 implementation progress:
+安全与兼容边界：
 
-- Task 1 已完成 relay replay primitives：`RelayEventFrame` 增加可选 `localEventId`，`ReplayBuffer` 支持 metadata、window miss 查询、snapshot/restore，`ReplayStore` 以 `schema = "mcode.relay.replay.v1"` 做 bounded JSON 持久化基础，`REPLAY_STORE_PATH` 成为独立配置项。
-- Task 2 已完成 relay recovery protocol integration：`RelayHub` 可从 replay store 恢复并持久化 replay window，`/v1/events` ready frame 暴露 replay metadata 并在窗口缺失时发送 `replay_miss`，desktop `event_push.localEventId` 会被 relay ACK 回传；proxy/tunnel/TCP 运行时失败使用 `target_offline`、`desktop_replaced`、`request_timeout` 等分类 code。
-- Task 3 已完成 desktop recovery queue primitives：新增 `recovery.rs`，提供 bounded `OutboundEventQueue`、`QueuedOutboundEvent`、`localEventId` ACK 记录和 overflow 统计；Desktop health/Pinia/runtimeApi 暴露 recovery storage、queued event、last ACK local id、last relay event id、replay support、interrupted session 和 stale interaction 诊断字段。
-- Task 4 已完成 desktop reliable upstream event queue：Desktop upstream 的实时 CLI event sink 和 proxy response `events[]` 都先进入 outbound queue，再以 `event_push.localEventId` 发送；收到 relay `ack.localEventId` 后按本地 id 删除队列，旧 ACK 仍更新兼容的 relay event id；upstream 重连后会 replay 未 ACK queued events。
-- Task 5 已完成 desktop runtime snapshot persistence：`MCODE_DESKTOP_STATE_PATH` 启用后，Desktop 会以 `schema = "mcode.desktop.state.v1"` 保存 target/gateway/local services、ACK checkpoint、queued outbound events、CLI session metadata、pending interactions 和 bounded diagnostics；启动时加载 snapshot，运行中的 CLI session 恢复为 `interrupted`，对应 pending interaction 标记为 `stale`。snapshot builder 不包含 pair offer、pair secret、官方 CLI token、access/refresh token 或 live process handle；gateway 配置、本地服务、session 状态、pending interaction、outbound queue enqueue/ACK 等可恢复状态变更后都会触发 best-effort 落盘。
+- 现有 `event_push`、`ack`、`proxy_response`、tunnel 和 TCP frames 继续可用；新增字段都是 additive。
+- snapshot 不持久化 pair offer、pair secret、官方 CLI token、app/relay access token、refresh token 或 live process handle。
+- P19 的 JSON persistence 是单机 first-slice hardening，不是多实例共享数据库。
+- Relay 只做 replay/ACK/错误分类，不解析 Codex 或 Claude CLI 的 session、permission、streaming 语义。
+
+UI 行为：
+
+- Desktop connection page 显示 `lastAckLocalEventId`、`lastRelayEventId`、queued event count、recovery storage mode、replay support 和 oldest queued local event。
+- Desktop agents page 显示 interrupted session count 和 stale pending interaction count。
+- Desktop health/runtimeApi/Pinia 同步暴露上述 recovery diagnostics，便于 native client 复刻。
+
+原生 iOS/Android 复制规则：
+
+- Store the last processed relay `eventId` per gateway connection and pass it as `lastEventId` when reconnecting `/v1/events`.
+- If `replay_miss` arrives, show a recoverable warning and refresh session state; do not reconnect as `codex` or `claude`.
+- Treat `target_offline` and `request_timeout` as retryable operation failures.
+- Treat `session_revoked` as a gateway session reset and require re-pair or session refresh.
+- Display Desktop `interrupted` CLI sessions as requiring a new prompt because live official CLI processes cannot be resumed after Desktop restart.
+- Display `stale` pending interactions as no longer actionable, even if their original request id is still visible in local UI history.

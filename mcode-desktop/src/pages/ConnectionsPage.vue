@@ -76,14 +76,25 @@ onMounted(() => {
         <strong>{{ retryDelayText }}</strong>
       </div>
       <div class="status-card">
-        <span>Last ACK</span>
-        <strong>{{ runtime.lastAckEventId ?? "无" }}</strong>
+        <span>ACK Local</span>
+        <strong>{{ runtime.lastAckLocalEventId ?? "无" }}</strong>
+      </div>
+      <div class="status-card">
+        <span>Relay Event</span>
+        <strong>{{ runtime.lastRelayEventId ?? "无" }}</strong>
+      </div>
+      <div class="status-card">
+        <span>Queued Events</span>
+        <strong>{{ runtime.queuedOutboundEventCount }}</strong>
       </div>
     </section>
 
     <section class="diagnostic-strip">
       <span>Controller: {{ runtime.activeControllerId || "未绑定" }}</span>
       <span>Shutdown: {{ runtime.shutdownRequested ? "requested" : "running" }}</span>
+      <span>Recovery: {{ runtime.recoveryStorageMode }}</span>
+      <span>Replay: {{ runtime.replaySupported ? "supported" : "best-effort" }}</span>
+      <span>Oldest queued: {{ runtime.oldestQueuedLocalEventId ?? "无" }}</span>
     </section>
 
     <section class="panel-card">
@@ -201,7 +212,7 @@ p {
 .card-grid,
 .pair-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
 }
 
