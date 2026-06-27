@@ -65,7 +65,9 @@ fn p3_generate_pair_offer_returns_code_secret_and_json_payload() {
     assert_eq!(offer.code.len(), 9);
     assert_eq!(offer.code.chars().nth(4), Some('-'));
     assert!(offer.secret.len() >= 32);
-    assert!(offer.qr_payload.contains("\"targetAgent\":\"mcode-desktop\""));
+    assert!(offer
+        .qr_payload
+        .contains("\"targetAgent\":\"mcode-desktop\""));
 }
 
 #[test]

@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue"
-import type { CliRuntimeKind, CliRuntimeStatus } from "../lib/runtimeApi"
+import type {
+  CliPendingInteraction,
+  CliRuntimeKind,
+  CliRuntimeSession,
+  CliRuntimeStatus,
+} from "../lib/runtimeApi"
 import { useDesktopRuntimeStore } from "../stores/desktopRuntime"
 
 const runtime = useDesktopRuntimeStore()
@@ -58,6 +63,36 @@ function statusText(status: CliRuntimeStatus): string {
   return "未检测到"
 }
 
+function sessionsForRuntime(id: CliRuntimeKind) {
+  return runtime.cliSessions.filter((session) => session.runtime === id)
+}
+
+function latestSessionText(id: CliRuntimeKind): string {
+  const [latest] = sessionsForRuntime(id).sort((a, b) => b.updatedAtMs - a.updatedAtMs)
+  if (!latest) return "暂无会话"
+  return `${latest.status} · ${latest.workingDir}`
+}
+
+function latestSession(id: CliRuntimeKind): CliRuntimeSession | null {
+  return sessionsForRuntime(id).sort((a, b) => b.updatedAtMs - a.updatedAtMs)[0] || null
+}
+
+function pendingInteractionsForRuntime(id: CliRuntimeKind): CliPendingInteraction[] {
+  const sessionIds = new Set(sessionsForRuntime(id).map((session) => session.sessionId))
+  return runtime.cliPendingInteractions.filter(
+    (interaction) => interaction.status === "pending" && sessionIds.has(interaction.sessionId)
+  )
+}
+
+function latestPendingInteraction(id: CliRuntimeKind): CliPendingInteraction | null {
+  return pendingInteractionsForRuntime(id).sort((a, b) => b.createdAtMs - a.createdAtMs)[0] || null
+}
+
+function formatTime(value?: number | null): string {
+  if (!value) return "无"
+  return new Date(value).toLocaleTimeString()
+}
+
 onMounted(() => {
   if (runtime.cliRuntimes.length === 0) {
     refresh()
@@ -109,6 +144,22 @@ onMounted(() => {
         </dl>
 
         <p v-if="item.status.error" class="runtime-error">{{ item.status.error }}</p>
+        <p class="session-summary">
+          Session：{{ sessionsForRuntime(item.id).length }} 个，最近 {{ latestSessionText(item.id) }}
+        </p>
+        <div v-if="latestSession(item.id)" class="session-diagnostics">
+          <span>Active request：{{ latestSession(item.id)?.activeRequestId || "无" }}</span>
+          <span>Last event：{{ formatTime(latestSession(item.id)?.lastEventAtMs) }}</span>
+          <span>Exit code：{{ latestSession(item.id)?.exitCode ?? "无" }}</span>
+          <span v-if="latestSession(item.id)?.stderrPreview">
+            Stderr：{{ latestSession(item.id)?.stderrPreview }}
+          </span>
+        </div>
+        <div v-if="latestPendingInteraction(item.id)" class="interaction-diagnostics">
+          <strong>等待响应：{{ pendingInteractionsForRuntime(item.id).length }}</strong>
+          <span>{{ latestPendingInteraction(item.id)?.kind }} · {{ latestPendingInteraction(item.id)?.summary }}</span>
+          <span>Session：{{ latestPendingInteraction(item.id)?.sessionId }}</span>
+        </div>
       </div>
     </section>
 
@@ -118,9 +169,10 @@ onMounted(() => {
         <h3>当前适配器边界</h3>
       </div>
       <p>
-        Codex CLI adapter 支持 `codex --version` 检测与 `codex exec --json` 非交互 prompt。
-        Claude CLI 当前只做安装检测；prompt、权限请求、会话恢复和流式事件归一化留给后续 P5
-        子阶段。
+        Codex CLI adapter 支持 `codex --version` 检测与 `codex exec --json` prompt。
+        P8 已加入 session 生命周期，P9 已加入 CLI 输出到 ACP-style events 的第一版归一化；P14
+        开始支持 Codex stdout 实时事件推送与 acp_cancel 进程取消。P15 会记录 permission/question
+        pending 状态，并通过移动端 proxy 命令回传 resolved 事件；Claude prompt 执行仍保持明确未支持状态。
       </p>
       <button class="primary" type="button" :disabled="refreshing" @click="refresh">
         {{ refreshing ? "检测中..." : "刷新 CLI 状态" }}
@@ -256,6 +308,37 @@ dd {
   background: rgba(153, 46, 18, 0.1);
   color: #87351e;
   font-size: 13px;
+}
+
+.session-summary {
+  margin: 0;
+  border-top: 1px solid rgba(45, 68, 39, 0.12);
+  padding-top: 14px;
+  color: #41533c;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.session-diagnostics {
+  display: grid;
+  gap: 6px;
+  border-radius: 18px;
+  padding: 12px;
+  background: rgba(31, 52, 29, 0.06);
+  color: #41533c;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.interaction-diagnostics {
+  display: grid;
+  gap: 6px;
+  border-radius: 18px;
+  padding: 12px;
+  background: rgba(217, 119, 87, 0.12);
+  color: #6f321e;
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }
 
 .adapter-note {

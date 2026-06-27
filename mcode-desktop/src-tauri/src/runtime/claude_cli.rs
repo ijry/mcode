@@ -18,11 +18,17 @@ pub async fn dispatch_claude_proxy(command: &str, payload: Value) -> Result<Valu
 }
 
 async fn run_claude_prompt(_payload: Value) -> Result<Value> {
-    let status = detect_cli_runtime(CliRuntimeKind::ClaudeCli, CliRuntimeKind::ClaudeCli.binary()).await;
+    let status = detect_cli_runtime(
+        CliRuntimeKind::ClaudeCli,
+        CliRuntimeKind::ClaudeCli.binary(),
+    )
+    .await;
     if !status.installed {
         return Err(anyhow!(
             "Claude CLI is not available on this desktop: {}",
-            status.error.unwrap_or_else(|| "binary not found".to_string())
+            status
+                .error
+                .unwrap_or_else(|| "binary not found".to_string())
         ));
     }
 

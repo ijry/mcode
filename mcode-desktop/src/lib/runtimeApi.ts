@@ -4,6 +4,13 @@ import type { LocalServiceConfig } from "./localServices"
 export type GatewayProvider = "official" | "custom"
 export type UpstreamStatus = "offline" | "connecting" | "online" | "error"
 export type CliRuntimeKind = "codex-cli" | "claude-cli"
+export type CliSessionStatus =
+  | "connected"
+  | "running"
+  | "completed"
+  | "canceled"
+  | "disconnected"
+  | "error"
 
 export interface PairOffer {
   code: string
@@ -29,6 +36,36 @@ export interface CliRuntimeStatus {
   error?: string | null
 }
 
+export interface CliRuntimeSession {
+  sessionId: string
+  runtime: CliRuntimeKind
+  agentType: string
+  workingDir: string
+  status: CliSessionStatus
+  createdAtMs: number
+  updatedAtMs: number
+  activeRequestId?: string | null
+  cancelRequested: boolean
+  lastPromptPreview?: string | null
+  error?: string | null
+  lastEventAtMs?: number | null
+  exitCode?: number | null
+  stderrPreview?: string | null
+}
+
+export interface CliPendingInteraction {
+  interactionId: string
+  sessionId: string
+  kind: "permission" | "question" | string
+  status: "pending" | "resolved" | string
+  createdAtMs: number
+  resolvedAtMs?: number | null
+  decision?: string | null
+  value?: unknown
+  summary: string
+  data: unknown
+}
+
 export interface DesktopHealthSnapshot {
   targetAgent: "mcode-desktop"
   targetId: string
@@ -40,9 +77,16 @@ export interface DesktopHealthSnapshot {
   gatewayBaseUrl?: string | null
   capabilities: string[]
   cliRuntimes: CliRuntimeStatus[]
+  cliSessions: CliRuntimeSession[]
+  cliPendingInteractions: CliPendingInteraction[]
   pairOffer?: PairOffer | null
   localServices: LocalServiceConfig[]
   diagnostics: DiagnosticEntry[]
+  upstreamReconnectAttempt: number
+  upstreamNextRetryDelayMs?: number | null
+  lastAckEventId?: number | null
+  activeControllerId?: string | null
+  shutdownRequested: boolean
 }
 
 export const OFFICIAL_GATEWAY_BASE_URL = normalizeGatewayBaseUrl(

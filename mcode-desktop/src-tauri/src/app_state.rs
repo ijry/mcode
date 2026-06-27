@@ -1,8 +1,16 @@
-use std::sync::RwLock;
+use serde_json::Value;
+use std::collections::HashMap;
+use std::sync::atomic::AtomicBool;
+use std::sync::{Mutex, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::sync::oneshot;
+use tokio::sync::Mutex as AsyncMutex;
 use uuid::Uuid;
 
-use crate::runtime::{CliRuntimeStatus, CAPABILITY_TUNNEL_AVAILABLE};
+use crate::runtime::{
+    codex_cli::CodexAppServerSession, CliPendingInteraction, CliRuntimeSession, CliRuntimeStatus,
+    CAPABILITY_TUNNEL_AVAILABLE,
+};
 use crate::tunnel::{default_code_service, LocalServiceConfig};
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
@@ -44,6 +52,21 @@ pub struct DiagnosticEntry {
     pub created_at_ms: u64,
 }
 
+pub struct CliProcessControl {
+    pub request_id: Option<String>,
+    pub started_at_ms: u64,
+    pub cancel_tx: Option<oneshot::Sender<()>>,
+}
+
+pub struct CliInteractionWaiter {
+    pub session_id: String,
+    pub interaction_id: String,
+    pub kind: String,
+    pub source: Option<String>,
+    pub created_at_ms: u64,
+    pub response_tx: oneshot::Sender<Value>,
+}
+
 pub struct AppState {
     pub target_id: RwLock<String>,
     pub relay_url: RwLock<Option<String>>,
@@ -53,9 +76,19 @@ pub struct AppState {
     pub pair_offer: RwLock<Option<PairOffer>>,
     pub capabilities: RwLock<Vec<String>>,
     pub cli_runtimes: RwLock<Vec<CliRuntimeStatus>>,
+    pub cli_sessions: RwLock<Vec<CliRuntimeSession>>,
+    pub cli_processes: Mutex<HashMap<String, CliProcessControl>>,
+    pub codex_app_server_sessions: AsyncMutex<HashMap<String, CodexAppServerSession>>,
+    pub cli_pending_interactions: RwLock<Vec<CliPendingInteraction>>,
+    pub cli_interaction_waiters: Mutex<HashMap<String, CliInteractionWaiter>>,
     pub display_name: RwLock<String>,
     pub diagnostics: RwLock<Vec<DiagnosticEntry>>,
     pub local_services: RwLock<Vec<LocalServiceConfig>>,
+    pub upstream_reconnect_attempt: RwLock<u32>,
+    pub upstream_next_retry_delay_ms: RwLock<Option<u64>>,
+    pub last_ack_event_id: RwLock<Option<u64>>,
+    pub active_controller_id: RwLock<Option<String>>,
+    pub shutdown_requested: AtomicBool,
 }
 
 impl AppState {
@@ -89,9 +122,19 @@ impl Default for AppState {
             pair_offer: RwLock::new(None),
             capabilities: RwLock::new(vec![CAPABILITY_TUNNEL_AVAILABLE.to_string()]),
             cli_runtimes: RwLock::new(Vec::new()),
+            cli_sessions: RwLock::new(Vec::new()),
+            cli_processes: Mutex::new(HashMap::new()),
+            codex_app_server_sessions: AsyncMutex::new(HashMap::new()),
+            cli_pending_interactions: RwLock::new(Vec::new()),
+            cli_interaction_waiters: Mutex::new(HashMap::new()),
             display_name: RwLock::new("MCode Desktop".to_string()),
             diagnostics: RwLock::new(Vec::new()),
             local_services: RwLock::new(vec![default_code_service()]),
+            upstream_reconnect_attempt: RwLock::new(0),
+            upstream_next_retry_delay_ms: RwLock::new(None),
+            last_ack_event_id: RwLock::new(None),
+            active_controller_id: RwLock::new(None),
+            shutdown_requested: AtomicBool::new(false),
         }
     }
 }

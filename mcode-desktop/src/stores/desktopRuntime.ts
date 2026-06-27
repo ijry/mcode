@@ -7,6 +7,8 @@ import {
   OFFICIAL_GATEWAY_BASE_URL,
   refreshCliStatus as refreshCliStatusCommand,
   saveLocalService,
+  type CliPendingInteraction,
+  type CliRuntimeSession,
   type CliRuntimeStatus,
   type DesktopHealthSnapshot,
   type DiagnosticEntry,
@@ -40,12 +42,19 @@ export const useDesktopRuntimeStore = defineStore("desktopRuntime", {
     gatewayBaseUrl: OFFICIAL_GATEWAY_BASE_URL,
     capabilities: ["desktop.tunnel.available"] as string[],
     cliRuntimes: [] as CliRuntimeStatus[],
+    cliSessions: [] as CliRuntimeSession[],
+    cliPendingInteractions: [] as CliPendingInteraction[],
     pairCode: "",
     pairSecret: "",
     qrPayload: "",
     tunnelBind: "127.0.0.1:1080",
     localService: createDefaultService(),
     diagnostics: [] as DiagnosticEntry[],
+    upstreamReconnectAttempt: 0,
+    upstreamNextRetryDelayMs: null as number | null,
+    lastAckEventId: null as number | null,
+    activeControllerId: "",
+    shutdownRequested: false,
     lastMessage: "",
   }),
   actions: {
@@ -58,6 +67,8 @@ export const useDesktopRuntimeStore = defineStore("desktopRuntime", {
       this.version = health.version
       this.capabilities = health.capabilities
       this.cliRuntimes = health.cliRuntimes || []
+      this.cliSessions = health.cliSessions || []
+      this.cliPendingInteractions = health.cliPendingInteractions || []
       if (health.gatewayProvider) {
         this.gatewayProvider = health.gatewayProvider
       }
@@ -74,6 +85,11 @@ export const useDesktopRuntimeStore = defineStore("desktopRuntime", {
         this.tunnelBind = describeServiceBind(this.localService)
       }
       this.diagnostics = health.diagnostics || []
+      this.upstreamReconnectAttempt = health.upstreamReconnectAttempt || 0
+      this.upstreamNextRetryDelayMs = health.upstreamNextRetryDelayMs ?? null
+      this.lastAckEventId = health.lastAckEventId ?? null
+      this.activeControllerId = health.activeControllerId || ""
+      this.shutdownRequested = Boolean(health.shutdownRequested)
     },
     async refreshHealth() {
       try {

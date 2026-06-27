@@ -28,13 +28,18 @@ async fn p4_proxies_json_http_request_to_loopback_service() {
         protocol: LocalServiceProtocol::Http,
         enabled: true,
     };
-    let response = proxy_http_request(&service, tunnel_request(port, "POST", "/preview")).await.unwrap();
+    let response = proxy_http_request(&service, tunnel_request(port, "POST", "/preview"))
+        .await
+        .unwrap();
     let raw_request = server.await.unwrap();
 
     assert!(raw_request.starts_with("POST /preview?tab=1 HTTP/1.1"));
     assert!(raw_request.contains("{\"hello\":\"world\"}"));
     assert_eq!(response.status, 201);
-    assert_eq!(response.headers.get("x-local-test").map(String::as_str), Some("ok"));
+    assert_eq!(
+        response.headers.get("x-local-test").map(String::as_str),
+        Some("ok")
+    );
     assert_eq!(response.body, Some(json!({ "proxied": true })));
 }
 
@@ -62,7 +67,10 @@ async fn p4_upstream_replies_to_tunnel_request_frames() {
         let (stream, _) = relay.accept().await.unwrap();
         let mut socket = accept_async(stream).await.unwrap();
         let hello = socket.next().await.unwrap().unwrap();
-        assert!(hello.to_text().unwrap().contains("\"type\":\"desktop_hello\""));
+        assert!(hello
+            .to_text()
+            .unwrap()
+            .contains("\"type\":\"desktop_hello\""));
 
         socket
             .send(Message::Text(

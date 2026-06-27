@@ -1,8 +1,10 @@
+use std::sync::atomic::Ordering;
+
 use crate::app_state::{AppState, DiagnosticEntry, GatewayProvider, PairOffer, UpstreamStatus};
-use crate::runtime::CliRuntimeStatus;
+use crate::runtime::{CliPendingInteraction, CliRuntimeSession, CliRuntimeStatus};
 use crate::tunnel::LocalServiceConfig;
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DesktopHealthSnapshot {
     pub target_agent: String,
@@ -15,9 +17,16 @@ pub struct DesktopHealthSnapshot {
     pub gateway_base_url: Option<String>,
     pub capabilities: Vec<String>,
     pub cli_runtimes: Vec<CliRuntimeStatus>,
+    pub cli_sessions: Vec<CliRuntimeSession>,
+    pub cli_pending_interactions: Vec<CliPendingInteraction>,
     pub pair_offer: Option<PairOffer>,
     pub local_services: Vec<LocalServiceConfig>,
     pub diagnostics: Vec<DiagnosticEntry>,
+    pub upstream_reconnect_attempt: u32,
+    pub upstream_next_retry_delay_ms: Option<u64>,
+    pub last_ack_event_id: Option<u64>,
+    pub active_controller_id: Option<String>,
+    pub shutdown_requested: bool,
 }
 
 pub fn desktop_version() -> &'static str {
@@ -54,7 +63,9 @@ pub fn build_health_snapshot(state: &AppState) -> DesktopHealthSnapshot {
             .read()
             .ok()
             .and_then(|value| value.clone()),
-        gateway_provider: gateway_config.as_ref().map(|config| config.provider.clone()),
+        gateway_provider: gateway_config
+            .as_ref()
+            .map(|config| config.provider.clone()),
         gateway_base_url: gateway_config.map(|config| config.base_url),
         capabilities: state
             .capabilities
@@ -63,6 +74,16 @@ pub fn build_health_snapshot(state: &AppState) -> DesktopHealthSnapshot {
             .unwrap_or_default(),
         cli_runtimes: state
             .cli_runtimes
+            .read()
+            .map(|value| value.clone())
+            .unwrap_or_default(),
+        cli_sessions: state
+            .cli_sessions
+            .read()
+            .map(|value| value.clone())
+            .unwrap_or_default(),
+        cli_pending_interactions: state
+            .cli_pending_interactions
             .read()
             .map(|value| value.clone())
             .unwrap_or_default(),
@@ -77,5 +98,26 @@ pub fn build_health_snapshot(state: &AppState) -> DesktopHealthSnapshot {
             .read()
             .map(|value| value.clone())
             .unwrap_or_default(),
+        upstream_reconnect_attempt: state
+            .upstream_reconnect_attempt
+            .read()
+            .map(|value| *value)
+            .unwrap_or(0),
+        upstream_next_retry_delay_ms: state
+            .upstream_next_retry_delay_ms
+            .read()
+            .map(|value| *value)
+            .unwrap_or(None),
+        last_ack_event_id: state
+            .last_ack_event_id
+            .read()
+            .map(|value| *value)
+            .unwrap_or(None),
+        active_controller_id: state
+            .active_controller_id
+            .read()
+            .ok()
+            .and_then(|value| value.clone()),
+        shutdown_requested: state.shutdown_requested.load(Ordering::SeqCst),
     }
 }

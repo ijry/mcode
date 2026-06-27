@@ -22,9 +22,21 @@ beforeEach(() => {
 })
 
 it("loads desktop health through the tauri command boundary", async () => {
-  invokeMock.mockResolvedValue({ targetAgent: "mcode-desktop", upstreamStatus: "offline" })
+  invokeMock.mockResolvedValue({
+    targetAgent: "mcode-desktop",
+    upstreamStatus: "offline",
+    upstreamReconnectAttempt: 2,
+    upstreamNextRetryDelayMs: 4000,
+    lastAckEventId: 12,
+    activeControllerId: "mobile-1",
+    shutdownRequested: false,
+  })
 
-  await expect(getDesktopHealth()).resolves.toMatchObject({ targetAgent: "mcode-desktop" })
+  await expect(getDesktopHealth()).resolves.toMatchObject({
+    targetAgent: "mcode-desktop",
+    upstreamReconnectAttempt: 2,
+    lastAckEventId: 12,
+  })
   expect(invokeMock).toHaveBeenCalledWith("desktop_get_health")
 })
 

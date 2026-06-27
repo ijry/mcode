@@ -3,9 +3,7 @@ use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use mcode_desktop_lib::app_state::{AppState, GatewayConfig, GatewayProvider};
-use mcode_desktop_lib::gateway::upstream::{
-    build_proxy_response_frame, connect_upstream,
-};
+use mcode_desktop_lib::gateway::upstream::{build_proxy_response_frame, connect_upstream};
 use mcode_desktop_lib::runtime::{
     apply_cli_statuses_to_state, detect_cli_runtime, dispatch_desktop_proxy, CliRuntimeKind,
     CliRuntimeStatus,
@@ -118,7 +116,10 @@ async fn p5_upstream_replies_to_proxy_request_frames() {
         let (stream, _) = relay.accept().await.unwrap();
         let mut socket = accept_async(stream).await.unwrap();
         let hello = socket.next().await.unwrap().unwrap();
-        assert!(hello.to_text().unwrap().contains("\"type\":\"desktop_hello\""));
+        assert!(hello
+            .to_text()
+            .unwrap()
+            .contains("\"type\":\"desktop_hello\""));
 
         socket
             .send(Message::Text(
@@ -163,7 +164,10 @@ async fn p5_upstream_replies_to_proxy_request_frames() {
     assert_eq!(response["requestId"], "proxy-1");
     assert_eq!(response["ok"], true);
     assert_eq!(response["body"]["runtime"], "codex-cli");
-    assert!(response["body"]["config_options"].as_array().unwrap().is_empty());
+    assert!(response["body"]["config_options"]
+        .as_array()
+        .unwrap()
+        .is_empty());
 }
 
 fn runtime_status(runtime: CliRuntimeKind, installed: bool) -> CliRuntimeStatus {
