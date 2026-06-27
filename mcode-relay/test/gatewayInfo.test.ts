@@ -54,6 +54,7 @@ describe("gateway info", () => {
       environment: "production",
       storage: {
         pairingStore: "memory",
+        replayStore: "memory",
       },
       security: {
         jwtSecretConfigured: true,
@@ -90,6 +91,8 @@ describe("gateway info", () => {
         "pairing",
         "proxy",
         "events.replay",
+        "events.replayMiss",
+        "events.replayPersistence",
         "tunnel.http",
         "tunnel.tcp",
         "desktop.upstream",
@@ -105,6 +108,7 @@ describe("gateway info", () => {
         accessPolicy: "allow-all",
         storage: {
           pairingStore: "memory",
+          replayStore: "memory",
         },
       },
     })

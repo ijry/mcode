@@ -1,8 +1,11 @@
 import { randomUUID } from "node:crypto"
 import WebSocket from "ws"
 import { ReplayBuffer } from "../protocol/replayBuffer.js"
+import type { ReplayStore } from "../protocol/replayStore.js"
 import type {
+  RelayFailureCode,
   RelayEventFrame,
+  ReplayQueryResult,
   TunnelHttpRequest,
   TunnelHttpResponse,
 } from "../protocol/types.js"
@@ -16,12 +19,14 @@ export interface DesktopConnection {
 }
 
 interface PendingProxyRequest {
+  targetId: string
   resolve: (value: unknown) => void
   reject: (reason: Error) => void
   timer: NodeJS.Timeout
 }
 
 interface PendingTunnelRequest {
+  targetId: string
   resolve: (value: TunnelHttpResponse) => void
   reject: (reason: Error) => void
   timer: NodeJS.Timeout
@@ -34,7 +39,22 @@ interface ActiveTcpStream {
   mobileSocket: WebSocket
 }
 
-const DEFAULT_REPLAY_WINDOW = 200
+const DEFAULT_REPLAY_WINDOW = 1000
+
+interface RelayHubOptions {
+  replayWindowSize?: number
+  replayStore?: ReplayStore | null
+}
+
+export class RelayRequestError extends Error {
+  constructor(
+    public readonly code: RelayFailureCode,
+    message: string
+  ) {
+    super(message)
+    this.name = "RelayRequestError"
+  }
+}
 
 export class RelayHub {
   private readonly desktops = new Map<string, DesktopConnection>()
@@ -44,10 +64,19 @@ export class RelayHub {
   private readonly tcpStreams = new Map<string, ActiveTcpStream>()
   private readonly replayBuffers = new Map<string, ReplayBuffer>()
   private readonly eventSequences = new Map<string, number>()
+  private readonly replayWindowSize: number
+
+  constructor(private readonly options: RelayHubOptions = {}) {
+    this.replayWindowSize = options.replayWindowSize ?? DEFAULT_REPLAY_WINDOW
+  }
 
   registerDesktop(targetId: string, socket: WebSocket, targetName: string | null): DesktopConnection {
     const existing = this.desktops.get(targetId)
     if (existing && existing.socket !== socket) {
+      this.failPendingForTarget(
+        targetId,
+        new RelayRequestError("desktop_replaced", "desktop upstream replaced")
+      )
       this.closeTcpStreamsForTarget(targetId, "desktop upstream replaced")
       try {
         existing.socket.close()
@@ -70,6 +99,10 @@ export class RelayHub {
     for (const [targetId, connection] of this.desktops.entries()) {
       if (connection.socket === socket) {
         this.desktops.delete(targetId)
+        this.failPendingForTarget(
+          targetId,
+          new RelayRequestError("target_offline", "desktop upstream disconnected")
+        )
         this.closeTcpStreamsForTarget(targetId, "desktop upstream disconnected")
       }
     }
@@ -97,12 +130,13 @@ export class RelayHub {
     this.desktops.set(targetId, connection)
   }
 
-  attachMobileSubscriber(targetId: string, socket: WebSocket, lastEventId = 0): void {
+  attachMobileSubscriber(targetId: string, socket: WebSocket, lastEventId = 0): ReplayQueryResult {
     const set = this.mobileSubscribers.get(targetId) ?? new Set<WebSocket>()
     set.add(socket)
     this.mobileSubscribers.set(targetId, set)
 
-    for (const frame of this.getReplayFrames(targetId, lastEventId)) {
+    const replay = this.getReplayBuffer(targetId).queryAfter(lastEventId)
+    for (const frame of replay.frames) {
       if (socket.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify(frame))
       }
@@ -111,6 +145,7 @@ export class RelayHub {
     socket.on("close", () => {
       this.detachMobileSubscriber(targetId, socket)
     })
+    return replay
   }
 
   detachMobileSubscriber(targetId: string, socket: WebSocket): void {
@@ -122,9 +157,14 @@ export class RelayHub {
     }
   }
 
-  broadcastEvent(targetId: string, event: unknown): RelayEventFrame {
-    const frame = this.createEventFrame(targetId, event)
-    this.getReplayBuffer(targetId).push(frame)
+  broadcastEvent(targetId: string, event: unknown, localEventId?: number): RelayEventFrame {
+    const frame = this.createEventFrame(targetId, event, localEventId)
+    const replayBuffer = this.getReplayBuffer(targetId)
+    replayBuffer.push(frame)
+    this.options.replayStore?.saveTarget(targetId, {
+      eventSequence: this.eventSequences.get(targetId) ?? frame.eventId,
+      frames: replayBuffer.snapshot(),
+    })
     const payload = JSON.stringify(frame)
     const subscribers = this.mobileSubscribers.get(targetId)
     if (subscribers) {
@@ -145,7 +185,7 @@ export class RelayHub {
   ): Promise<unknown> {
     const desktop = this.desktops.get(targetId)
     if (!desktop || desktop.socket.readyState !== WebSocket.OPEN) {
-      throw new Error("target offline")
+      throw new RelayRequestError("target_offline", "target offline")
     }
 
     const requestId = randomUUID()
@@ -159,10 +199,10 @@ export class RelayHub {
     return await new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pendingProxy.delete(requestId)
-        reject(new Error("proxy request timeout"))
+        reject(new RelayRequestError("request_timeout", "proxy request timeout"))
       }, timeoutMs)
 
-      this.pendingProxy.set(requestId, { resolve, reject, timer })
+      this.pendingProxy.set(requestId, { targetId, resolve, reject, timer })
 
       try {
         desktop.socket.send(body)
@@ -202,7 +242,7 @@ export class RelayHub {
   ): Promise<TunnelHttpResponse> {
     const desktop = this.desktops.get(targetId)
     if (!desktop || desktop.socket.readyState !== WebSocket.OPEN) {
-      throw new Error("target offline")
+      throw new RelayRequestError("target_offline", "target offline")
     }
 
     const requestId = randomUUID()
@@ -215,10 +255,10 @@ export class RelayHub {
     return await new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pendingTunnel.delete(requestId)
-        reject(new Error("tunnel request timeout"))
+        reject(new RelayRequestError("request_timeout", "tunnel request timeout"))
       }, timeoutMs)
 
-      this.pendingTunnel.set(requestId, { resolve, reject, timer })
+      this.pendingTunnel.set(requestId, { targetId, resolve, reject, timer })
 
       try {
         desktop.socket.send(body)
@@ -256,7 +296,7 @@ export class RelayHub {
   openTcpStream(targetId: string, port: number, mobileSocket: WebSocket): string {
     const desktop = this.desktops.get(targetId)
     if (!desktop || desktop.socket.readyState !== WebSocket.OPEN) {
-      throw new Error("target offline")
+      throw new RelayRequestError("target_offline", "target offline")
     }
 
     const streamId = randomUUID()
@@ -298,7 +338,7 @@ export class RelayHub {
     const desktop = this.desktops.get(stream.targetId)
     if (!desktop || desktop.socket.readyState !== WebSocket.OPEN) {
       this.failTcpStream(streamId, "target offline")
-      throw new Error("target offline")
+      throw new RelayRequestError("target_offline", "target offline")
     }
 
     desktop.socket.send(
@@ -347,12 +387,17 @@ export class RelayHub {
   private getReplayBuffer(targetId: string): ReplayBuffer {
     const existing = this.replayBuffers.get(targetId)
     if (existing) return existing
-    const created = new ReplayBuffer(DEFAULT_REPLAY_WINDOW)
+    const created = new ReplayBuffer(this.replayWindowSize)
+    const restored = this.options.replayStore?.getTarget(targetId)
+    if (restored) {
+      created.restore(restored.frames)
+      this.eventSequences.set(targetId, restored.eventSequence)
+    }
     this.replayBuffers.set(targetId, created)
     return created
   }
 
-  private createEventFrame(targetId: string, event: unknown): RelayEventFrame {
+  private createEventFrame(targetId: string, event: unknown, localEventId?: number): RelayEventFrame {
     const nextEventId = (this.eventSequences.get(targetId) ?? 0) + 1
     this.eventSequences.set(targetId, nextEventId)
     const normalized = normalizeEventPayload(event)
@@ -361,6 +406,7 @@ export class RelayHub {
       channel: normalized.channel,
       payload: normalized.payload,
       ...(normalized.controllerId ? { controllerId: normalized.controllerId } : {}),
+      ...(localEventId !== undefined ? { localEventId } : {}),
     }
   }
 
@@ -387,6 +433,23 @@ export class RelayHub {
     for (const [streamId, stream] of this.tcpStreams.entries()) {
       if (stream.targetId === targetId) {
         this.failTcpStream(streamId, error)
+      }
+    }
+  }
+
+  private failPendingForTarget(targetId: string, error: RelayRequestError): void {
+    for (const [requestId, pending] of this.pendingProxy.entries()) {
+      if (pending.targetId === targetId) {
+        clearTimeout(pending.timer)
+        this.pendingProxy.delete(requestId)
+        pending.reject(error)
+      }
+    }
+    for (const [requestId, pending] of this.pendingTunnel.entries()) {
+      if (pending.targetId === targetId) {
+        clearTimeout(pending.timer)
+        this.pendingTunnel.delete(requestId)
+        pending.reject(error)
       }
     }
   }

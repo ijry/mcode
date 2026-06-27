@@ -13,7 +13,8 @@ import {
 import { JsonFilePairingStoreStorage, PairingStore } from "./pairing/store.js"
 import type { PairSessionRecord, TargetRecord } from "./pairing/store.js"
 import { buildGatewayHealth, buildGatewayInfo } from "./gateway/info.js"
-import { RelayHub } from "./tunnel/hub.js"
+import { JsonFileReplayStoreStorage, ReplayStore } from "./protocol/replayStore.js"
+import { RelayHub, RelayRequestError } from "./tunnel/hub.js"
 import { normalizeTunnelPath } from "./tunnel/httpProxy.js"
 import type { TargetAgent, TargetMetadata, TunnelHttpResponse } from "./protocol/types.js"
 
@@ -28,13 +29,24 @@ export function createRelayContext(overrides: Partial<RelayAppContext> = {}): Re
   return {
     config,
     store: overrides.store ?? createDefaultPairingStore(config),
-    hub: overrides.hub ?? new RelayHub(),
+    hub: overrides.hub ?? createDefaultRelayHub(config),
   }
 }
 
 function createDefaultPairingStore(config: RelayConfig): PairingStore {
   const storePath = config.PAIRING_STORE_PATH.trim()
   return new PairingStore(storePath ? new JsonFilePairingStoreStorage(storePath) : null)
+}
+
+function createDefaultRelayHub(config: RelayConfig): RelayHub {
+  const replayStorePath = config.REPLAY_STORE_PATH.trim()
+  return new RelayHub({
+    replayStore: new ReplayStore(
+      replayStorePath ? new JsonFileReplayStoreStorage(replayStorePath) : null,
+      1000
+    ),
+    replayWindowSize: 1000,
+  })
 }
 
 function getBearerToken(req: FastifyRequest): string | null {
@@ -206,9 +218,21 @@ function normalizeWebSocketData(raw: Buffer | ArrayBuffer | Buffer[] | string): 
   return Buffer.from(raw)
 }
 
-function closeSocketWithError(socket: WebSocket, message: string): void {
+function relayErrorPayload(error: unknown): { status: number; body: { code: string; message: string } } {
+  if (error instanceof RelayRequestError) {
+    const status =
+      error.code === "request_timeout" ? 504 : error.code === "target_offline" ? 503 : 409
+    return { status, body: { code: error.code, message: error.message } }
+  }
+  const message = error instanceof Error ? error.message : String(error)
+  if (message.includes("timeout")) return { status: 504, body: { code: "request_timeout", message } }
+  if (message.includes("offline")) return { status: 503, body: { code: "target_offline", message } }
+  return { status: 500, body: { code: "gateway_shutdown", message } }
+}
+
+function closeSocketWithError(socket: WebSocket, message: string, code = "gateway_shutdown"): void {
   if (socket.readyState === WebSocket.OPEN) {
-    socket.send(JSON.stringify({ type: "error", error: message }))
+    socket.send(JSON.stringify({ type: "error", code, error: message }))
     socket.close()
   }
 }
@@ -472,14 +496,8 @@ export async function buildRelayApp(context = createRelayContext()): Promise<Fas
       const response = result as { status?: number; body?: unknown }
       return reply.status(response.status ?? 200).send(response.body ?? null)
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      if (message.includes("offline")) {
-        return reply.code(503).send({ error: message })
-      }
-      if (message.includes("timeout")) {
-        return reply.code(504).send({ error: message })
-      }
-      return reply.code(500).send({ error: message })
+      const failure = relayErrorPayload(error)
+      return reply.code(failure.status).send(failure.body)
     }
   })
 
@@ -533,14 +551,8 @@ export async function buildRelayApp(context = createRelayContext()): Promise<Fas
       )
       return applyTunnelResponse(reply, response)
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      if (message.includes("offline")) {
-        return reply.code(503).send({ error: message })
-      }
-      if (message.includes("timeout")) {
-        return reply.code(504).send({ error: message })
-      }
-      return reply.code(500).send({ error: message })
+      const failure = relayErrorPayload(error)
+      return reply.code(failure.status).send(failure.body)
     }
   })
 
@@ -566,7 +578,8 @@ export async function buildRelayApp(context = createRelayContext()): Promise<Fas
       streamId = context.hub.openTcpStream(targetId, port, socket)
       socket.send(JSON.stringify({ type: "ready", targetId, port, streamId }))
     } catch (error) {
-      closeSocketWithError(socket, error instanceof Error ? error.message : String(error))
+      const failure = relayErrorPayload(error)
+      closeSocketWithError(socket, failure.body.message, failure.body.code)
       return
     }
 
@@ -577,7 +590,8 @@ export async function buildRelayApp(context = createRelayContext()): Promise<Fas
           context.hub.sendTcpData(streamId, data)
         }
       } catch (error) {
-        closeSocketWithError(socket, error instanceof Error ? error.message : String(error))
+        const failure = relayErrorPayload(error)
+        closeSocketWithError(socket, failure.body.message, failure.body.code)
         if (streamId) {
           context.hub.closeTcpStream(streamId)
         }
@@ -589,8 +603,30 @@ export async function buildRelayApp(context = createRelayContext()): Promise<Fas
     try {
       const auth = await authenticateSession(req, context)
       const socket = connection
-      context.hub.attachMobileSubscriber(auth.claims.targetId, socket, normalizeLastEventId(req))
-      socket.send(JSON.stringify({ type: "ready", targetId: auth.claims.targetId }))
+      const replay = context.hub.attachMobileSubscriber(
+        auth.claims.targetId,
+        socket,
+        normalizeLastEventId(req)
+      )
+      if (replay.replayMiss) {
+        socket.send(
+          JSON.stringify({
+            type: "replay_miss",
+            requestedLastEventId: replay.requestedLastEventId,
+            replayWindowStart: replay.replayWindowStart,
+            lastEventId: replay.lastEventId,
+          })
+        )
+      }
+      socket.send(
+        JSON.stringify({
+          type: "ready",
+          targetId: auth.claims.targetId,
+          replayWindowStart: replay.replayWindowStart,
+          lastEventId: replay.lastEventId,
+          replayAvailable: replay.replayAvailable,
+        })
+      )
       socket.on("close", () => {
         context.hub.detachMobileSubscriber(auth.claims.targetId, socket)
       })
@@ -664,7 +700,16 @@ export async function buildRelayApp(context = createRelayContext()): Promise<Fas
       }
 
       if (message?.type === "event_push") {
-        context.hub.broadcastEvent(activeTargetId, message.event ?? message)
+        const localEventId =
+          typeof message.localEventId === "number" && Number.isFinite(message.localEventId)
+            ? Math.trunc(message.localEventId)
+            : undefined
+        const frame = context.hub.broadcastEvent(activeTargetId, message.event ?? message, localEventId)
+        sendJson(socket, {
+          type: "ack",
+          eventId: frame.eventId,
+          ...(localEventId !== undefined ? { localEventId } : {}),
+        })
         return
       }
 

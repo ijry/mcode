@@ -29,6 +29,33 @@ describe("RelayHub", () => {
     })
   })
 
+  it("returns replay miss metadata when subscriber checkpoint is outside the window", () => {
+    const hub = new RelayHub({ replayWindowSize: 2 })
+    hub.broadcastEvent("desktop-1", { channel: "app://status", payload: { step: 1 } })
+    hub.broadcastEvent("desktop-1", { channel: "app://status", payload: { step: 2 } })
+    hub.broadcastEvent("desktop-1", { channel: "app://status", payload: { step: 3 } })
+
+    const socket = socketMock()
+    const result = hub.attachMobileSubscriber("desktop-1", socket, 1)
+
+    expect(result.replayMiss).toBe(true)
+    expect(result.replayWindowStart).toBe(2)
+    expect(result.lastEventId).toBe(3)
+    expect(socket.send).toHaveBeenCalledTimes(2)
+  })
+
+  it("echoes local event ids in relay event frames", () => {
+    const hub = new RelayHub()
+    const frame = hub.broadcastEvent(
+      "desktop-1",
+      { channel: "acp://event", payload: { type: "delta" } },
+      19
+    )
+
+    expect(frame.localEventId).toBe(19)
+    expect(hub.getReplayFrames("desktop-1", 0)[0].localEventId).toBe(19)
+  })
+
   it("forwards raw tcp stream frames between mobile and desktop sockets", () => {
     const hub = new RelayHub()
     const desktop = socketMock()

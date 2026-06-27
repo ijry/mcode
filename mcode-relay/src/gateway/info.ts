@@ -8,6 +8,8 @@ export const GATEWAY_FEATURES = [
   "session.refresh",
   "proxy",
   "events.replay",
+  "events.replayMiss",
+  "events.replayPersistence",
   "desktop.upstream",
   "tunnel.http",
   "tunnel.tcp",
@@ -68,6 +70,7 @@ export interface GatewayInfoResponse {
 
 export interface GatewayStorageStatus {
   pairingStore: "memory" | "json-file"
+  replayStore: "memory" | "json-file"
 }
 
 export function buildGatewayHealth(context: RelayAppContext): GatewayHealthResponse {
@@ -150,6 +153,7 @@ function normalizedPublicBaseUrl(config: RelayConfig): string | null {
 function buildGatewayStorage(config: RelayConfig): GatewayStorageStatus {
   return {
     pairingStore: config.PAIRING_STORE_PATH.trim() ? "json-file" : "memory",
+    replayStore: config.REPLAY_STORE_PATH.trim() ? "json-file" : "memory",
   }
 }
 
