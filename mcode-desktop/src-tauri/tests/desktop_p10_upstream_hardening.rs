@@ -11,9 +11,15 @@ use mcode_desktop_lib::health::build_health_snapshot;
 async fn p10_tracks_ack_and_active_controller_frames() {
     let state = AppState::new_for_test();
 
-    handle_upstream_frame(&state, RelayControlFrame::Ack { event_id: 42 })
-        .await
-        .unwrap();
+    handle_upstream_frame(
+        &state,
+        RelayControlFrame::Ack {
+            event_id: 42,
+            local_event_id: None,
+        },
+    )
+    .await
+    .unwrap();
     handle_upstream_frame(
         &state,
         RelayControlFrame::ControllerAttached {
@@ -63,7 +69,13 @@ fn p10_marks_shutdown_requested_for_safe_exit() {
 #[test]
 fn p10_parses_ack_and_controller_frames() {
     let ack = parse_upstream_frame(r#"{"type":"ack","eventId":7}"#).unwrap();
-    assert_eq!(ack, RelayControlFrame::Ack { event_id: 7 });
+    assert_eq!(
+        ack,
+        RelayControlFrame::Ack {
+            event_id: 7,
+            local_event_id: None
+        }
+    );
 
     let controller =
         parse_upstream_frame(r#"{"type":"controller_attached","controllerId":"phone"}"#).unwrap();

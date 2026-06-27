@@ -15,6 +15,7 @@ use tokio_tungstenite::{connect_async, tungstenite::Message};
 use url::Url;
 
 use crate::app_state::{AppState, GatewayConfig, GatewayProvider, PairOffer, UpstreamStatus};
+use crate::recovery::QueuedOutboundEvent;
 use crate::runtime::{
     dispatch_desktop_proxy_with_event_sink_arc, refresh_cli_status_into_state, CliEventSink,
 };
@@ -73,6 +74,8 @@ pub enum RelayControlFrame {
     Ack {
         #[serde(rename = "eventId")]
         event_id: u64,
+        #[serde(rename = "localEventId", default)]
+        local_event_id: Option<u64>,
     },
     #[serde(rename = "tunnel_request")]
     TunnelRequest {
@@ -220,6 +223,36 @@ pub fn build_event_push_frames(body: &serde_json::Value) -> Vec<serde_json::Valu
         .unwrap_or_default()
 }
 
+pub fn queue_event_for_upstream(
+    state: &AppState,
+    event: serde_json::Value,
+) -> Result<QueuedOutboundEvent> {
+    let queued = {
+        let mut queue = state
+            .outbound_event_queue
+            .lock()
+            .map_err(|_| anyhow!("outbound event queue lock poisoned"))?;
+        queue.enqueue(event)
+    };
+    let overflow_count = state
+        .outbound_event_queue
+        .lock()
+        .map(|queue| queue.overflow_count())
+        .unwrap_or(0);
+    if overflow_count > 0 {
+        state.push_diagnostic("error", "recovery_queue_overflow");
+    }
+    Ok(queued)
+}
+
+pub fn build_event_push_frame(local_event_id: u64, event: serde_json::Value) -> serde_json::Value {
+    json!({
+        "type": "event_push",
+        "localEventId": local_event_id,
+        "event": event,
+    })
+}
+
 pub fn build_tcp_data_frame(stream_id: &str, data: &[u8]) -> serde_json::Value {
     json!({
         "type": "tcp_data",
@@ -338,6 +371,7 @@ pub async fn connect_upstream(state: Arc<AppState>) -> Result<()> {
     }
 
     mark_upstream_online(&state).await;
+    replay_queued_events(&state, &outbound_tx)?;
     let mut tcp_writers: HashMap<String, OwnedWriteHalf> = HashMap::new();
 
     while let Some(message) = reader.next().await {
@@ -360,7 +394,8 @@ pub async fn connect_upstream(state: Arc<AppState>) -> Result<()> {
                     command,
                     payload,
                 } => {
-                    let event_sink = build_upstream_event_sink(outbound_tx.clone());
+                    let event_sink =
+                        build_upstream_event_sink(Arc::clone(&state), outbound_tx.clone());
                     let result = dispatch_desktop_proxy_with_event_sink_arc(
                         Arc::clone(&state),
                         &command,
@@ -371,7 +406,15 @@ pub async fn connect_upstream(state: Arc<AppState>) -> Result<()> {
                     .map_err(|error| error.to_string());
                     if let Ok(body) = &result {
                         for event_frame in build_event_push_frames(body) {
-                            send_outbound_json(&outbound_tx, event_frame)?;
+                            let event = event_frame
+                                .get("event")
+                                .cloned()
+                                .unwrap_or(event_frame);
+                            let queued = queue_event_for_upstream(state.as_ref(), event)?;
+                            send_outbound_json(
+                                &outbound_tx,
+                                build_event_push_frame(queued.local_event_id, queued.event),
+                            )?;
                         }
                     }
                     let response = build_proxy_response_frame(&request_id, result);
@@ -484,23 +527,54 @@ fn spawn_tcp_reader(stream_id: String, mut reader: OwnedReadHalf, outbound_tx: O
     });
 }
 
-fn build_upstream_event_sink(outbound_tx: OutboundTx) -> CliEventSink {
+fn replay_queued_events(state: &AppState, outbound_tx: &OutboundTx) -> Result<()> {
+    let pending = state
+        .outbound_event_queue
+        .lock()
+        .map_err(|_| anyhow!("outbound event queue lock poisoned"))?
+        .pending();
+    for queued in pending {
+        send_outbound_json(
+            outbound_tx,
+            build_event_push_frame(queued.local_event_id, queued.event),
+        )?;
+    }
+    Ok(())
+}
+
+fn build_upstream_event_sink(state: Arc<AppState>, outbound_tx: OutboundTx) -> CliEventSink {
     std::sync::Arc::new(move |event| {
-        let _ = send_outbound_json(
-            &outbound_tx,
-            json!({
-                "type": "event_push",
-                "event": event,
-            }),
-        );
+        if let Ok(queued) = queue_event_for_upstream(state.as_ref(), json!(event)) {
+            let _ = send_outbound_json(
+                &outbound_tx,
+                build_event_push_frame(queued.local_event_id, queued.event),
+            );
+        }
     })
 }
 
 pub async fn handle_upstream_frame(state: &AppState, frame: RelayControlFrame) -> Result<()> {
     match frame {
-        RelayControlFrame::Ack { event_id } => {
+        RelayControlFrame::Ack {
+            event_id,
+            local_event_id,
+        } => {
+            if let Some(local_event_id) = local_event_id {
+                if let Ok(mut queue) = state.outbound_event_queue.lock() {
+                    queue.ack(local_event_id, event_id);
+                }
+                if let Ok(mut last_ack) = state.last_ack_local_event_id.write() {
+                    *last_ack = Some(local_event_id);
+                }
+                if let Ok(mut replay_supported) = state.replay_supported.write() {
+                    *replay_supported = true;
+                }
+            }
             if let Ok(mut last_ack) = state.last_ack_event_id.write() {
                 *last_ack = Some(event_id);
+            }
+            if let Ok(mut last_relay_event_id) = state.last_relay_event_id.write() {
+                *last_relay_event_id = Some(event_id);
             }
             Ok(())
         }
