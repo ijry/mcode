@@ -25,6 +25,9 @@ const envSchema = z.object({
   DEPLOYMENT_ENV: deploymentEnvSchema.default("development"),
   LOG_POLICY: z.string().trim().min(1).default("standard"),
   AUDIT_POLICY: z.string().trim().min(1).default("disabled"),
+  ACCESS_POLICY: z.string().trim().min(1).default("allow-all"),
+  ADMIN_TOKEN: z.string().trim().default(""),
+  PAIRING_STORE_PATH: z.string().trim().default(""),
   ALLOW_DEV_SECRETS: booleanEnvSchema.default(true),
 })
 

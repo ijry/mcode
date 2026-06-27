@@ -21,6 +21,9 @@ async function createTestApp() {
       DEPLOYMENT_ENV: "development",
       LOG_POLICY: "standard",
       AUDIT_POLICY: "disabled",
+      ACCESS_POLICY: "allow-all",
+      ADMIN_TOKEN: "admin-secret",
+      PAIRING_STORE_PATH: "",
       ALLOW_DEV_SECRETS: true,
     },
     store,
@@ -210,5 +213,105 @@ describe("relay api", () => {
       .set("authorization", `Bearer ${pair.body.accessToken}`)
 
     expect(res.status).toBe(403)
+  })
+
+  it("requires admin token for enterprise device APIs", async () => {
+    const res = await request(app.server).get("/v1/admin/devices")
+
+    expect(res.status).toBe(401)
+  })
+
+  it("lists enterprise devices sessions and audit events", async () => {
+    store.addOffer({
+      code: "123456",
+      secret: "secret",
+      targetId: "desktop-1",
+      targetAgent: "mcode-desktop",
+      ttlSeconds: 300,
+    })
+    const pair = await request(app.server)
+      .post("/v1/pair")
+      .set("x-mcode-device-name", "Alice Phone")
+      .set("user-agent", "MCode Test")
+      .send({ code: "123456", secret: "secret" })
+
+    const devices = await request(app.server)
+      .get("/v1/admin/devices")
+      .set("x-mcode-admin-token", "admin-secret")
+    const sessions = await request(app.server)
+      .get("/v1/admin/sessions")
+      .set("x-mcode-admin-token", "admin-secret")
+    const audit = await request(app.server)
+      .get("/v1/admin/audit-events")
+      .set("x-mcode-admin-token", "admin-secret")
+
+    expect(pair.status).toBe(200)
+    expect(devices.status).toBe(200)
+    expect(devices.body.devices[0]).toMatchObject({
+      targetId: "desktop-1",
+      targetAgent: "mcode-desktop",
+      revoked: false,
+    })
+    expect(sessions.body.sessions[0]).toMatchObject({
+      targetId: "desktop-1",
+      deviceName: "Alice Phone",
+      deviceUserAgent: "MCode Test",
+    })
+    expect(audit.body.events.some((event: any) => event.type === "session.created")).toBe(true)
+  })
+
+  it("revokes sessions through enterprise admin API", async () => {
+    store.addOffer({
+      code: "123456",
+      secret: "secret",
+      targetId: "desktop-1",
+      targetAgent: "mcode-desktop",
+      ttlSeconds: 300,
+    })
+    const pair = await request(app.server)
+      .post("/v1/pair")
+      .send({ code: "123456", secret: "secret" })
+    const sessionId = store.listSessions()[0].sessionId
+
+    const revoked = await request(app.server)
+      .post(`/v1/admin/sessions/${sessionId}/revoke`)
+      .set("x-mcode-admin-token", "admin-secret")
+      .set("x-mcode-admin-actor", "security")
+      .send({ reason: "lost device" })
+    const blocked = await request(app.server)
+      .post("/v1/proxy/acp_list_agents")
+      .set("authorization", `Bearer ${pair.body.accessToken}`)
+      .send({})
+
+    expect(revoked.status).toBe(200)
+    expect(blocked.status).toBe(401)
+    expect(blocked.body.error).toContain("session revoked")
+    expect(store.listAuditEvents().some((event) => event.type === "session.revoked")).toBe(true)
+  })
+
+  it("revokes targets and blocks refresh tokens", async () => {
+    store.addOffer({
+      code: "123456",
+      secret: "secret",
+      targetId: "desktop-1",
+      targetAgent: "mcode-desktop",
+      ttlSeconds: 300,
+    })
+    const pair = await request(app.server)
+      .post("/v1/pair")
+      .send({ code: "123456", secret: "secret" })
+
+    const revoked = await request(app.server)
+      .post("/v1/admin/devices/desktop-1/revoke")
+      .set("x-mcode-admin-token", "admin-secret")
+      .send({ reason: "retired" })
+    const refresh = await request(app.server)
+      .post("/v1/session/refresh")
+      .send({ refreshToken: pair.body.refreshToken })
+
+    expect(revoked.status).toBe(200)
+    expect(refresh.status).toBe(401)
+    expect(refresh.body.error).toBe("refresh token revoked")
+    expect(store.getTarget("desktop-1")?.revoked).toBe(true)
   })
 })

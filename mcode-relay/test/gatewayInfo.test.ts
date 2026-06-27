@@ -19,6 +19,9 @@ function config(overrides: Partial<RelayConfig> = {}): RelayConfig {
     DEPLOYMENT_ENV: "production",
     LOG_POLICY: "metadata-only",
     AUDIT_POLICY: "external",
+    ACCESS_POLICY: "allow-all",
+    ADMIN_TOKEN: "admin-secret",
+    PAIRING_STORE_PATH: "",
     ALLOW_DEV_SECRETS: false,
     ...overrides,
   }
@@ -48,6 +51,9 @@ describe("gateway info", () => {
       baseUrl: "https://gateway.example.com",
       protocolVersion: "1",
       environment: "production",
+      storage: {
+        pairingStore: "memory",
+      },
       security: {
         jwtSecretConfigured: true,
         publicBaseUrlConfigured: true,
@@ -57,6 +63,9 @@ describe("gateway info", () => {
       stats: {
         targets: 0,
         sessions: 0,
+        revokedSessions: 0,
+        revokedTargets: 0,
+        auditEvents: 0,
         desktopsOnline: 0,
       },
     })
@@ -81,12 +90,21 @@ describe("gateway info", () => {
         "proxy",
         "events.replay",
         "tunnel.http",
+        "tunnel.tcp",
         "desktop.upstream",
+        "enterprise.devices",
+        "enterprise.sessionRevocation",
+        "enterprise.audit",
+        "enterprise.accessPolicy",
       ]),
       deployment: {
         environment: "production",
         logPolicy: "metadata-only",
         auditPolicy: "external",
+        accessPolicy: "allow-all",
+        storage: {
+          pairingStore: "memory",
+        },
       },
     })
     expect(JSON.stringify(res.body)).not.toContain("test-secret")

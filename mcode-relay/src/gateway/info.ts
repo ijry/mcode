@@ -10,6 +10,11 @@ export const GATEWAY_FEATURES = [
   "events.replay",
   "desktop.upstream",
   "tunnel.http",
+  "tunnel.tcp",
+  "enterprise.devices",
+  "enterprise.sessionRevocation",
+  "enterprise.audit",
+  "enterprise.accessPolicy",
 ]
 
 const DEFAULT_VERSION = "0.0.0-dev"
@@ -25,6 +30,9 @@ export interface GatewaySecurityStatus {
 export interface GatewayStats {
   targets: number
   sessions: number
+  revokedSessions: number
+  revokedTargets: number
+  auditEvents: number
   desktopsOnline: number
 }
 
@@ -36,6 +44,7 @@ export interface GatewayHealthResponse {
   version: string
   protocolVersion: string
   environment: RelayConfig["DEPLOYMENT_ENV"]
+  storage: GatewayStorageStatus
   security: GatewaySecurityStatus
   stats: GatewayStats
 }
@@ -51,8 +60,14 @@ export interface GatewayInfoResponse {
     environment: RelayConfig["DEPLOYMENT_ENV"]
     logPolicy: string
     auditPolicy: string
+    accessPolicy: string
+    storage: GatewayStorageStatus
   }
   security: GatewaySecurityStatus
+}
+
+export interface GatewayStorageStatus {
+  pairingStore: "memory" | "json-file"
 }
 
 export function buildGatewayHealth(context: RelayAppContext): GatewayHealthResponse {
@@ -65,6 +80,7 @@ export function buildGatewayHealth(context: RelayAppContext): GatewayHealthRespo
     version: relayVersion(),
     protocolVersion: PROTOCOL_VERSION,
     environment: config.DEPLOYMENT_ENV,
+    storage: buildGatewayStorage(config),
     security: buildGatewaySecurity(config),
     stats: buildGatewayStats(context),
   }
@@ -83,6 +99,8 @@ export function buildGatewayInfo(context: RelayAppContext): GatewayInfoResponse 
       environment: config.DEPLOYMENT_ENV,
       logPolicy: config.LOG_POLICY,
       auditPolicy: config.AUDIT_POLICY,
+      accessPolicy: config.ACCESS_POLICY,
+      storage: buildGatewayStorage(config),
     },
     security: buildGatewaySecurity(config),
   }
@@ -117,6 +135,9 @@ function buildGatewayStats(context: RelayAppContext): GatewayStats {
   return {
     targets: targets.length,
     sessions: context.store.listSessions().filter((session) => session.revokedAt === null).length,
+    revokedSessions: context.store.listSessions().filter((session) => session.revokedAt !== null).length,
+    revokedTargets: targets.filter((target) => target.revoked).length,
+    auditEvents: context.store.listAuditEvents(500).length,
     desktopsOnline: targets.filter((target) => context.hub.isDesktopOnline(target.targetId)).length,
   }
 }
@@ -124,6 +145,12 @@ function buildGatewayStats(context: RelayAppContext): GatewayStats {
 function normalizedPublicBaseUrl(config: RelayConfig): string | null {
   const value = config.PUBLIC_BASE_URL.trim()
   return value ? value : null
+}
+
+function buildGatewayStorage(config: RelayConfig): GatewayStorageStatus {
+  return {
+    pairingStore: config.PAIRING_STORE_PATH.trim() ? "json-file" : "memory",
+  }
 }
 
 function relayVersion(): string {
