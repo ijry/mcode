@@ -2,6 +2,7 @@ pub mod claude_cli;
 pub mod codex_cli;
 pub mod events;
 pub mod json_rpc;
+pub mod process_stdio;
 
 pub use events::{normalize_cli_output_events, AcpEventEnvelope};
 
