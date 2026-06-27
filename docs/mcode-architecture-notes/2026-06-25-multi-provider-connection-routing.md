@@ -761,6 +761,8 @@ UI 行为：
 
 P18 计划把 Claude 官方 CLI adapter 从“检测 + unsupported error”推进到可用的 Desktop runtime。外部连接模型不变：Claude 官方 CLI 仍是 `targetAgent = mcode-desktop` 下的 capability，不新增移动端 `targetAgent = claude`，官方凭据和本机进程仍只留在 desktop。
 
+Implementation plan: `docs/superpowers/plans/2026-06-28-mcode-p18-claude-cli-streaming.md`。Claude 默认 print-mode 命令参考 Anthropic Claude Code CLI reference：`claude -p`、`--output-format stream-json`、`--verbose`、`--include-partial-messages` 和 `--permission-mode`。
+
 建议链路：
 
 ```text
