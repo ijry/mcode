@@ -4,6 +4,7 @@ use anyhow::{anyhow, Result};
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use tokio::net::TcpStream;
 use url::Url;
 
 use crate::app_state::AppState;
@@ -12,6 +13,7 @@ use crate::app_state::AppState;
 #[serde(rename_all = "camelCase")]
 pub enum LocalServiceProtocol {
     Http,
+    Tcp,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -42,7 +44,7 @@ pub fn validate_local_service_config(config: LocalServiceConfig) -> Result<Local
         return Err(anyhow!("service name is required"));
     }
     if host != "127.0.0.1" {
-        return Err(anyhow!("P4 only allows loopback host 127.0.0.1"));
+        return Err(anyhow!("tunnel only allows loopback host 127.0.0.1"));
     }
     if config.port == 0 {
         return Err(anyhow!("service port is required"));
@@ -114,7 +116,10 @@ pub async fn serve_tunnel_request(
         ),
         Err(error) => state.push_diagnostic(
             "error",
-            format!("{} {}:{} -> {}", service.name, service.host, service.port, error),
+            format!(
+                "{} {}:{} -> {}",
+                service.name, service.host, service.port, error
+            ),
         ),
     }
     result
@@ -125,6 +130,9 @@ pub async fn proxy_http_request(
     request: TunnelHttpRequest,
 ) -> Result<TunnelHttpResponse> {
     let service = validate_local_service_config(service.clone())?;
+    if service.protocol != LocalServiceProtocol::Http {
+        return Err(anyhow!("local service is not configured for http tunnel"));
+    }
     if !service.enabled {
         return Err(anyhow!("local service is disabled"));
     }
@@ -176,6 +184,18 @@ pub async fn proxy_http_request(
     })
 }
 
+pub async fn open_tcp_stream(state: &AppState, port: u16) -> Result<TcpStream> {
+    let service = find_enabled_service(state, port)?;
+    let service = validate_local_service_config(service)?;
+    if service.protocol != LocalServiceProtocol::Tcp {
+        return Err(anyhow!("local service is not configured for tcp tunnel"));
+    }
+
+    TcpStream::connect(format!("{}:{}", service.host, service.port))
+        .await
+        .map_err(Into::into)
+}
+
 fn find_enabled_service(state: &AppState, port: u16) -> Result<LocalServiceConfig> {
     let services = state
         .local_services
@@ -188,7 +208,10 @@ fn find_enabled_service(state: &AppState, port: u16) -> Result<LocalServiceConfi
         .ok_or_else(|| anyhow!("enabled local service for port {port} is not configured"))
 }
 
-fn build_local_service_url(service: &LocalServiceConfig, request: &TunnelHttpRequest) -> Result<Url> {
+fn build_local_service_url(
+    service: &LocalServiceConfig,
+    request: &TunnelHttpRequest,
+) -> Result<Url> {
     let mut url = Url::parse(&format!("http://{}:{}", service.host, service.port))?;
     url.set_path(normalize_request_path(&request.path).as_str());
     {

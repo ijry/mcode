@@ -39,3 +39,32 @@ export interface TunnelHttpResponse {
   headers?: Record<string, string>
   body?: unknown
 }
+
+export interface TunnelTcpConnectFrame {
+  type: "tcp_connect"
+  streamId: string
+  port: number
+}
+
+export interface TunnelTcpDataFrame {
+  type: "tcp_data"
+  streamId: string
+  dataBase64: string
+}
+
+export interface TunnelTcpCloseFrame {
+  type: "tcp_close"
+  streamId: string
+}
+
+export interface TunnelTcpErrorFrame {
+  type: "tcp_error"
+  streamId: string
+  error: string
+}
+
+export type TunnelTcpFrame =
+  | TunnelTcpConnectFrame
+  | TunnelTcpDataFrame
+  | TunnelTcpCloseFrame
+  | TunnelTcpErrorFrame

@@ -1,7 +1,11 @@
 import { randomUUID } from "node:crypto"
 import WebSocket from "ws"
 import { ReplayBuffer } from "../protocol/replayBuffer.js"
-import type { RelayEventFrame, TunnelHttpRequest, TunnelHttpResponse } from "../protocol/types.js"
+import type {
+  RelayEventFrame,
+  TunnelHttpRequest,
+  TunnelHttpResponse,
+} from "../protocol/types.js"
 
 export interface DesktopConnection {
   socket: WebSocket
@@ -23,6 +27,13 @@ interface PendingTunnelRequest {
   timer: NodeJS.Timeout
 }
 
+interface ActiveTcpStream {
+  streamId: string
+  targetId: string
+  port: number
+  mobileSocket: WebSocket
+}
+
 const DEFAULT_REPLAY_WINDOW = 200
 
 export class RelayHub {
@@ -30,12 +41,14 @@ export class RelayHub {
   private readonly mobileSubscribers = new Map<string, Set<WebSocket>>()
   private readonly pendingProxy = new Map<string, PendingProxyRequest>()
   private readonly pendingTunnel = new Map<string, PendingTunnelRequest>()
+  private readonly tcpStreams = new Map<string, ActiveTcpStream>()
   private readonly replayBuffers = new Map<string, ReplayBuffer>()
   private readonly eventSequences = new Map<string, number>()
 
   registerDesktop(targetId: string, socket: WebSocket, targetName: string | null): DesktopConnection {
     const existing = this.desktops.get(targetId)
     if (existing && existing.socket !== socket) {
+      this.closeTcpStreamsForTarget(targetId, "desktop upstream replaced")
       try {
         existing.socket.close()
       } catch {
@@ -57,6 +70,7 @@ export class RelayHub {
     for (const [targetId, connection] of this.desktops.entries()) {
       if (connection.socket === socket) {
         this.desktops.delete(targetId)
+        this.closeTcpStreamsForTarget(targetId, "desktop upstream disconnected")
       }
     }
   }
@@ -239,6 +253,93 @@ export class RelayHub {
     pending.reject(new Error(message.error ?? "tunnel request failed"))
   }
 
+  openTcpStream(targetId: string, port: number, mobileSocket: WebSocket): string {
+    const desktop = this.desktops.get(targetId)
+    if (!desktop || desktop.socket.readyState !== WebSocket.OPEN) {
+      throw new Error("target offline")
+    }
+
+    const streamId = randomUUID()
+    this.tcpStreams.set(streamId, {
+      streamId,
+      targetId,
+      port,
+      mobileSocket,
+    })
+
+    mobileSocket.on("close", () => {
+      this.closeTcpStream(streamId)
+    })
+    mobileSocket.on("error", () => {
+      this.closeTcpStream(streamId)
+    })
+
+    try {
+      desktop.socket.send(
+        JSON.stringify({
+          type: "tcp_connect",
+          streamId,
+          port,
+        })
+      )
+    } catch (error) {
+      this.tcpStreams.delete(streamId)
+      throw error instanceof Error ? error : new Error(String(error))
+    }
+
+    return streamId
+  }
+
+  sendTcpData(streamId: string, data: Buffer): void {
+    const stream = this.tcpStreams.get(streamId)
+    if (!stream) {
+      throw new Error("tcp stream not found")
+    }
+    const desktop = this.desktops.get(stream.targetId)
+    if (!desktop || desktop.socket.readyState !== WebSocket.OPEN) {
+      this.failTcpStream(streamId, "target offline")
+      throw new Error("target offline")
+    }
+
+    desktop.socket.send(
+      JSON.stringify({
+        type: "tcp_data",
+        streamId,
+        dataBase64: data.toString("base64"),
+      })
+    )
+  }
+
+  closeTcpStream(streamId: string): void {
+    const stream = this.tcpStreams.get(streamId)
+    if (!stream) return
+    this.tcpStreams.delete(streamId)
+
+    const desktop = this.desktops.get(stream.targetId)
+    if (desktop?.socket.readyState === WebSocket.OPEN) {
+      desktop.socket.send(
+        JSON.stringify({
+          type: "tcp_close",
+          streamId,
+        })
+      )
+    }
+  }
+
+  handleDesktopTcpData(message: { streamId: string; dataBase64: string }): void {
+    const stream = this.tcpStreams.get(message.streamId)
+    if (!stream || stream.mobileSocket.readyState !== WebSocket.OPEN) return
+    stream.mobileSocket.send(Buffer.from(message.dataBase64, "base64"))
+  }
+
+  handleDesktopTcpClose(message: { streamId: string }): void {
+    this.closeTcpStreamFromDesktop(message.streamId)
+  }
+
+  handleDesktopTcpError(message: { streamId: string; error?: string | null }): void {
+    this.failTcpStream(message.streamId, message.error || "tcp stream failed")
+  }
+
   getReplayFrames(targetId: string, lastEventId = 0): RelayEventFrame[] {
     return this.getReplayBuffer(targetId).after(lastEventId)
   }
@@ -260,6 +361,33 @@ export class RelayHub {
       channel: normalized.channel,
       payload: normalized.payload,
       ...(normalized.controllerId ? { controllerId: normalized.controllerId } : {}),
+    }
+  }
+
+  private closeTcpStreamFromDesktop(streamId: string): void {
+    const stream = this.tcpStreams.get(streamId)
+    if (!stream) return
+    this.tcpStreams.delete(streamId)
+    if (stream.mobileSocket.readyState === WebSocket.OPEN) {
+      stream.mobileSocket.close()
+    }
+  }
+
+  private failTcpStream(streamId: string, error: string): void {
+    const stream = this.tcpStreams.get(streamId)
+    if (!stream) return
+    this.tcpStreams.delete(streamId)
+    if (stream.mobileSocket.readyState === WebSocket.OPEN) {
+      stream.mobileSocket.send(JSON.stringify({ type: "error", streamId, error }))
+      stream.mobileSocket.close()
+    }
+  }
+
+  private closeTcpStreamsForTarget(targetId: string, error: string): void {
+    for (const [streamId, stream] of this.tcpStreams.entries()) {
+      if (stream.targetId === targetId) {
+        this.failTcpStream(streamId, error)
+      }
     }
   }
 }

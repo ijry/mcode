@@ -16,6 +16,23 @@ it("rejects non-loopback hosts in P3", () => {
   )
 })
 
+it("accepts tcp loopback services", () => {
+  expect(
+    buildLocalServiceConfig({
+      name: "Raw TCP",
+      host: "127.0.0.1",
+      port: "9000",
+      protocol: "tcp",
+    })
+  ).toEqual({
+    name: "Raw TCP",
+    host: "127.0.0.1",
+    port: 9000,
+    protocol: "tcp",
+    enabled: true,
+  })
+})
+
 it("describes a saved service bind", () => {
   expect(
     describeServiceBind({

@@ -2,7 +2,7 @@ export interface LocalServiceConfig {
   name: string
   host: string
   port: number
-  protocol: "http"
+  protocol: "http" | "tcp"
   enabled: boolean
 }
 
@@ -10,7 +10,7 @@ export function buildLocalServiceConfig(input: {
   name: string
   host: string
   port: number | string
-  protocol?: "http"
+  protocol?: "http" | "tcp"
   enabled?: boolean
 }): LocalServiceConfig {
   const name = input.name.trim()
@@ -25,7 +25,7 @@ export function buildLocalServiceConfig(input: {
     name,
     host,
     port,
-    protocol: input.protocol || "http",
+    protocol: input.protocol === "tcp" ? "tcp" : "http",
     enabled: input.enabled ?? true,
   }
 }

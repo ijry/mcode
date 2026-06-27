@@ -12,6 +12,7 @@ const form = reactive({
   name: runtime.localService.name,
   host: runtime.localService.host,
   port: String(runtime.localService.port),
+  protocol: runtime.localService.protocol,
   enabled: runtime.localService.enabled,
 })
 
@@ -21,6 +22,7 @@ watch(
     form.name = service.name
     form.host = service.host
     form.port = String(service.port)
+    form.protocol = service.protocol
     form.enabled = service.enabled
   }
 )
@@ -33,10 +35,11 @@ async function saveService() {
       name: form.name,
       host: form.host,
       port: form.port,
+      protocol: form.protocol,
       enabled: form.enabled,
     })
     await runtime.saveService(config)
-    message.value = "本地服务已保存，网关收到请求后会代理到该 loopback HTTP 服务。"
+    message.value = "本地服务已保存，HTTP/TCP 请求都会通过网关鉴权后代理到 loopback。"
   } catch (error) {
     message.value = error instanceof Error ? error.message : String(error)
   } finally {
@@ -51,24 +54,24 @@ async function saveService() {
       <p class="kicker">Tunnel Preview</p>
       <h2>本地服务通过网关暴露给 MCode</h2>
       <p>
-        P4 已支持 HTTP 本地端口访问：MCode 经网关访问 `/v1/tunnel/:targetId/:port/*` 后，
-        desktop 会代理到配置的 `127.0.0.1:&lt;port&gt;`。原始 TCP 字节流仍是后续阶段。
+        P7 支持 HTTP 本地端口访问与 raw TCP 字节流：MCode 经网关鉴权后，
+        desktop 会代理到配置的 `127.0.0.1:&lt;port&gt;`。
       </p>
     </div>
 
     <section class="binding-card">
       <span>当前本地服务</span>
       <strong>{{ runtime.tunnelBind }}</strong>
-      <p>移动端访问时必须走网关验证后的 `/v1/tunnel/:targetId/:port/*` 路径。</p>
+      <p>HTTP 走 `/v1/tunnel/:targetId/:port/*`，raw TCP 走 `/v1/tunnel-tcp/:targetId/:port`。</p>
     </section>
 
     <section class="service-card">
       <div class="service-header">
         <div>
           <p class="section-label">Local Service</p>
-          <h3>配置本机 HTTP 服务</h3>
+          <h3>配置本机服务</h3>
         </div>
-        <span class="badge">P4 HTTP</span>
+        <span class="badge">P7 HTTP/TCP</span>
       </div>
 
       <div class="form-grid">
@@ -86,8 +89,9 @@ async function saveService() {
         </label>
         <label class="field">
           <span>协议</span>
-          <select disabled>
-            <option>HTTP</option>
+          <select v-model="form.protocol">
+            <option value="http">HTTP</option>
+            <option value="tcp">TCP</option>
           </select>
         </label>
       </div>
