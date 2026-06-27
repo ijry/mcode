@@ -23,7 +23,27 @@ export interface RelayEventFrame {
   channel: string
   payload: unknown
   controllerId?: string | null
+  localEventId?: number | null
 }
+
+export interface ReplayMetadata {
+  replayWindowStart: number | null
+  lastEventId: number
+  replayAvailable: boolean
+}
+
+export interface ReplayQueryResult extends ReplayMetadata {
+  frames: RelayEventFrame[]
+  replayMiss: boolean
+  requestedLastEventId: number
+}
+
+export type RelayFailureCode =
+  | "target_offline"
+  | "desktop_replaced"
+  | "session_revoked"
+  | "request_timeout"
+  | "gateway_shutdown"
 
 export interface TunnelHttpRequest {
   port: number

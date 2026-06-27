@@ -815,3 +815,7 @@ P19 计划补齐 P10/P13 之后仍偏 first-slice 的可靠性边界，目标是
 - 现有 `event_push`、`ack`、`proxy_response` 继续可用；新增字段只能是 additive。
 - 不持久化官方 CLI token、app/relay access token、pair code 或 live process handle。
 - 原生 iOS/Android 如收到 `replay_miss`，应提示“部分事件可能缺失，刷新会话状态”，而不是把 Codex/Claude 当 direct target 重连。
+
+P19 implementation progress:
+
+- Task 1 已完成 relay replay primitives：`RelayEventFrame` 增加可选 `localEventId`，`ReplayBuffer` 支持 metadata、window miss 查询、snapshot/restore，`ReplayStore` 以 `schema = "mcode.relay.replay.v1"` 做 bounded JSON 持久化基础，`REPLAY_STORE_PATH` 成为独立配置项。
