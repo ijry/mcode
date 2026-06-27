@@ -846,3 +846,45 @@ UI 行为：
 - Treat `session_revoked` as a gateway session reset and require re-pair or session refresh.
 - Display Desktop `interrupted` CLI sessions as requiring a new prompt because live official CLI processes cannot be resumed after Desktop restart.
 - Display `stale` pending interactions as no longer actionable, even if their original request id is still visible in local UI history.
+
+## P20 Planned App Recovery UX Behavior
+
+P20 closes the mobile/app side of P19 without changing relay or Desktop
+protocols. `mcode-app` should consume relay replay checkpoints and recovery
+signals so a Desktop gateway connection can reconnect with `lastEventId`,
+surface replay gaps, and refresh visible session state.
+
+Design document: `docs/superpowers/specs/2026-06-28-mcode-p20-app-recovery-ux-design.md`.
+
+Planned app behavior:
+
+- `RelayGateway.connectEvents()` accepts optional recovery options and appends
+  `lastEventId` to `/v1/events` when the current relay instance has a known
+  positive checkpoint.
+- `acpApi` owns per-`instanceKey` relay checkpoints because it owns realtime
+  bridge reconnect and event dispatch.
+- Relay wrapper frames update the checkpoint only after their payload is
+  dispatched successfully; `ready`, `replay_miss`, malformed frames, and failed
+  dispatches do not advance the checkpoint.
+- `replay_miss` updates realtime bridge health and triggers existing
+  conversation calibration/session refresh instead of being treated as an ACP
+  conversation event.
+- Detail status UI shows replay-miss as a recoverable warning, while preserving
+  the existing reconnect/recovered banners.
+- Classified gateway errors map to user actions: `target_offline` and
+  `request_timeout` are retryable, `session_revoked` requires gateway session
+  reset or re-pair, and `desktop_replaced` should reconnect the bridge.
+- Desktop `interrupted` sessions and `stale` permission/question interactions
+  are displayed as non-resumable state; stale interactions must not keep active
+  response buttons.
+
+Compatibility and native replication:
+
+- Direct Codeg/OpenCode events do not use relay checkpoints.
+- Relay `eventId` remains separate from ACP `seq`; native clients must not
+  merge these sequences.
+- The P20 checkpoint can be memory-only for the first slice; durable app restart
+  checkpoint persistence is a later storage decision.
+- Native clients should pass `lastEventId` only for the same authenticated
+  gateway session context and should update it after successful event handling,
+  not on raw WebSocket receive.
