@@ -972,7 +972,7 @@ git commit -m "feat(app): add p22 relay client identity"
 - Consumes: all previous task outputs.
 - Produces: checked plan progress and a final architecture note summary for native clients.
 
-- [ ] **Step 1: Run full verification**
+- [x] **Step 1: Run full verification**
 
 Run:
 
@@ -989,11 +989,11 @@ git diff --check
 
 Expected: all pass. If a test fails, use `systematic-debugging` before changing code.
 
-- [ ] **Step 2: Update plan checkboxes**
+- [x] **Step 2: Update plan checkboxes**
 
 Check off every completed step in this plan file. Leave any blocked step unchecked with a short reason directly under that step.
 
-- [ ] **Step 3: Finalize architecture note**
+- [x] **Step 3: Finalize architecture note**
 
 Add a short final P22 status paragraph:
 
@@ -1007,7 +1007,7 @@ P22 first slice status:
   device's active turn.
 ```
 
-- [ ] **Step 4: Commit P22 verification record**
+- [x] **Step 4: Commit P22 verification record**
 
 Run:
 

@@ -1000,3 +1000,11 @@ Implementation progress:
 - App now persists a per-install relay `clientId`, sends it on relay HTTP and
   event connections, maps `turn_busy` to multi-device busy copy, and treats
   resolved interactions from any device as authoritative.
+
+P22 first slice status:
+
+- Implemented multi-client event observation with relay `clientId`.
+- Implemented Desktop-hosted active turn coordination with `turn_busy`.
+- Implemented first-valid-responder-wins metadata for interactions.
+- Not implemented: prompt queueing and explicit cancel/takeover of another
+  device's active turn.
