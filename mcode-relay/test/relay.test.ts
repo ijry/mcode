@@ -96,6 +96,45 @@ describe("relay api", () => {
     expect(res.body.target.protocolVersion).toBe("1")
   })
 
+  it("lists multiple logical targets with different target agents", async () => {
+    store.addOffer({
+      code: "123456",
+      secret: "secret",
+      targetId: "codeg-1",
+      targetName: "Codeg on Work PC",
+      targetAgent: "codeg",
+      ttlSeconds: 300,
+    })
+    const pair = await request(app.server)
+      .post("/v1/pair")
+      .send({ code: "123456", secret: "secret" })
+    store.upsertTarget({
+      targetId: "opencode-1",
+      targetName: "OpenCode on Work PC",
+      targetAgent: "opencode",
+    })
+    store.upsertTarget({
+      targetId: "desktop-1",
+      targetName: "MCode Desktop on Work PC",
+      targetAgent: "mcode-desktop",
+      capabilities: ["desktop.runtime.codex-cli"],
+    })
+
+    const res = await request(app.server)
+      .get("/v1/targets")
+      .set("authorization", `Bearer ${pair.body.accessToken}`)
+
+    expect(res.status).toBe(200)
+    expect(res.body.currentTargetId).toBe("codeg-1")
+    expect(res.body.targets).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ targetId: "codeg-1", targetAgent: "codeg" }),
+        expect.objectContaining({ targetId: "opencode-1", targetAgent: "opencode" }),
+        expect.objectContaining({ targetId: "desktop-1", targetAgent: "mcode-desktop" }),
+      ])
+    )
+  })
+
   it("rejects pairing with an invalid secret", async () => {
     store.addOffer({
       code: "123456",

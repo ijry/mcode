@@ -250,15 +250,16 @@
               </u-radio-group>
             </u-form-item>
 
+            <u-form-item label="目标类型" prop="targetAgent" required>
+              <u-subsection
+                :list="targetAgentLabels"
+                :current="targetAgentIndex"
+                @change="handleTargetAgentChange"
+                activeColor="#007aff"
+              ></u-subsection>
+            </u-form-item>
+
             <view v-if="form.routeMode === 'direct'">
-              <u-form-item label="目标类型" prop="targetAgent" required>
-                <u-subsection
-                  :list="directTargetLabels"
-                  :current="directTargetIndex"
-                  @change="handleDirectTargetChange"
-                  activeColor="#007aff"
-                ></u-subsection>
-              </u-form-item>
               <u-form-item label="服务地址" prop="directBaseUrl" required>
                 <u-input
                   v-model="form.directBaseUrl"
@@ -305,7 +306,7 @@
                 ></u-input>
               </u-form-item>
               <text class="connections-sheet__tip">
-                网关入口当前默认连接 MCode Desktop，由 desktop 代理 Codex CLI、Claude CLI 与内网穿透能力。
+                请使用所选目标生成的配对代码。Codeg、OpenCode 与 MCode Desktop 可以分别通过同一网关连接。
               </text>
             </view>
           </u-form>
@@ -393,6 +394,7 @@ import { createGateway } from "@/services/gateway"
 import type { RelaySessionInfo } from "@/services/gateway"
 import { buildWebSocketProtocols } from "@/services/gateway/wsProtocol"
 import { buildConnectionConfigCode, parseConnectionConfigCodeToConnection } from "./connectionConfigCode"
+import { assertPairTargetAgentMatchesSelection } from "./connectionPairValidation"
 import {
   encodeConnectionContext,
   readStoredConnections,
@@ -424,12 +426,12 @@ const DEPLOYMENT_GUIDE_URL = "https://pan.quark.cn/s/0008015b1d33"
 const OFFICIAL_GATEWAY_BASE_URL = normalizeBaseUrl(
   String(import.meta.env.VITE_MCODE_OFFICIAL_GATEWAY_BASE_URL || "")
 )
-const directTargetOptions = [
+const targetAgentOptions = [
   { label: "Codeg", value: "codeg" as ConnectionTargetAgent },
   { label: "OpenCode", value: "opencode" as ConnectionTargetAgent },
   { label: "MCode Desktop", value: "mcode-desktop" as ConnectionTargetAgent },
 ]
-const directTargetLabels = directTargetOptions.map((item) => item.label)
+const targetAgentLabels = targetAgentOptions.map((item) => item.label)
 const gatewayProviderOptions = [
   { label: "MCode 官方网关", value: "official" as ConnectionGatewayProvider },
   { label: "自定义", value: "custom" as ConnectionGatewayProvider },
@@ -483,8 +485,8 @@ const form = ref({
 
 const connections = ref<ConnectionItem[]>([])
 const popupTitle = computed(() => (editingConnectionKey.value ? "编辑连接" : "新增连接"))
-const directTargetIndex = computed(() => {
-  const index = directTargetOptions.findIndex((item) => item.value === form.value.targetAgent)
+const targetAgentIndex = computed(() => {
+  const index = targetAgentOptions.findIndex((item) => item.value === form.value.targetAgent)
   return index >= 0 ? index : 0
 })
 
@@ -618,15 +620,14 @@ function subsectionChange(index: number) {
 function handleRouteModeChange(value: string) {
   form.value.routeMode = value === "gateway" ? "gateway" : "direct"
   if (form.value.routeMode === "gateway") {
-    form.value.targetAgent = "mcode-desktop"
     if (form.value.gatewayProvider === "official") {
       form.value.gatewayBaseUrl = OFFICIAL_GATEWAY_BASE_URL
     }
   }
 }
 
-function handleDirectTargetChange(index: number) {
-  form.value.targetAgent = directTargetOptions[index]?.value || "codeg"
+function handleTargetAgentChange(index: number) {
+  form.value.targetAgent = targetAgentOptions[index]?.value || "codeg"
 }
 
 function handleGatewayProviderSelect(item: { value?: ConnectionGatewayProvider }) {
@@ -718,11 +719,12 @@ async function submitConnection() {
       if (!session) {
         throw new Error("配对失败：未获取到网关会话")
       }
+      assertPairTargetAgentMatchesSelection(session, form.value.targetAgent)
 
       const newConnection = buildConnectionItem({
         version: 2,
         name: form.value.name,
-        targetAgent: "mcode-desktop",
+        targetAgent: form.value.targetAgent,
         routeMode: "gateway",
         gatewayProvider: form.value.gatewayProvider,
         gatewayBaseUrl,

@@ -109,6 +109,9 @@ desktop 运行方式：
 - web/uni-app 连接卡片通过 `getConnectionCapabilityChips()` 从 `targetProfile.capabilities` 映射能力标签；当前只展示认识的 desktop capability，未知 key 不展示但保留在数据层。
 - 网关模式下 target metadata 以 pair/refresh 返回值为准，UI 不强信本地旧值。
 - web/uni-app 新增连接表单已经使用 `routeMode`、`targetAgent`、`gatewayProvider` 作为主状态；`mode`、`url`、`relaySession` 只作为当前网关运行时代码的兼容别名保留。
+- web/uni-app 新增连接表单现已把“目标类型”提升为直连/网关共用字段；切换到网关不会再把
+  `targetAgent` 改写为 `mcode-desktop`。
+- web/uni-app 网关配对成功后会校验 relay 返回的 `gatewaySession.targetAgent`，如果配对码属于其他目标类型则拒绝保存。
 - `MCode 官方网关` 不展示域名输入框，构建时从 `VITE_MCODE_OFFICIAL_GATEWAY_BASE_URL` 读取默认网关地址；如果未配置，保存时提示“官方网关地址未配置”。选择 `自定义` 时必须填写 `gatewayBaseUrl`。
 
 ## Compatibility

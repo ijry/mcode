@@ -49,6 +49,33 @@ describe("connection config code", () => {
     })
   })
 
+  it("encodes and decodes v2 opencode gateway config codes", () => {
+    const code = buildConnectionConfigCode({
+      name: "OpenCode Relay",
+      targetAgent: "opencode",
+      routeMode: "gateway",
+      gatewayProvider: "official",
+      gatewayBaseUrl: "https://relay.example.com/",
+      pairCode: "OPEN-1234",
+      pairSecret: "pair-secret",
+    })
+
+    expect(parseConnectionConfigCodeToConnection(code)).toEqual({
+      version: 2,
+      name: "OpenCode Relay",
+      targetAgent: "opencode",
+      routeMode: "gateway",
+      gatewayProvider: "official",
+      gatewayBaseUrl: "https://relay.example.com",
+      pairCode: "OPEN-1234",
+      pairSecret: "pair-secret",
+      mode: "relay",
+      url: "https://relay.example.com",
+      relaySession: undefined,
+    })
+  })
+
+
   it("migrates legacy v1 direct config codes on import", () => {
     const code = Buffer.from(
       JSON.stringify({

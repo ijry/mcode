@@ -49,6 +49,17 @@ describe("connection presentation", () => {
     ).toBe("MCode Desktop · 网关 · 自定义网关 · https://relay.example.com")
   })
 
+  it("renders gateway subtitles for non-desktop target agents", () => {
+    expect(
+      getConnectionSubtitle({
+        targetAgent: "opencode",
+        routeMode: "gateway",
+        gatewayProvider: "official",
+        gatewayBaseUrl: "https://relay.example.com/",
+      } as any)
+    ).toBe("OpenCode · 网关 · MCode 官方网关 · https://relay.example.com")
+  })
+
   it("maps online state to badge text", () => {
     expect(getConnectionBadgeText(true)).toBe("CONNECTED")
     expect(getConnectionBadgeText(false)).toBe("OFFLINE")

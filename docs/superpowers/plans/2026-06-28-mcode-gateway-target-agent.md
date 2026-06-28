@@ -38,11 +38,11 @@
 - Consumes: `ConnectionTargetAgent`, `ConnectionGatewayProvider`, `createGateway().pair()`.
 - Produces: gateway `ConnectionItem` records with selected `targetAgent`.
 
-- [ ] Step 1: Rename target selector constants from direct-only naming to route-neutral naming.
-- [ ] Step 2: Render the target selector above the route-specific fields so both direct and gateway modes use it.
-- [ ] Step 3: Replace `handleDirectTargetChange` with `handleTargetAgentChange`.
-- [ ] Step 4: Remove `form.targetAgent = "mcode-desktop"` from `handleRouteModeChange`.
-- [ ] Step 5: In gateway save, validate `session.targetAgent` when present:
+- [x] Step 1: Rename target selector constants from direct-only naming to route-neutral naming.
+- [x] Step 2: Render the target selector above the route-specific fields so both direct and gateway modes use it.
+- [x] Step 3: Replace `handleDirectTargetChange` with `handleTargetAgentChange`.
+- [x] Step 4: Remove `form.targetAgent = "mcode-desktop"` from `handleRouteModeChange`.
+- [x] Step 5: In gateway save, validate `session.targetAgent` when present:
 
 ```ts
 if (session.targetAgent && session.targetAgent !== form.value.targetAgent) {
@@ -50,8 +50,8 @@ if (session.targetAgent && session.targetAgent !== form.value.targetAgent) {
 }
 ```
 
-- [ ] Step 6: Save gateway connections with `targetAgent: form.value.targetAgent`.
-- [ ] Step 7: Update gateway helper text to say the pair code must come from the selected target.
+- [x] Step 6: Save gateway connections with `targetAgent: form.value.targetAgent`.
+- [x] Step 7: Update gateway helper text to say the pair code must come from the selected target.
 
 ## Task 2: App Schema And Presentation Tests
 
@@ -64,10 +64,10 @@ if (session.targetAgent && session.targetAgent !== form.value.targetAgent) {
 - Consumes: `buildConnectionRecordKey`, `getConnectionSubtitle`, `buildConnectionConfigCode`, `parseConnectionConfigCodeToConnection`.
 - Produces: regression tests that fail if gateway target agents collapse to Desktop.
 
-- [ ] Step 1: Add a schema test asserting `codeg/gateway` and `opencode/gateway` on the same gateway have different record keys.
-- [ ] Step 2: Add a presentation test asserting `OpenCode · 网关` is rendered for an OpenCode gateway connection.
-- [ ] Step 3: Add a config-code test asserting an OpenCode gateway v2 code roundtrips with `targetAgent = "opencode"`.
-- [ ] Step 4: Run `cd mcode-app; npm run test:unit -- --runTestsByPath tests/services/connectionSchema.spec.ts tests/pages/connections/connectionPresentation.spec.ts tests/pages/connections/connectionConfigCode.spec.ts`.
+- [x] Step 1: Add a schema test asserting `codeg/gateway` and `opencode/gateway` on the same gateway have different record keys.
+- [x] Step 2: Add a presentation test asserting `OpenCode · 网关` is rendered for an OpenCode gateway connection.
+- [x] Step 3: Add a config-code test asserting an OpenCode gateway v2 code roundtrips with `targetAgent = "opencode"`.
+- [x] Step 4: Run `cd mcode-app; npm run test:unit -- --runTestsByPath tests/services/connectionSchema.spec.ts tests/pages/connections/connectionPresentation.spec.ts tests/pages/connections/connectionConfigCode.spec.ts`.
 
 ## Task 3: Relay Multi-Target Coverage
 
@@ -78,23 +78,22 @@ if (session.targetAgent && session.targetAgent !== form.value.targetAgent) {
 - Consumes: `PairingStore.upsertTarget`, authenticated `/v1/targets`.
 - Produces: coverage that one relay can list logical targets with different `targetAgent` values.
 
-- [ ] Step 1: Add a Vitest case that pairs once to obtain an access token, upserts Codeg/OpenCode/Desktop targets, then calls `/v1/targets`.
-- [ ] Step 2: Assert the response includes all three target agents and preserves their target ids.
-- [ ] Step 3: Run `cd mcode-relay; npm test -- --runInBand test/relay.test.ts` if supported, otherwise `npm test`.
+- [x] Step 1: Add a Vitest case that pairs once to obtain an access token, upserts Codeg/OpenCode/Desktop targets, then calls `/v1/targets`.
+- [x] Step 2: Assert the response includes all three target agents and preserves their target ids.
+- [x] Step 3: Run `cd mcode-relay; npm test -- --runInBand test/relay.test.ts` if supported, otherwise `npm test`.
 
 ## Task 4: Verification And Commit
 
 **Files:**
 - All files touched above.
 
-- [ ] Step 1: Run `cd mcode-app; npm run test:unit`.
-- [ ] Step 2: Run `cd mcode-relay; npm test`.
-- [ ] Step 3: Run `git diff --check`.
-- [ ] Step 4: Commit with `git commit -m "fix(app): support gateway target agent selection"`.
+- [x] Step 1: Run `cd mcode-app; npm run test:unit`.
+- [x] Step 2: Run `cd mcode-relay; npm test`.
+- [x] Step 3: Run `git diff --check`.
+- [x] Step 4: Commit with `git commit -m "fix(app): support gateway target agent selection"`.
 
 ## Self-Review
 
 - Spec coverage: UI target selector, gateway save persistence, pair metadata mismatch, relay multi-target listing, and native architecture note are covered.
 - Placeholder scan: no deferred placeholders are required for this plan.
 - Type consistency: all tasks use `targetAgent`, `routeMode`, `gatewayProvider`, and `targetProfile` consistently.
-
