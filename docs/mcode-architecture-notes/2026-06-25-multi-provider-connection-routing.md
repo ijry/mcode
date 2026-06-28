@@ -1008,3 +1008,62 @@ P22 first slice status:
 - Implemented first-valid-responder-wins metadata for interactions.
 - Not implemented: prompt queueing and explicit cancel/takeover of another
   device's active turn.
+
+## P23 Planned Active Turn Control Behavior
+
+P23 adds operation-level cancellation for active Desktop-hosted official CLI
+turns. It is the practical "takeover" foundation for multi-device use: another
+paired device does not steal a running Codex/Claude provider turn, but it can
+request cancellation, observe Desktop settling the provider process, and then
+start the next prompt after the active-turn guard is cleared.
+
+Design document:
+`docs/superpowers/specs/2026-06-28-mcode-p23-active-turn-control-design.md`.
+
+Planned relay behavior:
+
+- Continue forwarding P22 `clientId` and `client` metadata on
+  `/v1/proxy/acp_cancel`.
+- Continue broadcasting Desktop-originated turn-control events to every
+  subscriber of the target.
+- Do not store cancel ownership, active turn state, or controller leases in
+  relay.
+- Official and self-hosted gateways use the same additive protocol.
+
+Planned Desktop behavior:
+
+- Keep `acp_cancel` as the public command for active turn cancellation.
+- When a hosted official CLI turn is active, record
+  `cancelRequestedByClientId`, `cancelRequestedAtMs`, and `cancelReason` on the
+  active-turn/session diagnostics.
+- Emit `turn_cancel_requested` before invoking the provider cancellation path.
+- Reuse Codex app-server `turn/interrupt` plus fallback stop behavior, and reuse
+  Claude/process cancellation for stdio adapters.
+- Emit `turn_cancelled` after successful settlement or `turn_cancel_failed` with
+  a safe error summary if Desktop cannot cancel cleanly.
+- Treat duplicate cancel requests for the same active turn as idempotent
+  `cancel_requested`, not as duplicate provider interrupts.
+
+Planned app behavior:
+
+- Any paired client connected to the Desktop-hosted active turn may call
+  `acp_cancel`.
+- The requesting device shows `正在取消当前任务...`; other devices show
+  `其他设备正在取消当前任务。`
+- On `turn_cancelled`, clear generating state and allow a new prompt.
+- On `turn_cancel_failed`, show a recoverable error and keep refresh/reconnect
+  actions available.
+- UI must not imply one device owns the whole Desktop target; active turn owner
+  and cancel requester are diagnostics only.
+
+Compatibility and native replication:
+
+- Older clients may keep calling `acp_cancel(connectionId)` without a client id;
+  Desktop should treat the requester as `unknown`.
+- Existing `canceled`/`cancelled` status handling remains valid.
+- Direct Codeg/OpenCode paths are unaffected unless they later opt into the
+  same event names.
+- Native clients should keep using the persistent relay `clientId`, send
+  cancellation only through Desktop `acp_cancel`, disable duplicate cancel
+  controls while cancellation is pending, and only allow a new prompt after
+  `turn_cancelled` or a refreshed snapshot shows no active turn.
