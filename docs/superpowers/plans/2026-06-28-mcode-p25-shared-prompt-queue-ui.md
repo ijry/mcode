@@ -694,7 +694,7 @@ git diff --check
 
 Expected: no whitespace errors.
 
-- [ ] Step 6: Commit docs and plan progress.
+- [x] Step 6: Commit docs and plan progress.
 
 ```bash
 git add docs/mcode-architecture-notes/2026-06-25-multi-provider-connection-routing.md docs/superpowers/plans/2026-06-28-mcode-p25-shared-prompt-queue-ui.md
