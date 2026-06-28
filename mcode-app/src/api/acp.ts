@@ -60,6 +60,7 @@ class AcpApiClient {
   private bridgeStates = new Map<string, BridgeState>()
   private relayRecoveryStates = new Map<string, RelayRecoveryState>()
   private replayMissCalibrationHook: ((instanceKey: string) => Promise<void> | void) | null = null
+  private requestHookForTest: ((endpoint: string, data: any) => any) | null = null
 
   constructor(baseUrl: string = "") {
     this.baseUrl = baseUrl
@@ -174,6 +175,19 @@ class AcpApiClient {
    */
   async acpCancel(connectionId: string): Promise<void> {
     await this.request("/acp_cancel", { connectionId })
+  }
+
+  async acpCancelQueuedPrompt(
+    connectionId: string,
+    queueItemId: string,
+    sessionId?: string | null
+  ): Promise<any> {
+    return await this.request("/acp_cancel_queued_prompt", {
+      connectionId,
+      sessionId: sessionId || connectionId,
+      queueItemId,
+      reason: "user_cancelled",
+    })
   }
 
   /**
@@ -661,6 +675,9 @@ class AcpApiClient {
    * 通用请求方法
    */
   private async request(endpoint: string, data: any): Promise<any> {
+    if (this.requestHookForTest) {
+      return await this.requestHookForTest(endpoint, data)
+    }
     const auth = useAuthStore()
     const gateway = auth.gateway()
     const command = String(endpoint || "").replace(/^\/+/, "")
@@ -869,6 +886,12 @@ class AcpApiClient {
     hook: ((instanceKey: string) => Promise<void> | void) | null
   ) {
     this.replayMissCalibrationHook = hook
+  }
+
+  __setRequestHookForTest(
+    hook: ((endpoint: string, data: any) => any) | null
+  ) {
+    this.requestHookForTest = hook
   }
 
   private buildBridgeHealthForInstance(instanceKey: string): RealtimeBridgeHealth {

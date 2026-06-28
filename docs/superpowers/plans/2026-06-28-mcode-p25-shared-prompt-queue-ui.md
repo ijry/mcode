@@ -41,7 +41,7 @@
 - Produces: `acpApi.acpCancelQueuedPrompt(connectionId: string, queueItemId: string, sessionId?: string | null): Promise<any>`
 - Produces test hook: `acpApi.__setRequestHookForTest(hook: ((endpoint: string, data: any) => any) | null): void`
 
-- [ ] Step 1: Add a private request hook field to `AcpApiClient`.
+- [x] Step 1: Add a private request hook field to `AcpApiClient`.
 
 In `mcode-app/src/api/acp.ts`, inside `class AcpApiClient`, add:
 
@@ -49,7 +49,7 @@ In `mcode-app/src/api/acp.ts`, inside `class AcpApiClient`, add:
 private requestHookForTest: ((endpoint: string, data: any) => any) | null = null
 ```
 
-- [ ] Step 2: Add `acpCancelQueuedPrompt` near `acpCancel`.
+- [x] Step 2: Add `acpCancelQueuedPrompt` near `acpCancel`.
 
 Add this method after `acpCancel(connectionId: string)`:
 
@@ -68,7 +68,7 @@ async acpCancelQueuedPrompt(
 }
 ```
 
-- [ ] Step 3: Route private requests through the test hook.
+- [x] Step 3: Route private requests through the test hook.
 
 At the top of `private async request(endpoint: string, data: any): Promise<any>`, before reading `useAuthStore()`, add:
 
@@ -78,7 +78,7 @@ if (this.requestHookForTest) {
 }
 ```
 
-- [ ] Step 4: Add the public test hook method near other `__...ForTest` methods.
+- [x] Step 4: Add the public test hook method near other `__...ForTest` methods.
 
 Add this method in `AcpApiClient` near `__setReplayMissCalibrationHookForTest(...)`:
 
@@ -90,7 +90,7 @@ __setRequestHookForTest(
 }
 ```
 
-- [ ] Step 5: Write the API unit test.
+- [x] Step 5: Write the API unit test.
 
 Create `mcode-app/tests/api/acpQueuedPromptCancel.spec.ts`:
 
@@ -138,7 +138,7 @@ describe("acpApi queued prompt cancellation", () => {
 })
 ```
 
-- [ ] Step 6: Run focused API test.
+- [x] Step 6: Run focused API test.
 
 Run:
 
