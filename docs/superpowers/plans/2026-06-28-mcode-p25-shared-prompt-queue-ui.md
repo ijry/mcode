@@ -619,7 +619,7 @@ npm run test:unit -- --runTestsByPath tests/pages/conversation-detail/detailRunt
 
 Expected: PASS.
 
-- [ ] Step 10: Commit Task 3.
+- [x] Step 10: Commit Task 3.
 
 ```bash
 git add mcode-app/src/pages/conversation-detail/index.vue mcode-app/src/pages/conversation-detail/index.scss docs/superpowers/plans/2026-06-28-mcode-p25-shared-prompt-queue-ui.md
@@ -636,7 +636,7 @@ git commit -m "feat(app): show shared prompt queue"
 - Consumes all prior task outputs.
 - Produces updated architecture note with P25 implemented status.
 
-- [ ] Step 1: Update P25 architecture note status.
+- [x] Step 1: Update P25 architecture note status.
 
 In `docs/mcode-architecture-notes/2026-06-25-multi-provider-connection-routing.md`, change `## P25 Planned Shared Prompt Queue UI Behavior` to:
 
@@ -650,7 +650,7 @@ Replace the `Planned app behavior:` line with:
 Implemented app behavior:
 ```
 
-- [ ] Step 2: Add P25 implementation progress bullets.
+- [x] Step 2: Add P25 implementation progress bullets.
 
 At the end of the P25 section, add:
 
@@ -669,11 +669,11 @@ P25 first slice status:
   restrictions.
 ```
 
-- [ ] Step 3: Mark this plan complete as tasks are finished.
+- [x] Step 3: Mark this plan complete as tasks are finished.
 
 Change all completed task checkboxes in this file from `[ ]` to `[x]`.
 
-- [ ] Step 4: Run full app unit tests.
+- [x] Step 4: Run full app unit tests.
 
 Run:
 
@@ -684,7 +684,7 @@ npm run test:unit
 
 Expected: PASS.
 
-- [ ] Step 5: Run repository diff check.
+- [x] Step 5: Run repository diff check.
 
 Run:
 
