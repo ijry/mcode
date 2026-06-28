@@ -1019,6 +1019,8 @@ start the next prompt after the active-turn guard is cleared.
 
 Design document:
 `docs/superpowers/specs/2026-06-28-mcode-p23-active-turn-control-design.md`.
+Implementation plan:
+`docs/superpowers/plans/2026-06-28-mcode-p23-active-turn-control.md`.
 
 Planned relay behavior:
 
