@@ -68,7 +68,7 @@
 - Produces `/v1/events` ready frame with `clientId`.
 - Consumes: existing pairing session `sessionId`, target id, and optional session device name.
 
-- [ ] **Step 1: Write relay hub tests for multi-subscriber broadcast and proxy metadata**
+- [x] **Step 1: Write relay hub tests for multi-subscriber broadcast and proxy metadata**
 
 Add to `mcode-relay/test/hub.test.ts`:
 
@@ -143,13 +143,13 @@ it("forwards client identity on proxy requests", async () => {
 })
 ```
 
-- [ ] **Step 2: Run relay hub tests and verify failure**
+- [x] **Step 2: Run relay hub tests and verify failure**
 
 Run: `cd mcode-relay; npm test -- --run test/hub.test.ts`
 
 Expected: FAIL because `attachMobileSubscriber` and `sendProxyRequest` do not accept client identity yet.
 
-- [ ] **Step 3: Implement relay client identity types and hub forwarding**
+- [x] **Step 3: Implement relay client identity types and hub forwarding**
 
 In `mcode-relay/src/protocol/types.ts`, add:
 
@@ -216,7 +216,7 @@ async sendProxyRequest(
 }
 ```
 
-- [ ] **Step 4: Add server-side client id extraction and ready frame**
+- [x] **Step 4: Add server-side client id extraction and ready frame**
 
 In `mcode-relay/src/server.ts`, add helpers near `normalizeLastEventId`:
 
@@ -253,7 +253,7 @@ function buildClientIdentity(
 
 Use `const client = buildClientIdentity(req, auth)` in `/v1/proxy/:command` and pass it to `sendProxyRequest`. In `/v1/events`, pass it to `attachMobileSubscriber` and include `clientId: client.clientId` in the ready frame.
 
-- [ ] **Step 5: Add relay API test for client id ready frame and proxy forwarding**
+- [x] **Step 5: Add relay API test for client id ready frame and proxy forwarding**
 
 Add to `mcode-relay/test/relay.test.ts`:
 
@@ -297,13 +297,13 @@ it("forwards relay client id on authorized proxy calls", async () => {
 })
 ```
 
-- [ ] **Step 6: Run relay tests**
+- [x] **Step 6: Run relay tests**
 
 Run: `cd mcode-relay; npm test -- --run test/hub.test.ts test/relay.test.ts`
 
 Expected: PASS.
 
-- [ ] **Step 7: Update architecture note progress**
+- [x] **Step 7: Update architecture note progress**
 
 Append under the P22 section of `docs/mcode-architecture-notes/2026-06-25-multi-provider-connection-routing.md`:
 
@@ -315,7 +315,7 @@ Implementation progress:
   identity on `proxy_request` to Desktop.
 ```
 
-- [ ] **Step 8: Commit relay client identity**
+- [x] **Step 8: Commit relay client identity**
 
 Run:
 

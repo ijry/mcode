@@ -158,6 +158,44 @@ describe("relay api", () => {
     expect(res.status).toBe(401)
   })
 
+  it("forwards relay client id on authorized proxy calls", async () => {
+    store.addOffer({
+      code: "123456",
+      secret: "secret",
+      targetId: "desktop-1",
+      targetAgent: "mcode-desktop",
+      ttlSeconds: 300,
+    })
+    const pair = await request(app.server)
+      .post("/v1/pair")
+      .set("x-mcode-device-name", "Alice Phone")
+      .send({ code: "123456", secret: "secret" })
+
+    const sendProxyRequest = vi.spyOn(hub, "sendProxyRequest").mockResolvedValue({
+      status: 200,
+      body: { ok: true },
+    })
+
+    const res = await request(app.server)
+      .post("/v1/proxy/acp_prompt")
+      .set("authorization", `Bearer ${pair.body.accessToken}`)
+      .set("x-mcode-client-id", "client-phone-1")
+      .send({ prompt: "hello" })
+
+    expect(res.status).toBe(200)
+    expect(sendProxyRequest).toHaveBeenCalledWith(
+      "desktop-1",
+      "acp_prompt",
+      { prompt: "hello" },
+      undefined,
+      expect.objectContaining({
+        clientId: "client-phone-1",
+        targetId: "desktop-1",
+        deviceName: "Alice Phone",
+      })
+    )
+  })
+
   it("forwards authorized tunnel HTTP requests to the target desktop", async () => {
     store.addOffer({
       code: "123456",

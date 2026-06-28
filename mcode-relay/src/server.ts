@@ -16,7 +16,12 @@ import { buildGatewayHealth, buildGatewayInfo } from "./gateway/info.js"
 import { JsonFileReplayStoreStorage, ReplayStore } from "./protocol/replayStore.js"
 import { RelayHub, RelayRequestError } from "./tunnel/hub.js"
 import { normalizeTunnelPath } from "./tunnel/httpProxy.js"
-import type { TargetAgent, TargetMetadata, TunnelHttpResponse } from "./protocol/types.js"
+import type {
+  ClientIdentity,
+  TargetAgent,
+  TargetMetadata,
+  TunnelHttpResponse,
+} from "./protocol/types.js"
 
 export interface RelayAppContext {
   config: RelayConfig
@@ -189,6 +194,38 @@ function normalizeLastEventId(req: FastifyRequest): number {
   const raw = query.lastEventId ?? query.last_event_id ?? 0
   const value = Number(raw)
   return Number.isFinite(value) && value > 0 ? Math.trunc(value) : 0
+}
+
+function normalizeClientId(value: unknown): string | null {
+  if (Array.isArray(value)) return normalizeClientId(value[0])
+  if (typeof value !== "string") return null
+  const trimmed = value.trim()
+  if (!/^[a-zA-Z0-9._:-]{6,96}$/.test(trimmed)) return null
+  return trimmed
+}
+
+function getRequestClientId(req: FastifyRequest): string | null {
+  const header = normalizeClientId(req.headers["x-mcode-client-id"])
+  if (header) return header
+
+  const query = req.query && typeof req.query === "object" ? (req.query as Record<string, unknown>) : {}
+  const queryClientId = normalizeClientId(query.clientId ?? query.client_id)
+  if (queryClientId) return queryClientId
+
+  const body = req.body && typeof req.body === "object" ? (req.body as Record<string, unknown>) : {}
+  return normalizeClientId(body.clientId ?? body.client_id)
+}
+
+function buildClientIdentity(
+  req: FastifyRequest,
+  auth: Awaited<ReturnType<typeof authenticateSession>>
+): ClientIdentity {
+  return {
+    clientId: getRequestClientId(req) ?? `relay-${auth.session.sessionId}`,
+    sessionId: auth.session.sessionId,
+    targetId: auth.claims.targetId,
+    deviceName: auth.session.deviceName ?? null,
+  }
 }
 
 function normalizeTunnelHeaders(headers: FastifyRequest["headers"]) {
@@ -487,11 +524,13 @@ export async function buildRelayApp(context = createRelayContext()): Promise<Fas
     const payload = req.body ?? {}
     try {
       const timeoutMs = command === "acp_describe_agent_options" ? 70_000 : undefined
+      const client = buildClientIdentity(req, auth)
       const result = await context.hub.sendProxyRequest(
         auth.claims.targetId,
         command,
         payload,
-        timeoutMs
+        timeoutMs,
+        client
       )
       const response = result as { status?: number; body?: unknown }
       return reply.status(response.status ?? 200).send(response.body ?? null)
@@ -603,10 +642,12 @@ export async function buildRelayApp(context = createRelayContext()): Promise<Fas
     try {
       const auth = await authenticateSession(req, context)
       const socket = connection
+      const client = buildClientIdentity(req, auth)
       const replay = context.hub.attachMobileSubscriber(
         auth.claims.targetId,
         socket,
-        normalizeLastEventId(req)
+        normalizeLastEventId(req),
+        client
       )
       if (replay.replayMiss) {
         socket.send(
@@ -622,6 +663,7 @@ export async function buildRelayApp(context = createRelayContext()): Promise<Fas
         JSON.stringify({
           type: "ready",
           targetId: auth.claims.targetId,
+          clientId: client.clientId,
           replayWindowStart: replay.replayWindowStart,
           lastEventId: replay.lastEventId,
           replayAvailable: replay.replayAvailable,

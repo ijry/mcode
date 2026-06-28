@@ -8,6 +8,13 @@ export interface TargetMetadata {
   protocolVersion: string
 }
 
+export interface ClientIdentity {
+  clientId: string
+  sessionId: string
+  targetId: string
+  deviceName: string | null
+}
+
 export interface DesktopUpstreamHello {
   type: "desktop_hello"
   targetId: string

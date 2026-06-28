@@ -988,3 +988,9 @@ Native replication:
   another device started the active turn.
 - Treat `turn_busy` as a recoverable busy state, not as connection loss.
 - Disable permission/question controls after any resolved event arrives.
+
+Implementation progress:
+
+- Relay now treats app clients as multiple subscribers, assigns/reuses
+  `clientId`, includes it in `/v1/events` ready frames, and forwards client
+  identity on `proxy_request` to Desktop.

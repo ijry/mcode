@@ -56,6 +56,75 @@ describe("RelayHub", () => {
     expect(hub.getReplayFrames("desktop-1", 0)[0].localEventId).toBe(19)
   })
 
+  it("broadcasts desktop events to multiple mobile subscribers", () => {
+    const hub = new RelayHub()
+    const first = socketMock()
+    const second = socketMock()
+
+    hub.attachMobileSubscriber("desktop-1", first, 0, {
+      clientId: "client-a",
+      sessionId: "session-a",
+      targetId: "desktop-1",
+      deviceName: "Phone",
+    })
+    hub.attachMobileSubscriber("desktop-1", second, 0, {
+      clientId: "client-b",
+      sessionId: "session-b",
+      targetId: "desktop-1",
+      deviceName: "Watch",
+    })
+    hub.broadcastEvent("desktop-1", {
+      channel: "acp://event",
+      payload: { type: "stream_batch", connectionId: "s1", data: { delta: "hi" } },
+    })
+
+    expect(first.send).toHaveBeenCalledTimes(1)
+    expect(second.send).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(String((first.send as any).mock.calls[0][0]))).toMatchObject({
+      channel: "acp://event",
+      payload: { type: "stream_batch" },
+    })
+    expect(JSON.parse(String((second.send as any).mock.calls[0][0]))).toMatchObject({
+      channel: "acp://event",
+      payload: { type: "stream_batch" },
+    })
+  })
+
+  it("forwards client identity on proxy requests", async () => {
+    const hub = new RelayHub()
+    const desktop = socketMock()
+    hub.registerDesktop("desktop-1", desktop, "Work Desktop")
+
+    const promise = hub.sendProxyRequest(
+      "desktop-1",
+      "acp_prompt",
+      { prompt: "hi" },
+      10_000,
+      {
+        clientId: "client-phone",
+        sessionId: "session-1",
+        targetId: "desktop-1",
+        deviceName: "Phone",
+      }
+    )
+
+    const frame = JSON.parse(String((desktop.send as any).mock.calls[0][0]))
+    expect(frame).toMatchObject({
+      type: "proxy_request",
+      command: "acp_prompt",
+      clientId: "client-phone",
+      client: {
+        clientId: "client-phone",
+        sessionId: "session-1",
+        targetId: "desktop-1",
+        deviceName: "Phone",
+      },
+    })
+
+    hub.handleDesktopProxyResponse({ requestId: frame.requestId, ok: true, body: { ok: true } })
+    await expect(promise).resolves.toMatchObject({ body: { ok: true } })
+  })
+
   it("forwards raw tcp stream frames between mobile and desktop sockets", () => {
     const hub = new RelayHub()
     const desktop = socketMock()

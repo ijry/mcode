@@ -3,6 +3,7 @@ import WebSocket from "ws"
 import { ReplayBuffer } from "../protocol/replayBuffer.js"
 import type { ReplayStore } from "../protocol/replayStore.js"
 import type {
+  ClientIdentity,
   RelayFailureCode,
   RelayEventFrame,
   ReplayQueryResult,
@@ -58,7 +59,7 @@ export class RelayRequestError extends Error {
 
 export class RelayHub {
   private readonly desktops = new Map<string, DesktopConnection>()
-  private readonly mobileSubscribers = new Map<string, Set<WebSocket>>()
+  private readonly mobileSubscribers = new Map<string, Map<WebSocket, ClientIdentity>>()
   private readonly pendingProxy = new Map<string, PendingProxyRequest>()
   private readonly pendingTunnel = new Map<string, PendingTunnelRequest>()
   private readonly tcpStreams = new Map<string, ActiveTcpStream>()
@@ -130,10 +131,20 @@ export class RelayHub {
     this.desktops.set(targetId, connection)
   }
 
-  attachMobileSubscriber(targetId: string, socket: WebSocket, lastEventId = 0): ReplayQueryResult {
-    const set = this.mobileSubscribers.get(targetId) ?? new Set<WebSocket>()
-    set.add(socket)
-    this.mobileSubscribers.set(targetId, set)
+  attachMobileSubscriber(
+    targetId: string,
+    socket: WebSocket,
+    lastEventId = 0,
+    client: ClientIdentity = {
+      clientId: "unknown",
+      sessionId: "unknown",
+      targetId,
+      deviceName: null,
+    }
+  ): ReplayQueryResult {
+    const subscribers = this.mobileSubscribers.get(targetId) ?? new Map<WebSocket, ClientIdentity>()
+    subscribers.set(socket, client)
+    this.mobileSubscribers.set(targetId, subscribers)
 
     const replay = this.getReplayBuffer(targetId).queryAfter(lastEventId)
     for (const frame of replay.frames) {
@@ -149,10 +160,10 @@ export class RelayHub {
   }
 
   detachMobileSubscriber(targetId: string, socket: WebSocket): void {
-    const set = this.mobileSubscribers.get(targetId)
-    if (!set) return
-    set.delete(socket)
-    if (set.size === 0) {
+    const subscribers = this.mobileSubscribers.get(targetId)
+    if (!subscribers) return
+    subscribers.delete(socket)
+    if (subscribers.size === 0) {
       this.mobileSubscribers.delete(targetId)
     }
   }
@@ -168,7 +179,7 @@ export class RelayHub {
     const payload = JSON.stringify(frame)
     const subscribers = this.mobileSubscribers.get(targetId)
     if (subscribers) {
-      for (const socket of subscribers) {
+      for (const socket of subscribers.keys()) {
         if (socket.readyState === WebSocket.OPEN) {
           socket.send(payload)
         }
@@ -181,7 +192,8 @@ export class RelayHub {
     targetId: string,
     command: string,
     payload: unknown,
-    timeoutMs = 10_000
+    timeoutMs = 10_000,
+    client?: ClientIdentity
   ): Promise<unknown> {
     const desktop = this.desktops.get(targetId)
     if (!desktop || desktop.socket.readyState !== WebSocket.OPEN) {
@@ -194,6 +206,7 @@ export class RelayHub {
       requestId,
       command,
       payload,
+      ...(client ? { clientId: client.clientId, client } : {}),
     })
 
     return await new Promise((resolve, reject) => {
