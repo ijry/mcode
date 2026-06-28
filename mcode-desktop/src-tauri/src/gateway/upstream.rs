@@ -90,6 +90,10 @@ pub enum RelayControlFrame {
         command: String,
         #[serde(default)]
         payload: serde_json::Value,
+        #[serde(rename = "clientId", default)]
+        client_id: Option<String>,
+        #[serde(default)]
+        client: Option<serde_json::Value>,
     },
     #[serde(rename = "tcp_connect")]
     TcpConnect {
@@ -394,7 +398,10 @@ pub async fn connect_upstream(state: Arc<AppState>) -> Result<()> {
                     request_id,
                     command,
                     payload,
+                    client_id,
+                    client,
                 } => {
+                    let payload = merge_proxy_client_metadata(payload, client_id, client);
                     let event_sink =
                         build_upstream_event_sink(Arc::clone(&state), outbound_tx.clone());
                     let result = dispatch_desktop_proxy_with_event_sink_arc(
@@ -490,6 +497,29 @@ pub async fn connect_upstream(state: Arc<AppState>) -> Result<()> {
 
 pub fn parse_upstream_frame(message: &str) -> Result<RelayControlFrame> {
     serde_json::from_str(message).map_err(Into::into)
+}
+
+fn merge_proxy_client_metadata(
+    payload: serde_json::Value,
+    client_id: Option<String>,
+    client: Option<serde_json::Value>,
+) -> serde_json::Value {
+    let mut object = match payload {
+        serde_json::Value::Object(object) => object,
+        _ => serde_json::Map::new(),
+    };
+    if let Some(client_id) = client_id
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        object
+            .entry("sourceClientId".to_string())
+            .or_insert(serde_json::Value::String(client_id));
+    }
+    if let Some(client) = client {
+        object.entry("client".to_string()).or_insert(client);
+    }
+    serde_json::Value::Object(object)
 }
 
 fn send_outbound_text(tx: &OutboundTx, text: String) -> Result<()> {

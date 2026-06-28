@@ -994,3 +994,6 @@ Implementation progress:
 - Relay now treats app clients as multiple subscribers, assigns/reuses
   `clientId`, includes it in `/v1/events` ready frames, and forwards client
   identity on `proxy_request` to Desktop.
+- Desktop now records active turn ownership per hosted official CLI session,
+  rejects concurrent prompt attempts with `turn_busy`, and annotates resolved
+  permission/question interactions with `responderClientId`.

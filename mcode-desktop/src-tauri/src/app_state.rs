@@ -68,6 +68,15 @@ pub struct CliInteractionWaiter {
     pub response_tx: oneshot::Sender<Value>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostedActiveTurn {
+    pub session_id: String,
+    pub active_turn_id: String,
+    pub owner_client_id: Option<String>,
+    pub started_at_ms: u64,
+}
+
 pub struct AppState {
     pub target_id: RwLock<String>,
     pub relay_url: RwLock<Option<String>>,
@@ -79,6 +88,7 @@ pub struct AppState {
     pub cli_runtimes: RwLock<Vec<CliRuntimeStatus>>,
     pub cli_sessions: RwLock<Vec<CliRuntimeSession>>,
     pub cli_processes: Mutex<HashMap<String, CliProcessControl>>,
+    pub hosted_active_turns: Mutex<HashMap<String, HostedActiveTurn>>,
     pub codex_app_server_sessions: AsyncMutex<HashMap<String, CodexAppServerSession>>,
     pub cli_pending_interactions: RwLock<Vec<CliPendingInteraction>>,
     pub cli_interaction_waiters: Mutex<HashMap<String, CliInteractionWaiter>>,
@@ -130,6 +140,7 @@ impl Default for AppState {
             cli_runtimes: RwLock::new(Vec::new()),
             cli_sessions: RwLock::new(Vec::new()),
             cli_processes: Mutex::new(HashMap::new()),
+            hosted_active_turns: Mutex::new(HashMap::new()),
             codex_app_server_sessions: AsyncMutex::new(HashMap::new()),
             cli_pending_interactions: RwLock::new(Vec::new()),
             cli_interaction_waiters: Mutex::new(HashMap::new()),

@@ -346,7 +346,7 @@ git commit -m "feat(relay): forward p22 client identity"
 - Produces: `CliPendingInteraction.responder_client_id: Option<String>`.
 - Produces health fields `active_turn_owner_client_id`, `active_turn_count`, and responder metadata in pending interactions.
 
-- [ ] **Step 1: Write Desktop tests for busy rejection and first responder wins**
+- [x] **Step 1: Write Desktop tests for busy rejection and first responder wins**
 
 Create `mcode-desktop/src-tauri/tests/desktop_p22_multi_client_session.rs`:
 
@@ -447,13 +447,13 @@ async fn p22_first_responder_wins_for_pending_permission() {
 }
 ```
 
-- [ ] **Step 2: Run Desktop P22 test and verify failure**
+- [x] **Step 2: Run Desktop P22 test and verify failure**
 
 Run: `cargo test --manifest-path mcode-desktop/src-tauri/Cargo.toml --test desktop_p22_multi_client_session`
 
 Expected: FAIL because active turn owner and responder metadata are not implemented.
 
-- [ ] **Step 3: Extend Desktop state structs**
+- [x] **Step 3: Extend Desktop state structs**
 
 In `mcode-desktop/src-tauri/src/runtime/mod.rs`, add to `CliRuntimeSession`:
 
@@ -487,7 +487,7 @@ pub struct HostedActiveTurn {
 
 Initialize `hosted_active_turns` in `Default`.
 
-- [ ] **Step 4: Implement source client extraction and active-turn guard**
+- [x] **Step 4: Implement source client extraction and active-turn guard**
 
 In `mcode-desktop/src-tauri/src/runtime/mod.rs`, add:
 
@@ -571,7 +571,7 @@ anyhow!(
 
 Add helper `update_session_active_turn_owner` to mutate matching `CliRuntimeSession`.
 
-- [ ] **Step 5: Merge relay client metadata in Desktop upstream proxy requests**
+- [x] **Step 5: Merge relay client metadata in Desktop upstream proxy requests**
 
 In `mcode-desktop/src-tauri/src/gateway/upstream.rs`, update `RelayControlFrame::ProxyRequest`:
 
@@ -617,7 +617,7 @@ fn merge_proxy_client_metadata(
 }
 ```
 
-- [ ] **Step 6: Apply active-turn guard to Codex and Claude prompts**
+- [x] **Step 6: Apply active-turn guard to Codex and Claude prompts**
 
 For Codex app-server prompt in `mcode-desktop/src-tauri/src/runtime/codex_cli.rs`:
 
@@ -634,7 +634,7 @@ For Claude stdio prompt in `mcode-desktop/src-tauri/src/runtime/claude_cli.rs`:
 - Call `end_hosted_turn(state, &connection_id)` after process completion or error.
 - For stateless `dispatch_claude_proxy` without `state`, keep current behavior because no Desktop session host exists.
 
-- [ ] **Step 7: Add responder metadata to interaction resolution events**
+- [x] **Step 7: Add responder metadata to interaction resolution events**
 
 In `respond_interaction`, compute:
 
@@ -652,7 +652,7 @@ In `resolved_interaction_event`, add:
 
 Also include `responderClientId` in the response root for easier app use.
 
-- [ ] **Step 8: Expose health diagnostics**
+- [x] **Step 8: Expose health diagnostics**
 
 In `mcode-desktop/src-tauri/src/health.rs`, add to `DesktopHealthSnapshot`:
 
@@ -663,7 +663,7 @@ pub active_turn_owner_client_id: Option<String>,
 
 Populate from `state.hosted_active_turns`.
 
-- [ ] **Step 9: Run Desktop tests**
+- [x] **Step 9: Run Desktop tests**
 
 Run:
 
@@ -674,7 +674,7 @@ cargo test --manifest-path mcode-desktop/src-tauri/Cargo.toml
 
 Expected: PASS.
 
-- [ ] **Step 10: Update architecture note progress**
+- [x] **Step 10: Update architecture note progress**
 
 Append:
 
@@ -684,7 +684,7 @@ Append:
   permission/question interactions with `responderClientId`.
 ```
 
-- [ ] **Step 11: Commit Desktop coordination**
+- [x] **Step 11: Commit Desktop coordination**
 
 Run:
 

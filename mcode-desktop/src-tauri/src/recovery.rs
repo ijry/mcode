@@ -295,6 +295,8 @@ fn interrupt_running_session(mut session: CliRuntimeSession) -> CliRuntimeSessio
         session.active_request_id = None;
         session.cancel_requested = false;
         session.active_turn_id = None;
+        session.active_turn_owner_client_id = None;
+        session.active_turn_started_at_ms = None;
         session.app_server_active = false;
         session.error = Some("Desktop restarted while the CLI session was running".to_string());
         session.updated_at_ms = now_ms();

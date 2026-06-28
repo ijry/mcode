@@ -48,6 +48,7 @@ async fn p19_snapshot_restores_gateway_services_and_interrupts_running_sessions(
             resolved_at_ms: None,
             decision: None,
             value: None,
+            responder_client_id: None,
             summary: "Run command?".to_string(),
             data: json!({ "id": "perm-1" }),
         });

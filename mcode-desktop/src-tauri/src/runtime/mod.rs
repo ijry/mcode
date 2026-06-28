@@ -16,7 +16,7 @@ use tokio::process::Command;
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
-use crate::app_state::{AppState, CliInteractionWaiter};
+use crate::app_state::{AppState, CliInteractionWaiter, HostedActiveTurn};
 
 pub const CAPABILITY_CODEX_CLI: &str = "desktop.runtime.codex-cli";
 pub const CAPABILITY_CLAUDE_CLI: &str = "desktop.runtime.claude-cli";
@@ -103,6 +103,8 @@ pub struct CliRuntimeSession {
     pub protocol: Option<String>,
     pub provider_thread_id: Option<String>,
     pub active_turn_id: Option<String>,
+    pub active_turn_owner_client_id: Option<String>,
+    pub active_turn_started_at_ms: Option<u64>,
     pub app_server_active: bool,
     pub created_at_ms: u64,
     pub updated_at_ms: u64,
@@ -126,6 +128,7 @@ pub struct CliPendingInteraction {
     pub resolved_at_ms: Option<u64>,
     pub decision: Option<String>,
     pub value: Option<Value>,
+    pub responder_client_id: Option<String>,
     pub summary: String,
     pub data: Value,
 }
@@ -333,6 +336,8 @@ fn connect_cli_session(state: &AppState, payload: Value) -> Result<Value> {
             protocol: None,
             provider_thread_id: None,
             active_turn_id: None,
+            active_turn_owner_client_id: None,
+            active_turn_started_at_ms: None,
             app_server_active: false,
             created_at_ms: now,
             updated_at_ms: now,
@@ -376,6 +381,8 @@ async fn close_cli_session(
         session.cancel_requested = status == CliSessionStatus::Canceled;
         session.error = None;
         session.active_turn_id = None;
+        session.active_turn_owner_client_id = None;
+        session.active_turn_started_at_ms = None;
         if status == CliSessionStatus::Disconnected {
             session.app_server_active = false;
         }
@@ -388,6 +395,7 @@ async fn close_cli_session(
     if status == CliSessionStatus::Disconnected {
         codex_cli::stop_codex_app_server_session(state, &session_id).await;
     }
+    end_hosted_turn(state, &session_id);
     let _ = crate::recovery::save_recovery_snapshot(state);
 
     Ok(json!({
@@ -447,6 +455,9 @@ async fn dispatch_prompt_with_state(
             Ok(attach_session_to_response(body, completed))
         }
         Err(error) => {
+            if is_turn_busy_error(&error) {
+                return Err(error);
+            }
             mark_session_error(state, &session_id, error.to_string())?;
             Err(error)
         }
@@ -478,6 +489,9 @@ async fn dispatch_prompt_with_state_arc(
             Ok(attach_session_to_response(body, completed))
         }
         Err(error) => {
+            if is_turn_busy_error(&error) {
+                return Err(error);
+            }
             mark_session_error(state.as_ref(), &session_id, error.to_string())?;
             Err(error)
         }
@@ -547,6 +561,36 @@ fn mark_prompt_started(
     session_id: &str,
     payload: &Value,
 ) -> Result<CliRuntimeSession> {
+    {
+        let sessions = state
+            .cli_sessions
+            .read()
+            .map_err(|_| anyhow!("cli session lock poisoned"))?;
+        let session = sessions
+            .iter()
+            .find(|session| session.session_id == session_id)
+            .ok_or_else(|| anyhow!("cli session not found: {session_id}"))?;
+        if let Some(agent_type) = extract_agent_type(payload) {
+            let runtime = runtime_from_agent_type(agent_type)
+                .ok_or_else(|| anyhow!("unsupported desktop agent type: {agent_type}"))?;
+            if runtime != session.runtime {
+                return Err(anyhow!(
+                    "cli session {} belongs to {}",
+                    session.session_id,
+                    session.runtime.id()
+                ));
+            }
+        }
+    }
+
+    begin_hosted_turn(
+        state,
+        session_id,
+        extract_request_id(payload)
+            .map(ToString::to_string)
+            .unwrap_or_else(|| format!("turn-{}", Uuid::new_v4())),
+        extract_source_client_id(payload),
+    )?;
     let mut sessions = state
         .cli_sessions
         .write()
@@ -554,12 +598,16 @@ fn mark_prompt_started(
     let session = sessions
         .iter_mut()
         .find(|session| session.session_id == session_id)
-        .ok_or_else(|| anyhow!("cli session not found: {session_id}"))?;
+        .ok_or_else(|| {
+            end_hosted_turn(state, session_id);
+            anyhow!("cli session not found: {session_id}")
+        })?;
 
     if let Some(agent_type) = extract_agent_type(payload) {
         let runtime = runtime_from_agent_type(agent_type)
             .ok_or_else(|| anyhow!("unsupported desktop agent type: {agent_type}"))?;
         if runtime != session.runtime {
+            end_hosted_turn(state, session_id);
             return Err(anyhow!(
                 "cli session {} belongs to {}",
                 session.session_id,
@@ -577,6 +625,8 @@ fn mark_prompt_started(
     session.exit_code = None;
     session.stderr_preview = None;
     session.active_turn_id = None;
+    session.active_turn_owner_client_id = extract_source_client_id(payload);
+    session.active_turn_started_at_ms = Some(now_ms());
     let session = session.clone();
     drop(sessions);
     let _ = crate::recovery::save_recovery_snapshot(state);
@@ -662,12 +712,15 @@ fn update_session_after_prompt(
     session.protocol = protocol;
     session.provider_thread_id = provider_thread_id;
     session.active_turn_id = active_turn_id;
+    session.active_turn_owner_client_id = None;
+    session.active_turn_started_at_ms = None;
     session.app_server_active = app_server_active.unwrap_or(false);
     if has_events {
         session.last_event_at_ms = Some(now_ms());
     }
     let session = session.clone();
     drop(sessions);
+    end_hosted_turn(state, session_id);
     let _ = crate::recovery::save_recovery_snapshot(state);
     Ok(session)
 }
@@ -705,6 +758,99 @@ pub fn update_session_provider_diagnostics(
         }
     }
     let _ = crate::recovery::save_recovery_snapshot(state);
+}
+
+pub fn begin_hosted_turn(
+    state: &AppState,
+    session_id: &str,
+    active_turn_id: impl Into<String>,
+    owner_client_id: Option<String>,
+) -> Result<()> {
+    let active_turn_id = active_turn_id.into();
+    let now = now_ms();
+    let mut active = state
+        .hosted_active_turns
+        .lock()
+        .map_err(|_| anyhow!("hosted active turn lock poisoned"))?;
+    if let Some(existing) = active.get(session_id) {
+        return Err(turn_busy_error(existing));
+    }
+    active.insert(
+        session_id.to_string(),
+        HostedActiveTurn {
+            session_id: session_id.to_string(),
+            active_turn_id: active_turn_id.clone(),
+            owner_client_id: owner_client_id.clone(),
+            started_at_ms: now,
+        },
+    );
+    drop(active);
+    update_session_active_turn_owner(
+        state,
+        session_id,
+        Some(active_turn_id),
+        owner_client_id,
+        Some(now),
+    );
+    Ok(())
+}
+
+pub fn begin_hosted_turn_for_test(
+    state: &AppState,
+    session_id: &str,
+    active_turn_id: &str,
+    owner_client_id: Option<String>,
+) -> Result<()> {
+    begin_hosted_turn(
+        state,
+        session_id,
+        active_turn_id.to_string(),
+        owner_client_id,
+    )
+}
+
+pub fn end_hosted_turn(state: &AppState, session_id: &str) {
+    if let Ok(mut active) = state.hosted_active_turns.lock() {
+        active.remove(session_id);
+    }
+    update_session_active_turn_owner(state, session_id, None, None, None);
+}
+
+fn update_session_active_turn_owner(
+    state: &AppState,
+    session_id: &str,
+    active_turn_id: Option<String>,
+    owner_client_id: Option<String>,
+    started_at_ms: Option<u64>,
+) {
+    if let Ok(mut sessions) = state.cli_sessions.write() {
+        if let Some(session) = sessions
+            .iter_mut()
+            .find(|session| session.session_id == session_id)
+        {
+            session.active_turn_id = active_turn_id;
+            session.active_turn_owner_client_id = owner_client_id;
+            session.active_turn_started_at_ms = started_at_ms;
+            session.updated_at_ms = now_ms();
+        }
+    }
+}
+
+fn turn_busy_error(existing: &HostedActiveTurn) -> anyhow::Error {
+    anyhow!(
+        "{}",
+        json!({
+            "code": "turn_busy",
+            "message": "another device is running a turn",
+            "activeTurnId": existing.active_turn_id,
+            "activeTurnOwnerClientId": existing.owner_client_id,
+            "retryable": true,
+        })
+    )
+}
+
+fn is_turn_busy_error(error: &anyhow::Error) -> bool {
+    error.to_string().contains("\"code\":\"turn_busy\"")
 }
 
 pub fn mark_session_event(state: &AppState, session_id: &str) {
@@ -750,6 +896,7 @@ pub fn capture_pending_interaction(state: &AppState, session_id: &str, event: &A
             resolved_at_ms: None,
             decision: None,
             value: None,
+            responder_client_id: None,
             summary,
             data: event.data.clone(),
         });
@@ -858,6 +1005,7 @@ fn respond_interaction(state: &AppState, payload: Value, kind: &str) -> Result<V
         .cloned()
         .or_else(|| payload.get("answer").cloned())
         .or_else(|| payload.get("response").cloned());
+    let responder_client_id = extract_source_client_id(&payload);
     let interaction = mark_interaction_resolved(
         state,
         &session_id,
@@ -865,6 +1013,7 @@ fn respond_interaction(state: &AppState, payload: Value, kind: &str) -> Result<V
         kind,
         decision.clone(),
         value.clone(),
+        responder_client_id,
     )?;
     let event = resolved_interaction_event(&session_id, &interaction, &decision, value.clone());
     let live_resolved = resolve_live_interaction_waiter(
@@ -885,6 +1034,7 @@ fn respond_interaction(state: &AppState, payload: Value, kind: &str) -> Result<V
         "status": "resolved",
         "decision": decision,
         "value": value,
+        "responderClientId": interaction.responder_client_id,
         "liveResolved": live_resolved,
         "interaction": interaction,
         "events": [event],
@@ -1050,6 +1200,7 @@ fn mark_interaction_resolved(
     kind: &str,
     decision: String,
     value: Option<Value>,
+    responder_client_id: Option<String>,
 ) -> Result<CliPendingInteraction> {
     let now = now_ms();
     let mut interactions = state
@@ -1069,6 +1220,7 @@ fn mark_interaction_resolved(
     interaction.resolved_at_ms = Some(now);
     interaction.decision = Some(decision);
     interaction.value = value;
+    interaction.responder_client_id = responder_client_id;
     let interaction = interaction.clone();
     drop(interactions);
     let _ = crate::recovery::save_recovery_snapshot(state);
@@ -1090,6 +1242,7 @@ fn resolved_interaction_event(
                 "decision": decision,
                 "value": value,
                 "status": "resolved",
+                "responderClientId": interaction.responder_client_id,
             }),
         },
         _ => AcpEventEnvelope {
@@ -1100,6 +1253,7 @@ fn resolved_interaction_event(
                 "answer": value,
                 "decision": decision,
                 "status": "resolved",
+                "responderClientId": interaction.responder_client_id,
             }),
         },
     }
@@ -1264,6 +1418,22 @@ fn extract_session_id(payload: &Value) -> Option<&str> {
         .or_else(|| payload.get("id").and_then(Value::as_str))
         .map(str::trim)
         .filter(|value| !value.is_empty())
+}
+
+pub fn extract_source_client_id(payload: &Value) -> Option<String> {
+    payload
+        .get("sourceClientId")
+        .and_then(Value::as_str)
+        .or_else(|| payload.get("source_client_id").and_then(Value::as_str))
+        .or_else(|| {
+            payload
+                .get("client")
+                .and_then(Value::as_object)
+                .and_then(|client| client.get("clientId").and_then(Value::as_str))
+        })
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
 }
 
 fn extract_request_id(payload: &Value) -> Option<&str> {
