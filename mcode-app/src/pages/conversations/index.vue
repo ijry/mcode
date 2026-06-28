@@ -1,11 +1,17 @@
 <template>
   <view class="page conversations-page" :style="[upThemeVars, upThemePageStyle]">
+    <!-- 液态玻璃背景光斑 -->
+    <view class="liquid-bg" aria-hidden="true">
+      <view class="liquid-blob liquid-blob--one"></view>
+      <view class="liquid-blob liquid-blob--two"></view>
+      <view class="liquid-blob liquid-blob--three"></view>
+    </view>
     <view class="conversations-shell">
-      <up-sticky class="conversations-sticky" :offset-top="0" :custom-nav-height="0" :bg-color="upThemeVar('--up-page-bg-color', '#f5f5f7')" z-index="20">
+      <up-sticky class="conversations-sticky" :offset-top="0" :custom-nav-height="0" bg-color="transparent" z-index="20">
         <view class="conversations-header">
           <text class="conversations-header__title">会话</text>
           <view class="conversations-header__action" @click="createConversation()">
-            <up-icon name="plus" size="16" color="#2f7cf6"></up-icon>
+            <up-icon name="plus" size="20" :color="upThemeVar('--up-primary', '#2f7cf6')"></up-icon>
           </view>
         </view>
 
@@ -2324,15 +2330,76 @@ function formatTime(time?: string): string {
 }
 
 .conversations-page {
-  background: var(--up-page-bg-color, var(--up-bg-color, #f3f4f6));
+  position: relative;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--up-primary, #2f7cf6) 7%, var(--up-page-bg-color, #f0f2f5) 93%) 0%,
+      var(--up-page-bg-color, #f0f2f5) 48%,
+      var(--up-page-bg-color, #f0f2f5) 100%
+    );
+}
+
+/* ===== 液态玻璃背景 ===== */
+.liquid-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.liquid-blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(80rpx);
+  opacity: 0.5;
+}
+
+.liquid-blob--one {
+  width: 460rpx;
+  height: 460rpx;
+  top: -80rpx;
+  right: -90rpx;
+  background: color-mix(in srgb, var(--up-primary, #2f7cf6) 32%, transparent);
+  animation: liquidFloat 20s ease-in-out infinite alternate;
+}
+
+.liquid-blob--two {
+  width: 540rpx;
+  height: 540rpx;
+  bottom: 120rpx;
+  left: -160rpx;
+  background: rgba(167, 139, 250, 0.22);
+  animation: liquidFloat 15s ease-in-out infinite alternate-reverse;
+}
+
+.liquid-blob--three {
+  width: 380rpx;
+  height: 380rpx;
+  top: 42%;
+  right: 40rpx;
+  background: rgba(96, 165, 250, 0.2);
+  animation: liquidFloat 25s ease-in-out infinite alternate;
+}
+
+@keyframes liquidFloat {
+  from {
+    transform: translate(0, 0) scale(1);
+  }
+  to {
+    transform: translate(60rpx, 80rpx) scale(1.2);
+  }
 }
 
 .conversations-shell {
+  position: relative;
+  z-index: 1;
   min-height: 100vh;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  padding: 0 24rpx 40rpx;
+  padding: 0 32rpx 40rpx;
 }
 
 .conversations-sticky {
@@ -2341,8 +2408,8 @@ function formatTime(time?: string): string {
 }
 
 .conversations-sticky :deep(.u-sticky__content) {
-  padding-top: 28rpx;
-  background: var(--up-page-bg-color, var(--up-bg-color, #f3f4f6));
+  padding-top: 40rpx;
+  background: transparent;
 }
 
 .conversations-header {
@@ -2353,24 +2420,31 @@ function formatTime(time?: string): string {
 }
 
 .conversations-header__title {
-  font-size: 60rpx;
-  font-weight: 700;
+  font-size: 68rpx;
+  font-weight: 800;
   line-height: 1.08;
   letter-spacing: -0.04em;
-  color: var(--up-main-color, #303133);
+  color: var(--up-main-color, #191c1e);
 }
 
 .conversations-header__action {
-  width: 48rpx;
-  height: 48rpx;
+  width: 64rpx;
+  height: 64rpx;
   display: flex;
   align-items: center;
   justify-content: center;
   border-radius: 999rpx;
-  border: 2rpx solid var(--up-primary, #2979ff);
-  background: var(--up-card-bg-color, #ffffff);
+  border: 1rpx solid rgba(255, 255, 255, 0.5);
+  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 50%, transparent);
+  backdrop-filter: blur(25rpx);
+  -webkit-backdrop-filter: blur(25rpx);
   box-shadow: 0 6rpx 18rpx rgba(47, 124, 246, 0.08);
   flex-shrink: 0;
+  transition: transform 0.2s ease;
+}
+
+.conversations-header__action:active {
+  transform: scale(0.9);
 }
 
 .conversations-searchbar {
@@ -2378,10 +2452,12 @@ function formatTime(time?: string): string {
 }
 
 .conversations-searchbar :deep(.u-search__content) {
-  border: none !important;
-  border-radius: 24rpx !important;
-  background-color: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6)) !important;
-  box-shadow: none !important;
+  border: 1rpx solid rgba(255, 255, 255, 0.5) !important;
+  border-radius: 28rpx !important;
+  background-color: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 40%, transparent) !important;
+  backdrop-filter: blur(25rpx);
+  -webkit-backdrop-filter: blur(25rpx);
+  box-shadow: 0 4rpx 16rpx rgba(31, 38, 135, 0.05) !important;
 }
 
 .conversations-searchbar :deep(.u-search__content__input) {
@@ -2432,10 +2508,10 @@ function formatTime(time?: string): string {
 
 .group-section__title {
   display: block;
-  font-size: 22rpx;
+  font-size: 24rpx;
   font-weight: 600;
-  color: var(--up-tips-color, #909193);
-  letter-spacing: 0.06em;
+  color: color-mix(in srgb, var(--up-tips-color, #909193) 60%, transparent);
+  letter-spacing: 0.18em;
   text-transform: uppercase;
   flex: 0 1 auto;
 }
@@ -2467,25 +2543,33 @@ function formatTime(time?: string): string {
 
 .live-card {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 18rpx;
-  padding: 18rpx 16rpx;
-  border-radius: 22rpx;
-  background: var(--up-card-bg-color, #ffffff) !important;
-  border: 1rpx solid var(--up-border-color, #dadbde);
-  box-shadow: 0 10rpx 26rpx rgba(15, 23, 42, 0.08) !important;
+  padding: 24rpx 22rpx;
+  border-radius: 32rpx;
+  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 45%, transparent) !important;
+  backdrop-filter: blur(30rpx);
+  -webkit-backdrop-filter: blur(30rpx);
+  border: 1rpx solid rgba(255, 255, 255, 0.6);
+  box-shadow: 0 8rpx 32rpx rgba(31, 38, 135, 0.07) !important;
   overflow: hidden;
+  transition: transform 0.15s ease;
+}
+
+.live-card:active {
+  transform: scale(0.98);
 }
 
 .agent-logo {
-  width: 64rpx;
-  height: 64rpx;
-  border-radius: 18rpx;
+  width: 96rpx;
+  height: 96rpx;
+  border-radius: 28rpx;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  background: color-mix(in srgb, var(--up-primary, #2979ff) 12%, var(--up-card-bg-color, #ffffff) 88%);
+  background: color-mix(in srgb, var(--up-primary, #2f7cf6) 10%, transparent);
+  border: 1rpx solid color-mix(in srgb, var(--up-primary, #2f7cf6) 8%, transparent);
 }
 
 .agent-logo__text {
@@ -2535,8 +2619,8 @@ function formatTime(time?: string): string {
 .live-card__session-name {
   display: block;
   margin-top: 8rpx;
-  font-size: 26rpx;
-  color: var(--up-content-color, #606266);
+  font-size: 28rpx;
+  color: color-mix(in srgb, var(--up-content-color, #606266) 80%, transparent);
   line-height: 1.3;
 }
 
@@ -2544,7 +2628,7 @@ function formatTime(time?: string): string {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 10rpx;
   flex-shrink: 0;
   padding-left: 8rpx;
