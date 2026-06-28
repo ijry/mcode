@@ -42,6 +42,10 @@ jest.mock('@/services/conversation/hotConversationCoordinator', () => ({
   isHotConversation: jest.fn(() => false),
 }))
 
+jest.mock('@/services/gateway/relayClientIdentity', () => ({
+  getRelayClientId: jest.fn(() => 'client-phone'),
+}))
+
 jest.mock('@/services/db/migrations', () => ({
   ensureConversationSchema: jest.fn(),
 }))
@@ -112,6 +116,105 @@ describe('conversationRuntime ACP error handling', () => {
 
     expect(session.status).toBe('idle')
     expect(session.inputErrorMessage).toBeNull()
+  })
+
+  it('clears pending permission when another device resolves it', () => {
+    const { store, session } = prepareSession()
+
+    store.handleEvent({
+      type: 'permission_request',
+      connectionId: 'conn-1',
+      data: {
+        id: 'perm-1',
+        description: 'Run command?',
+        options: [],
+      },
+    } as any)
+
+    expect(session.status).toBe('waiting_permission')
+    expect(session.pendingPermission?.id).toBe('perm-1')
+
+    store.handleEvent({
+      type: 'permission_resolved',
+      connectionId: 'conn-1',
+      data: {
+        requestId: 'perm-1',
+        responderClientId: 'other-device',
+      },
+    } as any)
+
+    expect(session.pendingPermission).toBeNull()
+    expect(session.status).toBe('connected')
+  })
+
+  it('shows local cancel-request copy for active turn cancellation', () => {
+    const { store, session } = prepareSession()
+    session.status = 'thinking'
+
+    store.handleEvent({
+      type: 'turn_cancel_requested',
+      connectionId: 'conn-1',
+      data: {
+        activeTurnId: 'turn-live',
+        cancelRequestedByClientId: 'client-phone',
+      },
+    } as any)
+
+    expect(session.status).toBe('thinking')
+    expect(session.inputErrorMessage).toBe('正在取消当前任务...')
+  })
+
+  it('shows other-device cancel-request copy for active turn cancellation', () => {
+    const { store, session } = prepareSession()
+    session.status = 'thinking'
+
+    store.handleEvent({
+      type: 'turn_cancel_requested',
+      connectionId: 'conn-1',
+      data: {
+        activeTurnId: 'turn-live',
+        cancelRequestedByClientId: 'client-watch',
+      },
+    } as any)
+
+    expect(session.status).toBe('thinking')
+    expect(session.inputErrorMessage).toBe('其他设备正在取消当前任务。')
+  })
+
+  it('clears generating state after turn_cancelled', () => {
+    const { store, session } = prepareSession()
+    session.status = 'thinking'
+    session.inputErrorMessage = '正在取消当前任务...'
+    session.liveMessage = {
+      role: 'assistant',
+      content: [{ type: 'text', text: 'partial' }],
+      isStreaming: true,
+      timestamp: Date.now(),
+    }
+
+    store.handleEvent({
+      type: 'turn_cancelled',
+      connectionId: 'conn-1',
+      data: { activeTurnId: 'turn-live', status: 'canceled' },
+    } as any)
+
+    expect(session.status).toBe('connected')
+    expect(session.inputErrorMessage).toBeNull()
+    expect(session.liveMessage).toBeNull()
+  })
+
+  it('surfaces recoverable copy after turn_cancel_failed', () => {
+    const { store, session } = prepareSession()
+    session.status = 'thinking'
+
+    store.handleEvent({
+      type: 'turn_cancel_failed',
+      connectionId: 'conn-1',
+      data: { message: 'provider refused interrupt' },
+    } as any)
+
+    expect(session.status).toBe('error')
+    expect(session.inputErrorMessage).toBe('取消当前任务失败，请刷新后重试。')
   })
 
   it('does not let an older snapshot overwrite newer streamed tail content', () => {

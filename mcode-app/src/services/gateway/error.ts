@@ -1,3 +1,5 @@
+import { describeGatewayFailureCode } from "./relayRecovery"
+
 function asObject(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : null
 }
@@ -45,6 +47,9 @@ function pickNestedMessage(value: unknown, seen = new Set<unknown>()): string | 
 
   const record = asObject(value)
   if (!record) return null
+
+  const classified = describeGatewayFailureCode(record.code)
+  if (classified) return classified
 
   const nestedCandidates = [
     record.detail,

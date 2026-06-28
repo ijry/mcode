@@ -1,9 +1,21 @@
-import { createGateway } from "@/services/gateway"
-import type { CodegGateway, GatewayMode, RelaySessionInfo } from "@/services/gateway"
-import { getDirectToken } from "@/services/gateway/directTokenStore"
-import { buildRemoteInstanceKey } from "@/services/realtime/instance-key"
+import type { GatewayMode, PairTargetMetadata, RelaySessionInfo } from "@/services/gateway"
+import {
+  toConnectionRuntimeContext,
+  type ConnectionRuntimeContext,
+  type DriverResolvedConnectionContext,
+} from "@/agents/shared/driverTypes"
+import { resolveConnectionDriver } from "@/services/gateway/connectionDriverRegistry"
+import {
+  buildConnectionRecordKey,
+  migrateConnectionRecord,
+  normalizeConnectionBaseUrl,
+  normalizeConnectionRecordV2,
+  normalizePairTargetProfile,
+  type ConnectionRecordV2,
+  type ConnectionTargetAgent,
+} from "./connectionSchema"
 
-export interface ConnectionContext {
+export interface LegacyConnectionContextInput {
   name: string
   mode: GatewayMode
   url: string
@@ -13,21 +25,22 @@ export interface ConnectionContext {
   relaySession?: RelaySessionInfo | null
 }
 
-export interface ResolvedConnectionContext {
-  connection: ConnectionContext
-  gateway: CodegGateway
-  instanceKey: string
-}
+export type ConnectionContext = ConnectionRuntimeContext
+
+export type ConnectionContextLike = ConnectionContext | ConnectionRecordV2 | LegacyConnectionContextInput
+
+export type ResolvedConnectionContext = DriverResolvedConnectionContext
 
 export function normalizeBaseUrl(url: string) {
-  return String(url || "").trim().replace(/\/+$/, "")
+  return normalizeConnectionBaseUrl(url)
 }
 
-export function buildConnectionKey(input: Pick<ConnectionContext, "mode" | "url">) {
-  return `${input.mode}::${normalizeBaseUrl(input.url)}`
+export function buildConnectionKey(input: ConnectionContextLike) {
+  const normalized = normalizeConnectionContext(input)
+  return normalized ? buildConnectionRecordKey(normalized) : ""
 }
 
-export function encodeConnectionContext(connection: ConnectionContext) {
+export function encodeConnectionContext(connection: ConnectionContextLike) {
   return encodeURIComponent(JSON.stringify(sanitizeConnectionContext(connection)))
 }
 
@@ -36,175 +49,126 @@ export function decodeConnectionContext(raw?: string | null): ConnectionContext 
   if (!input) return null
 
   try {
-    const parsed = JSON.parse(decodeURIComponent(input)) as Record<string, unknown>
-    const mode = parsed.mode === "relay" ? "relay" : parsed.mode === "direct" ? "direct" : null
-    const url = normalizeBaseUrl(String(parsed.url || ""))
-    if (!mode || !url) return null
-
-    return {
-      name: String(parsed.name || "").trim() || "未命名连接",
-      mode,
-      url,
-      directToken: pickString(parsed.directToken),
-      pairCode: pickString(parsed.pairCode),
-      pairSecret: pickString(parsed.pairSecret),
-      relaySession: normalizeRelaySession(parsed.relaySession),
-    }
+    return normalizeConnectionContext(JSON.parse(decodeURIComponent(input)))
   } catch {
     return null
   }
 }
 
 export async function resolveConnectionContext(
-  connection: ConnectionContext
+  connection: ConnectionContextLike
 ): Promise<ResolvedConnectionContext> {
-  if (connection.mode === "direct") {
-    const token = pickString(connection.directToken, getDirectToken(connection.url))
-    if (!token) {
-      throw new Error(`${connection.name} 缺少直连令牌`)
-    }
-
-    const gateway = createGateway({
-      mode: "direct",
-      directBaseUrl: connection.url,
-    })
-    await gateway.pair({
-      directBaseUrl: connection.url,
-      token,
-    })
-
-    const instanceKey = buildRemoteInstanceKey({
-      mode: "direct",
-      baseUrl: connection.url,
-      principal: token.slice(0, 16) || "direct:anonymous",
-    })
-
-    return {
-      connection: {
-        ...connection,
-        directToken: token,
-      },
-      gateway,
-      instanceKey,
-    }
+  const normalized = normalizeConnectionContext(connection)
+  if (!normalized) {
+    throw new Error("连接信息无效")
   }
 
-  let relaySession = normalizeRelaySession(connection.relaySession)
-  if (!relaySession?.accessToken) {
-    if (!connection.pairCode || !connection.pairSecret) {
-      throw new Error(`${connection.name} 缺少中继配对信息`)
-    }
-
-    const pairGateway = createGateway({
-      mode: "relay",
-      relayUrl: connection.url,
-      session: { accessToken: "" },
-    })
-    const session = await pairGateway.pair({
-      relayUrl: connection.url,
-      code: connection.pairCode,
-      secret: connection.pairSecret,
-    })
-    if (!session?.accessToken) {
-      throw new Error(`${connection.name} 中继会话无效`)
-    }
-    relaySession = session
-  }
-
-  const gateway = createGateway({
-    mode: "relay",
-    relayUrl: connection.url,
-    session: relaySession,
-  })
-  const descriptor = gateway.getRemoteInstanceDescriptor()
-  const instanceKey =
-    descriptor.instanceKey ||
-    buildRemoteInstanceKey({
-      mode: "relay",
-      baseUrl: connection.url,
-      principal: relaySession?.targetId || relaySession?.refreshToken || "relay:anonymous",
-    })
-
-  return {
-    connection: {
-      ...connection,
-      relaySession,
-    },
-    gateway,
-    instanceKey,
-  }
+  const sourceKey = buildConnectionRecordKey(normalized)
+  const driver = resolveConnectionDriver(normalized)
+  const resolved = await driver.connect(normalized)
+  persistResolvedConnection(resolved.connection, sourceKey)
+  return resolved
 }
 
-export function persistResolvedConnection(connection: ConnectionContext) {
+export function persistResolvedConnection(connection: ConnectionContextLike, lookupKey?: string) {
+  const normalized = normalizeConnectionContext(connection)
+  if (!normalized) return
+
   const savedConnections = readStoredConnections()
-  const key = buildConnectionKey(connection)
-  const index = savedConnections.findIndex((item) => buildConnectionKey(item) === key)
+  const candidateKeys = Array.from(
+    new Set([String(lookupKey || "").trim(), buildConnectionRecordKey(normalized)].filter(Boolean))
+  )
+  const index = savedConnections.findIndex((item) =>
+    candidateKeys.includes(buildConnectionRecordKey(item))
+  )
   if (index < 0) return
 
-  savedConnections[index] = {
+  savedConnections[index] = sanitizeConnectionContext({
     ...savedConnections[index],
-    directToken: pickString(connection.directToken, savedConnections[index].directToken),
-    relaySession: connection.relaySession ?? savedConnections[index].relaySession ?? null,
+    ...normalized,
+  })
+  uni.setStorageSync("mcode_connections", savedConnections.map((item) => sanitizeConnectionContext(item)))
+}
+
+export function applyPairMetadata(
+  connection: ConnectionContextLike,
+  session: RelaySessionInfo | null,
+  target: PairTargetMetadata | null
+): ConnectionContext {
+  const normalized = normalizeConnectionContext(connection)
+  if (!normalized) {
+    throw new Error("连接信息无效")
   }
-  uni.setStorageSync("mcode_connections", savedConnections)
+
+  const normalizedTarget = normalizePairTargetProfile({
+    ...(session || {}),
+    ...(target || {}),
+  })
+  const targetAgent =
+    normalizedTarget?.targetAgent ||
+    normalizeTargetAgent(session?.targetAgent) ||
+    normalized.targetAgent
+  const targetProfile = normalizedTarget || normalized.targetProfile || null
+  const gatewaySession = session
+    ? {
+        ...session,
+        ...(targetProfile?.targetId ? { targetId: targetProfile.targetId } : {}),
+        ...(targetProfile?.targetAgent ? { targetAgent: targetProfile.targetAgent } : {}),
+        ...(targetProfile?.displayName ? { displayName: targetProfile.displayName } : {}),
+        ...(targetProfile?.capabilities ? { capabilities: targetProfile.capabilities } : {}),
+        ...(targetProfile?.protocolVersion ? { protocolVersion: targetProfile.protocolVersion } : {}),
+      }
+    : normalized.gatewaySession || null
+
+  return toConnectionContext({
+    ...normalized,
+    targetAgent,
+    ...(gatewaySession ? { gatewaySession } : {}),
+    ...(targetProfile ? { targetProfile } : {}),
+  })
 }
 
 export function readStoredConnections(): ConnectionContext[] {
   const raw = uni.getStorageSync("mcode_connections")
   if (!Array.isArray(raw)) return []
   return raw
-    .map((item) => normalizeStoredConnection(item))
+    .map((item) => normalizeConnectionContext(item))
     .filter((item): item is ConnectionContext => Boolean(item))
 }
 
-function sanitizeConnectionContext(connection: ConnectionContext) {
-  return {
-    name: String(connection.name || "").trim(),
-    mode: connection.mode,
-    url: normalizeBaseUrl(connection.url),
-    directToken: pickString(connection.directToken) || undefined,
-    pairCode: pickString(connection.pairCode) || undefined,
-    pairSecret: pickString(connection.pairSecret) || undefined,
-    relaySession: normalizeRelaySession(connection.relaySession) || undefined,
-  }
+function normalizeConnectionContext(input: unknown): ConnectionContext | null {
+  const record = normalizeConnectionRecordInput(input)
+  return record ? toConnectionContext(record) : null
 }
 
-function normalizeStoredConnection(input: unknown): ConnectionContext | null {
+function sanitizeConnectionContext(connection: ConnectionContextLike) {
+  const normalized = normalizeConnectionContext(connection)
+  if (!normalized) {
+    throw new Error("连接信息无效")
+  }
+  return normalized
+}
+
+function normalizeConnectionRecordInput(input: unknown): ConnectionRecordV2 | null {
   if (!input || typeof input !== "object") return null
   const raw = input as Record<string, unknown>
-  const mode = raw.mode === "relay" ? "relay" : raw.mode === "direct" ? "direct" : null
-  const url = normalizeBaseUrl(String(raw.url || ""))
-  if (!mode || !url) return null
 
-  return {
-    name: String(raw.name || "").trim() || "未命名连接",
-    mode,
-    url,
-    directToken: pickString(raw.directToken),
-    pairCode: pickString(raw.pairCode),
-    pairSecret: pickString(raw.pairSecret),
-    relaySession: normalizeRelaySession(raw.relaySession),
-  }
+  const normalizedV2 = normalizeConnectionRecordV2({
+    version: 2,
+    ...raw,
+    gatewaySession: raw.gatewaySession ?? raw.relaySession,
+  })
+  if (normalizedV2) return normalizedV2
+
+  return migrateConnectionRecord(raw)
 }
 
-function normalizeRelaySession(input: unknown): RelaySessionInfo | null {
-  if (!input || typeof input !== "object") return null
-  const raw = input as Record<string, unknown>
-  const accessToken = pickString(raw.accessToken)
-  if (!accessToken) return null
-
-  return {
-    accessToken,
-    refreshToken: pickString(raw.refreshToken) || undefined,
-    targetId: pickString(raw.targetId) || undefined,
-  }
+function toConnectionContext(record: ConnectionRecordV2): ConnectionContext {
+  return toConnectionRuntimeContext(record)
 }
 
-function pickString(...values: unknown[]) {
-  for (const value of values) {
-    if (typeof value === "string" && value.trim()) {
-      return value.trim()
-    }
-  }
-  return ""
+function normalizeTargetAgent(value: unknown): ConnectionTargetAgent | null {
+  return value === "codeg" || value === "opencode" || value === "mcode-desktop"
+    ? value
+    : null
 }

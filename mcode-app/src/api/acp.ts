@@ -16,6 +16,13 @@ import { destroyRealtimeTransport, getOrCreateRealtimeTransport, getRealtimeTran
 import { getRegisteredRemoteInstanceDescriptor } from "@/services/realtime/remoteInstanceRegistry"
 import type { RealtimeTransport, RealtimeTransportHost, RemoteInstanceDescriptor } from "@/services/realtime/types"
 import type { EventChannelConnection, RelaySessionInfo } from "@/services/gateway/types"
+import { classifyRelayRealtimeFrame } from "@/services/gateway/relayRecovery"
+import {
+  clearRelayCheckpoint,
+  clearRelayCheckpoints,
+  readRelayCheckpoint,
+  upsertRelayCheckpoint,
+} from "@/services/gateway/relayCheckpointStore"
 
 type BridgeState = {
   descriptor: RemoteInstanceDescriptor
@@ -28,6 +35,14 @@ type BridgeState = {
   detachReady: (() => void) | null
   detachClose: (() => void) | null
   detachError: (() => void) | null
+}
+
+type RelayRecoveryState = {
+  lastRelayEventId: number | null
+  replayWindowStart: number | null
+  requestedLastEventId: number | null
+  recoveryIssue: "replay_miss" | null
+  recoveryMessage: string | null
 }
 
 /**
@@ -43,6 +58,8 @@ class AcpApiClient {
   private pollingInstanceKey: string | null = null
   private ensureBridgePromises = new Map<string, Promise<BridgeState>>()
   private bridgeStates = new Map<string, BridgeState>()
+  private relayRecoveryStates = new Map<string, RelayRecoveryState>()
+  private replayMissCalibrationHook: ((instanceKey: string) => Promise<void> | void) | null = null
 
   constructor(baseUrl: string = "") {
     this.baseUrl = baseUrl
@@ -379,6 +396,18 @@ class AcpApiClient {
   }
 
   getRealtimeBridgeHealth(instanceKey?: string): RealtimeBridgeHealth {
+    if (instanceKey && this.relayRecoveryStates.has(instanceKey)) {
+      const bridge = this.bridgeStates.get(instanceKey)
+      if (bridge) return this.buildBridgeHealth(instanceKey, bridge)
+      return {
+        instanceKey,
+        state: "idle",
+        reconnectAttempt: 0,
+        nextRetryDelayMs: null,
+        updatedAt: Date.now(),
+        ...this.getBridgeRecoveryHealthPatch(instanceKey),
+      }
+    }
     const descriptor = this.resolveDescriptor(instanceKey)
     const bridge = this.bridgeStates.get(descriptor.instanceKey)
     if (!bridge) {
@@ -388,6 +417,7 @@ class AcpApiClient {
         reconnectAttempt: 0,
         nextRetryDelayMs: null,
         updatedAt: Date.now(),
+        ...this.getBridgeRecoveryHealthPatch(descriptor.instanceKey),
       }
     }
     return this.buildBridgeHealth(descriptor.instanceKey, bridge)
@@ -478,6 +508,21 @@ class AcpApiClient {
     return this.normalizeEventEnvelope(raw as Record<string, unknown> | null | undefined)
   }
 
+  getRelayRecoveryState(instanceKey?: string): RelayRecoveryState {
+    const key = instanceKey || this.getCurrentDescriptor().instanceKey
+    return this.getOrCreateRelayRecoveryState(key)
+  }
+
+  clearRelayRecoveryState(instanceKey?: string) {
+    if (instanceKey) {
+      this.relayRecoveryStates.delete(instanceKey)
+      clearRelayCheckpoint(instanceKey)
+      return
+    }
+    this.relayRecoveryStates.clear()
+    clearRelayCheckpoints()
+  }
+
   canUseAttachTransport(instanceKey?: string) {
     const key = this.resolveDescriptor(instanceKey).instanceKey
     return this.bridgeStates.get(key)?.attachCapable === true
@@ -560,19 +605,23 @@ class AcpApiClient {
     this.emitBridgeHealth(targetKey, this.buildBridgeHealth(targetKey, bridge))
 
     eventConnection = await gateway.connectEvents((raw) => {
-      if (this.isAttachFrame(raw)) {
-        transport.handleServerFrame(raw)
-        return
-      }
-      const globalFrame = this.extractGlobalFrame(raw)
-      if (globalFrame) {
-        this.dispatchGlobalEvent(targetKey, globalFrame.channel, globalFrame.payload)
-        return
-      }
-      const event = this.extractLegacyEvent(raw)
-      if (event) {
-        this.dispatchEvent(event, targetKey)
-      }
+      this.handleRelayRealtimeFrame(targetKey, raw, (frame) => {
+        if (this.isAttachFrame(frame)) {
+          transport.handleServerFrame(frame)
+          return
+        }
+        const globalFrame = this.extractGlobalFrame(frame)
+        if (globalFrame) {
+          this.dispatchGlobalEvent(targetKey, globalFrame.channel, globalFrame.payload)
+          return
+        }
+        const event = this.extractLegacyEvent(frame)
+        if (event) {
+          this.dispatchEvent(event, targetKey)
+        }
+      })
+    }, {
+      lastEventId: this.getOrCreateRelayRecoveryState(targetKey).lastRelayEventId,
     })
     bridge.connection = eventConnection
     bridge.detachReady = eventConnection.onReady(() => {
@@ -735,7 +784,126 @@ class AcpApiClient {
       reconnectAttempt: bridge.reconnectAttempt,
       nextRetryDelayMs: null,
       updatedAt: Date.now(),
+      ...this.getBridgeRecoveryHealthPatch(instanceKey),
     }
+  }
+
+  private getOrCreateRelayRecoveryState(instanceKey: string): RelayRecoveryState {
+    const existing = this.relayRecoveryStates.get(instanceKey)
+    if (existing) return existing
+    const stored = readRelayCheckpoint(instanceKey)
+    const created: RelayRecoveryState = {
+      lastRelayEventId: stored?.lastRelayEventId ?? null,
+      replayWindowStart: null,
+      requestedLastEventId: null,
+      recoveryIssue: null,
+      recoveryMessage: null,
+    }
+    this.relayRecoveryStates.set(instanceKey, created)
+    return created
+  }
+
+  private getBridgeRecoveryHealthPatch(instanceKey: string) {
+    const recovery = this.relayRecoveryStates.get(instanceKey)
+    if (!recovery) return {}
+    return {
+      recoveryIssue: recovery.recoveryIssue,
+      lastRelayEventId: recovery.lastRelayEventId,
+      replayWindowStart: recovery.replayWindowStart,
+      requestedLastEventId: recovery.requestedLastEventId,
+      recoveryMessage: recovery.recoveryMessage,
+    }
+  }
+
+  private handleRelayRealtimeFrame(
+    instanceKey: string,
+    raw: unknown,
+    dispatchPayload: (payload: unknown) => void
+  ) {
+    const frame = classifyRelayRealtimeFrame(raw)
+    const recovery = this.getOrCreateRelayRecoveryState(instanceKey)
+    if (frame.kind === "ready") {
+      recovery.replayWindowStart = frame.replayWindowStart ?? recovery.replayWindowStart
+      recovery.lastRelayEventId = frame.lastEventId ?? recovery.lastRelayEventId
+      recovery.recoveryIssue = null
+      recovery.recoveryMessage = null
+      return
+    }
+    if (frame.kind === "replay_miss") {
+      recovery.recoveryIssue = "replay_miss"
+      recovery.requestedLastEventId = frame.requestedLastEventId ?? null
+      recovery.replayWindowStart = frame.replayWindowStart ?? null
+      recovery.lastRelayEventId = frame.lastEventId ?? recovery.lastRelayEventId
+      recovery.recoveryMessage = "实时事件有缺口，正在刷新会话状态。部分中间状态可能已跳过。"
+      this.persistRelayCheckpoint(instanceKey, recovery.lastRelayEventId)
+      this.emitBridgeHealth(instanceKey, this.buildBridgeHealthForInstance(instanceKey))
+      void this.calibrateActiveConversationsAfterReplayMiss(instanceKey)
+      return
+    }
+    if (frame.kind === "event") {
+      dispatchPayload({
+        eventId: frame.eventId,
+        channel: frame.channel,
+        payload: frame.payload,
+        controllerId: frame.controllerId,
+        localEventId: frame.localEventId,
+      })
+      recovery.lastRelayEventId = frame.eventId
+      recovery.recoveryIssue = null
+      recovery.recoveryMessage = null
+      this.persistRelayCheckpoint(instanceKey, recovery.lastRelayEventId)
+      return
+    }
+    dispatchPayload(frame.payload)
+  }
+
+  __handleRelayRealtimeFrameForTest(
+    instanceKey: string,
+    raw: unknown,
+    dispatchPayload: (payload: unknown) => void
+  ) {
+    return this.handleRelayRealtimeFrame(instanceKey, raw, dispatchPayload)
+  }
+
+  __setReplayMissCalibrationHookForTest(
+    hook: ((instanceKey: string) => Promise<void> | void) | null
+  ) {
+    this.replayMissCalibrationHook = hook
+  }
+
+  private buildBridgeHealthForInstance(instanceKey: string): RealtimeBridgeHealth {
+    const bridge = this.bridgeStates.get(instanceKey)
+    if (bridge) return this.buildBridgeHealth(instanceKey, bridge)
+    return {
+      instanceKey,
+      state: "idle",
+      reconnectAttempt: 0,
+      nextRetryDelayMs: null,
+      updatedAt: Date.now(),
+      ...this.getBridgeRecoveryHealthPatch(instanceKey),
+    }
+  }
+
+  private async calibrateActiveConversationsAfterReplayMiss(instanceKey: string) {
+    if (this.replayMissCalibrationHook) {
+      await this.replayMissCalibrationHook(instanceKey)
+      return
+    }
+    const { calibrateActiveConversationsForInstance } = await import(
+      "@/services/conversation/conversationSyncService"
+    )
+    await calibrateActiveConversationsForInstance(instanceKey)
+  }
+
+  private persistRelayCheckpoint(instanceKey: string, lastRelayEventId: number | null) {
+    if (
+      typeof lastRelayEventId !== "number" ||
+      !Number.isFinite(lastRelayEventId) ||
+      lastRelayEventId <= 0
+    ) {
+      return
+    }
+    upsertRelayCheckpoint(instanceKey, Math.trunc(lastRelayEventId))
   }
 
   private normalizeEventEnvelope(event: EventEnvelope | Record<string, unknown> | null | undefined) {
@@ -898,6 +1066,55 @@ class AcpApiClient {
             scope: "conversation",
           },
         }
+      case "turn_cancel_requested":
+        {
+          const source = toRecord(record.data) ?? record
+          return {
+            connectionId,
+            type: "turn_cancel_requested",
+            data: {
+              sessionId: firstString(source.session_id, source.sessionId),
+              activeTurnId: firstString(source.active_turn_id, source.activeTurnId),
+              activeTurnOwnerClientId:
+                firstString(source.active_turn_owner_client_id, source.activeTurnOwnerClientId) || null,
+              cancelRequestedByClientId:
+                firstString(source.cancel_requested_by_client_id, source.cancelRequestedByClientId) || null,
+              cancelRequestedAtMs:
+                firstNumber(source.cancel_requested_at_ms, source.cancelRequestedAtMs) ?? null,
+              reason: firstString(source.reason, source.cancel_reason, source.cancelReason) || null,
+            },
+          }
+        }
+      case "turn_cancelled":
+        {
+          const source = toRecord(record.data) ?? record
+          return {
+            connectionId,
+            type: "turn_cancelled",
+            data: {
+              sessionId: firstString(source.session_id, source.sessionId),
+              activeTurnId: firstString(source.active_turn_id, source.activeTurnId),
+              cancelRequestedByClientId:
+                firstString(source.cancel_requested_by_client_id, source.cancelRequestedByClientId) || null,
+              status: firstString(source.status) || "canceled",
+            },
+          }
+        }
+      case "turn_cancel_failed":
+        {
+          const source = toRecord(record.data) ?? record
+          return {
+            connectionId,
+            type: "turn_cancel_failed",
+            data: {
+              sessionId: firstString(source.session_id, source.sessionId),
+              activeTurnId: firstString(source.active_turn_id, source.activeTurnId),
+              cancelRequestedByClientId:
+                firstString(source.cancel_requested_by_client_id, source.cancelRequestedByClientId) || null,
+              message: firstString(source.message) || null,
+            },
+          }
+        }
       case "turn_complete":
         return {
           connectionId,
@@ -952,6 +1169,8 @@ class AcpApiClient {
           type: "permission_resolved",
           data: {
             requestId: firstString(record.request_id, record.requestId),
+            responderClientId:
+              firstString(record.responder_client_id, record.responderClientId) || null,
           },
         }
       case "question_request":
@@ -977,6 +1196,8 @@ class AcpApiClient {
             type: "question_resolved",
             data: {
               questionId: firstString(source.question_id, source.questionId),
+              responderClientId:
+                firstString(source.responder_client_id, source.responderClientId) || null,
             },
           }
         }

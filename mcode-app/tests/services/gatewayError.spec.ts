@@ -34,4 +34,19 @@ describe("gateway error normalization", () => {
     expect(toErrorMessage({ response: { status: 429 } })).toBe("HTTP 429")
     expect(toErrorMessage("429")).toBe("HTTP 429")
   })
+
+  it("maps classified gateway failure codes before generic message", () => {
+    expect(toResponseErrorMessage({ code: "target_offline", message: "target offline" }, 503))
+      .toContain("Desktop")
+    expect(toResponseErrorMessage({ code: "session_revoked", message: "revoked" }, 401))
+      .toContain("重新配对")
+    expect(toErrorMessage(new Error(JSON.stringify({ code: "request_timeout", message: "timeout" }))))
+      .toContain("重试")
+  })
+
+  it("maps turn_busy to multi-device busy copy", () => {
+    expect(toResponseErrorMessage({ code: "turn_busy" }, 409)).toBe(
+      "其他设备正在执行任务，请等待当前任务完成。"
+    )
+  })
 })

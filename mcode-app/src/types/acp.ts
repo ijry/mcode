@@ -151,6 +151,9 @@ export interface EventEnvelope {
     | "tool_call_update"
     | "status_changed"
     | "turn_complete"
+    | "turn_cancel_requested"
+    | "turn_cancelled"
+    | "turn_cancel_failed"
     | "usage_update"
     | "permission_request"
     | "permission_resolved"
@@ -238,6 +241,29 @@ export interface TurnCompleteEvent {
   timestamp: number
 }
 
+export interface TurnCancelRequestedEvent {
+  sessionId?: string | null
+  activeTurnId?: string | null
+  activeTurnOwnerClientId?: string | null
+  cancelRequestedByClientId?: string | null
+  cancelRequestedAtMs?: number | null
+  reason?: string | null
+}
+
+export interface TurnCancelledEvent {
+  sessionId?: string | null
+  activeTurnId?: string | null
+  cancelRequestedByClientId?: string | null
+  status?: string | null
+}
+
+export interface TurnCancelFailedEvent {
+  sessionId?: string | null
+  activeTurnId?: string | null
+  cancelRequestedByClientId?: string | null
+  message?: string | null
+}
+
 export interface UsageUpdateEvent {
   inputTokens: number
   outputTokens: number
@@ -260,6 +286,11 @@ export interface RealtimeBridgeHealth {
   reconnectAttempt: number
   nextRetryDelayMs?: number | null
   updatedAt: number
+  recoveryIssue?: "replay_miss" | null
+  lastRelayEventId?: number | null
+  replayWindowStart?: number | null
+  requestedLastEventId?: number | null
+  recoveryMessage?: string | null
 }
 
 export interface RuntimeErrorEvent {
@@ -278,6 +309,12 @@ export interface PermissionRequest {
 
 export interface PermissionResolvedEvent {
   requestId: string
+  responderClientId?: string | null
+}
+
+export interface QuestionResolvedEvent {
+  questionId: string
+  responderClientId?: string | null
 }
 
 export interface PermissionOption {

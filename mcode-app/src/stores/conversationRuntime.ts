@@ -40,6 +40,7 @@ import {
   type PersistedTurnWithParts,
 } from "@/services/db/repositories/conversationRepository"
 import { buildPersistedTurnRecord } from "@/services/conversation/conversationDetailPersistence"
+import { getRelayClientId } from "@/services/gateway/relayClientIdentity"
 import {
   buildConversationTimeline,
   buildLiveMessageTurnId,
@@ -600,6 +601,35 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
 
       case "question_resolved":
         clearPendingQuestion(session.conversationId, firstString(event.data?.questionId))
+        syncManagedSendPermission(session.conversationId)
+        break
+
+      case "turn_cancel_requested": {
+        touchHotConversation(session.conversationId)
+        const requester = firstString(event.data?.cancelRequestedByClientId)
+        session.inputErrorMessage =
+          requester && requester === getRelayClientId()
+            ? "正在取消当前任务..."
+            : "其他设备正在取消当前任务。"
+        syncManagedSendPermission(session.conversationId)
+        break
+      }
+
+      case "turn_cancelled":
+        session.liveMessage = null
+        session.pendingPermission = null
+        session.pendingQuestion = null
+        session.status = session.connectionId ? "connected" : "idle"
+        session.inputErrorMessage = null
+        session.apiRetry = null
+        releaseHotConversation(session.conversationId)
+        syncManagedSendPermission(session.conversationId)
+        break
+
+      case "turn_cancel_failed":
+        touchHotConversation(session.conversationId)
+        session.status = "error"
+        session.inputErrorMessage = "取消当前任务失败，请刷新后重试。"
         syncManagedSendPermission(session.conversationId)
         break
 

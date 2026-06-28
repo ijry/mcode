@@ -66,7 +66,7 @@
             :class="getConnectionIconClass(conn)"
           >
             <u-icon
-              :name="conn.mode === 'direct' ? 'wifi' : 'cloud'"
+              :name="conn.routeMode === 'direct' ? 'wifi' : 'cloud'"
               size="24"
               :color="getConnectionIconColor(conn)"
             ></u-icon>
@@ -89,8 +89,18 @@
             </view>
 
             <text class="connection-card__meta">
-              {{ getConnectionSubtitle(conn.mode, conn.url) }}
+              {{ getConnectionSubtitle(conn) }}
             </text>
+
+            <view v-if="getConnectionCapabilityChips(conn).length" class="connection-card__chips">
+              <text
+                v-for="chip in getConnectionCapabilityChips(conn)"
+                :key="chip"
+                class="connection-card__chip"
+              >
+                {{ chip }}
+              </text>
+            </view>
 
             <text
               v-if="getConnectionHealthDetail(conn)"
@@ -233,14 +243,22 @@
               <u-input v-model="form.name" placeholder="请输入连接名称"></u-input>
             </u-form-item>
 
-            <u-form-item label="连接模式" prop="mode" required>
-              <u-radio-group :modelValue="form.mode" placement="row" @change="handleModeChange">
-                <u-radio name="direct" label="直连模式"></u-radio>
-                <u-radio name="relay" label="中继模式"></u-radio>
+            <u-form-item label="连接方式" prop="routeMode" required>
+              <u-radio-group :modelValue="form.routeMode" placement="row" @change="handleRouteModeChange">
+                <u-radio name="direct" label="直连"></u-radio>
+                <u-radio name="gateway" label="中转（网关）"></u-radio>
               </u-radio-group>
             </u-form-item>
 
-            <view v-if="form.mode === 'direct'">
+            <view v-if="form.routeMode === 'direct'">
+              <u-form-item label="目标类型" prop="targetAgent" required>
+                <u-subsection
+                  :list="directTargetLabels"
+                  :current="directTargetIndex"
+                  @change="handleDirectTargetChange"
+                  activeColor="#007aff"
+                ></u-subsection>
+              </u-form-item>
               <u-form-item label="服务地址" prop="directBaseUrl" required>
                 <u-input
                   v-model="form.directBaseUrl"
@@ -257,9 +275,22 @@
             </view>
 
             <view v-else>
-              <u-form-item label="中继地址" prop="relayUrl" required>
+              <u-form-item label="通道服务商" prop="gatewayProvider" required>
+                <u-select
+                  :options="gatewayProviderOptions"
+                  keyName="value"
+                  labelName="label"
+                  :current="form.gatewayProvider"
+                  label="请选择服务商"
+                  :showOptionsLabel="true"
+                  :border="true"
+                  optionsWidth="320rpx"
+                  @select="handleGatewayProviderSelect"
+                ></u-select>
+              </u-form-item>
+              <u-form-item v-if="form.gatewayProvider === 'custom'" label="自定义域名" prop="gatewayBaseUrl" required>
                 <u-input
-                  v-model="form.relayUrl"
+                  v-model="form.gatewayBaseUrl"
                   placeholder="https://relay.example.com"
                 ></u-input>
               </u-form-item>
@@ -273,6 +304,9 @@
                   placeholder="请输入配对密钥"
                 ></u-input>
               </u-form-item>
+              <text class="connections-sheet__tip">
+                网关入口当前默认连接 MCode Desktop，由 desktop 代理 Codex CLI、Claude CLI 与内网穿透能力。
+              </text>
             </view>
           </u-form>
 
@@ -288,7 +322,7 @@
             <view class="connections-sheet__scan-copy">
               <text class="connections-sheet__scan-title">扫码导入已有连接</text>
               <text class="connections-sheet__scan-desc">
-                支持扫描已保存连接的配置码，自动导入直连或中继配置。
+                支持扫描已保存连接的配置码，自动导入直连或网关配置。
               </text>
             </view>
 
@@ -359,7 +393,25 @@ import { createGateway } from "@/services/gateway"
 import type { RelaySessionInfo } from "@/services/gateway"
 import { buildWebSocketProtocols } from "@/services/gateway/wsProtocol"
 import { buildConnectionConfigCode, parseConnectionConfigCodeToConnection } from "./connectionConfigCode"
-import { encodeConnectionContext } from "@/services/connectionContext"
+import {
+  encodeConnectionContext,
+  readStoredConnections,
+  type ConnectionContext,
+} from "@/services/connectionContext"
+import {
+  buildConnectionRecordKey,
+  deriveLegacyRouteCompat,
+  migrateConnectionRecord,
+  normalizeConnectionRecordV2,
+  type ConnectionRecordV2,
+  type ConnectionGatewayProvider,
+  type ConnectionRouteMode,
+  type ConnectionTargetAgent,
+} from "@/services/connectionSchema"
+import {
+  getConnectionCapabilityChips,
+  getConnectionSubtitle,
+} from "./connectionPresentation"
 import {
   buildConnectionAgentsRoute,
   buildModelProvidersRoute,
@@ -369,6 +421,19 @@ import { openGuardedExternalUrl } from "@/services/externalLinkGuard"
 declare const plus: any
 
 const DEPLOYMENT_GUIDE_URL = "https://pan.quark.cn/s/0008015b1d33"
+const OFFICIAL_GATEWAY_BASE_URL = normalizeBaseUrl(
+  String(import.meta.env.VITE_MCODE_OFFICIAL_GATEWAY_BASE_URL || "")
+)
+const directTargetOptions = [
+  { label: "Codeg", value: "codeg" as ConnectionTargetAgent },
+  { label: "OpenCode", value: "opencode" as ConnectionTargetAgent },
+  { label: "MCode Desktop", value: "mcode-desktop" as ConnectionTargetAgent },
+]
+const directTargetLabels = directTargetOptions.map((item) => item.label)
+const gatewayProviderOptions = [
+  { label: "MCode 官方网关", value: "official" as ConnectionGatewayProvider },
+  { label: "自定义", value: "custom" as ConnectionGatewayProvider },
+]
 
 const formRef = ref()
 const showAddPopup = ref(false)
@@ -402,29 +467,26 @@ const stoppedWatcherKeys = new Set<string>()
 const NETWORK_FAILURE_HINT = "请检查主机网络可达性、内网穿透地址稳定性，以及电脑端 Web 服务是否开启。"
 const CONNECTION_RETRY_DELAY_MS = 3000
 
-interface ConnectionItem {
-  name: string
-  mode: "direct" | "relay"
-  url: string
-  active?: boolean
-  directToken?: string
-  pairCode?: string
-  pairSecret?: string
-  relaySession?: RelaySessionInfo
-}
+type ConnectionItem = ConnectionContext
 
 const form = ref({
   name: "",
-  mode: "direct" as "direct" | "relay",
+  routeMode: "direct" as ConnectionRouteMode,
+  targetAgent: "codeg" as ConnectionTargetAgent,
   directBaseUrl: "",
   directToken: "",
-  relayUrl: "",
+  gatewayProvider: "official" as ConnectionGatewayProvider,
+  gatewayBaseUrl: OFFICIAL_GATEWAY_BASE_URL,
   pairCode: "",
   pairSecret: "",
 })
 
 const connections = ref<ConnectionItem[]>([])
 const popupTitle = computed(() => (editingConnectionKey.value ? "编辑连接" : "新增连接"))
+const directTargetIndex = computed(() => {
+  const index = directTargetOptions.findIndex((item) => item.value === form.value.targetAgent)
+  return index >= 0 ? index : 0
+})
 
 const connectionActions = computed(() => {
   const current = connections.value[currentConnectionIndex.value]
@@ -440,11 +502,6 @@ const connectionActions = computed(() => {
     { name: "删除", color: "#fa3534" },
   ]
 })
-
-function getConnectionSubtitle(mode: ConnectionItem["mode"], url: string) {
-  const modeText = mode === "direct" ? "直连模式" : "中继模式"
-  return `${modeText} · ${normalizeBaseUrl(url)}`
-}
 
 function getConnectionHealth(conn: ConnectionItem): ConnectionHealth {
   const key = connectionKey(conn)
@@ -548,11 +605,7 @@ onUnmounted(() => {
 })
 
 function loadConnections() {
-  const savedConnections = uni.getStorageSync("mcode_connections") || []
-
-  connections.value = savedConnections.map((conn: ConnectionItem) => ({
-    ...conn,
-  }))
+  connections.value = readStoredConnections()
   pruneConnectedMapByConnections()
   syncOnlineWatchers()
   void refreshOnlineStatus()
@@ -562,13 +615,25 @@ function subsectionChange(index: number) {
   subsectionIndex.value = index
 }
 
-function handleModeChange(value: string) {
-  if (value === "relay") {
-    uni.showToast({ title: "中继模式即将推出", icon: "none" })
-    form.value.mode = "direct"
-    return
+function handleRouteModeChange(value: string) {
+  form.value.routeMode = value === "gateway" ? "gateway" : "direct"
+  if (form.value.routeMode === "gateway") {
+    form.value.targetAgent = "mcode-desktop"
+    if (form.value.gatewayProvider === "official") {
+      form.value.gatewayBaseUrl = OFFICIAL_GATEWAY_BASE_URL
+    }
   }
-  form.value.mode = "direct"
+}
+
+function handleDirectTargetChange(index: number) {
+  form.value.targetAgent = directTargetOptions[index]?.value || "codeg"
+}
+
+function handleGatewayProviderSelect(item: { value?: ConnectionGatewayProvider }) {
+  form.value.gatewayProvider = item.value === "custom" ? "custom" : "official"
+  if (form.value.gatewayProvider === "official") {
+    form.value.gatewayBaseUrl = OFFICIAL_GATEWAY_BASE_URL
+  }
 }
 
 function openTutorialPopup() {
@@ -595,7 +660,7 @@ async function submitConnection() {
 
   try {
     const previousKey = editingConnectionKey.value
-    if (form.value.mode === "direct") {
+    if (form.value.routeMode === "direct") {
       if (!form.value.directBaseUrl || !form.value.directToken) {
         uni.showToast({ title: "请填写完整信息", icon: "none" })
         return
@@ -611,49 +676,60 @@ async function submitConnection() {
         token: form.value.directToken,
       })
 
-      const newConnection: ConnectionItem = {
+      const newConnection = buildConnectionItem({
+        version: 2,
         name: form.value.name,
-        mode: "direct",
-        url: form.value.directBaseUrl,
-        active: true,
+        targetAgent: form.value.targetAgent,
+        routeMode: "direct",
+        directBaseUrl: normalizeBaseUrl(form.value.directBaseUrl),
         directToken: form.value.directToken,
-      }
+      })
 
       await assertConnectionReachable(newConnection)
       saveConnection(newConnection, previousKey || undefined)
       syncConnectionRuntimeState(previousKey, newConnection)
       uni.showToast({ title: "连接成功", icon: "success" })
     } else {
-      if (!form.value.relayUrl || !form.value.pairCode || !form.value.pairSecret) {
+      const gatewayBaseUrl = getFormGatewayBaseUrl()
+      if (!gatewayBaseUrl) {
+        uni.showToast({
+          title: form.value.gatewayProvider === "official" ? "官方网关地址未配置" : "请填写自定义域名",
+          icon: "none",
+        })
+        return
+      }
+      if (!form.value.pairCode || !form.value.pairSecret) {
         uni.showToast({ title: "请填写完整信息", icon: "none" })
         return
       }
 
       const gateway = createGateway({
         mode: "relay",
-        relayUrl: form.value.relayUrl,
+        relayUrl: gatewayBaseUrl,
         session: { accessToken: "" },
       })
 
       const session = await gateway.pair({
-        relayUrl: form.value.relayUrl,
+        relayUrl: gatewayBaseUrl,
         code: form.value.pairCode,
         secret: form.value.pairSecret,
       })
 
       if (!session) {
-        throw new Error("配对失败：未获取到中继会话")
+        throw new Error("配对失败：未获取到网关会话")
       }
 
-      const newConnection: ConnectionItem = {
+      const newConnection = buildConnectionItem({
+        version: 2,
         name: form.value.name,
-        mode: "relay",
-        url: form.value.relayUrl,
-        active: true,
+        targetAgent: "mcode-desktop",
+        routeMode: "gateway",
+        gatewayProvider: form.value.gatewayProvider,
+        gatewayBaseUrl,
         pairCode: form.value.pairCode,
         pairSecret: form.value.pairSecret,
-        relaySession: session,
-      }
+        gatewaySession: session,
+      })
 
       await assertConnectionReachable(newConnection)
       saveConnection(newConnection, previousKey || undefined)
@@ -671,7 +747,7 @@ async function submitConnection() {
 }
 
 function saveConnection(conn: ConnectionItem, originalKey?: string) {
-  const savedConnections = uni.getStorageSync("mcode_connections") || []
+  const savedConnections = readStoredConnections()
 
   const existingIndex = originalKey
     ? savedConnections.findIndex((c: ConnectionItem) => connectionKey(c) === originalKey)
@@ -765,7 +841,7 @@ function openConfigCodePopup(conn: ConnectionItem) {
     const code = buildConnectionConfigCode(conn)
     configCodeValue.value = code
     configCodeConnectionName.value = conn.name
-    configCodeConnectionMeta.value = getConnectionSubtitle(conn.mode, conn.url)
+    configCodeConnectionMeta.value = getConnectionSubtitle(conn)
     showConfigCodePopup.value = true
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
@@ -814,15 +890,7 @@ function openModelProviders(conn: ConnectionItem) {
 }
 
 function encodeConnectionForRoute(conn: ConnectionItem) {
-  return encodeConnectionContext({
-    name: conn.name,
-    mode: conn.mode,
-    url: conn.url,
-    directToken: conn.directToken,
-    pairCode: conn.pairCode,
-    pairSecret: conn.pairSecret,
-    relaySession: conn.relaySession,
-  })
+  return encodeConnectionContext(conn)
 }
 
 async function activateConnection(conn: ConnectionItem) {
@@ -837,15 +905,7 @@ async function activateConnection(conn: ConnectionItem) {
 }
 
 function openProjectList(conn: ConnectionItem) {
-  const encodedConnection = encodeConnectionContext({
-    name: conn.name,
-    mode: conn.mode,
-    url: conn.url,
-    directToken: conn.directToken,
-    pairCode: conn.pairCode,
-    pairSecret: conn.pairSecret,
-    relaySession: conn.relaySession,
-  })
+  const encodedConnection = encodeConnectionContext(conn)
   uni.navigateTo({
     url: `/pages/projects/index?connection=${encodedConnection}`,
   })
@@ -932,7 +992,7 @@ function showConnectionTroubleshooting(conn: ConnectionItem) {
     title: "连接排查建议",
     content:
       `当前地址：${host}\n\n` +
-      "1. 确认电脑端 codeg 的 Web 服务仍在运行。\n" +
+      "1. 确认电脑端 Web 服务仍在运行。\n" +
       "2. 手机网络可以访问该地址；内网穿透地址没有休眠、过期或切换。\n" +
       "3. 访问 token 未改动，防火墙或代理没有拦截 WebSocket。",
     confirmText: "立即重试",
@@ -961,13 +1021,15 @@ function disconnectConnection(conn: ConnectionItem) {
 function editConnection(conn: ConnectionItem, index: number) {
   editingConnectionKey.value = connectionKey(conn)
   form.value.name = conn.name
-  form.value.mode = conn.mode
+  form.value.routeMode = conn.routeMode
+  form.value.targetAgent = conn.targetAgent
 
-  if (conn.mode === "direct") {
-    form.value.directBaseUrl = conn.url
+  if (conn.routeMode === "direct") {
+    form.value.directBaseUrl = conn.directBaseUrl || conn.url
     form.value.directToken = conn.directToken || ""
   } else {
-    form.value.relayUrl = conn.url
+    form.value.gatewayProvider = conn.gatewayProvider || "official"
+    form.value.gatewayBaseUrl = conn.gatewayBaseUrl || conn.url || OFFICIAL_GATEWAY_BASE_URL
     form.value.pairCode = conn.pairCode || ""
     form.value.pairSecret = conn.pairSecret || ""
   }
@@ -983,16 +1045,18 @@ function deleteConnection(index: number) {
     content: `确定要删除连接 ${conn.name} 吗？`,
     success: (res) => {
       if (res.confirm) {
-        const savedConnections = uni.getStorageSync("mcode_connections") || []
-        savedConnections.splice(index, 1)
+        const deletedKey = connectionKey(conn)
+        const savedConnections = readStoredConnections().filter(
+          (item) => connectionKey(item) !== deletedKey
+        )
         uni.setStorageSync("mcode_connections", savedConnections)
         setConnectionConnected(conn, false)
         persistConnectedMap()
-        stopOnlineWatcher(connectionKey(conn))
+        stopOnlineWatcher(deletedKey)
         const nextOnline = { ...onlineMap.value }
-        delete nextOnline[connectionKey(conn)]
+        delete nextOnline[deletedKey]
         onlineMap.value = nextOnline
-        clearConnectionRuntimeHealth(connectionKey(conn))
+        clearConnectionRuntimeHealth(deletedKey)
 
         // 删除连接只清理本地记录与在线状态，不影响其它已建立连接
 
@@ -1008,10 +1072,12 @@ function resetForm() {
   subsectionIndex.value = 0
   form.value = {
     name: "",
-    mode: "direct",
+    routeMode: "direct",
+    targetAgent: "codeg",
     directBaseUrl: "",
     directToken: "",
-    relayUrl: "",
+    gatewayProvider: "official",
+    gatewayBaseUrl: OFFICIAL_GATEWAY_BASE_URL,
     pairCode: "",
     pairSecret: "",
   }
@@ -1047,10 +1113,7 @@ function startScanImport() {
       success: (res) => {
         try {
           const imported = parseConnectionConfigCodeToConnection(res.result || "")
-          const nextConnection: ConnectionItem = {
-            ...imported,
-            active: true,
-          }
+          const nextConnection = buildConnectionItem(imported)
           saveConnection(nextConnection)
           loadConnections()
           closeAddPopup()
@@ -1112,8 +1175,35 @@ function normalizeBaseUrl(url: string): string {
   return String(url || "").trim().replace(/\/+$/, "")
 }
 
-function connectionKey(conn: Pick<ConnectionItem, "mode" | "url">): string {
-  return `${conn.mode}::${normalizeBaseUrl(conn.url)}`
+function getFormGatewayBaseUrl(): string {
+  return normalizeBaseUrl(
+    form.value.gatewayProvider === "custom"
+      ? form.value.gatewayBaseUrl
+      : OFFICIAL_GATEWAY_BASE_URL
+  )
+}
+
+function buildConnectionItem(input: ConnectionRecordV2 | Record<string, unknown>): ConnectionItem {
+  const raw = input as Record<string, unknown>
+  const record =
+    normalizeConnectionRecordV2({
+      version: 2,
+      ...raw,
+      gatewaySession: raw.gatewaySession ?? raw.relaySession,
+    }) || migrateConnectionRecord(raw)
+
+  if (!record) {
+    throw new Error("连接信息无效")
+  }
+
+  return {
+    ...record,
+    ...deriveLegacyRouteCompat(record),
+  }
+}
+
+function connectionKey(conn: ConnectionItem): string {
+  return buildConnectionRecordKey(conn)
 }
 
 function isConnectionConnected(conn: ConnectionItem): boolean {
@@ -1466,7 +1556,7 @@ async function probeDirectOnline(conn: ConnectionItem): Promise<ProbeConnectionR
 async function probeRelayOnline(conn: ConnectionItem): Promise<ProbeConnectionResult> {
   try {
     const session = await ensureRelaySession(conn)
-    if (!session?.accessToken) return { online: false, error: "中继会话不可用" }
+    if (!session?.accessToken) return { online: false, error: "网关会话不可用" }
 
     const response = await uni.request({
       url: `${normalizeBaseUrl(conn.url)}/v1/targets`,
@@ -1478,7 +1568,7 @@ async function probeRelayOnline(conn: ConnectionItem): Promise<ProbeConnectionRe
     })
 
     if (Number(response.statusCode) !== 200) {
-      return { online: false, error: `中继状态返回 HTTP ${Number(response.statusCode) || 0}` }
+      return { online: false, error: `网关状态返回 HTTP ${Number(response.statusCode) || 0}` }
     }
 
     const data = response.data as
@@ -1912,6 +2002,22 @@ function persistConnectedMap() {
   line-height: 1.5;
   color: var(--up-content-color, #606266);
   word-break: break-all;
+}
+
+.connection-card__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10rpx;
+}
+
+.connection-card__chip {
+  padding: 8rpx 14rpx;
+  border-radius: 999rpx;
+  border: 1rpx solid color-mix(in srgb, var(--up-primary, #2979ff) 24%, var(--up-border-color, #dadbde) 76%);
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 10%, var(--up-card-bg-color, #ffffff) 90%);
+  color: var(--up-primary, #2979ff);
+  font-size: 20rpx;
+  font-weight: 600;
 }
 
 .connection-card__health-detail {
