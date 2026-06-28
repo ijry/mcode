@@ -230,6 +230,23 @@ export async function calibrateAfterReplayGap(conversationId: number) {
   return await calibrateConversationDetailInternal(conversationId, true)
 }
 
+export async function calibrateActiveConversationsForInstance(instanceKey: string) {
+  const active = Array.from(bindings.values()).filter(
+    (binding) => !binding.closed && binding.instanceKey === instanceKey
+  )
+  await Promise.all(active.map(async (binding) => {
+    try {
+      await calibrateAfterReplayGap(binding.conversationId)
+    } catch (error) {
+      console.warn("[conversation-realtime] replay miss calibration skipped", {
+        conversationId: binding.conversationId,
+        instanceKey,
+        error,
+      })
+    }
+  }))
+}
+
 async function mirrorConversationSummary(conversationId: number, event: EventEnvelope) {
   const binding = bindings.get(conversationId)
   if (!binding) return

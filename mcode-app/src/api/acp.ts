@@ -53,6 +53,7 @@ class AcpApiClient {
   private ensureBridgePromises = new Map<string, Promise<BridgeState>>()
   private bridgeStates = new Map<string, BridgeState>()
   private relayRecoveryStates = new Map<string, RelayRecoveryState>()
+  private replayMissCalibrationHook: ((instanceKey: string) => Promise<void> | void) | null = null
 
   constructor(baseUrl: string = "") {
     this.baseUrl = baseUrl
@@ -853,6 +854,12 @@ class AcpApiClient {
     return this.handleRelayRealtimeFrame(instanceKey, raw, dispatchPayload)
   }
 
+  __setReplayMissCalibrationHookForTest(
+    hook: ((instanceKey: string) => Promise<void> | void) | null
+  ) {
+    this.replayMissCalibrationHook = hook
+  }
+
   private buildBridgeHealthForInstance(instanceKey: string): RealtimeBridgeHealth {
     const bridge = this.bridgeStates.get(instanceKey)
     if (bridge) return this.buildBridgeHealth(instanceKey, bridge)
@@ -867,7 +874,14 @@ class AcpApiClient {
   }
 
   private async calibrateActiveConversationsAfterReplayMiss(instanceKey: string) {
-    console.warn("[relay-recovery] replay miss", { instanceKey })
+    if (this.replayMissCalibrationHook) {
+      await this.replayMissCalibrationHook(instanceKey)
+      return
+    }
+    const { calibrateActiveConversationsForInstance } = await import(
+      "@/services/conversation/conversationSyncService"
+    )
+    await calibrateActiveConversationsForInstance(instanceKey)
   }
 
   private normalizeEventEnvelope(event: EventEnvelope | Record<string, unknown> | null | undefined) {

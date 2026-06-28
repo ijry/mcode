@@ -3,6 +3,11 @@ import { acpApi } from "@/api/acp"
 describe("acpApi relay recovery", () => {
   beforeEach(() => {
     acpApi.clearRelayRecoveryState()
+    acpApi.__setReplayMissCalibrationHookForTest(() => {})
+  })
+
+  afterEach(() => {
+    acpApi.__setReplayMissCalibrationHookForTest(null)
   })
 
   it("records relay checkpoints after wrapped event dispatch", () => {
@@ -57,5 +62,22 @@ describe("acpApi relay recovery", () => {
       replayWindowStart: 5,
       lastRelayEventId: 8,
     })
+  })
+
+  it("invokes replay miss calibration hook for the affected instance", async () => {
+    const calls: string[] = []
+    acpApi.__setReplayMissCalibrationHookForTest(async (instanceKey) => {
+      calls.push(instanceKey)
+    })
+
+    acpApi.__handleRelayRealtimeFrameForTest(
+      "relay:miss-calibrate",
+      { type: "replay_miss", requestedLastEventId: 1, replayWindowStart: 5, lastEventId: 8 },
+      () => {}
+    )
+
+    await Promise.resolve()
+    expect(calls).toEqual(["relay:miss-calibrate"])
+    acpApi.__setReplayMissCalibrationHookForTest(null)
   })
 })

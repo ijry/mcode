@@ -1,4 +1,4 @@
-# MCode P7-P19 Roadmap Status
+# MCode P7-P20 Roadmap Status
 
 ## Purpose
 
@@ -23,6 +23,7 @@ that was intentionally left out of the first P1-P6 slices.
 | P17 | Codex app-server session reuse: keep one app-server client per Desktop CLI session, reuse provider thread ids, and cancel active turns through `turn/interrupt`. | Implemented first slice. Desktop stores per-session Codex app-server handles, reuses `thread/start` results across prompts, exposes provider thread/turn diagnostics, interrupts active turns on `acp_cancel`, and stops the process on `acp_disconnect`. |
 | P18 | Claude CLI streaming session adapter: execute Claude official CLI prompts through Desktop with stdout event streaming, cancellation, diagnostics, and P15 pending-interaction integration. | Implemented first slice. Desktop runs Claude print-mode through a process-based adapter, streams normalized events, kills active Claude prompts on `acp_cancel`, and keeps live-control write-back disabled until a stable Claude control channel is verified. |
 | P19 | Desktop/Relay recovery layer: relay replay persistence/miss signaling, Desktop outbound ACK queue, runtime snapshot, classified request failures, and recovery diagnostics. | Implemented first slice. Relay persists bounded replay windows when `REPLAY_STORE_PATH` is set, Desktop queues unacked event pushes with `localEventId`, Desktop snapshots recoverable runtime state through `MCODE_DESKTOP_STATE_PATH`, and health/UI expose recovery status. |
+| P20 | App recovery UX: consume relay event checkpoints, replay-miss signals, classified gateway failures, and Desktop interrupted/stale recovery state in MCode app. | Implemented first slice. App reconnects relay event streams with `lastEventId`, records checkpoints after successful dispatch, shows replay-miss recovery warnings, maps classified gateway failures to actions, calibrates active conversations after replay gaps, and documents native replication behavior. |
 
 ## P7 Implemented Scope
 
@@ -596,6 +597,42 @@ UI and client behavior:
   refresh session state; they must not reconnect as `codex` or `claude`.
 - `target_offline` and `request_timeout` are retryable operation failures;
   `session_revoked` means the gateway session must be reset.
+
+## P20 Implemented Scope
+
+P20 closes the app-side recovery loop for P19 relay/Desktop signals. It remains
+app-only: relay and Desktop wire protocols do not change, and official CLIs
+remain Desktop capabilities under `targetAgent = mcode-desktop`.
+
+Implemented behavior:
+
+- `RelayGateway.connectEvents(..., { lastEventId })` appends a positive relay
+  checkpoint to `/v1/events` reconnects.
+- `acpApi` stores an in-memory relay checkpoint per `instanceKey`, separate
+  from ACP conversation `seq`.
+- Wrapped relay events advance the checkpoint only after successful dispatch;
+  failed dispatch does not acknowledge progress in app state.
+- `ready` clears stale recovery warnings and can refresh replay metadata.
+- `replay_miss` updates realtime bridge health, shows recoverable detail-status
+  copy, and calibrates active conversations bound to the affected `instanceKey`.
+- Classified gateway failures map to actionable app copy for `target_offline`,
+  `request_timeout`, `session_revoked`, `desktop_replaced`, and
+  `gateway_shutdown`.
+- Desktop interrupted/stale display helpers live under
+  `mcode-app/src/agents/mcode-desktop`, preserving the agent-specific
+  directory boundary.
+
+Native iOS/Android replication rules:
+
+- Store relay `eventId` checkpoints per authenticated gateway connection, not
+  globally and not per ACP conversation.
+- Pass `lastEventId` only when reconnecting the same gateway session context.
+- Update the checkpoint after the wrapped event payload is handled, not when the
+  WebSocket frame is received.
+- Treat `replay_miss` as a recoverable state refresh, not as a conversation
+  event.
+- Keep Codex and Claude official CLIs behind `mcode-desktop` capabilities; do
+  not add mobile-side `codex` or `claude` target agents.
 
 ## Tracking Rules
 

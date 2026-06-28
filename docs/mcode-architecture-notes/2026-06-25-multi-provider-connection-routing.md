@@ -847,16 +847,17 @@ UI 行为：
 - Display Desktop `interrupted` CLI sessions as requiring a new prompt because live official CLI processes cannot be resumed after Desktop restart.
 - Display `stale` pending interactions as no longer actionable, even if their original request id is still visible in local UI history.
 
-## P20 Planned App Recovery UX Behavior
+## P20 App Recovery UX Behavior
 
 P20 closes the mobile/app side of P19 without changing relay or Desktop
-protocols. `mcode-app` should consume relay replay checkpoints and recovery
+protocols. `mcode-app` now consumes relay replay checkpoints and recovery
 signals so a Desktop gateway connection can reconnect with `lastEventId`,
 surface replay gaps, and refresh visible session state.
 
 Design document: `docs/superpowers/specs/2026-06-28-mcode-p20-app-recovery-ux-design.md`.
+Implementation plan: `docs/superpowers/plans/2026-06-28-mcode-p20-app-recovery-ux.md`.
 
-Planned app behavior:
+Implemented app behavior:
 
 - `RelayGateway.connectEvents()` accepts optional recovery options and appends
   `lastEventId` to `/v1/events` when the current relay instance has a known
@@ -864,19 +865,20 @@ Planned app behavior:
 - `acpApi` owns per-`instanceKey` relay checkpoints because it owns realtime
   bridge reconnect and event dispatch.
 - Relay wrapper frames update the checkpoint only after their payload is
-  dispatched successfully; `ready`, `replay_miss`, malformed frames, and failed
-  dispatches do not advance the checkpoint.
-- `replay_miss` updates realtime bridge health and triggers existing
-  conversation calibration/session refresh instead of being treated as an ACP
-  conversation event.
+  dispatched successfully; failed dispatches do not advance the checkpoint.
+- `ready` refreshes replay metadata and clears stale recovery warnings without
+  being dispatched as an ACP event.
+- `replay_miss` updates realtime bridge health, emits a recoverable warning,
+  and triggers active conversation calibration for bindings under the affected
+  `instanceKey` instead of being treated as an ACP conversation event.
 - Detail status UI shows replay-miss as a recoverable warning, while preserving
   the existing reconnect/recovered banners.
 - Classified gateway errors map to user actions: `target_offline` and
   `request_timeout` are retryable, `session_revoked` requires gateway session
   reset or re-pair, and `desktop_replaced` should reconnect the bridge.
 - Desktop `interrupted` sessions and `stale` permission/question interactions
-  are displayed as non-resumable state; stale interactions must not keep active
-  response buttons.
+  have app-side helper copy under `mcode-app/src/agents/mcode-desktop`; stale
+  interactions must not keep active response buttons.
 
 Compatibility and native replication:
 
@@ -888,3 +890,6 @@ Compatibility and native replication:
 - Native clients should pass `lastEventId` only for the same authenticated
   gateway session context and should update it after successful event handling,
   not on raw WebSocket receive.
+- Native clients should run the same replay-miss recovery flow: update bridge
+  health, show recoverable warning copy, refresh/calibrate visible sessions, and
+  keep official CLI state under `targetAgent = mcode-desktop`.
