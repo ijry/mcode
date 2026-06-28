@@ -932,3 +932,59 @@ Native replication:
 - Persist only positive relay event ids and update timestamps.
 - Never persist gateway tokens, official CLI credentials, or raw event payloads
   in checkpoint storage.
+
+## P22 Planned Multi-client Session Coordination Behavior
+
+P22 makes `mcode-desktop` the session host for official CLI-backed agents and
+keeps relay as a multi-client transport gateway. Phone, watch, and desktop
+clients may all connect to the same Desktop target and receive the current turn
+stream in real time, regardless of which client started the task. A client does
+not own the whole Desktop target; Desktop owns the CLI session and coordinates
+write operations per active turn.
+
+Design document:
+`docs/superpowers/specs/2026-06-28-mcode-p22-multi-client-session-coordination-design.md`.
+
+Planned relay behavior:
+
+- `/v1/events` continues to allow multiple subscribers for the same Desktop
+  target.
+- relay assigns or accepts a stable `clientId` for each app connection and
+  forwards it on mutating proxy calls to Desktop.
+- Desktop-originated session events are broadcast to every subscribed client.
+- replay/checkpoint behavior remains independent from client ownership; a
+  reconnecting device can recover missed events without stealing session state.
+- relay must not enforce a single-controller lease for Desktop targets.
+
+Planned Desktop behavior:
+
+- `mcode-desktop` owns Codex/Claude official CLI sessions and keeps official CLI
+  credentials local.
+- Desktop tracks `activeTurnId`, `activeTurnOwnerClientId`, and pending
+  permission/question interactions per hosted session.
+- If another client calls `acp_prompt` while a turn is active, Desktop returns
+  `turn_busy` instead of queueing or running concurrently.
+- Permission/question responses use first-valid-responder-wins semantics.
+  Desktop broadcasts the resolved interaction to every client.
+- `activeControllerId` may remain a legacy diagnostic, but new code should
+  prefer `activeTurnOwnerClientId` and must not treat a single client as owner
+  of the whole target.
+
+Planned app behavior:
+
+- Every client renders the active turn stream even when another device started
+  it.
+- `turn_busy` maps to user copy such as `其他设备正在执行任务，请等待当前任务完成。`
+- Interactions resolved by another device disable local controls and show copy
+  such as `该请求已由其他设备处理。`
+- Codex and Claude official CLIs remain Desktop capabilities under
+  `targetAgent = mcode-desktop`; native/mobile clients must not add direct
+  official CLI target agents.
+
+Native replication:
+
+- Native clients should generate and persist a per-install `clientId`.
+- Native clients should subscribe to Desktop target events as viewers even when
+  another device started the active turn.
+- Treat `turn_busy` as a recoverable busy state, not as connection loss.
+- Disable permission/question controls after any resolved event arrives.
