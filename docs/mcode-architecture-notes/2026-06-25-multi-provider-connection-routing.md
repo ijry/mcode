@@ -1194,3 +1194,42 @@ Native iOS/Android replication:
   item that has not started.
 - Do not add mobile-side `codex` or `claude` target agents for this feature;
   official CLI queueing remains under `targetAgent = mcode-desktop`.
+
+## P25 Planned Shared Prompt Queue UI Behavior
+
+P25 makes the P24 Desktop-hosted prompt queue visible and cancellable in
+`mcode-app`. It does not change queue ownership: Desktop remains the queue host,
+relay remains transport-only, and the app renders shared queue state from
+`session.sharedPromptQueue`.
+
+Design document:
+`docs/superpowers/specs/2026-06-28-mcode-p25-shared-prompt-queue-ui-design.md`.
+
+Planned app behavior:
+
+- Conversation detail shows a separate `Desktop 队列` surface when
+  `sharedPromptQueue.count > 0`.
+- The existing local draft queue remains separate and keeps its current
+  `待发送` behavior.
+- Shared queue rows show position, prompt preview, source device, created time,
+  and a queued-item cancel action.
+- Any paired client may cancel any queued item. This follows P23 active-turn
+  cancellation semantics and prevents queued work from becoming unmanageable if
+  the submitting device is offline.
+- `acpCancelQueuedPrompt(connectionId, queueItemId, sessionId?)` calls
+  `acp_cancel_queued_prompt` with `reason = "user_cancelled"`.
+- Cancel UI disables only the clicked row while the request is in flight.
+- The app must not remove rows optimistically; P24 queue lifecycle events remain
+  authoritative.
+
+Compatibility and native replication:
+
+- Older Desktop builds that do not emit queue events simply do not show the
+  shared queue UI.
+- Older Desktop builds that reject `acp_cancel_queued_prompt` should surface a
+  recoverable cancel-failed toast.
+- Native clients should render Desktop shared queue state separately from local
+  drafts, use `queueItemId` as the stable key, and wait for queue lifecycle
+  events before removing cancelled rows.
+- Official CLI queue UI remains under `targetAgent = mcode-desktop`; native
+  clients must not add direct Codex or Claude target agents.
