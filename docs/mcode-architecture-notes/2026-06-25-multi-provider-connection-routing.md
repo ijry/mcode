@@ -1275,3 +1275,36 @@ Compatibility and native replication:
 - Native clients should treat restored queue rows the same as live P24 queue
   rows, keep local drafts separate, and avoid mobile-side Codex or Claude
   target agents.
+
+## P27 Queue Policy Controls Behavior
+
+P27 adds first-slice Desktop queue policy controls without moving queue
+ownership to relay.
+
+Design document:
+`docs/superpowers/specs/2026-06-28-mcode-p27-queue-policy-controls-design.md`.
+Implementation plan:
+`docs/superpowers/plans/2026-06-28-mcode-p27-queue-policy-controls.md`.
+
+Planned Desktop behavior:
+
+- Health exposes `promptQueuePolicy` and `expiredPromptQueueCount`.
+- Queue overflow uses policy `queueLimit`.
+- Recovery drops queued prompts older than policy `maxRestoredAgeMs`.
+- Expired restored prompts are counted and recorded as Desktop diagnostics.
+- `acp_cancel_all_queued_prompts` clears queued prompts for one Desktop
+  session without interrupting the active provider turn.
+
+Planned app behavior:
+
+- Conversation detail shared Desktop queue can show a `清空` action.
+- Clear-all calls `acp_cancel_all_queued_prompts` and disables while in flight.
+- Shared queue rows remain event-authoritative and are not removed
+  optimistically.
+
+Compatibility and native replication:
+
+- Older Desktop builds may reject clear-all; clients should show a recoverable
+  failure message.
+- Native clients should treat clear-all as a Desktop shared queue action, not as
+  a local draft queue operation.
