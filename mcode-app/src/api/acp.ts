@@ -1066,6 +1066,55 @@ class AcpApiClient {
             scope: "conversation",
           },
         }
+      case "turn_cancel_requested":
+        {
+          const source = toRecord(record.data) ?? record
+          return {
+            connectionId,
+            type: "turn_cancel_requested",
+            data: {
+              sessionId: firstString(source.session_id, source.sessionId),
+              activeTurnId: firstString(source.active_turn_id, source.activeTurnId),
+              activeTurnOwnerClientId:
+                firstString(source.active_turn_owner_client_id, source.activeTurnOwnerClientId) || null,
+              cancelRequestedByClientId:
+                firstString(source.cancel_requested_by_client_id, source.cancelRequestedByClientId) || null,
+              cancelRequestedAtMs:
+                firstNumber(source.cancel_requested_at_ms, source.cancelRequestedAtMs) ?? null,
+              reason: firstString(source.reason, source.cancel_reason, source.cancelReason) || null,
+            },
+          }
+        }
+      case "turn_cancelled":
+        {
+          const source = toRecord(record.data) ?? record
+          return {
+            connectionId,
+            type: "turn_cancelled",
+            data: {
+              sessionId: firstString(source.session_id, source.sessionId),
+              activeTurnId: firstString(source.active_turn_id, source.activeTurnId),
+              cancelRequestedByClientId:
+                firstString(source.cancel_requested_by_client_id, source.cancelRequestedByClientId) || null,
+              status: firstString(source.status) || "canceled",
+            },
+          }
+        }
+      case "turn_cancel_failed":
+        {
+          const source = toRecord(record.data) ?? record
+          return {
+            connectionId,
+            type: "turn_cancel_failed",
+            data: {
+              sessionId: firstString(source.session_id, source.sessionId),
+              activeTurnId: firstString(source.active_turn_id, source.activeTurnId),
+              cancelRequestedByClientId:
+                firstString(source.cancel_requested_by_client_id, source.cancelRequestedByClientId) || null,
+              message: firstString(source.message) || null,
+            },
+          }
+        }
       case "turn_complete":
         return {
           connectionId,

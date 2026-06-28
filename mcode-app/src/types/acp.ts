@@ -151,6 +151,9 @@ export interface EventEnvelope {
     | "tool_call_update"
     | "status_changed"
     | "turn_complete"
+    | "turn_cancel_requested"
+    | "turn_cancelled"
+    | "turn_cancel_failed"
     | "usage_update"
     | "permission_request"
     | "permission_resolved"
@@ -236,6 +239,29 @@ export interface TurnCompleteEvent {
   conversationId: number
   turnId: string
   timestamp: number
+}
+
+export interface TurnCancelRequestedEvent {
+  sessionId?: string | null
+  activeTurnId?: string | null
+  activeTurnOwnerClientId?: string | null
+  cancelRequestedByClientId?: string | null
+  cancelRequestedAtMs?: number | null
+  reason?: string | null
+}
+
+export interface TurnCancelledEvent {
+  sessionId?: string | null
+  activeTurnId?: string | null
+  cancelRequestedByClientId?: string | null
+  status?: string | null
+}
+
+export interface TurnCancelFailedEvent {
+  sessionId?: string | null
+  activeTurnId?: string | null
+  cancelRequestedByClientId?: string | null
+  message?: string | null
 }
 
 export interface UsageUpdateEvent {

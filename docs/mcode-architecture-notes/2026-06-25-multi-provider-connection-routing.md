@@ -1078,3 +1078,6 @@ Implementation progress:
   `turn_cancel_requested` and `turn_cancelled`, treats duplicate cancel requests
   as idempotent, and keeps the active-turn guard authoritative until
   cancellation settlement.
+- App now normalizes P23 turn-control events and synchronizes local/other-device
+  cancellation copy, cancelled idle transition, and recoverable cancel failure
+  state across subscribed clients.

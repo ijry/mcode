@@ -674,7 +674,7 @@ git commit -m "feat(desktop): coordinate p23 active turn cancellation"
   - other requester: `其他设备正在取消当前任务。`
   - failure: `取消当前任务失败，请刷新后重试。`
 
-- [ ] **Step 1: Add app runtime tests for turn-control events**
+- [x] **Step 1: Add app runtime tests for turn-control events**
 
 Append to `mcode-app/tests/stores/conversationRuntime.spec.ts`:
 
@@ -758,7 +758,7 @@ it('surfaces recoverable copy after turn_cancel_failed', () => {
 })
 ```
 
-- [ ] **Step 2: Run app runtime tests and verify failure**
+- [x] **Step 2: Run app runtime tests and verify failure**
 
 Run:
 
@@ -769,7 +769,7 @@ npm run test:unit -- conversationRuntime
 
 Expected: FAIL because event types and handlers do not exist yet.
 
-- [ ] **Step 3: Extend ACP event types**
+- [x] **Step 3: Extend ACP event types**
 
 In `mcode-app/src/types/acp.ts`, extend `EventEnvelope["type"]`:
 
@@ -806,7 +806,7 @@ export interface TurnCancelFailedEvent {
 }
 ```
 
-- [ ] **Step 4: Normalize turn-control events in ACP API**
+- [x] **Step 4: Normalize turn-control events in ACP API**
 
 In `mcode-app/src/api/acp.ts`, add cases in `normalizeAcpEventRecord` before `turn_complete`:
 
@@ -853,7 +853,7 @@ In `mcode-app/src/api/acp.ts`, add cases in `normalizeAcpEventRecord` before `tu
         }
 ```
 
-- [ ] **Step 5: Add ACP normalization tests**
+- [x] **Step 5: Add ACP normalization tests**
 
 Create `mcode-app/tests/api/acpTurnControlEvents.spec.ts`:
 
@@ -933,7 +933,7 @@ describe("acpApi turn control event normalization", () => {
 })
 ```
 
-- [ ] **Step 6: Handle turn-control events in runtime store**
+- [x] **Step 6: Handle turn-control events in runtime store**
 
 In `mcode-app/src/stores/conversationRuntime.ts`, add import:
 
@@ -974,7 +974,7 @@ Add cases in `handleEvent` before `turn_complete`:
         break
 ```
 
-- [ ] **Step 7: Run app focused tests**
+- [x] **Step 7: Run app focused tests**
 
 Run:
 
@@ -986,7 +986,7 @@ npm run test:unit -- acpTurnControlEvents
 
 Expected: PASS.
 
-- [ ] **Step 8: Update architecture note progress**
+- [x] **Step 8: Update architecture note progress**
 
 Append under P23 implementation progress:
 
@@ -996,7 +996,7 @@ Append under P23 implementation progress:
   state across subscribed clients.
 ```
 
-- [ ] **Step 9: Commit app turn-control handling**
+- [x] **Step 9: Commit app turn-control handling**
 
 Run:
 
