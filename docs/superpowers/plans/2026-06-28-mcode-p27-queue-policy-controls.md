@@ -662,7 +662,7 @@ Expected: no whitespace errors.
 
 Change completed checkboxes in this file from `[ ]` to `[x]`.
 
-- [ ] Step 6: Commit verification progress.
+- [x] Step 6: Commit verification progress.
 
 ```bash
 git add docs/superpowers/plans/2026-06-28-mcode-p27-queue-policy-controls.md
