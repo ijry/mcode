@@ -4,9 +4,16 @@ import {
   draftSummary,
   formatQueueTime,
   formatTokenCountK,
+  hasSharedPromptQueue,
+  isSharedPromptQueueCancelDisabled,
   isStoppableRuntimeStatus,
   looksLikeNetworkFailure,
   queueStatusText,
+  sharedPromptQueueItemPreview,
+  sharedPromptQueueItemSource,
+  sharedPromptQueuePositionLabel,
+  sharedPromptQueueSummary,
+  sharedPromptQueueTitle,
 } from "@/pages/conversation-detail/detailRuntimePresentation"
 import type { ContentPart } from "@/types/acp"
 import type { QueuedDraft, UploadedAttachment } from "@/pages/conversation-detail/detailDataNormalization"
@@ -91,6 +98,45 @@ describe("detailRuntimePresentation", () => {
     expect(buildOptimisticText("", [attachment("a.txt")])).toBe("已附文件：a.txt")
     expect(buildOptimisticText("hello", [attachment("a.txt"), attachment("b.txt")]))
       .toBe("hello\n\n已附文件：a.txt、b.txt")
+  })
+
+  it("formats shared Desktop prompt queue copy", () => {
+    const queue = {
+      count: 2,
+      items: [
+        {
+          queueItemId: "queue-1",
+          queuePosition: 1,
+          sourceClientId: "client-phone",
+          sourceDeviceName: "Phone",
+          promptPreview: "run tests",
+          createdAtMs: new Date(2026, 0, 1, 9, 5).getTime(),
+        },
+        {
+          queueItemId: "queue-2",
+          queuePosition: 2,
+          sourceClientId: "client-watch",
+          sourceDeviceName: "Watch",
+          promptPreview: "",
+        },
+      ],
+    }
+
+    expect(hasSharedPromptQueue(queue)).toBe(true)
+    expect(sharedPromptQueueTitle(queue)).toBe("Desktop 队列 2")
+    expect(sharedPromptQueueSummary(queue)).toBe("run tests")
+    expect(sharedPromptQueueItemPreview(queue.items[1])).toBe("队列任务")
+    expect(sharedPromptQueueItemSource(queue.items[0], "client-phone")).toBe("当前设备")
+    expect(sharedPromptQueueItemSource(queue.items[1], "client-phone")).toBe("Watch")
+    expect(sharedPromptQueueItemSource({ queueItemId: "queue-3" }, "client-phone")).toBe("其他设备")
+    expect(sharedPromptQueuePositionLabel(queue.items[0], 0)).toBe("#1")
+    expect(sharedPromptQueuePositionLabel({ queueItemId: "queue-3" }, 2)).toBe("#3")
+  })
+
+  it("detects shared queue cancel disabled state", () => {
+    expect(isSharedPromptQueueCancelDisabled("", new Set())).toBe(true)
+    expect(isSharedPromptQueueCancelDisabled("queue-1", new Set(["queue-1"]))).toBe(true)
+    expect(isSharedPromptQueueCancelDisabled("queue-1", ["queue-2"])).toBe(false)
   })
 
   it("detects network-like failure copy", () => {

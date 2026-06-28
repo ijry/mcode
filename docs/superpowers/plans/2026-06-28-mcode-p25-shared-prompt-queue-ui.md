@@ -149,7 +149,7 @@ npm run test:unit -- --runTestsByPath tests/api/acpQueuedPromptCancel.spec.ts
 
 Expected: PASS.
 
-- [ ] Step 7: Commit Task 1.
+- [x] Step 7: Commit Task 1.
 
 ```bash
 git add mcode-app/src/api/acp.ts mcode-app/tests/api/acpQueuedPromptCancel.spec.ts docs/superpowers/plans/2026-06-28-mcode-p25-shared-prompt-queue-ui.md
@@ -174,7 +174,7 @@ git commit -m "feat(app): add queued prompt cancel api"
   - `sharedPromptQueuePositionLabel(item: SharedPromptQueueViewItem | null | undefined, fallbackIndex?: number): string`
   - `isSharedPromptQueueCancelDisabled(queueItemId: string | null | undefined, cancellingIds: Set<string> | string[]): boolean`
 
-- [ ] Step 1: Add shared queue types and helpers.
+- [x] Step 1: Add shared queue types and helpers.
 
 In `detailRuntimePresentation.ts`, after `queueStatusText(...)`, add:
 
@@ -257,7 +257,7 @@ export function isSharedPromptQueueCancelDisabled(
 }
 ```
 
-- [ ] Step 2: Import helpers in `detailRuntimePresentation.spec.ts`.
+- [x] Step 2: Import helpers in `detailRuntimePresentation.spec.ts`.
 
 Extend the existing import:
 
@@ -281,7 +281,7 @@ import {
 } from "@/pages/conversation-detail/detailRuntimePresentation"
 ```
 
-- [ ] Step 3: Add shared queue presentation tests.
+- [x] Step 3: Add shared queue presentation tests.
 
 Append this test to `detailRuntimePresentation.spec.ts`:
 
@@ -326,7 +326,7 @@ it("detects shared queue cancel disabled state", () => {
 })
 ```
 
-- [ ] Step 4: Run focused presentation test.
+- [x] Step 4: Run focused presentation test.
 
 Run:
 

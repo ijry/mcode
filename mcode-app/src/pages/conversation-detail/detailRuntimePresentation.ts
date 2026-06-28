@@ -67,6 +67,83 @@ export function queueStatusText(status: QueuedDraft["status"]): string {
   return "待发送"
 }
 
+export interface SharedPromptQueueViewItem {
+  queueItemId?: string | null
+  sessionId?: string | null
+  queuePosition?: number | null
+  sourceClientId?: string | null
+  sourceDeviceName?: string | null
+  promptPreview?: string | null
+  createdAtMs?: number | null
+}
+
+export interface SharedPromptQueueViewState {
+  count?: number | null
+  items?: SharedPromptQueueViewItem[] | null
+}
+
+export function hasSharedPromptQueue(
+  queue: SharedPromptQueueViewState | null | undefined
+) {
+  return Number(queue?.count || 0) > 0 || Number(queue?.items?.length || 0) > 0
+}
+
+export function sharedPromptQueueTitle(
+  queue: SharedPromptQueueViewState | null | undefined
+) {
+  const count = Math.max(0, Math.trunc(Number(queue?.count || queue?.items?.length || 0)))
+  return `Desktop 队列 ${count}`
+}
+
+export function sharedPromptQueueSummary(
+  queue: SharedPromptQueueViewState | null | undefined
+) {
+  const first = queue?.items?.[0]
+  const preview = String(first?.promptPreview || "").trim()
+  return preview || "等待当前任务完成后执行"
+}
+
+export function sharedPromptQueueItemPreview(
+  item: SharedPromptQueueViewItem | null | undefined
+) {
+  const preview = String(item?.promptPreview || "").trim()
+  return preview || "队列任务"
+}
+
+export function sharedPromptQueueItemSource(
+  item: SharedPromptQueueViewItem | null | undefined,
+  localClientId?: string | null
+) {
+  const sourceClientId = String(item?.sourceClientId || "").trim()
+  const normalizedLocalClientId = String(localClientId || "").trim()
+  if (sourceClientId && normalizedLocalClientId && sourceClientId === normalizedLocalClientId) {
+    return "当前设备"
+  }
+  const deviceName = String(item?.sourceDeviceName || "").trim()
+  return deviceName || "其他设备"
+}
+
+export function sharedPromptQueuePositionLabel(
+  item: SharedPromptQueueViewItem | null | undefined,
+  fallbackIndex = 0
+) {
+  const position = Number(item?.queuePosition)
+  if (Number.isFinite(position) && position > 0) {
+    return `#${Math.trunc(position)}`
+  }
+  return `#${Math.max(1, Math.trunc(fallbackIndex) + 1)}`
+}
+
+export function isSharedPromptQueueCancelDisabled(
+  queueItemId: string | null | undefined,
+  cancellingIds: Set<string> | string[]
+) {
+  const normalized = String(queueItemId || "").trim()
+  if (!normalized) return true
+  if (Array.isArray(cancellingIds)) return cancellingIds.includes(normalized)
+  return cancellingIds.has(normalized)
+}
+
 export function formatQueueTime(ts: number): string {
   const date = new Date(ts)
   const hh = String(date.getHours()).padStart(2, "0")
