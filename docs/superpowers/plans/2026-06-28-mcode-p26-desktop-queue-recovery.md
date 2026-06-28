@@ -355,7 +355,7 @@ cargo test --test desktop_p19_recovery_snapshot
 
 Expected: PASS.
 
-- [ ] Step 4: Commit Task 2.
+- [x] Step 4: Commit Task 2.
 
 ```bash
 git add mcode-desktop/src-tauri/src/runtime/mod.rs mcode-desktop/src-tauri/tests/desktop_p19_recovery_snapshot.rs docs/superpowers/plans/2026-06-28-mcode-p26-desktop-queue-recovery.md
@@ -371,7 +371,7 @@ git commit -m "test(desktop): cover restored queue cancellation"
 - Consumes all prior task outputs.
 - Produces complete P26 progress record.
 
-- [ ] Step 1: Run Desktop prompt queue tests.
+- [x] Step 1: Run Desktop prompt queue tests.
 
 Run:
 
@@ -382,7 +382,7 @@ cargo test --test desktop_p24_prompt_queue
 
 Expected: PASS.
 
-- [ ] Step 2: Run Desktop recovery tests.
+- [x] Step 2: Run Desktop recovery tests.
 
 Run:
 
@@ -393,7 +393,7 @@ cargo test --test desktop_p19_recovery_snapshot
 
 Expected: PASS.
 
-- [ ] Step 3: Run app queue UI regression tests.
+- [x] Step 3: Run app queue UI regression tests.
 
 Run:
 
@@ -404,7 +404,7 @@ npm run test:unit -- --runTestsByPath tests/pages/conversation-detail/detailRunt
 
 Expected: PASS.
 
-- [ ] Step 4: Run repository diff check.
+- [x] Step 4: Run repository diff check.
 
 Run:
 
@@ -414,7 +414,7 @@ git diff --check
 
 Expected: no whitespace errors.
 
-- [ ] Step 5: Mark all P26 plan checkboxes complete.
+- [x] Step 5: Mark all P26 plan checkboxes complete.
 
 Change completed checkboxes in this file from `[ ]` to `[x]`.
 
