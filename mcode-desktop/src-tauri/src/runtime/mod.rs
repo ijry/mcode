@@ -110,6 +110,12 @@ pub struct CliRuntimeSession {
     pub updated_at_ms: u64,
     pub active_request_id: Option<String>,
     pub cancel_requested: bool,
+    #[serde(default)]
+    pub cancel_requested_by_client_id: Option<String>,
+    #[serde(default)]
+    pub cancel_requested_at_ms: Option<u64>,
+    #[serde(default)]
+    pub cancel_reason: Option<String>,
     pub last_prompt_preview: Option<String>,
     pub error: Option<String>,
     pub last_event_at_ms: Option<u64>,
@@ -240,7 +246,7 @@ pub async fn dispatch_desktop_proxy_with_event_sink(
         "acp_describe_agent_options" => describe_agent_options(payload).await,
         "acp_connect" => connect_cli_session(state, payload),
         "acp_disconnect" => close_cli_session(state, payload, CliSessionStatus::Disconnected).await,
-        "acp_cancel" => close_cli_session(state, payload, CliSessionStatus::Canceled).await,
+        "acp_cancel" => cancel_cli_session(state, payload, event_sink).await,
         "acp_get_session_snapshot" | "acp_get_sessions" => get_session_snapshot(state, payload),
         "acp_respond_permission" => respond_permission(state, payload),
         "acp_respond_question" => respond_question(state, payload),
@@ -257,6 +263,7 @@ pub async fn dispatch_desktop_proxy_with_event_sink_arc(
 ) -> Result<Value> {
     match command {
         "acp_prompt" => dispatch_prompt_with_state_arc(state, payload, event_sink).await,
+        "acp_cancel" => cancel_cli_session(state.as_ref(), payload, event_sink).await,
         _ => {
             dispatch_desktop_proxy_with_event_sink(state.as_ref(), command, payload, event_sink)
                 .await
@@ -324,6 +331,9 @@ fn connect_cli_session(state: &AppState, payload: Value) -> Result<Value> {
         session.updated_at_ms = now;
         session.active_request_id = None;
         session.cancel_requested = false;
+        session.cancel_requested_by_client_id = None;
+        session.cancel_requested_at_ms = None;
+        session.cancel_reason = None;
         session.error = None;
         session
     } else {
@@ -343,6 +353,9 @@ fn connect_cli_session(state: &AppState, payload: Value) -> Result<Value> {
             updated_at_ms: now,
             active_request_id: None,
             cancel_requested: false,
+            cancel_requested_by_client_id: None,
+            cancel_requested_at_ms: None,
+            cancel_reason: None,
             last_prompt_preview: None,
             error: None,
             last_event_at_ms: None,
@@ -386,9 +399,6 @@ async fn close_cli_session(
         if status == CliSessionStatus::Disconnected {
             session.app_server_active = false;
         }
-        if status == CliSessionStatus::Canceled {
-            cancel_active_process(state, &session_id);
-        }
         session.clone()
     };
 
@@ -407,6 +417,52 @@ async fn close_cli_session(
         "canceled": status == CliSessionStatus::Canceled,
         "session": session,
     }))
+}
+
+async fn cancel_cli_session(
+    state: &AppState,
+    payload: Value,
+    event_sink: Option<CliEventSink>,
+) -> Result<Value> {
+    let session_id = extract_session_id(&payload)
+        .ok_or_else(|| anyhow!("cli session id is required"))?
+        .to_string();
+    let cancel_snapshot = request_hosted_turn_cancel(
+        state,
+        &session_id,
+        extract_source_client_id(&payload),
+        extract_cancel_reason(&payload),
+    )?;
+    if let Some(snapshot) = cancel_snapshot.as_ref() {
+        if !snapshot.already_requested {
+            emit_event(&event_sink, turn_cancel_requested_event(snapshot));
+        }
+    }
+
+    cancel_active_process(state, &session_id);
+    let response = close_cli_session(state, payload, CliSessionStatus::Canceled).await?;
+
+    if let Some(snapshot) = cancel_snapshot.as_ref() {
+        if !snapshot.already_requested {
+            emit_event(&event_sink, turn_cancelled_event(snapshot));
+        }
+        return Ok(json!({
+            "id": session_id,
+            "connectionId": session_id,
+            "sessionId": session_id,
+            "session_id": session_id,
+            "status": "cancel_requested",
+            "canceled": true,
+            "activeTurnId": snapshot.active_turn_id,
+            "activeTurnOwnerClientId": snapshot.owner_client_id,
+            "cancelRequestedByClientId": snapshot.cancel_requested_by_client_id,
+            "cancelRequestedAtMs": snapshot.cancel_requested_at_ms,
+            "reason": snapshot.cancel_reason,
+            "session": response.get("session").cloned().unwrap_or(Value::Null),
+        }));
+    }
+
+    Ok(response)
 }
 
 fn get_session_snapshot(state: &AppState, payload: Value) -> Result<Value> {
@@ -620,6 +676,9 @@ fn mark_prompt_started(
     session.updated_at_ms = now_ms();
     session.active_request_id = extract_request_id(payload).map(ToString::to_string);
     session.cancel_requested = false;
+    session.cancel_requested_by_client_id = None;
+    session.cancel_requested_at_ms = None;
+    session.cancel_reason = None;
     session.last_prompt_preview = extract_prompt_preview(payload);
     session.error = None;
     session.exit_code = None;
@@ -782,6 +841,9 @@ pub fn begin_hosted_turn(
             active_turn_id: active_turn_id.clone(),
             owner_client_id: owner_client_id.clone(),
             started_at_ms: now,
+            cancel_requested_by_client_id: None,
+            cancel_requested_at_ms: None,
+            cancel_reason: None,
         },
     );
     drop(active);
@@ -807,6 +869,67 @@ pub fn begin_hosted_turn_for_test(
         active_turn_id.to_string(),
         owner_client_id,
     )
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HostedTurnCancelSnapshot {
+    pub session_id: String,
+    pub active_turn_id: String,
+    pub owner_client_id: Option<String>,
+    pub cancel_requested_by_client_id: Option<String>,
+    pub cancel_requested_at_ms: Option<u64>,
+    pub cancel_reason: Option<String>,
+    pub already_requested: bool,
+}
+
+pub fn request_hosted_turn_cancel(
+    state: &AppState,
+    session_id: &str,
+    requester_client_id: Option<String>,
+    reason: Option<String>,
+) -> Result<Option<HostedTurnCancelSnapshot>> {
+    let mut active = state
+        .hosted_active_turns
+        .lock()
+        .map_err(|_| anyhow!("hosted active turn lock poisoned"))?;
+    let Some(turn) = active.get_mut(session_id) else {
+        return Ok(None);
+    };
+    let already_requested = turn.cancel_requested_by_client_id.is_some();
+    if !already_requested {
+        turn.cancel_requested_by_client_id =
+            requester_client_id.or_else(|| Some("unknown".to_string()));
+        turn.cancel_requested_at_ms = Some(now_ms());
+        turn.cancel_reason = reason;
+    }
+    let snapshot = HostedTurnCancelSnapshot {
+        session_id: turn.session_id.clone(),
+        active_turn_id: turn.active_turn_id.clone(),
+        owner_client_id: turn.owner_client_id.clone(),
+        cancel_requested_by_client_id: turn.cancel_requested_by_client_id.clone(),
+        cancel_requested_at_ms: turn.cancel_requested_at_ms,
+        cancel_reason: turn.cancel_reason.clone(),
+        already_requested,
+    };
+    drop(active);
+    update_session_cancel_request(
+        state,
+        session_id,
+        snapshot.cancel_requested_by_client_id.clone(),
+        snapshot.cancel_requested_at_ms,
+        snapshot.cancel_reason.clone(),
+    );
+    Ok(Some(snapshot))
+}
+
+pub fn request_hosted_turn_cancel_for_test(
+    state: &AppState,
+    session_id: &str,
+    requester_client_id: Option<String>,
+    reason: Option<String>,
+) -> Result<HostedTurnCancelSnapshot> {
+    request_hosted_turn_cancel(state, session_id, requester_client_id, reason)?
+        .ok_or_else(|| anyhow!("hosted active turn not found: {session_id}"))
 }
 
 pub fn end_hosted_turn(state: &AppState, session_id: &str) {
@@ -836,6 +959,27 @@ fn update_session_active_turn_owner(
     }
 }
 
+fn update_session_cancel_request(
+    state: &AppState,
+    session_id: &str,
+    requester_client_id: Option<String>,
+    requested_at_ms: Option<u64>,
+    reason: Option<String>,
+) {
+    if let Ok(mut sessions) = state.cli_sessions.write() {
+        if let Some(session) = sessions
+            .iter_mut()
+            .find(|session| session.session_id == session_id)
+        {
+            session.cancel_requested = true;
+            session.cancel_requested_by_client_id = requester_client_id;
+            session.cancel_requested_at_ms = requested_at_ms;
+            session.cancel_reason = reason;
+            session.updated_at_ms = now_ms();
+        }
+    }
+}
+
 fn turn_busy_error(existing: &HostedActiveTurn) -> anyhow::Error {
     anyhow!(
         "{}",
@@ -844,6 +988,8 @@ fn turn_busy_error(existing: &HostedActiveTurn) -> anyhow::Error {
             "message": "another device is running a turn",
             "activeTurnId": existing.active_turn_id,
             "activeTurnOwnerClientId": existing.owner_client_id,
+            "cancelRequestedByClientId": existing.cancel_requested_by_client_id,
+            "cancelRequestedAtMs": existing.cancel_requested_at_ms,
             "retryable": true,
         })
     )
@@ -1259,6 +1405,40 @@ fn resolved_interaction_event(
     }
 }
 
+fn turn_cancel_requested_event(snapshot: &HostedTurnCancelSnapshot) -> AcpEventEnvelope {
+    AcpEventEnvelope {
+        event_type: "turn_cancel_requested".to_string(),
+        connection_id: snapshot.session_id.clone(),
+        data: json!({
+            "sessionId": snapshot.session_id,
+            "activeTurnId": snapshot.active_turn_id,
+            "activeTurnOwnerClientId": snapshot.owner_client_id,
+            "cancelRequestedByClientId": snapshot.cancel_requested_by_client_id,
+            "cancelRequestedAtMs": snapshot.cancel_requested_at_ms,
+            "reason": snapshot.cancel_reason,
+        }),
+    }
+}
+
+fn turn_cancelled_event(snapshot: &HostedTurnCancelSnapshot) -> AcpEventEnvelope {
+    AcpEventEnvelope {
+        event_type: "turn_cancelled".to_string(),
+        connection_id: snapshot.session_id.clone(),
+        data: json!({
+            "sessionId": snapshot.session_id,
+            "activeTurnId": snapshot.active_turn_id,
+            "cancelRequestedByClientId": snapshot.cancel_requested_by_client_id,
+            "status": "canceled",
+        }),
+    }
+}
+
+fn emit_event(event_sink: &Option<CliEventSink>, event: AcpEventEnvelope) {
+    if let Some(sink) = event_sink.as_ref() {
+        sink(event);
+    }
+}
+
 fn interaction_id_from_event(kind: &str, data: &Value) -> String {
     match kind {
         "permission" => data
@@ -1431,6 +1611,17 @@ pub fn extract_source_client_id(payload: &Value) -> Option<String> {
                 .and_then(Value::as_object)
                 .and_then(|client| client.get("clientId").and_then(Value::as_str))
         })
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+fn extract_cancel_reason(payload: &Value) -> Option<String> {
+    payload
+        .get("reason")
+        .and_then(Value::as_str)
+        .or_else(|| payload.get("cancelReason").and_then(Value::as_str))
+        .or_else(|| payload.get("cancel_reason").and_then(Value::as_str))
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToString::to_string)

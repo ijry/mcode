@@ -75,6 +75,12 @@ pub struct HostedActiveTurn {
     pub active_turn_id: String,
     pub owner_client_id: Option<String>,
     pub started_at_ms: u64,
+    #[serde(default)]
+    pub cancel_requested_by_client_id: Option<String>,
+    #[serde(default)]
+    pub cancel_requested_at_ms: Option<u64>,
+    #[serde(default)]
+    pub cancel_reason: Option<String>,
 }
 
 pub struct AppState {

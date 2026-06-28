@@ -1074,3 +1074,7 @@ Implementation progress:
 
 - Relay coverage now explicitly verifies that `acp_cancel` forwards the same
   P22 `clientId` metadata as prompt and interaction commands.
+- Desktop now records active-turn cancel requester metadata, emits
+  `turn_cancel_requested` and `turn_cancelled`, treats duplicate cancel requests
+  as idempotent, and keeps the active-turn guard authoritative until
+  cancellation settlement.

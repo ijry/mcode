@@ -30,6 +30,7 @@
 - `mcode-desktop/src-tauri/src/app_state.rs`: extend `HostedActiveTurn` with cancel requester metadata.
 - `mcode-desktop/src-tauri/src/runtime/mod.rs`: add cancel metadata helpers, turn-control event builders, idempotent active-turn cancel handling, and `acp_cancel` dispatch behavior.
 - `mcode-desktop/src-tauri/src/health.rs`: expose top-level active-turn cancel requester diagnostics.
+- `mcode-desktop/src-tauri/src/recovery.rs`: clear in-flight cancel requester metadata when restoring interrupted running sessions.
 - `mcode-desktop/src-tauri/tests/desktop_p23_active_turn_control.rs`: add focused Rust tests for cancel metadata, idempotency, events, and health.
 - `mcode-app/src/types/acp.ts`: add event union members and payload interfaces for `turn_cancel_requested`, `turn_cancelled`, and `turn_cancel_failed`.
 - `mcode-app/src/api/acp.ts`: normalize turn-control event payloads from Desktop/relay.
@@ -134,6 +135,7 @@ git commit -m "test(relay): cover p23 cancel client identity"
 - Modify: `mcode-desktop/src-tauri/src/app_state.rs`
 - Modify: `mcode-desktop/src-tauri/src/runtime/mod.rs`
 - Modify: `mcode-desktop/src-tauri/src/health.rs`
+- Modify: `mcode-desktop/src-tauri/src/recovery.rs`
 - Create: `mcode-desktop/src-tauri/tests/desktop_p23_active_turn_control.rs`
 - Modify: `docs/mcode-architecture-notes/2026-06-25-multi-provider-connection-routing.md`
 
@@ -150,7 +152,7 @@ git commit -m "test(relay): cover p23 cancel client identity"
 - Produces: `DesktopHealthSnapshot.active_turn_cancel_requested_at_ms: Option<u64>`.
 - Produces event envelope types `turn_cancel_requested` and `turn_cancelled`.
 
-- [ ] **Step 1: Add Desktop tests for active turn cancel metadata and events**
+- [x] **Step 1: Add Desktop tests for active turn cancel metadata and events**
 
 Create `mcode-desktop/src-tauri/tests/desktop_p23_active_turn_control.rs`:
 
@@ -269,7 +271,7 @@ async fn p23_duplicate_cancel_is_idempotent_while_turn_is_cancelling() {
 }
 ```
 
-- [ ] **Step 2: Run Desktop P23 tests and verify failure**
+- [x] **Step 2: Run Desktop P23 tests and verify failure**
 
 Run:
 
@@ -279,7 +281,7 @@ cargo test --manifest-path mcode-desktop/src-tauri/Cargo.toml --test desktop_p23
 
 Expected: FAIL because cancel metadata fields and `request_hosted_turn_cancel_for_test` do not exist yet.
 
-- [ ] **Step 3: Extend Desktop active turn and session structs**
+- [x] **Step 3: Extend Desktop active turn and session structs**
 
 In `mcode-desktop/src-tauri/src/app_state.rs`, replace `HostedActiveTurn` with:
 
@@ -307,7 +309,7 @@ pub cancel_reason: Option<String>,
 
 Update every `CliRuntimeSession` construction and recovery restore compile error with `None` for these fields. In `connect_cli_session`, set all three to `None` for new sessions.
 
-- [ ] **Step 4: Populate new active turn fields in `begin_hosted_turn`**
+- [x] **Step 4: Populate new active turn fields in `begin_hosted_turn`**
 
 In `mcode-desktop/src-tauri/src/runtime/mod.rs`, update the `HostedActiveTurn` insert in `begin_hosted_turn`:
 
@@ -330,7 +332,7 @@ Update `turn_busy_error` to include cancel diagnostics:
 "cancelRequestedAtMs": existing.cancel_requested_at_ms,
 ```
 
-- [ ] **Step 5: Add cancel reason extraction and active-turn cancel helper**
+- [x] **Step 5: Add cancel reason extraction and active-turn cancel helper**
 
 Add below `begin_hosted_turn_for_test` in `mcode-desktop/src-tauri/src/runtime/mod.rs`:
 
@@ -436,7 +438,7 @@ fn extract_cancel_reason(payload: &Value) -> Option<String> {
 }
 ```
 
-- [ ] **Step 6: Keep cancel metadata when ending active turn**
+- [x] **Step 6: Keep cancel metadata when ending active turn**
 
 Replace `end_hosted_turn` with a version that does not erase cancel diagnostics from the session:
 
@@ -462,7 +464,7 @@ session.cancel_reason = None;
 
 In `update_session_after_prompt`, do not overwrite cancel metadata unless a new prompt starts.
 
-- [ ] **Step 7: Add turn-control event builders**
+- [x] **Step 7: Add turn-control event builders**
 
 Add near `resolved_interaction_event` in `mcode-desktop/src-tauri/src/runtime/mod.rs`:
 
@@ -506,7 +508,7 @@ fn emit_event(event_sink: &Option<CliEventSink>, event: AcpEventEnvelope) {
 }
 ```
 
-- [ ] **Step 8: Route `acp_cancel` through active-turn cancellation**
+- [x] **Step 8: Route `acp_cancel` through active-turn cancellation**
 
 Change `dispatch_desktop_proxy_with_event_sink` match arm:
 
@@ -582,7 +584,7 @@ if status == CliSessionStatus::Canceled {
 }
 ```
 
-- [ ] **Step 9: Expose health diagnostics**
+- [x] **Step 9: Expose health diagnostics**
 
 In `mcode-desktop/src-tauri/src/health.rs`, add to `DesktopHealthSnapshot`:
 
@@ -621,7 +623,7 @@ active_turn_cancel_requested_at_ms: active_turn_snapshot
     .and_then(|(_, _, _, requested_at_ms)| requested_at_ms),
 ```
 
-- [ ] **Step 10: Run Desktop focused tests**
+- [x] **Step 10: Run Desktop focused tests**
 
 Run:
 
@@ -632,7 +634,7 @@ cargo test --manifest-path mcode-desktop/src-tauri/Cargo.toml --test desktop_p22
 
 Expected: PASS.
 
-- [ ] **Step 11: Update architecture note progress**
+- [x] **Step 11: Update architecture note progress**
 
 Append under P23 implementation progress:
 
@@ -643,12 +645,12 @@ Append under P23 implementation progress:
   cancellation settlement.
 ```
 
-- [ ] **Step 12: Commit Desktop active turn control**
+- [x] **Step 12: Commit Desktop active turn control**
 
 Run:
 
 ```bash
-git add -- mcode-desktop/src-tauri/src/app_state.rs mcode-desktop/src-tauri/src/runtime/mod.rs mcode-desktop/src-tauri/src/health.rs mcode-desktop/src-tauri/tests/desktop_p23_active_turn_control.rs docs/mcode-architecture-notes/2026-06-25-multi-provider-connection-routing.md docs/superpowers/plans/2026-06-28-mcode-p23-active-turn-control.md
+git add -- mcode-desktop/src-tauri/src/app_state.rs mcode-desktop/src-tauri/src/runtime/mod.rs mcode-desktop/src-tauri/src/health.rs mcode-desktop/src-tauri/src/recovery.rs mcode-desktop/src-tauri/tests/desktop_p23_active_turn_control.rs docs/mcode-architecture-notes/2026-06-25-multi-provider-connection-routing.md docs/superpowers/plans/2026-06-28-mcode-p23-active-turn-control.md
 git commit -m "feat(desktop): coordinate p23 active turn cancellation"
 ```
 

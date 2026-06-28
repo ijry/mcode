@@ -294,6 +294,9 @@ fn interrupt_running_session(mut session: CliRuntimeSession) -> CliRuntimeSessio
         session.status = CliSessionStatus::Interrupted;
         session.active_request_id = None;
         session.cancel_requested = false;
+        session.cancel_requested_by_client_id = None;
+        session.cancel_requested_at_ms = None;
+        session.cancel_reason = None;
         session.active_turn_id = None;
         session.active_turn_owner_client_id = None;
         session.active_turn_started_at_ms = None;

@@ -37,6 +37,8 @@ pub struct DesktopHealthSnapshot {
     pub stale_pending_interaction_count: usize,
     pub active_turn_count: usize,
     pub active_turn_owner_client_id: Option<String>,
+    pub active_turn_cancel_requested_by_client_id: Option<String>,
+    pub active_turn_cancel_requested_at_ms: Option<u64>,
     pub active_controller_id: Option<String>,
     pub shutdown_requested: bool,
 }
@@ -76,6 +78,14 @@ pub fn build_health_snapshot(state: &AppState) -> DesktopHealthSnapshot {
                 .values()
                 .next()
                 .and_then(|turn| turn.owner_client_id.clone()),
+            active
+                .values()
+                .next()
+                .and_then(|turn| turn.cancel_requested_by_client_id.clone()),
+            active
+                .values()
+                .next()
+                .and_then(|turn| turn.cancel_requested_at_ms),
         )
     });
     let last_relay_event_id = state
@@ -193,10 +203,17 @@ pub fn build_health_snapshot(state: &AppState) -> DesktopHealthSnapshot {
             .count(),
         active_turn_count: active_turn_snapshot
             .as_ref()
-            .map(|(count, _)| *count)
+            .map(|(count, _, _, _)| *count)
             .unwrap_or(0),
         active_turn_owner_client_id: active_turn_snapshot
-            .and_then(|(_, owner_client_id)| owner_client_id),
+            .as_ref()
+            .and_then(|(_, owner_client_id, _, _)| owner_client_id.clone()),
+        active_turn_cancel_requested_by_client_id: active_turn_snapshot
+            .as_ref()
+            .and_then(|(_, _, requester_client_id, _)| requester_client_id.clone()),
+        active_turn_cancel_requested_at_ms: active_turn_snapshot
+            .as_ref()
+            .and_then(|(_, _, _, requested_at_ms)| *requested_at_ms),
         active_controller_id: state
             .active_controller_id
             .read()
