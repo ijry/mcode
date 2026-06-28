@@ -34,6 +34,20 @@ fn write_fake_claude_script() -> std::path::PathBuf {
     path
 }
 
+#[test]
+fn p27_health_exposes_prompt_queue_policy() {
+    let state = AppState::new_for_test();
+    let health = build_health_snapshot(&state);
+
+    assert_eq!(health.prompt_queue_policy.queue_limit, 20);
+    assert_eq!(
+        health.prompt_queue_policy.max_restored_age_ms,
+        7 * 24 * 60 * 60 * 1000
+    );
+    assert!(health.prompt_queue_policy.allow_any_client_cancel);
+    assert_eq!(health.expired_prompt_queue_count, 0);
+}
+
 #[tokio::test]
 async fn p24_queues_prompt_when_session_turn_is_busy() {
     let state = AppState::new_for_test();

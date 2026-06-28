@@ -1,6 +1,6 @@
 use serde_json::Value;
 use std::collections::HashMap;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Mutex, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::oneshot;
@@ -13,6 +13,9 @@ use crate::runtime::{
     QueuedPromptItem, CAPABILITY_TUNNEL_AVAILABLE,
 };
 use crate::tunnel::{default_code_service, LocalServiceConfig};
+
+pub const DEFAULT_PROMPT_QUEUE_LIMIT: usize = 20;
+pub const DEFAULT_PROMPT_QUEUE_MAX_RESTORED_AGE_MS: u64 = 7 * 24 * 60 * 60 * 1000;
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -70,6 +73,24 @@ pub struct CliInteractionWaiter {
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct PromptQueuePolicy {
+    pub queue_limit: usize,
+    pub max_restored_age_ms: u64,
+    pub allow_any_client_cancel: bool,
+}
+
+impl Default for PromptQueuePolicy {
+    fn default() -> Self {
+        Self {
+            queue_limit: DEFAULT_PROMPT_QUEUE_LIMIT,
+            max_restored_age_ms: DEFAULT_PROMPT_QUEUE_MAX_RESTORED_AGE_MS,
+            allow_any_client_cancel: true,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HostedActiveTurn {
     pub session_id: String,
     pub active_turn_id: String,
@@ -96,6 +117,8 @@ pub struct AppState {
     pub cli_processes: Mutex<HashMap<String, CliProcessControl>>,
     pub hosted_active_turns: Mutex<HashMap<String, HostedActiveTurn>>,
     pub queued_prompts: Mutex<HashMap<String, Vec<QueuedPromptItem>>>,
+    pub prompt_queue_policy: RwLock<PromptQueuePolicy>,
+    pub expired_prompt_queue_count: AtomicU64,
     pub codex_app_server_sessions: AsyncMutex<HashMap<String, CodexAppServerSession>>,
     pub cli_pending_interactions: RwLock<Vec<CliPendingInteraction>>,
     pub cli_interaction_waiters: Mutex<HashMap<String, CliInteractionWaiter>>,
@@ -149,6 +172,8 @@ impl Default for AppState {
             cli_processes: Mutex::new(HashMap::new()),
             hosted_active_turns: Mutex::new(HashMap::new()),
             queued_prompts: Mutex::new(HashMap::new()),
+            prompt_queue_policy: RwLock::new(PromptQueuePolicy::default()),
+            expired_prompt_queue_count: AtomicU64::new(0),
             codex_app_server_sessions: AsyncMutex::new(HashMap::new()),
             cli_pending_interactions: RwLock::new(Vec::new()),
             cli_interaction_waiters: Mutex::new(HashMap::new()),

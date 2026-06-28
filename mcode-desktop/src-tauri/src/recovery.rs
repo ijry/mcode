@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
 use std::fs;
 use std::path::Path;
+use std::sync::atomic::Ordering;
 
 use anyhow::Result;
 use serde_json::Value;
@@ -252,7 +253,14 @@ pub fn apply_recovery_snapshot(
     if let Ok(mut queue) = state.outbound_event_queue.lock() {
         queue.restore_pending(snapshot.queued_outbound_events);
     }
-    restore_persistent_queued_prompts(state, snapshot.queued_prompts);
+    let (queued_prompts, expired_count) =
+        filter_restorable_queued_prompts(state, snapshot.queued_prompts);
+    if expired_count > 0 {
+        state
+            .expired_prompt_queue_count
+            .fetch_add(expired_count as u64, Ordering::SeqCst);
+    }
+    restore_persistent_queued_prompts(state, queued_prompts);
 
     let interrupted_session_ids = snapshot
         .cli_sessions
@@ -285,12 +293,17 @@ pub fn apply_recovery_snapshot(
         *pending = interactions;
     }
     if let Ok(mut diagnostics) = state.diagnostics.write() {
-        *diagnostics = snapshot
-            .diagnostics
-            .into_iter()
-            .rev()
-            .take(50)
-            .collect::<Vec<_>>();
+        let mut restored_diagnostics = snapshot.diagnostics;
+        if expired_count > 0 {
+            restored_diagnostics.push(DiagnosticEntry {
+                level: "warning".to_string(),
+                message: format!(
+                    "{expired_count} expired queued prompt(s) were dropped during recovery"
+                ),
+                created_at_ms: now_ms(),
+            });
+        }
+        *diagnostics = restored_diagnostics.into_iter().rev().take(50).collect();
         diagnostics.reverse();
     }
     Ok(())
@@ -312,4 +325,27 @@ fn interrupt_running_session(mut session: CliRuntimeSession) -> CliRuntimeSessio
         session.updated_at_ms = now_ms();
     }
     session
+}
+
+fn filter_restorable_queued_prompts(
+    state: &AppState,
+    prompts: Vec<PersistentQueuedPrompt>,
+) -> (Vec<PersistentQueuedPrompt>, usize) {
+    let max_age_ms = state
+        .prompt_queue_policy
+        .read()
+        .map(|policy| policy.max_restored_age_ms)
+        .unwrap_or(crate::app_state::DEFAULT_PROMPT_QUEUE_MAX_RESTORED_AGE_MS);
+    let now = now_ms();
+    let mut kept = Vec::new();
+    let mut expired = 0usize;
+    for prompt in prompts {
+        let age = now.saturating_sub(prompt.created_at_ms);
+        if prompt.created_at_ms == 0 || age <= max_age_ms {
+            kept.push(prompt);
+        } else {
+            expired += 1;
+        }
+    }
+    (kept, expired)
 }

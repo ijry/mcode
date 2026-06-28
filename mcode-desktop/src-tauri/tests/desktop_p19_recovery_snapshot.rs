@@ -207,3 +207,38 @@ async fn p26_restored_queued_prompt_can_be_cancelled() {
         0
     );
 }
+
+#[tokio::test]
+async fn p27_recovery_drops_expired_queued_prompts() {
+    let state = AppState::new_for_test();
+    let connected = dispatch_desktop_proxy_with_state(
+        &state,
+        "acp_connect",
+        json!({ "agentType": "claude_code", "workingDir": env!("CARGO_MANIFEST_DIR") }),
+    )
+    .await
+    .unwrap();
+    let session_id = connected["sessionId"].as_str().unwrap().to_string();
+    mcode_desktop_lib::runtime::begin_hosted_turn_for_test(&state, &session_id, "turn-live", None)
+        .unwrap();
+    dispatch_desktop_proxy_with_state(
+        &state,
+        "acp_prompt",
+        json!({ "sessionId": session_id, "prompt": "expired restore" }),
+    )
+    .await
+    .unwrap();
+    let mut snapshot = mcode_desktop_lib::recovery::build_recovery_snapshot(&state).unwrap();
+    snapshot.queued_prompts[0].created_at_ms = 1;
+
+    let restored = AppState::new_for_test();
+    apply_recovery_snapshot(&restored, snapshot).unwrap();
+    let health = mcode_desktop_lib::health::build_health_snapshot(&restored);
+
+    assert_eq!(health.prompt_queue_count, 0);
+    assert_eq!(health.expired_prompt_queue_count, 1);
+    assert!(health
+        .diagnostics
+        .iter()
+        .any(|entry| entry.message.contains("expired queued prompt")));
+}

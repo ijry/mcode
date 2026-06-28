@@ -53,7 +53,7 @@
 - Produces health fields: `promptQueuePolicy`, `expiredPromptQueueCount`
 - Consumes: existing `PersistentQueuedPrompt` and queue restore flow.
 
-- [ ] Step 1: Add policy health failing test.
+- [x] Step 1: Add policy health failing test.
 
 Add to `desktop_p24_prompt_queue.rs`:
 
@@ -70,7 +70,7 @@ fn p27_health_exposes_prompt_queue_policy() {
 }
 ```
 
-- [ ] Step 2: Add restored expiry failing test.
+- [x] Step 2: Add restored expiry failing test.
 
 Add to `desktop_p19_recovery_snapshot.rs`:
 
@@ -111,7 +111,7 @@ async fn p27_recovery_drops_expired_queued_prompts() {
 }
 ```
 
-- [ ] Step 3: Run failing Desktop tests.
+- [x] Step 3: Run failing Desktop tests.
 
 Run:
 
@@ -123,7 +123,7 @@ cargo test --test desktop_p19_recovery_snapshot p27_recovery_drops_expired_queue
 
 Expected: FAIL because fields/policy do not exist.
 
-- [ ] Step 4: Add `PromptQueuePolicy` to `app_state.rs`.
+- [x] Step 4: Add `PromptQueuePolicy` to `app_state.rs`.
 
 Add imports:
 
@@ -170,7 +170,7 @@ prompt_queue_policy: RwLock::new(PromptQueuePolicy::default()),
 expired_prompt_queue_count: AtomicU64::new(0),
 ```
 
-- [ ] Step 5: Expose policy in health.
+- [x] Step 5: Expose policy in health.
 
 In `health.rs`, import `PromptQueuePolicy`, add fields:
 
@@ -186,7 +186,7 @@ prompt_queue_policy: state.prompt_queue_policy.read().map(|value| value.clone())
 expired_prompt_queue_count: state.expired_prompt_queue_count.load(Ordering::SeqCst),
 ```
 
-- [ ] Step 6: Use policy queue limit in runtime.
+- [x] Step 6: Use policy queue limit in runtime.
 
 In `runtime/mod.rs`, remove the local `DEFAULT_PROMPT_QUEUE_LIMIT` constant.
 
@@ -202,7 +202,7 @@ let queue_limit = state
 
 Use `queue_limit` for both the comparison and error payload `queueLimit`.
 
-- [ ] Step 7: Filter expired restored prompts.
+- [x] Step 7: Filter expired restored prompts.
 
 In `recovery.rs`, before `restore_persistent_queued_prompts(...)`, add:
 
@@ -245,7 +245,7 @@ fn filter_restorable_queued_prompts(
 }
 ```
 
-- [ ] Step 8: Update architecture note.
+- [x] Step 8: Update architecture note.
 
 Append P27 planned/implemented section:
 
@@ -269,7 +269,7 @@ App behavior:
   optimistically.
 ```
 
-- [ ] Step 9: Run focused tests.
+- [x] Step 9: Run focused tests.
 
 Run:
 

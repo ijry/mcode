@@ -141,7 +141,6 @@ pub struct CliPendingInteraction {
 }
 
 pub type CliEventSink = Arc<dyn Fn(AcpEventEnvelope) + Send + Sync>;
-const DEFAULT_PROMPT_QUEUE_LIMIT: usize = 20;
 
 #[derive(Clone)]
 pub struct QueuedPromptItem {
@@ -1191,14 +1190,19 @@ fn push_queued_prompt(state: &AppState, item: QueuedPromptItem) -> Result<Queued
         .lock()
         .map_err(|_| anyhow!("queued prompt lock poisoned"))?;
     let queue = queues.entry(item.session_id.clone()).or_default();
-    if queue.len() >= DEFAULT_PROMPT_QUEUE_LIMIT {
+    let queue_limit = state
+        .prompt_queue_policy
+        .read()
+        .map(|policy| policy.queue_limit)
+        .unwrap_or(crate::app_state::DEFAULT_PROMPT_QUEUE_LIMIT);
+    if queue.len() >= queue_limit {
         return Err(anyhow!(
             "{}",
             json!({
                 "code": "turn_queue_full",
                 "message": "prompt queue is full",
                 "sessionId": item.session_id,
-                "queueLimit": DEFAULT_PROMPT_QUEUE_LIMIT,
+                "queueLimit": queue_limit,
                 "retryable": true,
             })
         ));

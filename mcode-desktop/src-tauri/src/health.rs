@@ -1,6 +1,8 @@
 use std::sync::atomic::Ordering;
 
-use crate::app_state::{AppState, DiagnosticEntry, GatewayProvider, PairOffer, UpstreamStatus};
+use crate::app_state::{
+    AppState, DiagnosticEntry, GatewayProvider, PairOffer, PromptQueuePolicy, UpstreamStatus,
+};
 use crate::runtime::{
     queued_prompt_snapshots, CliPendingInteraction, CliRuntimeSession, CliRuntimeStatus,
     CliSessionStatus, QueuedPromptSnapshot,
@@ -42,6 +44,8 @@ pub struct DesktopHealthSnapshot {
     pub active_turn_cancel_requested_at_ms: Option<u64>,
     pub prompt_queue_count: usize,
     pub prompt_queue: Vec<QueuedPromptSnapshot>,
+    pub prompt_queue_policy: PromptQueuePolicy,
+    pub expired_prompt_queue_count: u64,
     pub active_controller_id: Option<String>,
     pub shutdown_requested: bool,
 }
@@ -220,6 +224,12 @@ pub fn build_health_snapshot(state: &AppState) -> DesktopHealthSnapshot {
             .and_then(|(_, _, _, requested_at_ms)| *requested_at_ms),
         prompt_queue_count: prompt_queue.len(),
         prompt_queue,
+        prompt_queue_policy: state
+            .prompt_queue_policy
+            .read()
+            .map(|value| value.clone())
+            .unwrap_or_default(),
+        expired_prompt_queue_count: state.expired_prompt_queue_count.load(Ordering::SeqCst),
         active_controller_id: state
             .active_controller_id
             .read()
