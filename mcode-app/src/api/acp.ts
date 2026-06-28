@@ -118,8 +118,8 @@ class AcpApiClient {
     blocks: PromptInputBlock[],
     folderId?: number,
     conversationId?: number
-  ): Promise<void> {
-    await this.request("/acp_prompt", {
+  ): Promise<any> {
+    return await this.request("/acp_prompt", {
       connectionId,
       blocks,
       folderId,
@@ -1115,6 +1115,20 @@ class AcpApiClient {
             },
           }
         }
+      case "turn_queued":
+      case "turn_queue_updated":
+      case "turn_dequeued":
+      case "turn_started":
+      case "turn_queue_cancelled":
+      case "turn_queue_failed":
+        {
+          const source = toRecord(record.data) ?? record
+          return {
+            connectionId,
+            type: rawType as EventEnvelope["type"],
+            data: normalizeTurnQueueEventData(source),
+          }
+        }
       case "turn_complete":
         return {
           connectionId,
@@ -1272,6 +1286,30 @@ function parseJsonRecord(raw: unknown) {
 
 function toRecord(raw: unknown) {
   return raw && typeof raw === "object" ? raw as Record<string, unknown> : null
+}
+
+function normalizeTurnQueueEventData(source: Record<string, unknown>) {
+  return {
+    sessionId: firstString(source.session_id, source.sessionId) || null,
+    queueItemId: firstString(source.queue_item_id, source.queueItemId) || null,
+    queuePosition:
+      firstNumber(source.queue_position, source.queuePosition) ?? null,
+    queueLength:
+      firstNumber(source.queue_length, source.queueLength) ?? null,
+    sourceClientId:
+      firstString(source.source_client_id, source.sourceClientId) || null,
+    sourceDeviceName:
+      firstString(source.source_device_name, source.sourceDeviceName) || null,
+    promptPreview:
+      firstString(source.prompt_preview, source.promptPreview) || null,
+    createdAtMs:
+      firstNumber(source.created_at_ms, source.createdAtMs) ?? null,
+    activeTurnId:
+      firstString(source.active_turn_id, source.activeTurnId) || null,
+    message: firstString(source.message, source.error) || null,
+    runtime: firstString(source.runtime) || null,
+    agentType: firstString(source.agent_type, source.agentType) || null,
+  }
 }
 
 function extractErrorText(rawOutput: unknown) {

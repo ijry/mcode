@@ -70,4 +70,62 @@ describe("acpApi turn control event normalization", () => {
       },
     })
   })
+
+  it("normalizes queue lifecycle metadata", () => {
+    expect(acpApi.normalizeRealtimeEvent({
+      type: "turn_queued",
+      connectionId: "conn-1",
+      data: {
+        session_id: "session-1",
+        queue_item_id: "queue-1",
+        queue_position: "2",
+        queue_length: 3,
+        source_client_id: "client-phone",
+        source_device_name: "Phone",
+        prompt_preview: "run tests",
+        created_at_ms: "1782630000000",
+        active_turn_id: "turn-active",
+        runtime: "claude",
+        agent_type: "claude_code",
+      },
+    })).toMatchObject({
+      type: "turn_queued",
+      connectionId: "conn-1",
+      data: {
+        sessionId: "session-1",
+        queueItemId: "queue-1",
+        queuePosition: 2,
+        queueLength: 3,
+        sourceClientId: "client-phone",
+        sourceDeviceName: "Phone",
+        promptPreview: "run tests",
+        createdAtMs: 1782630000000,
+        activeTurnId: "turn-active",
+        runtime: "claude",
+        agentType: "claude_code",
+      },
+    })
+  })
+
+  it("normalizes queue failure messages from camelCase payloads", () => {
+    expect(acpApi.normalizeRealtimeEvent({
+      type: "turn_queue_failed",
+      connectionId: "conn-1",
+      data: {
+        sessionId: "session-1",
+        queueItemId: "queue-1",
+        queueLength: 0,
+        message: "provider failed",
+      },
+    })).toMatchObject({
+      type: "turn_queue_failed",
+      connectionId: "conn-1",
+      data: {
+        sessionId: "session-1",
+        queueItemId: "queue-1",
+        queueLength: 0,
+        message: "provider failed",
+      },
+    })
+  })
 })

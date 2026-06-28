@@ -909,6 +909,7 @@ import {
   buildDraftSendPayload,
   buildPromptStartWatchSignature,
   findLatestOptimisticTurnId,
+  isQueuedPromptResponse,
   resolvePromptStartSnapshotOutcome,
   resolvePromptStartTimeoutFailure,
   resolvePromptStartWatchOutcome,
@@ -3006,7 +3007,18 @@ async function sendDraft(draft: QueuedDraft): Promise<boolean> {
         throw new Error("该会话已被其他端重新接管，请等待当前轮结束后再发送")
       }
     }
-    await acpApi.acpPrompt(conn, blocks, folderId.value, conversationId.value)
+    const promptResponse = await acpApi.acpPrompt(conn, blocks, folderId.value, conversationId.value)
+    if (isQueuedPromptResponse(promptResponse)) {
+      runtime.removeOptimisticUserMessage(conversationId.value, optimisticTurnId)
+      runtime.clearLiveMessage(conversationId.value)
+      runtime.handleEvent({
+        connectionId: conn,
+        type: "turn_queued",
+        data: promptResponse,
+      } as any)
+      usePetStore().addExp('user', 5)
+      return true
+    }
     const started = await waitForPromptStart(draft)
     if (!started.started) {
       runtime.removeOptimisticUserMessage(conversationId.value, optimisticTurnId)

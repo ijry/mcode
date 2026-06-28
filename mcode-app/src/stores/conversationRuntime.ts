@@ -14,6 +14,7 @@ import type {
   PendingQuestionState,
   ApiRetryEvent,
   RuntimeErrorEvent,
+  TurnQueueEvent,
 } from "@/types/acp"
 import { acpApi } from "@/api/acp"
 import { useAuthStore } from "./auth"
@@ -77,6 +78,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         apiRetry: null,
         pendingPermission: null,
         pendingQuestion: null,
+        sharedPromptQueue: createSharedPromptQueueState(),
         inFlightUserTurnId: null,
         lastAppliedSeq: null,
         lastCompletedTurnKey: null,
@@ -633,6 +635,16 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         syncManagedSendPermission(session.conversationId)
         break
 
+      case "turn_queued":
+      case "turn_queue_updated":
+      case "turn_dequeued":
+      case "turn_started":
+      case "turn_queue_cancelled":
+      case "turn_queue_failed":
+        handleTurnQueueEvent(session, event.type, event.data)
+        syncManagedSendPermission(session.conversationId)
+        break
+
       case "turn_complete":
         touchHotConversation(session.conversationId)
         void completeTurn(session.conversationId, {
@@ -802,6 +814,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       session.apiRetry = null
       session.pendingPermission = null
       session.pendingQuestion = null
+      session.sharedPromptQueue = createSharedPromptQueueState()
       session.inFlightUserTurnId = null
       session.lastCompletedTurnKey = null
       session.lastCompletedTurnAt = 0
@@ -836,6 +849,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       session.apiRetry = null
       session.pendingPermission = null
       session.pendingQuestion = null
+      session.sharedPromptQueue = createSharedPromptQueueState()
       session.inFlightUserTurnId = null
       session.lastAppliedSeq = null
       session.lastCompletedTurnKey = null
@@ -903,6 +917,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     session.apiRetry = null
     session.pendingPermission = null
     session.pendingQuestion = null
+    session.sharedPromptQueue = createSharedPromptQueueState()
     session.inFlightUserTurnId = null
     session.lastAppliedSeq = 0
     session.lastCompletedTurnKey = null
@@ -976,6 +991,7 @@ interface RuntimeSession {
   apiRetry: ApiRetryEvent | null
   pendingPermission: PermissionRequest | null
   pendingQuestion: PendingQuestionState | null
+  sharedPromptQueue: SharedPromptQueueState
   inFlightUserTurnId: string | null
   lastAppliedSeq: number | null
   lastCompletedTurnKey: string | null
@@ -983,6 +999,189 @@ interface RuntimeSession {
   externalTurnBackfillInFlight: boolean
   externalTurnBackfillLastAttemptAt: number
   stats: SessionStats
+}
+
+interface SharedPromptQueueState {
+  count: number
+  items: SharedPromptQueueItem[]
+  lastMessage: string | null
+}
+
+interface SharedPromptQueueItem {
+  queueItemId: string
+  sessionId: string | null
+  queuePosition: number | null
+  sourceClientId: string | null
+  sourceDeviceName: string | null
+  promptPreview: string | null
+  createdAtMs: number | null
+  runtime: string | null
+  agentType: string | null
+}
+
+function createSharedPromptQueueState(): SharedPromptQueueState {
+  return {
+    count: 0,
+    items: [],
+    lastMessage: null,
+  }
+}
+
+function handleTurnQueueEvent(
+  session: RuntimeSession,
+  eventType: EventEnvelope["type"],
+  raw: unknown
+) {
+  const data = normalizeTurnQueueRuntimeEvent(raw)
+  if (!data) return
+  touchHotConversation(session.conversationId)
+
+  switch (eventType) {
+    case "turn_queued":
+      upsertSharedPromptQueueItem(session.sharedPromptQueue, data, true)
+      applySharedPromptQueueCount(session.sharedPromptQueue, data)
+      session.sharedPromptQueue.lastMessage =
+        data.sourceClientId && data.sourceClientId === getRelayClientId()
+          ? "任务已加入队列。"
+          : "其他设备提交的任务已加入队列。"
+      session.inputErrorMessage = session.sharedPromptQueue.lastMessage
+      break
+    case "turn_queue_updated":
+      upsertSharedPromptQueueItem(session.sharedPromptQueue, data, false)
+      applySharedPromptQueueCount(session.sharedPromptQueue, data)
+      break
+    case "turn_dequeued":
+      removeSharedPromptQueueItem(session.sharedPromptQueue, data.queueItemId)
+      applySharedPromptQueueCount(session.sharedPromptQueue, data)
+      session.sharedPromptQueue.lastMessage = "队列任务已开始执行。"
+      break
+    case "turn_started":
+      removeSharedPromptQueueItem(session.sharedPromptQueue, data.queueItemId)
+      applySharedPromptQueueCount(session.sharedPromptQueue, data)
+      session.status = "thinking"
+      session.inputErrorMessage = null
+      session.apiRetry = null
+      break
+    case "turn_queue_cancelled":
+      removeSharedPromptQueueItem(session.sharedPromptQueue, data.queueItemId)
+      applySharedPromptQueueCount(session.sharedPromptQueue, data)
+      session.sharedPromptQueue.lastMessage = "队列任务已取消。"
+      session.inputErrorMessage = null
+      break
+    case "turn_queue_failed":
+      removeSharedPromptQueueItem(session.sharedPromptQueue, data.queueItemId)
+      applySharedPromptQueueCount(session.sharedPromptQueue, data)
+      session.status = "error"
+      session.inputErrorMessage =
+        firstString(data.message) || "队列任务启动失败，请重试。"
+      session.sharedPromptQueue.lastMessage = session.inputErrorMessage
+      break
+  }
+}
+
+function normalizeTurnQueueRuntimeEvent(raw: unknown): TurnQueueEvent | null {
+  if (!raw || typeof raw !== "object") return null
+  const record = raw as Record<string, unknown>
+  return {
+    sessionId: firstString(record.sessionId, record.session_id) || null,
+    queueItemId: firstString(record.queueItemId, record.queue_item_id) || null,
+    queuePosition:
+      firstNumber(record.queuePosition, record.queue_position) ?? null,
+    queueLength:
+      firstNumber(record.queueLength, record.queue_length) ?? null,
+    sourceClientId:
+      firstString(record.sourceClientId, record.source_client_id) || null,
+    sourceDeviceName:
+      firstString(record.sourceDeviceName, record.source_device_name) || null,
+    promptPreview:
+      firstString(record.promptPreview, record.prompt_preview) || null,
+    createdAtMs:
+      firstNumber(record.createdAtMs, record.created_at_ms) ?? null,
+    activeTurnId:
+      firstString(record.activeTurnId, record.active_turn_id) || null,
+    message: firstString(record.message, record.error) || null,
+    runtime: firstString(record.runtime) || null,
+    agentType: firstString(record.agentType, record.agent_type) || null,
+  }
+}
+
+function upsertSharedPromptQueueItem(
+  queue: SharedPromptQueueState,
+  data: TurnQueueEvent,
+  allowInsert: boolean
+) {
+  const queueItemId = firstString(data.queueItemId)
+  if (!queueItemId) return
+  const item = mapTurnQueueEventToItem(data, queueItemId)
+  const existingIndex = queue.items.findIndex((entry) => entry.queueItemId === queueItemId)
+  if (existingIndex >= 0) {
+    queue.items.splice(existingIndex, 1, {
+      ...queue.items[existingIndex],
+      ...item,
+    })
+  } else if (allowInsert) {
+    queue.items.push(item)
+  }
+  sortSharedPromptQueueItems(queue)
+}
+
+function mapTurnQueueEventToItem(
+  data: TurnQueueEvent,
+  queueItemId: string
+): SharedPromptQueueItem {
+  return {
+    queueItemId,
+    sessionId: data.sessionId ?? null,
+    queuePosition:
+      typeof data.queuePosition === "number" && Number.isFinite(data.queuePosition)
+        ? Math.max(1, Math.trunc(data.queuePosition))
+        : null,
+    sourceClientId: data.sourceClientId ?? null,
+    sourceDeviceName: data.sourceDeviceName ?? null,
+    promptPreview: data.promptPreview ?? null,
+    createdAtMs:
+      typeof data.createdAtMs === "number" && Number.isFinite(data.createdAtMs)
+        ? Math.trunc(data.createdAtMs)
+        : null,
+    runtime: data.runtime ?? null,
+    agentType: data.agentType ?? null,
+  }
+}
+
+function removeSharedPromptQueueItem(
+  queue: SharedPromptQueueState,
+  queueItemId?: string | null
+) {
+  const normalized = firstString(queueItemId)
+  if (!normalized) return
+  const index = queue.items.findIndex((entry) => entry.queueItemId === normalized)
+  if (index >= 0) {
+    queue.items.splice(index, 1)
+  }
+}
+
+function applySharedPromptQueueCount(
+  queue: SharedPromptQueueState,
+  data: TurnQueueEvent
+) {
+  const explicitCount = data.queueLength
+  if (typeof explicitCount === "number" && Number.isFinite(explicitCount)) {
+    queue.count = Math.max(0, Math.trunc(explicitCount))
+    if (queue.count === 0) {
+      queue.items = []
+    }
+    return
+  }
+  queue.count = queue.items.length
+}
+
+function sortSharedPromptQueueItems(queue: SharedPromptQueueState) {
+  queue.items.sort((left, right) => {
+    const leftPosition = left.queuePosition ?? Number.MAX_SAFE_INTEGER
+    const rightPosition = right.queuePosition ?? Number.MAX_SAFE_INTEGER
+    if (leftPosition !== rightPosition) return leftPosition - rightPosition
+    return (left.createdAtMs ?? 0) - (right.createdAtMs ?? 0)
+  })
 }
 
 function buildAssistantTurn(

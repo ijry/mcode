@@ -140,6 +140,36 @@ pub struct CliPendingInteraction {
 }
 
 pub type CliEventSink = Arc<dyn Fn(AcpEventEnvelope) + Send + Sync>;
+const DEFAULT_PROMPT_QUEUE_LIMIT: usize = 20;
+
+#[derive(Clone)]
+pub struct QueuedPromptItem {
+    pub queue_item_id: String,
+    pub session_id: String,
+    pub runtime: CliRuntimeKind,
+    pub agent_type: String,
+    pub payload: Value,
+    pub source_client_id: Option<String>,
+    pub source_device_name: Option<String>,
+    pub prompt_preview: Option<String>,
+    pub created_at_ms: u64,
+    pub event_sink: Option<CliEventSink>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueuedPromptSnapshot {
+    pub queue_item_id: String,
+    pub session_id: String,
+    pub runtime: CliRuntimeKind,
+    pub agent_type: String,
+    pub source_client_id: Option<String>,
+    pub source_device_name: Option<String>,
+    pub prompt_preview: Option<String>,
+    pub created_at_ms: u64,
+    pub queue_position: usize,
+    pub queue_length: usize,
+}
 
 pub fn detect_capabilities(codex_path: Option<&str>, claude_path: Option<&str>) -> Vec<String> {
     let mut capabilities = vec![CAPABILITY_TUNNEL_AVAILABLE.to_string()];
@@ -247,6 +277,7 @@ pub async fn dispatch_desktop_proxy_with_event_sink(
         "acp_connect" => connect_cli_session(state, payload),
         "acp_disconnect" => close_cli_session(state, payload, CliSessionStatus::Disconnected).await,
         "acp_cancel" => cancel_cli_session(state, payload, event_sink).await,
+        "acp_cancel_queued_prompt" => cancel_queued_prompt(state, payload, event_sink),
         "acp_get_session_snapshot" | "acp_get_sessions" => get_session_snapshot(state, payload),
         "acp_respond_permission" => respond_permission(state, payload),
         "acp_respond_question" => respond_question(state, payload),
@@ -263,7 +294,17 @@ pub async fn dispatch_desktop_proxy_with_event_sink_arc(
 ) -> Result<Value> {
     match command {
         "acp_prompt" => dispatch_prompt_with_state_arc(state, payload, event_sink).await,
-        "acp_cancel" => cancel_cli_session(state.as_ref(), payload, event_sink).await,
+        "acp_cancel" => {
+            let session_id = extract_session_id(&payload).map(ToString::to_string);
+            let result = cancel_cli_session(state.as_ref(), payload, event_sink.clone()).await;
+            if result.is_ok() {
+                if let Some(session_id) = session_id {
+                    start_next_queued_prompt_if_idle(Arc::clone(&state), session_id, event_sink);
+                }
+            }
+            result
+        }
+        "acp_cancel_queued_prompt" => cancel_queued_prompt(state.as_ref(), payload, event_sink),
         _ => {
             dispatch_desktop_proxy_with_event_sink(state.as_ref(), command, payload, event_sink)
                 .await
@@ -502,7 +543,13 @@ async fn dispatch_prompt_with_state(
         return dispatch_prompt_with_event_sink(payload, event_sink).await;
     };
 
-    let running_session = mark_prompt_started(state, &session_id, &payload)?;
+    let running_session = match mark_prompt_started(state, &session_id, &payload) {
+        Ok(session) => session,
+        Err(error) if is_turn_busy_error(&error) && should_queue_if_busy(&payload) => {
+            return enqueue_prompt_when_busy(state, &session_id, payload, event_sink);
+        }
+        Err(error) => return Err(error),
+    };
     let prompt_payload = merge_session_into_prompt_payload(payload, &running_session);
     let result = dispatch_session_prompt(state, &running_session, prompt_payload, event_sink).await;
     match result {
@@ -530,8 +577,15 @@ async fn dispatch_prompt_with_state_arc(
         return dispatch_prompt_with_event_sink(payload, event_sink).await;
     };
 
-    let running_session = mark_prompt_started(state.as_ref(), &session_id, &payload)?;
+    let running_session = match mark_prompt_started(state.as_ref(), &session_id, &payload) {
+        Ok(session) => session,
+        Err(error) if is_turn_busy_error(&error) && should_queue_if_busy(&payload) => {
+            return enqueue_prompt_when_busy(state.as_ref(), &session_id, payload, event_sink);
+        }
+        Err(error) => return Err(error),
+    };
     let prompt_payload = merge_session_into_prompt_payload(payload, &running_session);
+    let queue_event_sink = event_sink.clone();
     let result = dispatch_session_prompt_arc(
         Arc::clone(&state),
         &running_session,
@@ -543,6 +597,11 @@ async fn dispatch_prompt_with_state_arc(
         Ok(body) => {
             capture_pending_interactions_from_response(state.as_ref(), &session_id, &body);
             let completed = mark_session_completed(state.as_ref(), &session_id, &body)?;
+            start_next_queued_prompt_if_idle(
+                Arc::clone(&state),
+                session_id.clone(),
+                queue_event_sink.clone(),
+            );
             Ok(attach_session_to_response(body, completed))
         }
         Err(error) => {
@@ -550,6 +609,11 @@ async fn dispatch_prompt_with_state_arc(
                 return Err(error);
             }
             mark_session_error(state.as_ref(), &session_id, error.to_string())?;
+            start_next_queued_prompt_if_idle(
+                Arc::clone(&state),
+                session_id.clone(),
+                queue_event_sink.clone(),
+            );
             Err(error)
         }
     }
@@ -940,6 +1004,70 @@ pub fn end_hosted_turn(state: &AppState, session_id: &str) {
     update_session_active_turn_owner(state, session_id, None, None, None);
 }
 
+pub fn start_next_queued_prompt_if_idle(
+    state: Arc<AppState>,
+    session_id: String,
+    event_sink: Option<CliEventSink>,
+) {
+    let active = state
+        .hosted_active_turns
+        .lock()
+        .map(|active| active.contains_key(&session_id))
+        .unwrap_or(true);
+    if active {
+        return;
+    }
+    let item = {
+        let mut queues = match state.queued_prompts.lock() {
+            Ok(queues) => queues,
+            Err(_) => return,
+        };
+        let Some(queue) = queues.get_mut(&session_id) else {
+            return;
+        };
+        if queue.is_empty() {
+            queues.remove(&session_id);
+            return;
+        }
+        let item = queue.remove(0);
+        if queue.is_empty() {
+            queues.remove(&session_id);
+        }
+        item
+    };
+    let snapshot = queued_prompt_snapshot(&item, 1, queued_prompt_count(&state, &session_id));
+    let sink = item.event_sink.clone().or(event_sink);
+    emit_event(&sink, turn_dequeued_event(&snapshot));
+    emit_event(
+        &sink,
+        turn_started_event(&snapshot, Some(item.queue_item_id.clone())),
+    );
+    let prompt_state = Arc::clone(&state);
+    tokio::spawn(async move {
+        let result = dispatch_prompt_with_state_arc(
+            Arc::clone(&prompt_state),
+            item.payload,
+            item.event_sink.clone(),
+        )
+        .await;
+        if let Err(error) = result {
+            emit_event(
+                &item.event_sink,
+                turn_queue_failed_event(&snapshot, &error.to_string()),
+            );
+        }
+    });
+}
+
+fn queued_prompt_count(state: &AppState, session_id: &str) -> usize {
+    state
+        .queued_prompts
+        .lock()
+        .ok()
+        .and_then(|queues| queues.get(session_id).map(Vec::len))
+        .unwrap_or(0)
+}
+
 fn update_session_active_turn_owner(
     state: &AppState,
     session_id: &str,
@@ -978,6 +1106,228 @@ fn update_session_cancel_request(
             session.cancel_reason = reason;
             session.updated_at_ms = now_ms();
         }
+    }
+}
+
+fn should_queue_if_busy(payload: &Value) -> bool {
+    !payload
+        .get("queueIfBusy")
+        .or_else(|| payload.get("queue_if_busy"))
+        .and_then(Value::as_bool)
+        .map(|value| !value)
+        .unwrap_or(false)
+}
+
+fn enqueue_prompt_when_busy(
+    state: &AppState,
+    session_id: &str,
+    payload: Value,
+    event_sink: Option<CliEventSink>,
+) -> Result<Value> {
+    let session = find_cli_session(state, session_id)
+        .ok_or_else(|| anyhow!("cli session not found: {session_id}"))?;
+    let active_turn = state
+        .hosted_active_turns
+        .lock()
+        .map_err(|_| anyhow!("hosted active turn lock poisoned"))?
+        .get(session_id)
+        .cloned();
+    let Some(active_turn) = active_turn else {
+        return Err(anyhow!(
+            "active turn not found for busy session: {session_id}"
+        ));
+    };
+    let item = QueuedPromptItem {
+        queue_item_id: format!("queue-{}", Uuid::new_v4()),
+        session_id: session_id.to_string(),
+        runtime: session.runtime.clone(),
+        agent_type: session.agent_type.clone(),
+        source_client_id: extract_source_client_id(&payload),
+        source_device_name: extract_source_device_name(&payload),
+        prompt_preview: extract_prompt_preview(&payload),
+        created_at_ms: now_ms(),
+        payload,
+        event_sink: event_sink.clone(),
+    };
+    let snapshot = push_queued_prompt(state, item)?;
+    emit_event(&event_sink, turn_queued_event(&snapshot));
+    emit_event(&event_sink, turn_queue_updated_event(&snapshot));
+    Ok(json!({
+        "status": "queued",
+        "queued": true,
+        "queueItemId": snapshot.queue_item_id,
+        "queuePosition": snapshot.queue_position,
+        "queueLength": snapshot.queue_length,
+        "sessionId": snapshot.session_id,
+        "connectionId": snapshot.session_id,
+        "activeTurnId": active_turn.active_turn_id,
+        "activeTurnOwnerClientId": active_turn.owner_client_id,
+        "sourceClientId": snapshot.source_client_id,
+        "promptPreview": snapshot.prompt_preview,
+        "createdAtMs": snapshot.created_at_ms,
+    }))
+}
+
+fn push_queued_prompt(state: &AppState, item: QueuedPromptItem) -> Result<QueuedPromptSnapshot> {
+    let mut queues = state
+        .queued_prompts
+        .lock()
+        .map_err(|_| anyhow!("queued prompt lock poisoned"))?;
+    let queue = queues.entry(item.session_id.clone()).or_default();
+    if queue.len() >= DEFAULT_PROMPT_QUEUE_LIMIT {
+        return Err(anyhow!(
+            "{}",
+            json!({
+                "code": "turn_queue_full",
+                "message": "prompt queue is full",
+                "sessionId": item.session_id,
+                "queueLimit": DEFAULT_PROMPT_QUEUE_LIMIT,
+                "retryable": true,
+            })
+        ));
+    }
+    queue.push(item);
+    let position = queue.len();
+    let snapshot = queued_prompt_snapshot(
+        queue
+            .last()
+            .ok_or_else(|| anyhow!("queued prompt was not stored"))?,
+        position,
+        queue.len(),
+    );
+    Ok(snapshot)
+}
+
+fn cancel_queued_prompt(
+    state: &AppState,
+    payload: Value,
+    event_sink: Option<CliEventSink>,
+) -> Result<Value> {
+    let session_id = extract_session_id(&payload)
+        .ok_or_else(|| anyhow!("cli session id is required"))?
+        .to_string();
+    let queue_item_id = extract_queue_item_id(&payload)
+        .ok_or_else(|| anyhow!("queueItemId is required"))?
+        .to_string();
+    let mut queues = state
+        .queued_prompts
+        .lock()
+        .map_err(|_| anyhow!("queued prompt lock poisoned"))?;
+    let queue = queues
+        .get_mut(&session_id)
+        .ok_or_else(|| anyhow!("queued prompt not found: {queue_item_id}"))?;
+    let index = queue
+        .iter()
+        .position(|item| item.queue_item_id == queue_item_id)
+        .ok_or_else(|| anyhow!("queued prompt not found: {queue_item_id}"))?;
+    let item = queue.remove(index);
+    let queue_length = queue.len();
+    let snapshot = queued_prompt_snapshot(&item, index + 1, queue_length);
+    if queue.is_empty() {
+        queues.remove(&session_id);
+    }
+    drop(queues);
+    emit_event(&event_sink, turn_queue_cancelled_event(&snapshot));
+    emit_event(&event_sink, turn_queue_updated_event(&snapshot));
+    Ok(json!({
+        "status": "cancelled",
+        "queueItemId": snapshot.queue_item_id,
+        "sessionId": snapshot.session_id,
+        "queueLength": queue_length,
+    }))
+}
+
+fn queued_prompt_snapshot(
+    item: &QueuedPromptItem,
+    queue_position: usize,
+    queue_length: usize,
+) -> QueuedPromptSnapshot {
+    QueuedPromptSnapshot {
+        queue_item_id: item.queue_item_id.clone(),
+        session_id: item.session_id.clone(),
+        runtime: item.runtime.clone(),
+        agent_type: item.agent_type.clone(),
+        source_client_id: item.source_client_id.clone(),
+        source_device_name: item.source_device_name.clone(),
+        prompt_preview: item.prompt_preview.clone(),
+        created_at_ms: item.created_at_ms,
+        queue_position,
+        queue_length,
+    }
+}
+
+pub fn queued_prompt_snapshots(state: &AppState) -> Vec<QueuedPromptSnapshot> {
+    state
+        .queued_prompts
+        .lock()
+        .map(|queues| {
+            queues
+                .values()
+                .flat_map(|queue| {
+                    let queue_length = queue.len();
+                    queue.iter().enumerate().map(move |(index, item)| {
+                        queued_prompt_snapshot(item, index + 1, queue_length)
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn turn_queued_event(snapshot: &QueuedPromptSnapshot) -> AcpEventEnvelope {
+    queue_event("turn_queued", snapshot)
+}
+
+fn turn_queue_updated_event(snapshot: &QueuedPromptSnapshot) -> AcpEventEnvelope {
+    queue_event("turn_queue_updated", snapshot)
+}
+
+fn turn_queue_cancelled_event(snapshot: &QueuedPromptSnapshot) -> AcpEventEnvelope {
+    queue_event("turn_queue_cancelled", snapshot)
+}
+
+fn turn_dequeued_event(snapshot: &QueuedPromptSnapshot) -> AcpEventEnvelope {
+    queue_event("turn_dequeued", snapshot)
+}
+
+fn turn_started_event(
+    snapshot: &QueuedPromptSnapshot,
+    active_turn_id: Option<String>,
+) -> AcpEventEnvelope {
+    let mut event = queue_event("turn_started", snapshot);
+    if let Value::Object(ref mut data) = event.data {
+        data.insert(
+            "activeTurnId".to_string(),
+            Value::String(active_turn_id.unwrap_or_else(|| snapshot.queue_item_id.clone())),
+        );
+    }
+    event
+}
+
+fn turn_queue_failed_event(snapshot: &QueuedPromptSnapshot, message: &str) -> AcpEventEnvelope {
+    let mut event = queue_event("turn_queue_failed", snapshot);
+    if let Value::Object(ref mut data) = event.data {
+        data.insert("message".to_string(), Value::String(message.to_string()));
+    }
+    event
+}
+
+fn queue_event(event_type: &str, snapshot: &QueuedPromptSnapshot) -> AcpEventEnvelope {
+    AcpEventEnvelope {
+        event_type: event_type.to_string(),
+        connection_id: snapshot.session_id.clone(),
+        data: json!({
+            "sessionId": snapshot.session_id,
+            "queueItemId": snapshot.queue_item_id,
+            "queuePosition": snapshot.queue_position,
+            "queueLength": snapshot.queue_length,
+            "sourceClientId": snapshot.source_client_id,
+            "sourceDeviceName": snapshot.source_device_name,
+            "promptPreview": snapshot.prompt_preview,
+            "createdAtMs": snapshot.created_at_ms,
+            "runtime": snapshot.runtime.id(),
+            "agentType": snapshot.agent_type,
+        }),
     }
 }
 
@@ -1617,6 +1967,22 @@ pub fn extract_source_client_id(payload: &Value) -> Option<String> {
         .map(ToString::to_string)
 }
 
+fn extract_source_device_name(payload: &Value) -> Option<String> {
+    payload
+        .get("sourceDeviceName")
+        .and_then(Value::as_str)
+        .or_else(|| payload.get("source_device_name").and_then(Value::as_str))
+        .or_else(|| {
+            payload
+                .get("client")
+                .and_then(Value::as_object)
+                .and_then(|client| client.get("deviceName").and_then(Value::as_str))
+        })
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
 fn extract_cancel_reason(payload: &Value) -> Option<String> {
     payload
         .get("reason")
@@ -1626,6 +1992,15 @@ fn extract_cancel_reason(payload: &Value) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToString::to_string)
+}
+
+fn extract_queue_item_id(payload: &Value) -> Option<&str> {
+    payload
+        .get("queueItemId")
+        .and_then(Value::as_str)
+        .or_else(|| payload.get("queue_item_id").and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
 }
 
 fn extract_request_id(payload: &Value) -> Option<&str> {

@@ -48,6 +48,13 @@ export function resolveDraftSendFailure(result: {
   }
 }
 
+export function isQueuedPromptResponse(response: unknown) {
+  if (!response || typeof response !== "object") return false
+  const record = response as Record<string, unknown>
+  const status = typeof record.status === "string" ? record.status.trim() : ""
+  return status === "queued" || record.queued === true
+}
+
 export function buildPromptStartWatchSignature(
   session: PromptStartWatchSessionLike | null | undefined
 ) {

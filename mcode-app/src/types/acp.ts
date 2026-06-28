@@ -154,6 +154,12 @@ export interface EventEnvelope {
     | "turn_cancel_requested"
     | "turn_cancelled"
     | "turn_cancel_failed"
+    | "turn_queued"
+    | "turn_queue_updated"
+    | "turn_dequeued"
+    | "turn_started"
+    | "turn_queue_cancelled"
+    | "turn_queue_failed"
     | "usage_update"
     | "permission_request"
     | "permission_resolved"
@@ -262,6 +268,21 @@ export interface TurnCancelFailedEvent {
   activeTurnId?: string | null
   cancelRequestedByClientId?: string | null
   message?: string | null
+}
+
+export interface TurnQueueEvent {
+  sessionId?: string | null
+  queueItemId?: string | null
+  queuePosition?: number | null
+  queueLength?: number | null
+  sourceClientId?: string | null
+  sourceDeviceName?: string | null
+  promptPreview?: string | null
+  createdAtMs?: number | null
+  activeTurnId?: string | null
+  message?: string | null
+  runtime?: string | null
+  agentType?: string | null
 }
 
 export interface UsageUpdateEvent {

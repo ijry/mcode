@@ -33,7 +33,8 @@ async fn p22_records_active_turn_owner_and_rejects_concurrent_prompt() {
         json!({
             "sessionId": session_id,
             "prompt": "second turn",
-            "sourceClientId": "client-watch"
+            "sourceClientId": "client-watch",
+            "queueIfBusy": false
         }),
     )
     .await

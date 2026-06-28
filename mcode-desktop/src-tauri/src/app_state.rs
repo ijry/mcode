@@ -10,7 +10,7 @@ use uuid::Uuid;
 use crate::recovery::{OutboundEventQueue, DEFAULT_OUTBOUND_QUEUE_LIMIT};
 use crate::runtime::{
     codex_cli::CodexAppServerSession, CliPendingInteraction, CliRuntimeSession, CliRuntimeStatus,
-    CAPABILITY_TUNNEL_AVAILABLE,
+    QueuedPromptItem, CAPABILITY_TUNNEL_AVAILABLE,
 };
 use crate::tunnel::{default_code_service, LocalServiceConfig};
 
@@ -95,6 +95,7 @@ pub struct AppState {
     pub cli_sessions: RwLock<Vec<CliRuntimeSession>>,
     pub cli_processes: Mutex<HashMap<String, CliProcessControl>>,
     pub hosted_active_turns: Mutex<HashMap<String, HostedActiveTurn>>,
+    pub queued_prompts: Mutex<HashMap<String, Vec<QueuedPromptItem>>>,
     pub codex_app_server_sessions: AsyncMutex<HashMap<String, CodexAppServerSession>>,
     pub cli_pending_interactions: RwLock<Vec<CliPendingInteraction>>,
     pub cli_interaction_waiters: Mutex<HashMap<String, CliInteractionWaiter>>,
@@ -147,6 +148,7 @@ impl Default for AppState {
             cli_sessions: RwLock::new(Vec::new()),
             cli_processes: Mutex::new(HashMap::new()),
             hosted_active_turns: Mutex::new(HashMap::new()),
+            queued_prompts: Mutex::new(HashMap::new()),
             codex_app_server_sessions: AsyncMutex::new(HashMap::new()),
             cli_pending_interactions: RwLock::new(Vec::new()),
             cli_interaction_waiters: Mutex::new(HashMap::new()),

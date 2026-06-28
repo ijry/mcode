@@ -1113,3 +1113,84 @@ P23 first slice status:
 - Preserved existing `acp_cancel` compatibility with `status = canceled`; P23
   request-state metadata is additive under `cancelStatus`.
 - Not implemented: prompt queueing or a separate `acp_takeover` command.
+
+## P24 Desktop Prompt Queue Behavior
+
+P24 adds a Desktop-hosted prompt queue for official CLI-backed sessions. The
+external connection model remains unchanged: Codex and Claude official CLIs are
+still Desktop capabilities under `targetAgent = mcode-desktop`; relay remains a
+transport gateway and does not own queue state or CLI semantics.
+
+Design document:
+`docs/superpowers/specs/2026-06-28-mcode-p24-desktop-prompt-queue-design.md`.
+Implementation plan:
+`docs/superpowers/plans/2026-06-28-mcode-p24-desktop-prompt-queue.md`.
+
+Desktop behavior:
+
+- `AppState.queued_prompts` stores an in-memory FIFO queue per CLI `sessionId`.
+- If `acp_prompt` reaches a hosted session that already has an active turn,
+  Desktop enqueues the prompt by default and returns
+  `status = queued`, `queued = true`, `queueItemId`, `queuePosition`,
+  `queueLength`, `activeTurnId`, and `activeTurnOwnerClientId`.
+- Clients may opt out with `queueIfBusy = false`; Desktop then preserves the
+  P22 `turn_busy` error behavior.
+- Queue length is capped to a bounded first-slice limit. Overflow returns a
+  retryable `turn_queue_full` error and does not drop existing queued prompts.
+- `acp_cancel_queued_prompt` cancels a queued item without interrupting the
+  active provider turn.
+- After prompt completion, prompt error, or successful active-turn cancellation,
+  Desktop auto-starts the next queued prompt if the hosted session is idle.
+- Desktop emits additive queue events:
+  `turn_queued`, `turn_queue_updated`, `turn_dequeued`, `turn_started`,
+  `turn_queue_cancelled`, and `turn_queue_failed`.
+- Desktop health exposes `promptQueueCount` and per-item summaries for
+  diagnostics.
+
+App behavior:
+
+- `mcode-app` normalizes queue events from snake_case or camelCase payloads into
+  one `TurnQueueEvent` shape.
+- Conversation runtime sessions expose `sharedPromptQueue = { count, items,
+  lastMessage }` as shared Desktop queue metadata. This is separate from the
+  local composer draft queue.
+- `turn_queued` inserts a shared queue item and shows queued copy. Queue update
+  events only update existing items so a cancel update cannot reinsert a removed
+  item.
+- `turn_dequeued`, `turn_started`, and `turn_queue_cancelled` remove the queued
+  item. `turn_started` moves the session into thinking state; streaming events
+  remain authoritative for visible assistant content.
+- `turn_queue_failed` removes the queued item and surfaces a recoverable runtime
+  error.
+- If `acp_prompt` returns `status = queued`, the detail send path treats the
+  request as accepted, removes the local optimistic user turn, and relies on the
+  shared queue event/state instead of waiting for an immediate active turn.
+
+Compatibility and limits:
+
+- P24 queue state is intentionally memory-only; queued prompts do not survive
+  Desktop restart. P19 recovery continues to cover outbound event replay and
+  interrupted session diagnostics, not queued prompt persistence.
+- Existing clients that do not understand queue events can ignore them. They
+  still receive the queued prompt response body and later normal stream events
+  when the queued prompt starts.
+- Existing `turn_busy` handling remains available for older Desktop versions
+  and for explicit `queueIfBusy = false`.
+- Relay protocol changes are additive because queue lifecycle events travel
+  through the existing `event_push` and `/v1/events` paths.
+
+Native iOS/Android replication:
+
+- Keep one local composer draft queue and one Desktop shared prompt queue; do
+  not persist queued Desktop prompts in the mobile client as if they were local
+  drafts.
+- Treat `status = queued` as a successful send attempt, not as a timeout or
+  failure. Remove any local optimistic turn unless the native UI has a distinct
+  queued-message rendering model.
+- Subscribe to the same queue lifecycle events and update queue count/items by
+  `queueItemId`.
+- Allow active-turn cancel and queued-item cancel to remain separate commands:
+  `acp_cancel` for the running provider turn, `acp_cancel_queued_prompt` for an
+  item that has not started.
+- Do not add mobile-side `codex` or `claude` target agents for this feature;
+  official CLI queueing remains under `targetAgent = mcode-desktop`.

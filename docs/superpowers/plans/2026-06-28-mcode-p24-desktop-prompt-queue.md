@@ -47,13 +47,13 @@
 - Produces `acp_cancel_queued_prompt`.
 - Produces queue events through existing `CliEventSink`.
 
-- [ ] Step 1: Add `queued_prompts: Mutex<HashMap<String, Vec<QueuedPromptItem>>>` to `AppState`.
-- [ ] Step 2: Add `QueuedPromptItem` and `QueuedPromptSnapshot` structs in `runtime/mod.rs`.
-- [ ] Step 3: In `dispatch_desktop_proxy_with_event_sink`, route `acp_cancel_queued_prompt`.
-- [ ] Step 4: When `begin_hosted_turn` returns `turn_busy`, enqueue the prompt if `queueIfBusy !== false`.
-- [ ] Step 5: Return `status = queued`, `queued = true`, `queueItemId`, `queuePosition`, `queueLength`, `activeTurnId`, and `activeTurnOwnerClientId`.
-- [ ] Step 6: Emit `turn_queued` and `turn_queue_updated`.
-- [ ] Step 7: Add tests for enqueue response and queue full rejection.
+- [x] Step 1: Add `queued_prompts: Mutex<HashMap<String, Vec<QueuedPromptItem>>>` to `AppState`.
+- [x] Step 2: Add `QueuedPromptItem` and `QueuedPromptSnapshot` structs in `runtime/mod.rs`.
+- [x] Step 3: In `dispatch_desktop_proxy_with_event_sink`, route `acp_cancel_queued_prompt`.
+- [x] Step 4: When `begin_hosted_turn` returns `turn_busy`, enqueue the prompt if `queueIfBusy !== false`.
+- [x] Step 5: Return `status = queued`, `queued = true`, `queueItemId`, `queuePosition`, `queueLength`, `activeTurnId`, and `activeTurnOwnerClientId`.
+- [x] Step 6: Emit `turn_queued` and `turn_queue_updated`.
+- [x] Step 7: Add tests for enqueue response and queue full rejection.
 
 ## Task 2: Desktop Auto-Start And Cancel
 
@@ -66,12 +66,12 @@
 - Consumes `dispatch_prompt_with_state_arc`.
 - Produces queue diagnostics in health snapshot.
 
-- [ ] Step 1: Add `start_next_queued_prompt_if_idle(state: Arc<AppState>, sessionId, eventSink)`.
-- [ ] Step 2: Call it after successful prompt completion, prompt error, and cancel settlement.
-- [ ] Step 3: Emit `turn_dequeued` and `turn_started` when a queued item begins.
-- [ ] Step 4: Implement `acp_cancel_queued_prompt` for queued items.
-- [ ] Step 5: Expose queue count and per-session summaries in health.
-- [ ] Step 6: Add tests for cancel queued item and auto-start next queued item after active turn ends.
+- [x] Step 1: Add `start_next_queued_prompt_if_idle(state: Arc<AppState>, sessionId, eventSink)`.
+- [x] Step 2: Call it after successful prompt completion, prompt error, and cancel settlement.
+- [x] Step 3: Emit `turn_dequeued` and `turn_started` when a queued item begins.
+- [x] Step 4: Implement `acp_cancel_queued_prompt` for queued items.
+- [x] Step 5: Expose queue count and per-session summaries in health.
+- [x] Step 6: Add tests for cancel queued item and auto-start next queued item after active turn ends.
 
 ## Task 3: App Protocol And Runtime State
 
@@ -86,11 +86,11 @@
 - Produces `TurnQueuedEvent`, `TurnQueueUpdatedEvent`, `TurnDequeuedEvent`, `TurnStartedEvent`, `TurnQueueCancelledEvent`, `TurnQueueFailedEvent`.
 - Produces runtime shared queue fields on the conversation session.
 
-- [ ] Step 1: Add ACP queue event payload interfaces and union members.
-- [ ] Step 2: Normalize queue events in `acp.ts`.
-- [ ] Step 3: Add `sharedPromptQueue` state to conversation runtime sessions.
-- [ ] Step 4: Handle queue events by updating queue count/items and copy.
-- [ ] Step 5: Add app unit tests for event normalization and runtime state updates.
+- [x] Step 1: Add ACP queue event payload interfaces and union members.
+- [x] Step 2: Normalize queue events in `acp.ts`.
+- [x] Step 3: Add `sharedPromptQueue` state to conversation runtime sessions.
+- [x] Step 4: Handle queue events by updating queue count/items and copy.
+- [x] Step 5: Add app unit tests for event normalization and runtime state updates.
 
 ## Task 4: App Send Acceptance
 
@@ -103,10 +103,10 @@
 - Consumes ACP prompt response body.
 - Produces send-attempt result that treats `status = queued` as accepted.
 
-- [ ] Step 1: Add helper `isQueuedPromptResponse(response)` in `detailPromptSend.ts`.
-- [ ] Step 2: Use helper in send path so queued response does not remove optimistic user turn as failure.
-- [ ] Step 3: Keep existing `turn_busy` failure behavior for older Desktop or `queueIfBusy = false`.
-- [ ] Step 4: Add focused unit tests.
+- [x] Step 1: Add helper `isQueuedPromptResponse(response)` in `detailPromptSend.ts`.
+- [x] Step 2: Use helper in send path so queued response does not remove optimistic user turn as failure.
+- [x] Step 3: Keep existing `turn_busy` failure behavior for older Desktop or `queueIfBusy = false`.
+- [x] Step 4: Add focused unit tests.
 
 ## Task 5: Docs, Verification, Commit
 
@@ -114,16 +114,15 @@
 - Modify: `docs/mcode-architecture-notes/2026-06-25-multi-provider-connection-routing.md`
 - Modify: this plan file
 
-- [ ] Step 1: Add P24 architecture note section with protocol, compatibility, and native guidance.
-- [ ] Step 2: Mark plan progress complete.
-- [ ] Step 3: Run `cargo test --manifest-path mcode-desktop/src-tauri/Cargo.toml`.
-- [ ] Step 4: Run `cd mcode-app; npm run test:unit`.
-- [ ] Step 5: Run `git diff --check`.
-- [ ] Step 6: Commit with `git commit -m "feat(desktop): queue p24 hosted prompts"`.
+- [x] Step 1: Add P24 architecture note section with protocol, compatibility, and native guidance.
+- [x] Step 2: Mark plan progress complete.
+- [x] Step 3: Run `cargo test --manifest-path mcode-desktop/src-tauri/Cargo.toml`.
+- [x] Step 4: Run `cd mcode-app; npm run test:unit`.
+- [x] Step 5: Run `git diff --check`.
+- [x] Step 6: Commit with `git commit -m "feat(desktop): queue p24 hosted prompts"`.
 
 ## Self-Review
 
 - Spec coverage: Desktop enqueue, queue events, auto-start, cancel queued prompt, app normalization/runtime state, queued send acceptance, docs, and tests are covered.
 - Scope control: P24 does not persist queued prompts and does not move queue ownership to relay.
 - Type consistency: plan uses `sessionId`, `queueItemId`, `sourceClientId`, `activeTurnId`, and `targetAgent` consistently.
-

@@ -217,6 +217,117 @@ describe('conversationRuntime ACP error handling', () => {
     expect(session.inputErrorMessage).toBe('取消当前任务失败，请刷新后重试。')
   })
 
+  it('tracks shared prompt queue lifecycle events', () => {
+    const { store, session } = prepareSession()
+
+    store.handleEvent({
+      type: 'turn_queued',
+      connectionId: 'conn-1',
+      data: {
+        sessionId: 'session-1',
+        queueItemId: 'queue-1',
+        queuePosition: 1,
+        queueLength: 1,
+        sourceClientId: 'client-phone',
+        sourceDeviceName: 'Phone',
+        promptPreview: 'run tests',
+        createdAtMs: 1782630000000,
+        runtime: 'claude',
+        agentType: 'claude_code',
+      },
+    } as any)
+
+    expect(session.sharedPromptQueue).toMatchObject({
+      count: 1,
+      lastMessage: '任务已加入队列。',
+      items: [
+        {
+          queueItemId: 'queue-1',
+          queuePosition: 1,
+          promptPreview: 'run tests',
+        },
+      ],
+    })
+    expect(session.inputErrorMessage).toBe('任务已加入队列。')
+
+    store.handleEvent({
+      type: 'turn_started',
+      connectionId: 'conn-1',
+      data: {
+        sessionId: 'session-1',
+        queueItemId: 'queue-1',
+        queueLength: 0,
+        activeTurnId: 'turn-queued',
+      },
+    } as any)
+
+    expect(session.sharedPromptQueue.count).toBe(0)
+    expect(session.sharedPromptQueue.items).toHaveLength(0)
+    expect(session.status).toBe('thinking')
+    expect(session.inputErrorMessage).toBeNull()
+  })
+
+  it('does not reinsert cancelled queue items from queue update events', () => {
+    const { store, session } = prepareSession()
+
+    store.handleEvent({
+      type: 'turn_queued',
+      connectionId: 'conn-1',
+      data: {
+        queueItemId: 'queue-1',
+        queuePosition: 1,
+        queueLength: 1,
+      },
+    } as any)
+    store.handleEvent({
+      type: 'turn_queue_cancelled',
+      connectionId: 'conn-1',
+      data: {
+        queueItemId: 'queue-1',
+        queueLength: 0,
+      },
+    } as any)
+    store.handleEvent({
+      type: 'turn_queue_updated',
+      connectionId: 'conn-1',
+      data: {
+        queueItemId: 'queue-1',
+        queuePosition: 1,
+        queueLength: 0,
+      },
+    } as any)
+
+    expect(session.sharedPromptQueue.count).toBe(0)
+    expect(session.sharedPromptQueue.items).toEqual([])
+  })
+
+  it('surfaces queue start failures as recoverable runtime errors', () => {
+    const { store, session } = prepareSession()
+
+    store.handleEvent({
+      type: 'turn_queued',
+      connectionId: 'conn-1',
+      data: {
+        queueItemId: 'queue-1',
+        queueLength: 1,
+      },
+    } as any)
+    store.handleEvent({
+      type: 'turn_queue_failed',
+      connectionId: 'conn-1',
+      data: {
+        queueItemId: 'queue-1',
+        queueLength: 0,
+        message: 'provider failed',
+      },
+    } as any)
+
+    expect(session.sharedPromptQueue.count).toBe(0)
+    expect(session.sharedPromptQueue.items).toEqual([])
+    expect(session.status).toBe('error')
+    expect(session.inputErrorMessage).toBe('provider failed')
+  })
+
   it('does not let an older snapshot overwrite newer streamed tail content', () => {
     const { store, session } = prepareSession()
     session.lastAppliedSeq = 12

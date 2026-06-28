@@ -2,6 +2,7 @@ import {
   buildDraftSendPayload,
   buildPromptStartWatchSignature,
   findLatestOptimisticTurnId,
+  isQueuedPromptResponse,
   resolvePromptStartSnapshotOutcome,
   resolvePromptStartTimeoutFailure,
   resolvePromptStartWatchOutcome,
@@ -82,6 +83,21 @@ describe("detailPromptSend", () => {
       error: "网络异常",
       toastTitle: "发送失败: 网络异常",
     })
+  })
+
+  it("accepts queued prompt responses", () => {
+    expect(isQueuedPromptResponse({
+      status: "queued",
+      queueItemId: "queue-1",
+    })).toBe(true)
+    expect(isQueuedPromptResponse({
+      queued: true,
+      queueItemId: "queue-1",
+    })).toBe(true)
+    expect(isQueuedPromptResponse({
+      status: "ok",
+    })).toBe(false)
+    expect(isQueuedPromptResponse(null)).toBe(false)
   })
 
   it("builds stable prompt-start watch signatures", () => {

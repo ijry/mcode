@@ -2,7 +2,8 @@ use std::sync::atomic::Ordering;
 
 use crate::app_state::{AppState, DiagnosticEntry, GatewayProvider, PairOffer, UpstreamStatus};
 use crate::runtime::{
-    CliPendingInteraction, CliRuntimeSession, CliRuntimeStatus, CliSessionStatus,
+    queued_prompt_snapshots, CliPendingInteraction, CliRuntimeSession, CliRuntimeStatus,
+    CliSessionStatus, QueuedPromptSnapshot,
 };
 use crate::tunnel::LocalServiceConfig;
 
@@ -39,6 +40,8 @@ pub struct DesktopHealthSnapshot {
     pub active_turn_owner_client_id: Option<String>,
     pub active_turn_cancel_requested_by_client_id: Option<String>,
     pub active_turn_cancel_requested_at_ms: Option<u64>,
+    pub prompt_queue_count: usize,
+    pub prompt_queue: Vec<QueuedPromptSnapshot>,
     pub active_controller_id: Option<String>,
     pub shutdown_requested: bool,
 }
@@ -88,6 +91,7 @@ pub fn build_health_snapshot(state: &AppState) -> DesktopHealthSnapshot {
                 .and_then(|turn| turn.cancel_requested_at_ms),
         )
     });
+    let prompt_queue = queued_prompt_snapshots(state);
     let last_relay_event_id = state
         .last_relay_event_id
         .read()
@@ -214,6 +218,8 @@ pub fn build_health_snapshot(state: &AppState) -> DesktopHealthSnapshot {
         active_turn_cancel_requested_at_ms: active_turn_snapshot
             .as_ref()
             .and_then(|(_, _, _, requested_at_ms)| *requested_at_ms),
+        prompt_queue_count: prompt_queue.len(),
+        prompt_queue,
         active_controller_id: state
             .active_controller_id
             .read()
