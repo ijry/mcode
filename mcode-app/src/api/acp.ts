@@ -190,6 +190,17 @@ class AcpApiClient {
     })
   }
 
+  async acpCancelAllQueuedPrompts(
+    connectionId: string,
+    sessionId?: string | null
+  ): Promise<any> {
+    return await this.request("/acp_cancel_all_queued_prompts", {
+      connectionId,
+      sessionId: sessionId || connectionId,
+      reason: "user_cancelled_all",
+    })
+  }
+
   /**
    * 响应权限请求
    */

@@ -482,6 +482,16 @@
         </view>
 
         <view v-if="sharedPromptQueueExpanded && showSharedPromptQueue" class="shared-queue-panel">
+          <view class="shared-queue-panel__header">
+            <text class="shared-queue-panel__hint">等待 Desktop 当前任务完成后执行</text>
+            <view
+              class="shared-queue-clear"
+              :class="{ 'shared-queue-clear--disabled': sharedPromptQueueClearDisabled }"
+              @click.stop="clearSharedPromptQueue"
+            >
+              {{ clearingSharedPromptQueue ? "清空中" : "清空" }}
+            </view>
+          </view>
           <view
             v-for="(item, index) in sharedPromptQueueItems"
             :key="item.queueItemId || index"
@@ -893,6 +903,7 @@ import {
   formatTokenCountK,
   hasSharedPromptQueue,
   isSharedPromptQueueCancelDisabled,
+  isSharedPromptQueueClearDisabled,
   isStoppableRuntimeStatus,
   looksLikeNetworkFailure,
   queueStatusText,
@@ -1067,6 +1078,7 @@ const draftQueue = ref<QueuedDraft[]>([])
 const queueExpanded = ref(false)
 const sharedPromptQueueExpanded = ref(false)
 const cancellingSharedQueueItemIds = ref<Set<string>>(new Set())
+const clearingSharedPromptQueue = ref(false)
 const uploadingCount = ref(0)
 const showPlanDrawer = ref(false)
 const composerPanelMode = ref<ComposerPanelMode>("")
@@ -1128,6 +1140,13 @@ const sharedPromptQueueHeaderText = computed(() => sharedPromptQueueTitle(shared
 const sharedPromptQueueSummaryText = computed(() => sharedPromptQueueSummary(sharedPromptQueue.value))
 const localRelayClientId = computed(() => getRelayClientId())
 const hasBoundConnection = computed(() => Boolean(firstString(session.value?.connectionId)))
+const sharedPromptQueueClearDisabled = computed(() =>
+  isSharedPromptQueueClearDisabled(
+    sharedPromptQueue.value,
+    firstString(session.value?.connectionId),
+    clearingSharedPromptQueue.value
+  )
+)
 
 const managedConversation = computed(() => {
   if (!conversationId.value) return null
@@ -3281,6 +3300,23 @@ async function cancelSharedPromptQueueItem(queueItemId?: string | null, sessionI
     })
   } finally {
     setSharedQueueItemCancelling(normalizedQueueItemId, false)
+  }
+}
+
+async function clearSharedPromptQueue() {
+  const connectionId = firstString(session.value?.connectionId)
+  if (sharedPromptQueueClearDisabled.value || !connectionId) return
+  clearingSharedPromptQueue.value = true
+  try {
+    await acpApi.acpCancelAllQueuedPrompts(connectionId, connectionId)
+  } catch (error) {
+    uni.showToast({
+      title: "清空队列失败，请稍后重试",
+      icon: "none",
+      duration: 3000,
+    })
+  } finally {
+    clearingSharedPromptQueue.value = false
   }
 }
 

@@ -1258,7 +1258,7 @@ Design document:
 Implementation plan:
 `docs/superpowers/plans/2026-06-28-mcode-p26-desktop-queue-recovery.md`.
 
-Planned Desktop behavior:
+Implemented Desktop behavior:
 
 - `DesktopRecoverySnapshot.queuedPrompts` stores serializable queued prompt
   records without runtime `eventSink`.
@@ -1295,7 +1295,7 @@ Planned Desktop behavior:
 - `acp_cancel_all_queued_prompts` clears queued prompts for one Desktop
   session without interrupting the active provider turn.
 
-Planned app behavior:
+Implemented app behavior:
 
 - Conversation detail shared Desktop queue can show a `清空` action.
 - Clear-all calls `acp_cancel_all_queued_prompts` and disables while in flight.
@@ -1308,3 +1308,15 @@ Compatibility and native replication:
   failure message.
 - Native clients should treat clear-all as a Desktop shared queue action, not as
   a local draft queue operation.
+
+P27 first slice status:
+
+- Implemented Desktop `PromptQueuePolicy` with default queue limit, restored
+  queue age limit, and any-client cancel flag.
+- Implemented health fields `promptQueuePolicy` and
+  `expiredPromptQueueCount`.
+- Implemented restored queued-prompt expiry with Desktop diagnostics.
+- Implemented `acp_cancel_all_queued_prompts` for one Desktop session.
+- Implemented app API wrapper and conversation-detail `清空` action.
+- Not implemented: queue reorder, priority scheduling, or hard ownership
+  restriction enforcement.

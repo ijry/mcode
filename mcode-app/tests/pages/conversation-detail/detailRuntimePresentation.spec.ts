@@ -6,6 +6,7 @@ import {
   formatTokenCountK,
   hasSharedPromptQueue,
   isSharedPromptQueueCancelDisabled,
+  isSharedPromptQueueClearDisabled,
   isStoppableRuntimeStatus,
   looksLikeNetworkFailure,
   queueStatusText,
@@ -137,6 +138,13 @@ describe("detailRuntimePresentation", () => {
     expect(isSharedPromptQueueCancelDisabled("", new Set())).toBe(true)
     expect(isSharedPromptQueueCancelDisabled("queue-1", new Set(["queue-1"]))).toBe(true)
     expect(isSharedPromptQueueCancelDisabled("queue-1", ["queue-2"])).toBe(false)
+  })
+
+  it("detects shared queue clear disabled state", () => {
+    expect(isSharedPromptQueueClearDisabled({ count: 1, items: [] }, "conn-1", false)).toBe(false)
+    expect(isSharedPromptQueueClearDisabled({ count: 0, items: [] }, "conn-1", false)).toBe(true)
+    expect(isSharedPromptQueueClearDisabled({ count: 1, items: [] }, "", false)).toBe(true)
+    expect(isSharedPromptQueueClearDisabled({ count: 1, items: [] }, "conn-1", true)).toBe(true)
   })
 
   it("detects network-like failure copy", () => {

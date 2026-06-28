@@ -435,7 +435,7 @@ git commit -m "feat(desktop): cancel all queued prompts"
 - Produces: `acpApi.acpCancelAllQueuedPrompts(connectionId: string, sessionId?: string | null): Promise<any>`
 - Produces: `isSharedPromptQueueClearDisabled(queue, connectionId, clearing): boolean`
 
-- [ ] Step 1: Add API test.
+- [x] Step 1: Add API test.
 
 Append to `acpQueuedPromptCancel.spec.ts`:
 
@@ -462,7 +462,7 @@ it("sends acp_cancel_all_queued_prompts with explicit session id", async () => {
 })
 ```
 
-- [ ] Step 2: Implement App API wrapper.
+- [x] Step 2: Implement App API wrapper.
 
 In `acp.ts`, after `acpCancelQueuedPrompt(...)`, add:
 
@@ -479,7 +479,7 @@ async acpCancelAllQueuedPrompts(
 }
 ```
 
-- [ ] Step 3: Add presentation helper test.
+- [x] Step 3: Add presentation helper test.
 
 Import `isSharedPromptQueueClearDisabled` and append:
 
@@ -492,7 +492,7 @@ it("detects shared queue clear disabled state", () => {
 })
 ```
 
-- [ ] Step 4: Implement presentation helper.
+- [x] Step 4: Implement presentation helper.
 
 In `detailRuntimePresentation.ts`, add:
 
@@ -508,7 +508,7 @@ export function isSharedPromptQueueClearDisabled(
 }
 ```
 
-- [ ] Step 5: Add page state and handler.
+- [x] Step 5: Add page state and handler.
 
 In `index.vue`, import `isSharedPromptQueueClearDisabled`, add:
 
@@ -544,7 +544,7 @@ async function clearSharedPromptQueue() {
 }
 ```
 
-- [ ] Step 6: Add clear action template and styles.
+- [x] Step 6: Add clear action template and styles.
 
 Inside `.shared-queue-panel`, before the `v-for`, add:
 
@@ -592,7 +592,7 @@ Add styles before `.shared-queue-item`:
 }
 ```
 
-- [ ] Step 7: Run app focused tests.
+- [x] Step 7: Run app focused tests.
 
 Run:
 

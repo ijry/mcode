@@ -1386,6 +1386,33 @@
   gap: 8rpx;
 }
 
+.shared-queue-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12rpx;
+}
+
+.shared-queue-panel__hint {
+  font-size: 20rpx;
+  color: var(--up-tips-color, #909193);
+}
+
+.shared-queue-clear {
+  font-size: 20rpx;
+  color: #fa3534;
+  padding: 6rpx 10rpx;
+  border-radius: 999rpx;
+  background-color: color-mix(in srgb, #fa3534 10%, var(--up-card-bg-color, #ffffff) 90%);
+  flex-shrink: 0;
+
+  &--disabled {
+    color: var(--up-tips-color, #909193);
+    background-color: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
+    pointer-events: none;
+  }
+}
+
 .shared-queue-item {
   padding: 12rpx;
   border-radius: 14rpx;

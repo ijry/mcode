@@ -144,6 +144,16 @@ export function isSharedPromptQueueCancelDisabled(
   return cancellingIds.has(normalized)
 }
 
+export function isSharedPromptQueueClearDisabled(
+  queue: SharedPromptQueueViewState | null | undefined,
+  connectionId: string | null | undefined,
+  clearing: boolean
+) {
+  if (clearing) return true
+  if (!String(connectionId || "").trim()) return true
+  return !hasSharedPromptQueue(queue)
+}
+
 export function formatQueueTime(ts: number): string {
   const date = new Date(ts)
   const hh = String(date.getHours()).padStart(2, "0")
