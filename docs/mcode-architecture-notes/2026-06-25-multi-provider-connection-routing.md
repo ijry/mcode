@@ -893,3 +893,42 @@ Compatibility and native replication:
 - Native clients should run the same replay-miss recovery flow: update bridge
   health, show recoverable warning copy, refresh/calibrate visible sessions, and
   keep official CLI state under `targetAgent = mcode-desktop`.
+
+## P21 Planned App Relay Checkpoint Persistence Behavior
+
+P21 will make the P20 relay checkpoint survive app restart without changing
+relay or Desktop protocols. The app will persist only the relay high-water
+checkpoint needed for `/v1/events?lastEventId=...`; it will not persist gateway
+tokens, pair secrets, official CLI credentials, raw relay payloads, or Desktop
+runtime snapshots in the checkpoint store.
+
+Design document:
+`docs/superpowers/specs/2026-06-28-mcode-p21-app-relay-checkpoint-persistence-design.md`.
+Implementation plan:
+`docs/superpowers/plans/2026-06-28-mcode-p21-app-relay-checkpoint-persistence.md`.
+
+Planned app behavior:
+
+- Add `relayCheckpointStore.ts` under `mcode-app/src/services/gateway/` to own
+  the versioned `mcode_relay_checkpoints_v1` snapshot in `uni` storage.
+- Store one checkpoint record per `instanceKey`: `instanceKey`,
+  `lastRelayEventId`, and `updatedAt`.
+- Hydrate `acpApi` relay recovery state from the store before opening the
+  realtime bridge.
+- Persist a new checkpoint only after wrapped relay event payload handling
+  succeeds.
+- Persist `replay_miss.lastEventId` as the relay high-water checkpoint after
+  starting the state refresh/calibration path, so the app stops requesting an
+  event id outside the retained replay window.
+- Clear persisted checkpoints when `clearRelayRecoveryState()` clears the
+  matching in-memory recovery state.
+
+Native replication:
+
+- Native iOS/Android clients should use a small key-value checkpoint store
+  scoped by the same gateway instance identity used for realtime reconnect.
+- The checkpoint belongs to the authenticated gateway instance, not to an ACP
+  conversation.
+- Persist only positive relay event ids and update timestamps.
+- Never persist gateway tokens, official CLI credentials, or raw event payloads
+  in checkpoint storage.
