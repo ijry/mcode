@@ -1,8 +1,15 @@
-import type { CodegGateway, EventChannelConnection, PairTargetMetadata, RelaySessionInfo } from "./types"
+import type {
+  CodegGateway,
+  EventChannelConnection,
+  EventRecoveryOptions,
+  PairTargetMetadata,
+  RelaySessionInfo,
+} from "./types"
 import { toErrorMessage, toResponseErrorMessage } from "./error"
 import { buildRemoteInstanceKey } from "@/services/realtime/instance-key"
 import { decodeSocketPayload } from "./socketPayload"
 import { buildWebSocketProtocols } from "./wsProtocol"
+import { buildRelayEventsUrl } from "./relayRecovery"
 
 const COMMAND_TIMEOUT_MS: Record<string, number> = {
   acp_describe_agent_options: 70_000,
@@ -126,10 +133,14 @@ export class RelayGateway implements CodegGateway {
     }
   }
 
-  async connectEvents(onEvent: (event: unknown) => void): Promise<EventChannelConnection> {
+  async connectEvents(
+    onEvent: (event: unknown) => void,
+    options: EventRecoveryOptions = {}
+  ): Promise<EventChannelConnection> {
+    const eventsUrl = buildRelayEventsUrl(this.relayUrl, options.lastEventId)
     if (isH5WebSocketRuntime()) {
       const ws = new WebSocket(
-        `${this.relayUrl.replace(/^http/, "ws").replace(/\/$/, "")}/v1/events`,
+        eventsUrl,
         buildWebSocketProtocols(this.session.accessToken || "")
       )
       let opened = false
@@ -202,7 +213,7 @@ export class RelayGateway implements CodegGateway {
     }
 
     const socketTask: any = uni.connectSocket({
-      url: `${this.relayUrl.replace(/^http/, "ws").replace(/\/$/, "")}/v1/events`,
+      url: eventsUrl,
       header: getHeaders(this.session),
       complete: () => {},
     })

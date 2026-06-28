@@ -20,6 +20,32 @@ export interface RelaySessionInfo {
   protocolVersion?: string
 }
 
+export interface EventRecoveryOptions {
+  lastEventId?: number | null
+}
+
+export interface RelayReadyFrame {
+  type: "ready"
+  replayWindowStart?: number | null
+  lastEventId?: number | null
+  replayAvailable?: boolean
+}
+
+export interface RelayRecoveryMissFrame {
+  type: "replay_miss"
+  requestedLastEventId?: number | null
+  replayWindowStart?: number | null
+  lastEventId?: number | null
+}
+
+export interface RelayWrappedEventFrame {
+  eventId: number
+  channel: string
+  payload: unknown
+  controllerId?: string | null
+  localEventId?: number | null
+}
+
 export interface PairParams {
   relayUrl?: string
   code?: string
@@ -32,7 +58,10 @@ export interface CodegGateway {
   readonly mode: GatewayMode
   pair(params: PairParams): Promise<RelaySessionInfo | null>
   call<T>(command: string, payload?: Record<string, unknown>): Promise<T>
-  connectEvents(onEvent: (event: unknown) => void): Promise<EventChannelConnection>
+  connectEvents(
+    onEvent: (event: unknown) => void,
+    options?: EventRecoveryOptions
+  ): Promise<EventChannelConnection>
   refreshAuth(): Promise<void>
   getRemoteInstanceDescriptor(): RemoteInstanceDescriptor
 }
