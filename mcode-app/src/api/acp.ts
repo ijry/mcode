@@ -17,6 +17,12 @@ import { getRegisteredRemoteInstanceDescriptor } from "@/services/realtime/remot
 import type { RealtimeTransport, RealtimeTransportHost, RemoteInstanceDescriptor } from "@/services/realtime/types"
 import type { EventChannelConnection, RelaySessionInfo } from "@/services/gateway/types"
 import { classifyRelayRealtimeFrame } from "@/services/gateway/relayRecovery"
+import {
+  clearRelayCheckpoint,
+  clearRelayCheckpoints,
+  readRelayCheckpoint,
+  upsertRelayCheckpoint,
+} from "@/services/gateway/relayCheckpointStore"
 
 type BridgeState = {
   descriptor: RemoteInstanceDescriptor
@@ -510,9 +516,11 @@ class AcpApiClient {
   clearRelayRecoveryState(instanceKey?: string) {
     if (instanceKey) {
       this.relayRecoveryStates.delete(instanceKey)
+      clearRelayCheckpoint(instanceKey)
       return
     }
     this.relayRecoveryStates.clear()
+    clearRelayCheckpoints()
   }
 
   canUseAttachTransport(instanceKey?: string) {
@@ -783,8 +791,9 @@ class AcpApiClient {
   private getOrCreateRelayRecoveryState(instanceKey: string): RelayRecoveryState {
     const existing = this.relayRecoveryStates.get(instanceKey)
     if (existing) return existing
+    const stored = readRelayCheckpoint(instanceKey)
     const created: RelayRecoveryState = {
-      lastRelayEventId: null,
+      lastRelayEventId: stored?.lastRelayEventId ?? null,
       replayWindowStart: null,
       requestedLastEventId: null,
       recoveryIssue: null,
@@ -826,6 +835,7 @@ class AcpApiClient {
       recovery.replayWindowStart = frame.replayWindowStart ?? null
       recovery.lastRelayEventId = frame.lastEventId ?? recovery.lastRelayEventId
       recovery.recoveryMessage = "实时事件有缺口，正在刷新会话状态。部分中间状态可能已跳过。"
+      this.persistRelayCheckpoint(instanceKey, recovery.lastRelayEventId)
       this.emitBridgeHealth(instanceKey, this.buildBridgeHealthForInstance(instanceKey))
       void this.calibrateActiveConversationsAfterReplayMiss(instanceKey)
       return
@@ -841,6 +851,7 @@ class AcpApiClient {
       recovery.lastRelayEventId = frame.eventId
       recovery.recoveryIssue = null
       recovery.recoveryMessage = null
+      this.persistRelayCheckpoint(instanceKey, recovery.lastRelayEventId)
       return
     }
     dispatchPayload(frame.payload)
@@ -882,6 +893,17 @@ class AcpApiClient {
       "@/services/conversation/conversationSyncService"
     )
     await calibrateActiveConversationsForInstance(instanceKey)
+  }
+
+  private persistRelayCheckpoint(instanceKey: string, lastRelayEventId: number | null) {
+    if (
+      typeof lastRelayEventId !== "number" ||
+      !Number.isFinite(lastRelayEventId) ||
+      lastRelayEventId <= 0
+    ) {
+      return
+    }
+    upsertRelayCheckpoint(instanceKey, Math.trunc(lastRelayEventId))
   }
 
   private normalizeEventEnvelope(event: EventEnvelope | Record<string, unknown> | null | undefined) {
