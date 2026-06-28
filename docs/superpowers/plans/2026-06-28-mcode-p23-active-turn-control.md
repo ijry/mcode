@@ -203,7 +203,8 @@ async fn p23_cancel_records_requester_and_emits_events() {
     .await
     .unwrap();
 
-    assert_eq!(response["status"], "cancel_requested");
+    assert_eq!(response["status"], "canceled");
+    assert_eq!(response["cancelStatus"], "cancel_requested");
     assert_eq!(response["activeTurnId"], "turn-live");
     assert_eq!(response["activeTurnOwnerClientId"], "client-phone");
     assert_eq!(response["cancelRequestedByClientId"], "client-watch");
@@ -560,7 +561,8 @@ async fn cancel_cli_session(
             "connectionId": session_id,
             "sessionId": session_id,
             "session_id": session_id,
-            "status": "cancel_requested",
+            "status": "canceled",
+            "cancelStatus": "cancel_requested",
             "canceled": true,
             "activeTurnId": snapshot.active_turn_id,
             "activeTurnOwnerClientId": snapshot.owner_client_id,
@@ -1017,7 +1019,7 @@ git commit -m "feat(app): handle p23 turn control events"
 - Consumes: all previous task outputs.
 - Produces: checked plan progress and final P23 status in architecture notes.
 
-- [ ] **Step 1: Run full verification**
+- [x] **Step 1: Run full verification**
 
 Run:
 
@@ -1034,11 +1036,19 @@ git diff --check
 
 Expected: all pass. If any test fails, use `systematic-debugging` before changing code.
 
-- [ ] **Step 2: Update plan checkboxes**
+Verification result:
+
+- `cd mcode-relay; npm test` passed.
+- `cd mcode-relay; npm run typecheck` passed.
+- `cd mcode-app; npm run test:unit` passed.
+- `cargo test --manifest-path mcode-desktop/src-tauri/Cargo.toml` passed after preserving legacy `acp_cancel` response `status = "canceled"` and moving P23 request-state metadata to additive `cancelStatus = "cancel_requested"`.
+- `git diff --check` passed with CRLF warnings only.
+
+- [x] **Step 2: Update plan checkboxes**
 
 Check off every completed step in this file. Leave any blocked step unchecked with a short reason directly under that step.
 
-- [ ] **Step 3: Finalize architecture note**
+- [x] **Step 3: Finalize architecture note**
 
 Add a final P23 status paragraph under the P23 section:
 
@@ -1049,10 +1059,12 @@ P23 first slice status:
 - Implemented Desktop-hosted active-turn cancel requester metadata and
   cancellation lifecycle events.
 - Implemented app turn-control event normalization and multi-device cancel copy.
+- Preserved existing `acp_cancel` compatibility with `status = canceled`; P23
+  request-state metadata is additive under `cancelStatus`.
 - Not implemented: prompt queueing or a separate `acp_takeover` command.
 ```
 
-- [ ] **Step 4: Commit P23 verification record**
+- [x] **Step 4: Commit P23 verification record**
 
 Run:
 

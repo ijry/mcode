@@ -44,7 +44,8 @@ async fn p23_cancel_records_requester_and_emits_events() {
     .await
     .unwrap();
 
-    assert_eq!(response["status"], "cancel_requested");
+    assert_eq!(response["status"], "canceled");
+    assert_eq!(response["cancelStatus"], "cancel_requested");
     assert_eq!(response["activeTurnId"], "turn-live");
     assert_eq!(response["activeTurnOwnerClientId"], "client-phone");
     assert_eq!(response["cancelRequestedByClientId"], "client-watch");

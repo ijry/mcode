@@ -64,9 +64,9 @@ Rules:
   the same Desktop target.
 - `clientId` remains diagnostics and operation metadata, not authentication.
 - A cancel request is idempotent while the same turn is already cancelling.
-  Desktop should return success with `status = "cancel_requested"` and the
-  existing `cancelRequestedByClientId` instead of sending duplicate provider
-  interrupts.
+  Desktop should keep compatibility with `status = "canceled"` and include
+  additive `cancelStatus = "cancel_requested"` plus the existing
+  `cancelRequestedByClientId` instead of sending duplicate provider interrupts.
 - If no active turn exists, `acp_cancel` keeps compatibility with the current
   behavior: mark the session canceled when a session exists and return success.
 - After a turn is canceled or fails to cancel, Desktop must remove the hosted
@@ -93,7 +93,8 @@ Desktop response on accepted cancel:
 
 ```json
 {
-  "status": "cancel_requested",
+  "status": "canceled",
+  "cancelStatus": "cancel_requested",
   "sessionId": "desktop-session-1",
   "activeTurnId": "turn-123",
   "activeTurnOwnerClientId": "mcode-client-watch",

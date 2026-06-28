@@ -1045,6 +1045,9 @@ Planned Desktop behavior:
   a safe error summary if Desktop cannot cancel cleanly.
 - Treat duplicate cancel requests for the same active turn as idempotent
   `cancel_requested`, not as duplicate provider interrupts.
+- Preserve existing `acp_cancel` response compatibility with
+  `status = canceled`; P23 request-state metadata is additive under
+  `cancelStatus = cancel_requested`.
 
 Planned app behavior:
 
@@ -1081,3 +1084,13 @@ Implementation progress:
 - App now normalizes P23 turn-control events and synchronizes local/other-device
   cancellation copy, cancelled idle transition, and recoverable cancel failure
   state across subscribed clients.
+
+P23 first slice status:
+
+- Implemented client-identity forwarding coverage for `acp_cancel`.
+- Implemented Desktop-hosted active-turn cancel requester metadata and
+  cancellation lifecycle events.
+- Implemented app turn-control event normalization and multi-device cancel copy.
+- Preserved existing `acp_cancel` compatibility with `status = canceled`; P23
+  request-state metadata is additive under `cancelStatus`.
+- Not implemented: prompt queueing or a separate `acp_takeover` command.
