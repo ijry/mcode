@@ -16,6 +16,7 @@ import { destroyRealtimeTransport, getOrCreateRealtimeTransport, getRealtimeTran
 import { getRegisteredRemoteInstanceDescriptor } from "@/services/realtime/remoteInstanceRegistry"
 import type { RealtimeTransport, RealtimeTransportHost, RemoteInstanceDescriptor } from "@/services/realtime/types"
 import type { EventChannelConnection, RelaySessionInfo } from "@/services/gateway/types"
+import { classifyRelayRealtimeFrame } from "@/services/gateway/relayRecovery"
 
 type BridgeState = {
   descriptor: RemoteInstanceDescriptor
@@ -28,6 +29,14 @@ type BridgeState = {
   detachReady: (() => void) | null
   detachClose: (() => void) | null
   detachError: (() => void) | null
+}
+
+type RelayRecoveryState = {
+  lastRelayEventId: number | null
+  replayWindowStart: number | null
+  requestedLastEventId: number | null
+  recoveryIssue: "replay_miss" | null
+  recoveryMessage: string | null
 }
 
 /**
@@ -43,6 +52,7 @@ class AcpApiClient {
   private pollingInstanceKey: string | null = null
   private ensureBridgePromises = new Map<string, Promise<BridgeState>>()
   private bridgeStates = new Map<string, BridgeState>()
+  private relayRecoveryStates = new Map<string, RelayRecoveryState>()
 
   constructor(baseUrl: string = "") {
     this.baseUrl = baseUrl
@@ -379,6 +389,18 @@ class AcpApiClient {
   }
 
   getRealtimeBridgeHealth(instanceKey?: string): RealtimeBridgeHealth {
+    if (instanceKey && this.relayRecoveryStates.has(instanceKey)) {
+      const bridge = this.bridgeStates.get(instanceKey)
+      if (bridge) return this.buildBridgeHealth(instanceKey, bridge)
+      return {
+        instanceKey,
+        state: "idle",
+        reconnectAttempt: 0,
+        nextRetryDelayMs: null,
+        updatedAt: Date.now(),
+        ...this.getBridgeRecoveryHealthPatch(instanceKey),
+      }
+    }
     const descriptor = this.resolveDescriptor(instanceKey)
     const bridge = this.bridgeStates.get(descriptor.instanceKey)
     if (!bridge) {
@@ -388,6 +410,7 @@ class AcpApiClient {
         reconnectAttempt: 0,
         nextRetryDelayMs: null,
         updatedAt: Date.now(),
+        ...this.getBridgeRecoveryHealthPatch(descriptor.instanceKey),
       }
     }
     return this.buildBridgeHealth(descriptor.instanceKey, bridge)
@@ -478,6 +501,19 @@ class AcpApiClient {
     return this.normalizeEventEnvelope(raw as Record<string, unknown> | null | undefined)
   }
 
+  getRelayRecoveryState(instanceKey?: string): RelayRecoveryState {
+    const key = instanceKey || this.getCurrentDescriptor().instanceKey
+    return this.getOrCreateRelayRecoveryState(key)
+  }
+
+  clearRelayRecoveryState(instanceKey?: string) {
+    if (instanceKey) {
+      this.relayRecoveryStates.delete(instanceKey)
+      return
+    }
+    this.relayRecoveryStates.clear()
+  }
+
   canUseAttachTransport(instanceKey?: string) {
     const key = this.resolveDescriptor(instanceKey).instanceKey
     return this.bridgeStates.get(key)?.attachCapable === true
@@ -560,19 +596,23 @@ class AcpApiClient {
     this.emitBridgeHealth(targetKey, this.buildBridgeHealth(targetKey, bridge))
 
     eventConnection = await gateway.connectEvents((raw) => {
-      if (this.isAttachFrame(raw)) {
-        transport.handleServerFrame(raw)
-        return
-      }
-      const globalFrame = this.extractGlobalFrame(raw)
-      if (globalFrame) {
-        this.dispatchGlobalEvent(targetKey, globalFrame.channel, globalFrame.payload)
-        return
-      }
-      const event = this.extractLegacyEvent(raw)
-      if (event) {
-        this.dispatchEvent(event, targetKey)
-      }
+      this.handleRelayRealtimeFrame(targetKey, raw, (frame) => {
+        if (this.isAttachFrame(frame)) {
+          transport.handleServerFrame(frame)
+          return
+        }
+        const globalFrame = this.extractGlobalFrame(frame)
+        if (globalFrame) {
+          this.dispatchGlobalEvent(targetKey, globalFrame.channel, globalFrame.payload)
+          return
+        }
+        const event = this.extractLegacyEvent(frame)
+        if (event) {
+          this.dispatchEvent(event, targetKey)
+        }
+      })
+    }, {
+      lastEventId: this.getOrCreateRelayRecoveryState(targetKey).lastRelayEventId,
     })
     bridge.connection = eventConnection
     bridge.detachReady = eventConnection.onReady(() => {
@@ -735,7 +775,99 @@ class AcpApiClient {
       reconnectAttempt: bridge.reconnectAttempt,
       nextRetryDelayMs: null,
       updatedAt: Date.now(),
+      ...this.getBridgeRecoveryHealthPatch(instanceKey),
     }
+  }
+
+  private getOrCreateRelayRecoveryState(instanceKey: string): RelayRecoveryState {
+    const existing = this.relayRecoveryStates.get(instanceKey)
+    if (existing) return existing
+    const created: RelayRecoveryState = {
+      lastRelayEventId: null,
+      replayWindowStart: null,
+      requestedLastEventId: null,
+      recoveryIssue: null,
+      recoveryMessage: null,
+    }
+    this.relayRecoveryStates.set(instanceKey, created)
+    return created
+  }
+
+  private getBridgeRecoveryHealthPatch(instanceKey: string) {
+    const recovery = this.relayRecoveryStates.get(instanceKey)
+    if (!recovery) return {}
+    return {
+      recoveryIssue: recovery.recoveryIssue,
+      lastRelayEventId: recovery.lastRelayEventId,
+      replayWindowStart: recovery.replayWindowStart,
+      requestedLastEventId: recovery.requestedLastEventId,
+      recoveryMessage: recovery.recoveryMessage,
+    }
+  }
+
+  private handleRelayRealtimeFrame(
+    instanceKey: string,
+    raw: unknown,
+    dispatchPayload: (payload: unknown) => void
+  ) {
+    const frame = classifyRelayRealtimeFrame(raw)
+    const recovery = this.getOrCreateRelayRecoveryState(instanceKey)
+    if (frame.kind === "ready") {
+      recovery.replayWindowStart = frame.replayWindowStart ?? recovery.replayWindowStart
+      recovery.lastRelayEventId = frame.lastEventId ?? recovery.lastRelayEventId
+      recovery.recoveryIssue = null
+      recovery.recoveryMessage = null
+      return
+    }
+    if (frame.kind === "replay_miss") {
+      recovery.recoveryIssue = "replay_miss"
+      recovery.requestedLastEventId = frame.requestedLastEventId ?? null
+      recovery.replayWindowStart = frame.replayWindowStart ?? null
+      recovery.lastRelayEventId = frame.lastEventId ?? recovery.lastRelayEventId
+      recovery.recoveryMessage = "实时事件有缺口，正在刷新会话状态。部分中间状态可能已跳过。"
+      this.emitBridgeHealth(instanceKey, this.buildBridgeHealthForInstance(instanceKey))
+      void this.calibrateActiveConversationsAfterReplayMiss(instanceKey)
+      return
+    }
+    if (frame.kind === "event") {
+      dispatchPayload({
+        eventId: frame.eventId,
+        channel: frame.channel,
+        payload: frame.payload,
+        controllerId: frame.controllerId,
+        localEventId: frame.localEventId,
+      })
+      recovery.lastRelayEventId = frame.eventId
+      recovery.recoveryIssue = null
+      recovery.recoveryMessage = null
+      return
+    }
+    dispatchPayload(frame.payload)
+  }
+
+  __handleRelayRealtimeFrameForTest(
+    instanceKey: string,
+    raw: unknown,
+    dispatchPayload: (payload: unknown) => void
+  ) {
+    return this.handleRelayRealtimeFrame(instanceKey, raw, dispatchPayload)
+  }
+
+  private buildBridgeHealthForInstance(instanceKey: string): RealtimeBridgeHealth {
+    const bridge = this.bridgeStates.get(instanceKey)
+    if (bridge) return this.buildBridgeHealth(instanceKey, bridge)
+    return {
+      instanceKey,
+      state: "idle",
+      reconnectAttempt: 0,
+      nextRetryDelayMs: null,
+      updatedAt: Date.now(),
+      ...this.getBridgeRecoveryHealthPatch(instanceKey),
+    }
+  }
+
+  private async calibrateActiveConversationsAfterReplayMiss(instanceKey: string) {
+    console.warn("[relay-recovery] replay miss", { instanceKey })
   }
 
   private normalizeEventEnvelope(event: EventEnvelope | Record<string, unknown> | null | undefined) {

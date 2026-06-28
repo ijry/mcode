@@ -260,6 +260,11 @@ export interface RealtimeBridgeHealth {
   reconnectAttempt: number
   nextRetryDelayMs?: number | null
   updatedAt: number
+  recoveryIssue?: "replay_miss" | null
+  lastRelayEventId?: number | null
+  replayWindowStart?: number | null
+  requestedLastEventId?: number | null
+  recoveryMessage?: string | null
 }
 
 export interface RuntimeErrorEvent {
