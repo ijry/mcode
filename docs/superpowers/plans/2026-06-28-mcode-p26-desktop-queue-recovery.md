@@ -284,7 +284,7 @@ git commit -m "feat(desktop): persist queued prompts in recovery"
 - Consumes: Task 1 `queued_prompts` recovery.
 - Produces: test coverage that restored queue items can be cancelled.
 
-- [ ] Step 1: Add restored cancellation test.
+- [x] Step 1: Add restored cancellation test.
 
 Add this test to `desktop_p19_recovery_snapshot.rs`:
 
@@ -334,16 +334,17 @@ async fn p26_restored_queued_prompt_can_be_cancelled() {
 }
 ```
 
-- [ ] Step 2: Ensure queue mutations save recovery snapshot.
+- [x] Step 2: Ensure queue mutations save recovery snapshot.
 
 In `runtime/mod.rs`, add `let _ = crate::recovery::save_recovery_snapshot(state);`:
 
 - after `push_queued_prompt(state, item)?;`
 - after removing an item in `cancel_queued_prompt(...)` and dropping the queue lock
+- after removing an item in `start_next_queued_prompt_if_idle(...)` and dropping the queue lock
 
 Do not call save while holding `queued_prompts` lock.
 
-- [ ] Step 3: Run focused recovery tests.
+- [x] Step 3: Run focused recovery tests.
 
 Run:
 

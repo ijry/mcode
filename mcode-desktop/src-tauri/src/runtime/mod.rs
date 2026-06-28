@@ -1050,6 +1050,7 @@ pub fn start_next_queued_prompt_if_idle(
         }
         item
     };
+    let _ = crate::recovery::save_recovery_snapshot(state.as_ref());
     let snapshot = queued_prompt_snapshot(&item, 1, queued_prompt_count(&state, &session_id));
     let sink = item.event_sink.clone().or(event_sink);
     emit_event(&sink, turn_dequeued_event(&snapshot));
@@ -1165,6 +1166,7 @@ fn enqueue_prompt_when_busy(
         event_sink: event_sink.clone(),
     };
     let snapshot = push_queued_prompt(state, item)?;
+    let _ = crate::recovery::save_recovery_snapshot(state);
     emit_event(&event_sink, turn_queued_event(&snapshot));
     emit_event(&event_sink, turn_queue_updated_event(&snapshot));
     Ok(json!({
@@ -1242,6 +1244,7 @@ fn cancel_queued_prompt(
         queues.remove(&session_id);
     }
     drop(queues);
+    let _ = crate::recovery::save_recovery_snapshot(state);
     emit_event(&event_sink, turn_queue_cancelled_event(&snapshot));
     emit_event(&event_sink, turn_queue_updated_event(&snapshot));
     Ok(json!({

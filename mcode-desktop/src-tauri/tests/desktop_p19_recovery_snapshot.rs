@@ -160,3 +160,50 @@ async fn p26_snapshot_restores_queued_prompts_without_active_turn_resume() {
     );
     assert_eq!(health.cli_sessions[0].status, CliSessionStatus::Interrupted);
 }
+
+#[tokio::test]
+async fn p26_restored_queued_prompt_can_be_cancelled() {
+    let path = std::env::temp_dir().join(format!(
+        "mcode-desktop-p26-cancel-restored-{}.json",
+        std::process::id()
+    ));
+    let state = AppState::new_for_test();
+    let connected = dispatch_desktop_proxy_with_state(
+        &state,
+        "acp_connect",
+        json!({ "agentType": "claude_code", "workingDir": env!("CARGO_MANIFEST_DIR") }),
+    )
+    .await
+    .unwrap();
+    let session_id = connected["sessionId"].as_str().unwrap().to_string();
+    mcode_desktop_lib::runtime::begin_hosted_turn_for_test(&state, &session_id, "turn-live", None)
+        .unwrap();
+    let queued = dispatch_desktop_proxy_with_state(
+        &state,
+        "acp_prompt",
+        json!({ "sessionId": session_id, "prompt": "cancel after restore" }),
+    )
+    .await
+    .unwrap();
+    let queue_item_id = queued["queueItemId"].as_str().unwrap().to_string();
+    save_recovery_snapshot_to_path(&state, &path).unwrap();
+
+    let snapshot = load_recovery_snapshot(&path).unwrap().unwrap();
+    let restored = AppState::new_for_test();
+    apply_recovery_snapshot(&restored, snapshot).unwrap();
+    fs::remove_file(&path).ok();
+
+    let response = dispatch_desktop_proxy_with_state(
+        &restored,
+        "acp_cancel_queued_prompt",
+        json!({ "sessionId": session_id, "queueItemId": queue_item_id }),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(response["status"], "cancelled");
+    assert_eq!(
+        mcode_desktop_lib::health::build_health_snapshot(&restored).prompt_queue_count,
+        0
+    );
+}
