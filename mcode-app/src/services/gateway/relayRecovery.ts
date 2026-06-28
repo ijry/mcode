@@ -18,11 +18,18 @@ export function normalizeRelayEventCheckpoint(value: unknown): number | null {
   return Math.trunc(parsed)
 }
 
-export function buildRelayEventsUrl(relayUrl: string, checkpoint?: unknown): string {
+export function buildRelayEventsUrl(
+  relayUrl: string,
+  checkpoint?: unknown,
+  clientId?: string
+): string {
   const base = relayUrl.replace(/^http/, "ws").replace(/\/$/, "")
+  const params = new URLSearchParams()
   const normalized = normalizeRelayEventCheckpoint(checkpoint)
-  if (!normalized) return `${base}/v1/events`
-  return `${base}/v1/events?lastEventId=${encodeURIComponent(String(normalized))}`
+  if (normalized) params.set("lastEventId", String(normalized))
+  if (clientId) params.set("clientId", clientId)
+  const query = params.toString()
+  return `${base}/v1/events${query ? `?${query}` : ""}`
 }
 
 export function classifyRelayRealtimeFrame(raw: unknown): RelayRealtimeFrame {
@@ -73,6 +80,10 @@ export function describeGatewayFailureCode(code: unknown): string {
       return "Desktop 上游连接已切换，正在重新连接实时通道。"
     case "gateway_shutdown":
       return "网关正在重启，请稍后重试。"
+    case "turn_busy":
+      return "其他设备正在执行任务，请等待当前任务完成。"
+    case "interaction_resolved":
+      return "该请求已由其他设备处理。"
     default:
       return ""
   }

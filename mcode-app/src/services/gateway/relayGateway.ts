@@ -10,6 +10,7 @@ import { buildRemoteInstanceKey } from "@/services/realtime/instance-key"
 import { decodeSocketPayload } from "./socketPayload"
 import { buildWebSocketProtocols } from "./wsProtocol"
 import { buildRelayEventsUrl } from "./relayRecovery"
+import { getRelayClientId } from "./relayClientIdentity"
 
 const COMMAND_TIMEOUT_MS: Record<string, number> = {
   acp_describe_agent_options: 70_000,
@@ -22,6 +23,7 @@ const COMMAND_TIMEOUT_MS: Record<string, number> = {
 function getHeaders(session?: RelaySessionInfo | null): HeadersInit {
   const headers: Record<string, string> = {
     "content-type": "application/json",
+    "x-mcode-client-id": getRelayClientId(),
   }
   if (session?.accessToken) {
     headers.authorization = `Bearer ${session.accessToken}`
@@ -137,7 +139,11 @@ export class RelayGateway implements CodegGateway {
     onEvent: (event: unknown) => void,
     options: EventRecoveryOptions = {}
   ): Promise<EventChannelConnection> {
-    const eventsUrl = buildRelayEventsUrl(this.relayUrl, options.lastEventId)
+    const eventsUrl = buildRelayEventsUrl(
+      this.relayUrl,
+      options.lastEventId,
+      getRelayClientId()
+    )
     if (isH5WebSocketRuntime()) {
       const ws = new WebSocket(
         eventsUrl,

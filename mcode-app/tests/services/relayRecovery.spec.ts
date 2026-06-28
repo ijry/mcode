@@ -9,6 +9,8 @@ describe("relay recovery helpers", () => {
   it("builds events URLs with valid lastEventId only", () => {
     expect(buildRelayEventsUrl("https://relay.example.com/", 42))
       .toBe("wss://relay.example.com/v1/events?lastEventId=42")
+    expect(buildRelayEventsUrl("https://relay.example.com/", 42, "mcode-client-phone"))
+      .toBe("wss://relay.example.com/v1/events?lastEventId=42&clientId=mcode-client-phone")
     expect(buildRelayEventsUrl("http://127.0.0.1:8787", 0))
       .toBe("ws://127.0.0.1:8787/v1/events")
     expect(buildRelayEventsUrl("https://relay.example.com", -1))

@@ -43,4 +43,10 @@ describe("gateway error normalization", () => {
     expect(toErrorMessage(new Error(JSON.stringify({ code: "request_timeout", message: "timeout" }))))
       .toContain("重试")
   })
+
+  it("maps turn_busy to multi-device busy copy", () => {
+    expect(toResponseErrorMessage({ code: "turn_busy" }, 409)).toBe(
+      "其他设备正在执行任务，请等待当前任务完成。"
+    )
+  })
 })

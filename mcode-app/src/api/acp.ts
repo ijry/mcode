@@ -1120,6 +1120,8 @@ class AcpApiClient {
           type: "permission_resolved",
           data: {
             requestId: firstString(record.request_id, record.requestId),
+            responderClientId:
+              firstString(record.responder_client_id, record.responderClientId) || null,
           },
         }
       case "question_request":
@@ -1145,6 +1147,8 @@ class AcpApiClient {
             type: "question_resolved",
             data: {
               questionId: firstString(source.question_id, source.questionId),
+              responderClientId:
+                firstString(source.responder_client_id, source.responderClientId) || null,
             },
           }
         }

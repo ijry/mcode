@@ -716,7 +716,7 @@ git commit -m "feat(desktop): coordinate p22 hosted turns"
 - Consumes: Desktop error code `turn_busy`.
 - Consumes: resolved interaction payload `responderClientId`.
 
-- [ ] **Step 1: Write app client id tests**
+- [x] **Step 1: Write app client id tests**
 
 Create `mcode-app/tests/services/relayClientIdentity.spec.ts`:
 
@@ -749,7 +749,7 @@ describe("relayClientIdentity", () => {
 })
 ```
 
-- [ ] **Step 2: Write app error copy test**
+- [x] **Step 2: Write app error copy test**
 
 Create or update `mcode-app/tests/services/gatewayError.spec.ts`:
 
@@ -765,7 +765,7 @@ describe("gateway error copy", () => {
 })
 ```
 
-- [ ] **Step 3: Run app focused tests and verify failure**
+- [x] **Step 3: Run app focused tests and verify failure**
 
 Run:
 
@@ -776,7 +776,7 @@ npm run test:unit -- relayClientIdentity gatewayError
 
 Expected: FAIL because helper and error mapping do not exist yet.
 
-- [ ] **Step 4: Implement persistent relay client id**
+- [x] **Step 4: Implement persistent relay client id**
 
 Create `mcode-app/src/services/gateway/relayClientIdentity.ts`:
 
@@ -820,7 +820,7 @@ export function __resetRelayClientIdForTest() {
 }
 ```
 
-- [ ] **Step 5: Send client id on relay HTTP and event connections**
+- [x] **Step 5: Send client id on relay HTTP and event connections**
 
 Update `mcode-app/src/services/gateway/relayRecovery.ts`:
 
@@ -854,7 +854,7 @@ function getHeaders(session?: RelaySessionInfo | null): HeadersInit {
 const eventsUrl = buildRelayEventsUrl(this.relayUrl, options.lastEventId, getRelayClientId())
 ```
 
-- [ ] **Step 6: Map busy copy**
+- [x] **Step 6: Map busy copy**
 
 In `mcode-app/src/services/gateway/relayRecovery.ts`, update `describeGatewayFailureCode`:
 
@@ -865,7 +865,7 @@ case "interaction_resolved":
   return "该请求已由其他设备处理。"
 ```
 
-- [ ] **Step 7: Add responder metadata types and runtime behavior**
+- [x] **Step 7: Add responder metadata types and runtime behavior**
 
 In `mcode-app/src/types/acp.ts`:
 
@@ -899,7 +899,10 @@ if (responderClientId && responderClientId !== getRelayClientId()) {
 
 If `statusMessage` is not available on runtime session, keep the first slice to clearing pending controls and rely on toast/error copy only; do not add a broad UI refactor.
 
-- [ ] **Step 8: Add conversation runtime test for responder from another device**
+- [x] **Step 8: Add conversation runtime test for responder from another device**
+
+Added `conversationRuntime` coverage for a permission request resolved by
+another device. P22 also preserves `responderClientId` in ACP normalization.
 
 Update `mcode-app/tests/stores/conversationRuntime.spec.ts` with a focused test using existing store helpers:
 
@@ -926,7 +929,7 @@ it("clears pending permission when another device resolves it", () => {
 
 Adapt the helper names to the existing test file rather than creating a parallel runtime harness.
 
-- [ ] **Step 9: Run app tests**
+- [x] **Step 9: Run app tests**
 
 Run:
 
@@ -938,7 +941,7 @@ npm run test:unit
 
 Expected: PASS.
 
-- [ ] **Step 10: Update architecture note progress**
+- [x] **Step 10: Update architecture note progress**
 
 Append:
 
@@ -948,7 +951,7 @@ Append:
   resolved interactions from any device as authoritative.
 ```
 
-- [ ] **Step 11: Commit app client identity and copy**
+- [x] **Step 11: Commit app client identity and copy**
 
 Run:
 

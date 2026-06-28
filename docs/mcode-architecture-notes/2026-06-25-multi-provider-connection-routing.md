@@ -997,3 +997,6 @@ Implementation progress:
 - Desktop now records active turn ownership per hosted official CLI session,
   rejects concurrent prompt attempts with `turn_busy`, and annotates resolved
   permission/question interactions with `responderClientId`.
+- App now persists a per-install relay `clientId`, sends it on relay HTTP and
+  event connections, maps `turn_busy` to multi-device busy copy, and treats
+  resolved interactions from any device as authoritative.

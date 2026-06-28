@@ -114,6 +114,35 @@ describe('conversationRuntime ACP error handling', () => {
     expect(session.inputErrorMessage).toBeNull()
   })
 
+  it('clears pending permission when another device resolves it', () => {
+    const { store, session } = prepareSession()
+
+    store.handleEvent({
+      type: 'permission_request',
+      connectionId: 'conn-1',
+      data: {
+        id: 'perm-1',
+        description: 'Run command?',
+        options: [],
+      },
+    } as any)
+
+    expect(session.status).toBe('waiting_permission')
+    expect(session.pendingPermission?.id).toBe('perm-1')
+
+    store.handleEvent({
+      type: 'permission_resolved',
+      connectionId: 'conn-1',
+      data: {
+        requestId: 'perm-1',
+        responderClientId: 'other-device',
+      },
+    } as any)
+
+    expect(session.pendingPermission).toBeNull()
+    expect(session.status).toBe('connected')
+  })
+
   it('does not let an older snapshot overwrite newer streamed tail content', () => {
     const { store, session } = prepareSession()
     session.lastAppliedSeq = 12

@@ -283,6 +283,12 @@ export interface PermissionRequest {
 
 export interface PermissionResolvedEvent {
   requestId: string
+  responderClientId?: string | null
+}
+
+export interface QuestionResolvedEvent {
+  questionId: string
+  responderClientId?: string | null
 }
 
 export interface PermissionOption {
