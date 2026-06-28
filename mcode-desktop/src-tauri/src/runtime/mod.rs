@@ -292,6 +292,9 @@ pub async fn dispatch_desktop_proxy_with_event_sink(
         "acp_disconnect" => close_cli_session(state, payload, CliSessionStatus::Disconnected).await,
         "acp_cancel" => cancel_cli_session(state, payload, event_sink).await,
         "acp_cancel_queued_prompt" => cancel_queued_prompt(state, payload, event_sink),
+        "acp_cancel_all_queued_prompts" => {
+            cancel_all_queued_prompts(state, payload, event_sink)
+        }
         "acp_get_session_snapshot" | "acp_get_sessions" => get_session_snapshot(state, payload),
         "acp_respond_permission" => respond_permission(state, payload),
         "acp_respond_question" => respond_question(state, payload),
@@ -319,6 +322,9 @@ pub async fn dispatch_desktop_proxy_with_event_sink_arc(
             result
         }
         "acp_cancel_queued_prompt" => cancel_queued_prompt(state.as_ref(), payload, event_sink),
+        "acp_cancel_all_queued_prompts" => {
+            cancel_all_queued_prompts(state.as_ref(), payload, event_sink)
+        }
         _ => {
             dispatch_desktop_proxy_with_event_sink(state.as_ref(), command, payload, event_sink)
                 .await
@@ -1256,6 +1262,43 @@ fn cancel_queued_prompt(
         "queueItemId": snapshot.queue_item_id,
         "sessionId": snapshot.session_id,
         "queueLength": queue_length,
+    }))
+}
+
+fn cancel_all_queued_prompts(
+    state: &AppState,
+    payload: Value,
+    event_sink: Option<CliEventSink>,
+) -> Result<Value> {
+    let session_id = extract_session_id(&payload)
+        .ok_or_else(|| anyhow!("cli session id is required"))?
+        .to_string();
+    let removed = {
+        let mut queues = state
+            .queued_prompts
+            .lock()
+            .map_err(|_| anyhow!("queued prompt lock poisoned"))?;
+        queues.remove(&session_id).unwrap_or_default()
+    };
+    let cancelled_count = removed.len();
+    let snapshots = removed
+        .iter()
+        .enumerate()
+        .map(|(index, item)| queued_prompt_snapshot(item, index + 1, 0))
+        .collect::<Vec<_>>();
+    let _ = crate::recovery::save_recovery_snapshot(state);
+    for snapshot in &snapshots {
+        emit_event(&event_sink, turn_queue_cancelled_event(snapshot));
+    }
+    if let Some(snapshot) = snapshots.last() {
+        emit_event(&event_sink, turn_queue_updated_event(snapshot));
+    }
+    Ok(json!({
+        "status": "cancelled",
+        "sessionId": session_id,
+        "connectionId": session_id,
+        "cancelledCount": cancelled_count,
+        "queueLength": 0,
     }))
 }
 

@@ -299,7 +299,7 @@ git commit -m "feat(desktop): add prompt queue policy"
 - Produces Desktop proxy command: `acp_cancel_all_queued_prompts`
 - Response: `{ status, sessionId, cancelledCount, queueLength }`
 
-- [ ] Step 1: Add failing cancel-all test.
+- [x] Step 1: Add failing cancel-all test.
 
 Add to `desktop_p24_prompt_queue.rs`:
 
@@ -343,7 +343,7 @@ async fn p27_cancels_all_queued_prompts_without_touching_active_turn() {
 }
 ```
 
-- [ ] Step 2: Route command in runtime dispatch.
+- [x] Step 2: Route command in runtime dispatch.
 
 Add both match arms:
 
@@ -359,7 +359,7 @@ and in arc dispatch:
 }
 ```
 
-- [ ] Step 3: Implement `cancel_all_queued_prompts(...)`.
+- [x] Step 3: Implement `cancel_all_queued_prompts(...)`.
 
 Add near `cancel_queued_prompt(...)`:
 
@@ -402,7 +402,7 @@ fn cancel_all_queued_prompts(
 }
 ```
 
-- [ ] Step 4: Run Desktop cancel-all focused test.
+- [x] Step 4: Run Desktop cancel-all focused test.
 
 Run:
 

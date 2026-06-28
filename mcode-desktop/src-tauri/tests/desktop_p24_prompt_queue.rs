@@ -145,6 +145,44 @@ async fn p24_can_cancel_queued_prompt_without_touching_active_turn() {
 }
 
 #[tokio::test]
+async fn p27_cancels_all_queued_prompts_without_touching_active_turn() {
+    let state = AppState::new_for_test();
+    let connected = dispatch_desktop_proxy_with_state(
+        &state,
+        "acp_connect",
+        json!({ "agentType": "claude_code", "workingDir": env!("CARGO_MANIFEST_DIR") }),
+    )
+    .await
+    .unwrap();
+    let session_id = connected["sessionId"].as_str().unwrap().to_string();
+    begin_hosted_turn_for_test(&state, &session_id, "turn-live", None).unwrap();
+    for prompt in ["first queued", "second queued"] {
+        dispatch_desktop_proxy_with_state(
+            &state,
+            "acp_prompt",
+            json!({ "sessionId": session_id, "prompt": prompt }),
+        )
+        .await
+        .unwrap();
+    }
+
+    let response = dispatch_desktop_proxy_with_state(
+        &state,
+        "acp_cancel_all_queued_prompts",
+        json!({ "sessionId": session_id, "reason": "user_cancelled_all" }),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(response["status"], "cancelled");
+    assert_eq!(response["cancelledCount"], 2);
+    assert_eq!(response["queueLength"], 0);
+    let health = build_health_snapshot(&state);
+    assert_eq!(health.prompt_queue_count, 0);
+    assert_eq!(health.active_turn_count, 1);
+}
+
+#[tokio::test]
 async fn p24_queue_if_busy_false_preserves_turn_busy_behavior() {
     let state = AppState::new_for_test();
     let connected = dispatch_desktop_proxy_with_state(
