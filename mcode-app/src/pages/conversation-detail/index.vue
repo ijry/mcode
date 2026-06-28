@@ -462,6 +462,54 @@
           </view>
         </view>
 
+        <view
+          v-if="showSharedPromptQueue"
+          class="shared-queue-bar"
+          @click="sharedPromptQueueExpanded = !sharedPromptQueueExpanded"
+        >
+          <view class="shared-queue-bar__left">
+            <up-icon name="order" size="14" :color="upThemeVar('--up-primary', '#2979ff')"></up-icon>
+            <view class="shared-queue-bar__copy">
+              <text class="shared-queue-bar__title">{{ sharedPromptQueueHeaderText }}</text>
+              <text class="shared-queue-bar__summary u-line-1">{{ sharedPromptQueueSummaryText }}</text>
+            </view>
+          </view>
+          <up-icon
+            :name="sharedPromptQueueExpanded ? 'arrow-up' : 'arrow-down'"
+            size="12"
+            :color="upThemeVar('--up-light-color', '#c0c4cc')"
+          ></up-icon>
+        </view>
+
+        <view v-if="sharedPromptQueueExpanded && showSharedPromptQueue" class="shared-queue-panel">
+          <view
+            v-for="(item, index) in sharedPromptQueueItems"
+            :key="item.queueItemId || index"
+            class="shared-queue-item"
+          >
+            <view class="shared-queue-item__position">
+              {{ sharedPromptQueuePositionLabel(item, index) }}
+            </view>
+            <view class="shared-queue-item__body">
+              <text class="shared-queue-item__text u-line-2">
+                {{ sharedPromptQueueItemPreview(item) }}
+              </text>
+              <view class="shared-queue-item__meta">
+                <text>{{ sharedPromptQueueItemSource(item, localRelayClientId) }}</text>
+                <text v-if="item.createdAtMs">{{ formatQueueTime(item.createdAtMs) }}</text>
+              </view>
+            </view>
+            <view
+              v-if="session?.connectionId && item.queueItemId"
+              class="shared-queue-op"
+              :class="{ 'shared-queue-op--disabled': isSharedPromptQueueCancelDisabled(item.queueItemId, cancellingSharedQueueItemIds) }"
+              @click.stop="cancelSharedPromptQueueItem(item.queueItemId, item.sessionId)"
+            >
+              {{ isSharedPromptQueueCancelDisabled(item.queueItemId, cancellingSharedQueueItemIds) ? "取消中" : "取消" }}
+            </view>
+          </view>
+        </view>
+
         <view class="input-main-row">
           <view class="input-box">
             <up-textarea
@@ -778,6 +826,7 @@ import {
   registerRemoteInstanceDescriptor,
 } from "@/services/realtime/remoteInstanceRegistry"
 import { decodeConnectionContext } from "@/services/connectionContext"
+import { getRelayClientId } from "@/services/gateway/relayClientIdentity"
 import { usePetStore } from "@/stores/pet"
 import {
   buildAgentConfigContextKey,
@@ -842,9 +891,16 @@ import {
   draftSummary,
   formatQueueTime,
   formatTokenCountK,
+  hasSharedPromptQueue,
+  isSharedPromptQueueCancelDisabled,
   isStoppableRuntimeStatus,
   looksLikeNetworkFailure,
   queueStatusText,
+  sharedPromptQueueItemPreview,
+  sharedPromptQueueItemSource,
+  sharedPromptQueuePositionLabel,
+  sharedPromptQueueSummary,
+  sharedPromptQueueTitle,
 } from "./detailRuntimePresentation"
 import {
   bottomGeneratingText as resolveBottomGeneratingText,
@@ -1009,6 +1065,8 @@ const attachments = ref<UploadedAttachment[]>([])
 const uploadQueue = ref<UploadQueueItem[]>([])
 const draftQueue = ref<QueuedDraft[]>([])
 const queueExpanded = ref(false)
+const sharedPromptQueueExpanded = ref(false)
+const cancellingSharedQueueItemIds = ref<Set<string>>(new Set())
 const uploadingCount = ref(0)
 const showPlanDrawer = ref(false)
 const composerPanelMode = ref<ComposerPanelMode>("")
@@ -1063,6 +1121,12 @@ const session = computed(() => {
   if (!conversationId.value) return null
   return runtime.getOrCreateSession(conversationId.value)
 })
+const sharedPromptQueue = computed(() => session.value?.sharedPromptQueue || null)
+const showSharedPromptQueue = computed(() => hasSharedPromptQueue(sharedPromptQueue.value))
+const sharedPromptQueueItems = computed(() => sharedPromptQueue.value?.items || [])
+const sharedPromptQueueHeaderText = computed(() => sharedPromptQueueTitle(sharedPromptQueue.value))
+const sharedPromptQueueSummaryText = computed(() => sharedPromptQueueSummary(sharedPromptQueue.value))
+const localRelayClientId = computed(() => getRelayClientId())
 const hasBoundConnection = computed(() => Boolean(firstString(session.value?.connectionId)))
 
 const managedConversation = computed(() => {
@@ -3179,6 +3243,45 @@ async function sendQueuedDraft(id: string) {
 
 function removeDraft(id: string) {
   draftQueue.value = removeQueuedDraftById(draftQueue.value, id)
+}
+
+function setSharedQueueItemCancelling(queueItemId: string, cancelling: boolean) {
+  const normalized = String(queueItemId || "").trim()
+  if (!normalized) return
+  const next = new Set(cancellingSharedQueueItemIds.value)
+  if (cancelling) {
+    next.add(normalized)
+  } else {
+    next.delete(normalized)
+  }
+  cancellingSharedQueueItemIds.value = next
+}
+
+async function cancelSharedPromptQueueItem(queueItemId?: string | null, sessionId?: string | null) {
+  const normalizedQueueItemId = String(queueItemId || "").trim()
+  const connectionId = firstString(session.value?.connectionId)
+  if (!connectionId || !normalizedQueueItemId) return
+  if (isSharedPromptQueueCancelDisabled(
+    normalizedQueueItemId,
+    cancellingSharedQueueItemIds.value
+  )) return
+
+  setSharedQueueItemCancelling(normalizedQueueItemId, true)
+  try {
+    await acpApi.acpCancelQueuedPrompt(
+      connectionId,
+      normalizedQueueItemId,
+      firstString(sessionId) || connectionId
+    )
+  } catch (error) {
+    uni.showToast({
+      title: "取消队列任务失败，请稍后重试",
+      icon: "none",
+      duration: 3000,
+    })
+  } finally {
+    setSharedQueueItemCancelling(normalizedQueueItemId, false)
+  }
 }
 
 function showSharedLiveBlockedToast() {

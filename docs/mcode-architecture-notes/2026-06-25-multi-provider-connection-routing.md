@@ -1195,7 +1195,7 @@ Native iOS/Android replication:
 - Do not add mobile-side `codex` or `claude` target agents for this feature;
   official CLI queueing remains under `targetAgent = mcode-desktop`.
 
-## P25 Planned Shared Prompt Queue UI Behavior
+## P25 Shared Prompt Queue UI Behavior
 
 P25 makes the P24 Desktop-hosted prompt queue visible and cancellable in
 `mcode-app`. It does not change queue ownership: Desktop remains the queue host,
@@ -1205,7 +1205,7 @@ relay remains transport-only, and the app renders shared queue state from
 Design document:
 `docs/superpowers/specs/2026-06-28-mcode-p25-shared-prompt-queue-ui-design.md`.
 
-Planned app behavior:
+Implemented app behavior:
 
 - Conversation detail shows a separate `Desktop 队列` surface when
   `sharedPromptQueue.count > 0`.
@@ -1233,3 +1233,16 @@ Compatibility and native replication:
   events before removing cancelled rows.
 - Official CLI queue UI remains under `targetAgent = mcode-desktop`; native
   clients must not add direct Codex or Claude target agents.
+
+P25 first slice status:
+
+- Implemented shared Desktop queue presentation helpers for title, summary,
+  row preview, source labels, position labels, and cancel-disabled state.
+- Implemented `acpCancelQueuedPrompt(...)` as the app wrapper for
+  `acp_cancel_queued_prompt`.
+- Implemented conversation detail shared queue UI separately from the local
+  draft queue.
+- Implemented queued-item cancel request state without optimistic row removal;
+  P24 lifecycle events remain authoritative.
+- Not implemented: queue reorder, queue persistence, bulk cancel, or ownership
+  restrictions.

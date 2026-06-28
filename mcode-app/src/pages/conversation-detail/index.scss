@@ -1342,6 +1342,104 @@
   }
 }
 
+.shared-queue-bar {
+  margin-bottom: 10rpx;
+  padding: 12rpx 14rpx;
+  border-radius: 16rpx;
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 10%, var(--up-card-bg-color, #ffffff) 90%);
+  border: 1rpx solid color-mix(in srgb, var(--up-primary, #2979ff) 28%, var(--up-card-bg-color, #ffffff) 72%);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.shared-queue-bar__left {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  min-width: 0;
+}
+
+.shared-queue-bar__copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2rpx;
+}
+
+.shared-queue-bar__title {
+  font-size: 23rpx;
+  color: var(--up-primary, #2979ff);
+  font-weight: 600;
+}
+
+.shared-queue-bar__summary {
+  font-size: 20rpx;
+  color: var(--up-tips-color, #909193);
+  max-width: 520rpx;
+}
+
+.shared-queue-panel {
+  margin-bottom: 12rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+
+.shared-queue-item {
+  padding: 12rpx;
+  border-radius: 14rpx;
+  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
+  border: 1rpx solid var(--up-border-color, #dadbde);
+  display: flex;
+  align-items: flex-start;
+  gap: 12rpx;
+}
+
+.shared-queue-item__position {
+  flex-shrink: 0;
+  font-size: 20rpx;
+  color: var(--up-primary, #2979ff);
+  font-weight: 600;
+  padding-top: 2rpx;
+}
+
+.shared-queue-item__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.shared-queue-item__text {
+  display: block;
+  font-size: 23rpx;
+  color: var(--up-main-color, #303133);
+  line-height: 1.4;
+}
+
+.shared-queue-item__meta {
+  margin-top: 6rpx;
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  font-size: 20rpx;
+  color: var(--up-tips-color, #909193);
+}
+
+.shared-queue-op {
+  font-size: 20rpx;
+  color: #fa3534;
+  padding: 6rpx 10rpx;
+  border-radius: 999rpx;
+  background-color: color-mix(in srgb, #fa3534 10%, var(--up-card-bg-color, #ffffff) 90%);
+  flex-shrink: 0;
+
+  &--disabled {
+    color: var(--up-tips-color, #909193);
+    background-color: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
+    pointer-events: none;
+  }
+}
+
 .input-main-row {
   display: flex;
   align-items: flex-end;

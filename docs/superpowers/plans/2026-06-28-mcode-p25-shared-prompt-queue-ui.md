@@ -337,7 +337,7 @@ npm run test:unit -- --runTestsByPath tests/pages/conversation-detail/detailRunt
 
 Expected: PASS.
 
-- [ ] Step 5: Commit Task 2.
+- [x] Step 5: Commit Task 2.
 
 ```bash
 git add mcode-app/src/pages/conversation-detail/detailRuntimePresentation.ts mcode-app/tests/pages/conversation-detail/detailRuntimePresentation.spec.ts docs/superpowers/plans/2026-06-28-mcode-p25-shared-prompt-queue-ui.md
@@ -355,7 +355,7 @@ git commit -m "feat(app): add shared prompt queue presentation"
 - Consumes: Task 2 presentation helpers
 - Produces: detail page shared queue panel and `cancelSharedPromptQueueItem(queueItemId: string, sessionId?: string | null): Promise<void>`
 
-- [ ] Step 1: Extend presentation imports in `index.vue`.
+- [x] Step 1: Extend presentation imports in `index.vue`.
 
 Update the `detailRuntimePresentation` import to include:
 
@@ -369,7 +369,7 @@ sharedPromptQueueSummary,
 sharedPromptQueueTitle,
 ```
 
-- [ ] Step 2: Import relay client identity.
+- [x] Step 2: Import relay client identity.
 
 Add this import near other service imports:
 
@@ -377,7 +377,7 @@ Add this import near other service imports:
 import { getRelayClientId } from "@/services/gateway/relayClientIdentity"
 ```
 
-- [ ] Step 3: Add local shared queue UI state.
+- [x] Step 3: Add local shared queue UI state.
 
 After `const queueExpanded = ref(false)`, add:
 
@@ -386,7 +386,7 @@ const sharedPromptQueueExpanded = ref(false)
 const cancellingSharedQueueItemIds = ref<Set<string>>(new Set())
 ```
 
-- [ ] Step 4: Add shared queue computed state.
+- [x] Step 4: Add shared queue computed state.
 
 After `const session = computed(...)`, add:
 
@@ -399,7 +399,7 @@ const sharedPromptQueueSummaryText = computed(() => sharedPromptQueueSummary(sha
 const localRelayClientId = computed(() => getRelayClientId())
 ```
 
-- [ ] Step 5: Add a helper to replace the cancelling set reactively.
+- [x] Step 5: Add a helper to replace the cancelling set reactively.
 
 After `removeDraft(id: string)`, add:
 
@@ -417,7 +417,7 @@ function setSharedQueueItemCancelling(queueItemId: string, cancelling: boolean) 
 }
 ```
 
-- [ ] Step 6: Add cancel action handler.
+- [x] Step 6: Add cancel action handler.
 
 After `setSharedQueueItemCancelling(...)`, add:
 
@@ -450,7 +450,7 @@ async function cancelSharedPromptQueueItem(queueItemId?: string | null, sessionI
 }
 ```
 
-- [ ] Step 7: Add the shared queue template block.
+- [x] Step 7: Add the shared queue template block.
 
 In the composer area, after the local draft queue panel and before `<view class="input-main-row">`, insert:
 
@@ -504,7 +504,7 @@ In the composer area, after the local draft queue panel and before `<view class=
 </view>
 ```
 
-- [ ] Step 8: Add shared queue styles using `--up-*` variables.
+- [x] Step 8: Add shared queue styles using `--up-*` variables.
 
 In `index.scss`, after existing `.queue-op` styles and before `.input-main-row`, add:
 
@@ -608,7 +608,7 @@ In `index.scss`, after existing `.queue-op` styles and before `.input-main-row`,
 }
 ```
 
-- [ ] Step 9: Run type/build-adjacent focused tests.
+- [x] Step 9: Run type/build-adjacent focused tests.
 
 Run:
 
