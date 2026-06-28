@@ -3,6 +3,7 @@ import type { ApiRetryEvent, RealtimeBridgeHealth } from "@/types/acp"
 export type DetailBannerTone = "info" | "warning" | "error"
 export type DetailStatusCode =
   | "bridge_recovered"
+  | "replay_miss"
   | "bridge_reconnecting"
   | "bridge_error"
   | "runtime_error"
@@ -96,6 +97,16 @@ export function buildDetailStatusState(input: {
       icon: "checkmark-circle-fill",
       iconColor: color("--up-success", "#19be6b"),
       loading: false,
+    }
+  }
+  if (health?.recoveryIssue === "replay_miss") {
+    return {
+      code: "replay_miss",
+      severity: "warning",
+      text: health.recoveryMessage || "实时事件有缺口，正在刷新会话状态。部分中间状态可能已跳过。",
+      icon: "warning-fill",
+      iconColor: color("--up-warning", "#f9ae3d"),
+      loading: true,
     }
   }
   if (health?.state === "reconnecting") {
@@ -227,6 +238,7 @@ export function buildRuntimeStatusLabel(input: {
 }) {
   if (input.detailStatusCode === "bridge_reconnecting") return "重连中"
   if (input.detailStatusCode === "bridge_error") return "连接异常"
+  if (input.detailStatusCode === "replay_miss") return "恢复中"
   if (input.runtimeStatus === "thinking" || input.runtimeStatus === "running_tool") {
     return input.activeModelStatusLabel || (input.runtimeStatus === "thinking" ? "思考中" : "执行命令中")
   }
@@ -244,6 +256,7 @@ export function buildRuntimeStatusClass(input: {
 }) {
   if (input.detailStatusCode === "bridge_reconnecting") return "error"
   if (input.detailStatusCode === "bridge_error") return "error"
+  if (input.detailStatusCode === "replay_miss") return "pending"
   if (input.runtimeStatus === "thinking" || input.runtimeStatus === "running_tool") return "running"
   if (input.runtimeStatus === "waiting_permission" || input.runtimeStatus === "waiting_question") return "pending"
   if (input.runtimeStatus === "error") return "error"

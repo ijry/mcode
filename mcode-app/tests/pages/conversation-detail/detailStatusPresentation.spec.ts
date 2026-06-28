@@ -115,6 +115,27 @@ describe("detailStatusPresentation", () => {
     }))
   })
 
+  it("shows replay miss as recoverable warning", () => {
+    expect(buildDetailStatusState({
+      bridgeHealth: health("connected", {
+        recoveryIssue: "replay_miss",
+        recoveryMessage: "实时事件有缺口，正在刷新会话状态。部分中间状态可能已跳过。",
+      }),
+      showBridgeRecoveredBanner: false,
+      runtimeErrorText: "",
+      runtimeRetryText: "",
+      runtimeStatus: "connected",
+      longWaitElapsedMs: 0,
+      activeModelStatusLabel: "",
+      planTaskCount: 0,
+      themeColor,
+    })).toEqual(expect.objectContaining({
+      code: "replay_miss",
+      severity: "warning",
+      text: "实时事件有缺口，正在刷新会话状态。部分中间状态可能已跳过。",
+    }))
+  })
+
   it("builds status labels, classes, and waiting copy", () => {
     expect(buildRuntimeStatusLabel({
       detailStatusCode: "bridge_reconnecting",
