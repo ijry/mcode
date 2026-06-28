@@ -266,7 +266,7 @@ cargo test --test desktop_p19_recovery_snapshot p26_snapshot_restores_queued_pro
 
 Expected: PASS.
 
-- [ ] Step 7: Commit Task 1.
+- [x] Step 7: Commit Task 1.
 
 ```bash
 git add mcode-desktop/src-tauri/src/runtime/mod.rs mcode-desktop/src-tauri/src/recovery.rs mcode-desktop/src-tauri/tests/desktop_p19_recovery_snapshot.rs docs/mcode-architecture-notes/2026-06-25-multi-provider-connection-routing.md docs/superpowers/plans/2026-06-28-mcode-p26-desktop-queue-recovery.md
@@ -418,7 +418,7 @@ Expected: no whitespace errors.
 
 Change completed checkboxes in this file from `[ ]` to `[x]`.
 
-- [ ] Step 6: Commit verification progress.
+- [x] Step 6: Commit verification progress.
 
 ```bash
 git add docs/superpowers/plans/2026-06-28-mcode-p26-desktop-queue-recovery.md
