@@ -894,10 +894,10 @@ Compatibility and native replication:
   health, show recoverable warning copy, refresh/calibrate visible sessions, and
   keep official CLI state under `targetAgent = mcode-desktop`.
 
-## P21 Planned App Relay Checkpoint Persistence Behavior
+## P21 App Relay Checkpoint Persistence Behavior
 
-P21 will make the P20 relay checkpoint survive app restart without changing
-relay or Desktop protocols. The app will persist only the relay high-water
+P21 makes the P20 relay checkpoint survive app restart without changing relay
+or Desktop protocols. The app persists only the relay high-water
 checkpoint needed for `/v1/events?lastEventId=...`; it will not persist gateway
 tokens, pair secrets, official CLI credentials, raw relay payloads, or Desktop
 runtime snapshots in the checkpoint store.
@@ -907,20 +907,20 @@ Design document:
 Implementation plan:
 `docs/superpowers/plans/2026-06-28-mcode-p21-app-relay-checkpoint-persistence.md`.
 
-Planned app behavior:
+Implemented app behavior:
 
-- Add `relayCheckpointStore.ts` under `mcode-app/src/services/gateway/` to own
+- `relayCheckpointStore.ts` under `mcode-app/src/services/gateway/` owns
   the versioned `mcode_relay_checkpoints_v1` snapshot in `uni` storage.
-- Store one checkpoint record per `instanceKey`: `instanceKey`,
+- The store writes one checkpoint record per `instanceKey`: `instanceKey`,
   `lastRelayEventId`, and `updatedAt`.
-- Hydrate `acpApi` relay recovery state from the store before opening the
+- `acpApi` hydrates relay recovery state from the store before opening the
   realtime bridge.
-- Persist a new checkpoint only after wrapped relay event payload handling
+- A new checkpoint is persisted only after wrapped relay event payload handling
   succeeds.
-- Persist `replay_miss.lastEventId` as the relay high-water checkpoint after
+- `replay_miss.lastEventId` is persisted as the relay high-water checkpoint after
   starting the state refresh/calibration path, so the app stops requesting an
   event id outside the retained replay window.
-- Clear persisted checkpoints when `clearRelayRecoveryState()` clears the
+- Persisted checkpoints are cleared when `clearRelayRecoveryState()` clears the
   matching in-memory recovery state.
 
 Native replication:

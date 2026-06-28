@@ -1,4 +1,4 @@
-# MCode P7-P20 Roadmap Status
+# MCode P7-P21 Roadmap Status
 
 ## Purpose
 
@@ -24,6 +24,7 @@ that was intentionally left out of the first P1-P6 slices.
 | P18 | Claude CLI streaming session adapter: execute Claude official CLI prompts through Desktop with stdout event streaming, cancellation, diagnostics, and P15 pending-interaction integration. | Implemented first slice. Desktop runs Claude print-mode through a process-based adapter, streams normalized events, kills active Claude prompts on `acp_cancel`, and keeps live-control write-back disabled until a stable Claude control channel is verified. |
 | P19 | Desktop/Relay recovery layer: relay replay persistence/miss signaling, Desktop outbound ACK queue, runtime snapshot, classified request failures, and recovery diagnostics. | Implemented first slice. Relay persists bounded replay windows when `REPLAY_STORE_PATH` is set, Desktop queues unacked event pushes with `localEventId`, Desktop snapshots recoverable runtime state through `MCODE_DESKTOP_STATE_PATH`, and health/UI expose recovery status. |
 | P20 | App recovery UX: consume relay event checkpoints, replay-miss signals, classified gateway failures, and Desktop interrupted/stale recovery state in MCode app. | Implemented first slice. App reconnects relay event streams with `lastEventId`, records checkpoints after successful dispatch, shows replay-miss recovery warnings, maps classified gateway failures to actions, calibrates active conversations after replay gaps, and documents native replication behavior. |
+| P21 | App relay checkpoint persistence: persist `lastRelayEventId` per `instanceKey` in app storage so reconnect survives app restart without changing relay or Desktop protocols. | Implemented first slice. App hydrates relay checkpoints from uni storage, persists successful wrapped-event checkpoints, persists replay-miss high-water marks, clears persisted checkpoints on reset, and keeps sensitive gateway data out of the checkpoint store. |
 
 ## P7 Implemented Scope
 
@@ -633,6 +634,34 @@ Native iOS/Android replication rules:
   event.
 - Keep Codex and Claude official CLIs behind `mcode-desktop` capabilities; do
   not add mobile-side `codex` or `claude` target agents.
+
+## P21 Implemented Scope
+
+P21 makes the P20 relay checkpoint survive app restart. It remains app-only:
+relay and Desktop wire protocols do not change, and no new visible UI is added.
+
+Implemented behavior:
+
+- `relayCheckpointStore` owns the versioned `mcode_relay_checkpoints_v1`
+  storage snapshot.
+- `acpApi` hydrates the relay checkpoint before reconnect and persists it after
+  successful dispatch.
+- `replay_miss` persists the relay high-water mark when the relay provides a
+  positive `lastEventId`.
+- `clearRelayRecoveryState()` clears both memory recovery state and persisted
+  checkpoint storage.
+- The store never holds tokens, pair secrets, official CLI credentials, or raw
+  relay payloads.
+
+Native iOS/Android replication rules:
+
+- Persist relay checkpoints in small key-value storage scoped by gateway
+  instance identity.
+- Store only `instanceKey`, positive relay `lastRelayEventId`, and `updatedAt`.
+- Hydrate the checkpoint before opening `/v1/events`.
+- Persist after successful wrapped-event handling, not on raw WebSocket receive.
+- Never persist gateway tokens, official CLI credentials, or raw event payloads
+  in checkpoint storage.
 
 ## Tracking Rules
 
