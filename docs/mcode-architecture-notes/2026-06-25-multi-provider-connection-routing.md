@@ -1246,3 +1246,32 @@ P25 first slice status:
   P24 lifecycle events remain authoritative.
 - Not implemented: queue reorder, queue persistence, bulk cancel, or ownership
   restrictions.
+
+## P26 Desktop Queue Recovery Behavior
+
+P26 persists Desktop-hosted queued prompts in the existing P19 recovery
+snapshot. Only not-yet-started prompts are persisted; active provider turns
+remain non-resumable and restore as interrupted sessions.
+
+Design document:
+`docs/superpowers/specs/2026-06-28-mcode-p26-desktop-queue-recovery-design.md`.
+Implementation plan:
+`docs/superpowers/plans/2026-06-28-mcode-p26-desktop-queue-recovery.md`.
+
+Planned Desktop behavior:
+
+- `DesktopRecoverySnapshot.queuedPrompts` stores serializable queued prompt
+  records without runtime `eventSink`.
+- Restored queue items are visible through `desktop_get_health.promptQueue`.
+- Desktop boot does not auto-start restored queue items.
+- `acp_cancel_queued_prompt` can cancel restored queue items.
+- Relay remains transport-only and does not own queue durability.
+
+Compatibility and native replication:
+
+- Snapshots without `queuedPrompts` restore an empty queue.
+- Running CLI sessions still restore as interrupted; queued prompts that have
+  not started remain manageable.
+- Native clients should treat restored queue rows the same as live P24 queue
+  rows, keep local drafts separate, and avoid mobile-side Codex or Claude
+  target agents.
