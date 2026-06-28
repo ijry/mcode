@@ -1,4 +1,4 @@
-import { assertPairTargetAgentMatchesSelection } from "@/pages/connections/connectionPairValidation"
+import { assertPairTargetAgentMatchesSelection } from "@/services/connectionPairValidation"
 
 describe("connection pair validation", () => {
   it("allows matching or legacy pair responses without targetAgent", () => {

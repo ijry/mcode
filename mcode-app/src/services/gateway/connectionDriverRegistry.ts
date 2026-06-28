@@ -1,17 +1,20 @@
 import { codegDirectDriver } from "@/agents/codeg/driver"
-import { legacyGatewayDriver } from "@/agents/codeg/legacyGatewayDriver"
+import { codegGatewayDriver, legacyGatewayDriver } from "@/agents/codeg/legacyGatewayDriver"
 import { desktopDirectDriver } from "@/agents/mcode-desktop/directDriver"
 import { desktopGatewayDriver } from "@/agents/mcode-desktop/gatewayDriver"
 import { opencodeDirectDriver } from "@/agents/opencode/driver"
+import { opencodeGatewayDriver } from "@/agents/opencode/gatewayDriver"
 import type { ConnectionRecordV2 } from "@/services/connectionSchema"
 import type { ConnectionDriver } from "@/agents/shared/driverTypes"
 
 export {
   codegDirectDriver,
+  codegGatewayDriver,
   desktopDirectDriver,
   desktopGatewayDriver,
   legacyGatewayDriver,
   opencodeDirectDriver,
+  opencodeGatewayDriver,
 }
 export type {
   ConnectionDriver,
@@ -23,14 +26,17 @@ export function resolveConnectionDriver(connection: ConnectionRecordV2): Connect
   if (connection.routeMode === "direct" && connection.targetAgent === "opencode") {
     return opencodeDirectDriver
   }
+  if (connection.routeMode === "gateway" && connection.targetAgent === "opencode") {
+    return opencodeGatewayDriver
+  }
   if (connection.routeMode === "direct" && connection.targetAgent === "mcode-desktop") {
     return desktopDirectDriver
   }
   if (connection.routeMode === "gateway" && connection.targetAgent === "mcode-desktop") {
     return desktopGatewayDriver
   }
-  if (connection.routeMode === "gateway") {
-    return legacyGatewayDriver
+  if (connection.routeMode === "gateway" && connection.targetAgent === "codeg") {
+    return codegGatewayDriver
   }
   return codegDirectDriver
 }

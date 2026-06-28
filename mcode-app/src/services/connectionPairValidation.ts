@@ -1,6 +1,5 @@
-import type { RelaySessionInfo } from "@/services/gateway"
+import type { RelaySessionInfo } from "@/services/gateway/types"
 import type { ConnectionTargetAgent } from "@/services/connectionSchema"
-import { getConnectionTargetLabel } from "./connectionPresentation"
 
 export function assertPairTargetAgentMatchesSelection(
   session: Pick<RelaySessionInfo, "targetAgent">,
@@ -14,13 +13,8 @@ export function assertPairTargetAgentMatchesSelection(
 }
 
 function formatTargetAgentLabel(targetAgent: string) {
-  if (
-    targetAgent === "codeg" ||
-    targetAgent === "opencode" ||
-    targetAgent === "mcode-desktop"
-  ) {
-    return getConnectionTargetLabel({ targetAgent })
-  }
+  if (targetAgent === "opencode") return "OpenCode"
+  if (targetAgent === "mcode-desktop") return "MCode Desktop"
+  if (targetAgent === "codeg") return "Codeg"
   return targetAgent
 }
-

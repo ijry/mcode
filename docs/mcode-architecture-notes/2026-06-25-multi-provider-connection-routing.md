@@ -112,6 +112,10 @@ desktop 运行方式：
 - web/uni-app 新增连接表单现已把“目标类型”提升为直连/网关共用字段；切换到网关不会再把
   `targetAgent` 改写为 `mcode-desktop`。
 - web/uni-app 网关配对成功后会校验 relay 返回的 `gatewaySession.targetAgent`，如果配对码属于其他目标类型则拒绝保存。
+- web/uni-app runtime gateway driver 也复用同一 target 校验；保存后的连接在重连、会话过期后重新配对、或使用已有
+  `gatewaySession` 时，不能被 relay metadata 静默改写到另一个 `targetAgent`。
+- web/uni-app driver registry 现按 `codeg/gateway`、`opencode/gateway`、`mcode-desktop/gateway`
+  分别选择 driver id，避免把 OpenCode 网关连接落到 Codeg 兼容 driver 标签。
 - `MCode 官方网关` 不展示域名输入框，构建时从 `VITE_MCODE_OFFICIAL_GATEWAY_BASE_URL` 读取默认网关地址；如果未配置，保存时提示“官方网关地址未配置”。选择 `自定义` 时必须填写 `gatewayBaseUrl`。
 
 ## Compatibility

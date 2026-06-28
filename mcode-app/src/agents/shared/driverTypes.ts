@@ -12,10 +12,13 @@ import {
 } from "@/services/connectionSchema"
 import { buildRemoteInstanceKey } from "@/services/realtime/instance-key"
 import { registerRemoteInstanceDescriptor } from "@/services/realtime/remoteInstanceRegistry"
+import { assertPairTargetAgentMatchesSelection } from "@/services/connectionPairValidation"
 
 export type ConnectionDriverId =
   | "codeg-direct"
+  | "codeg-gateway"
   | "opencode-direct"
+  | "opencode-gateway"
   | "desktop-direct"
   | "desktop-gateway"
   | "codeg-gateway-legacy"
@@ -108,9 +111,13 @@ export function createGatewayConnectionDriver(id: ConnectionDriverId): Connectio
         if (!session?.accessToken) {
           throw new Error(`${connection.name} 网关会话无效`)
         }
+        assertPairTargetAgentMatchesSelection(session, connection.targetAgent)
         gatewaySession = session
       }
 
+      if (gatewaySession?.targetAgent) {
+        assertPairTargetAgentMatchesSelection(gatewaySession, connection.targetAgent)
+      }
       const targetProfile = buildTargetProfileFromSession(connection, gatewaySession)
       const targetAgent = targetProfile?.targetAgent || connection.targetAgent
       const gateway = withRegisteredDescriptor(new RelayGateway(gatewayBaseUrl, gatewaySession))

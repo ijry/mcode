@@ -394,7 +394,7 @@ import { createGateway } from "@/services/gateway"
 import type { RelaySessionInfo } from "@/services/gateway"
 import { buildWebSocketProtocols } from "@/services/gateway/wsProtocol"
 import { buildConnectionConfigCode, parseConnectionConfigCodeToConnection } from "./connectionConfigCode"
-import { assertPairTargetAgentMatchesSelection } from "./connectionPairValidation"
+import { assertPairTargetAgentMatchesSelection } from "@/services/connectionPairValidation"
 import {
   encodeConnectionContext,
   readStoredConnections,
