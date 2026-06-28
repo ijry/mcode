@@ -281,7 +281,7 @@ cargo test --test desktop_p19_recovery_snapshot p27_recovery_drops_expired_queue
 
 Expected: PASS.
 
-- [ ] Step 10: Commit Task 1.
+- [x] Step 10: Commit Task 1.
 
 ```bash
 git add mcode-desktop/src-tauri/src/app_state.rs mcode-desktop/src-tauri/src/health.rs mcode-desktop/src-tauri/src/runtime/mod.rs mcode-desktop/src-tauri/src/recovery.rs mcode-desktop/src-tauri/tests/desktop_p24_prompt_queue.rs mcode-desktop/src-tauri/tests/desktop_p19_recovery_snapshot.rs docs/mcode-architecture-notes/2026-06-25-multi-provider-connection-routing.md docs/superpowers/plans/2026-06-28-mcode-p27-queue-policy-controls.md
@@ -413,7 +413,7 @@ cargo test --test desktop_p24_prompt_queue p27_cancels_all_queued_prompts_withou
 
 Expected: PASS.
 
-- [ ] Step 5: Commit Task 2.
+- [x] Step 5: Commit Task 2.
 
 ```bash
 git add mcode-desktop/src-tauri/src/runtime/mod.rs mcode-desktop/src-tauri/tests/desktop_p24_prompt_queue.rs docs/superpowers/plans/2026-06-28-mcode-p27-queue-policy-controls.md
@@ -603,7 +603,7 @@ npm run test:unit -- --runTestsByPath tests/api/acpQueuedPromptCancel.spec.ts te
 
 Expected: PASS.
 
-- [ ] Step 8: Commit Task 3.
+- [x] Step 8: Commit Task 3.
 
 ```bash
 git add mcode-app/src/api/acp.ts mcode-app/tests/api/acpQueuedPromptCancel.spec.ts mcode-app/src/pages/conversation-detail/detailRuntimePresentation.ts mcode-app/tests/pages/conversation-detail/detailRuntimePresentation.spec.ts mcode-app/src/pages/conversation-detail/index.vue mcode-app/src/pages/conversation-detail/index.scss docs/superpowers/plans/2026-06-28-mcode-p27-queue-policy-controls.md
@@ -615,7 +615,7 @@ git commit -m "feat(app): clear shared prompt queue"
 **Files:**
 - Modify: `docs/superpowers/plans/2026-06-28-mcode-p27-queue-policy-controls.md`
 
-- [ ] Step 1: Run Desktop prompt queue tests.
+- [x] Step 1: Run Desktop prompt queue tests.
 
 Run:
 
@@ -626,7 +626,7 @@ cargo test --test desktop_p24_prompt_queue
 
 Expected: PASS.
 
-- [ ] Step 2: Run Desktop recovery tests.
+- [x] Step 2: Run Desktop recovery tests.
 
 Run:
 
@@ -637,7 +637,7 @@ cargo test --test desktop_p19_recovery_snapshot
 
 Expected: PASS.
 
-- [ ] Step 3: Run App focused tests.
+- [x] Step 3: Run App focused tests.
 
 Run:
 
@@ -648,7 +648,7 @@ npm run test:unit -- --runTestsByPath tests/api/acpQueuedPromptCancel.spec.ts te
 
 Expected: PASS.
 
-- [ ] Step 4: Run repository diff check.
+- [x] Step 4: Run repository diff check.
 
 Run:
 
@@ -658,7 +658,7 @@ git diff --check
 
 Expected: no whitespace errors.
 
-- [ ] Step 5: Mark all P27 plan checkboxes complete.
+- [x] Step 5: Mark all P27 plan checkboxes complete.
 
 Change completed checkboxes in this file from `[ ]` to `[x]`.
 
