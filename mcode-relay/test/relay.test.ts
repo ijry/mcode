@@ -196,6 +196,44 @@ describe("relay api", () => {
     )
   })
 
+  it("forwards relay client id on authorized cancel calls", async () => {
+    store.addOffer({
+      code: "223344",
+      secret: "cancel-secret",
+      targetId: "desktop-1",
+      targetAgent: "mcode-desktop",
+      ttlSeconds: 300,
+    })
+    const pair = await request(app.server)
+      .post("/v1/pair")
+      .set("x-mcode-device-name", "Alice Watch")
+      .send({ code: "223344", secret: "cancel-secret" })
+
+    const sendProxyRequest = vi.spyOn(hub, "sendProxyRequest").mockResolvedValue({
+      status: 200,
+      body: { status: "cancel_requested" },
+    })
+
+    const res = await request(app.server)
+      .post("/v1/proxy/acp_cancel")
+      .set("authorization", `Bearer ${pair.body.accessToken}`)
+      .set("x-mcode-client-id", "client-watch-1")
+      .send({ sessionId: "session-1", reason: "user_cancelled_from_watch" })
+
+    expect(res.status).toBe(200)
+    expect(sendProxyRequest).toHaveBeenCalledWith(
+      "desktop-1",
+      "acp_cancel",
+      { sessionId: "session-1", reason: "user_cancelled_from_watch" },
+      undefined,
+      expect.objectContaining({
+        clientId: "client-watch-1",
+        targetId: "desktop-1",
+        deviceName: "Alice Watch",
+      })
+    )
+  })
+
   it("forwards authorized tunnel HTTP requests to the target desktop", async () => {
     store.addOffer({
       code: "123456",

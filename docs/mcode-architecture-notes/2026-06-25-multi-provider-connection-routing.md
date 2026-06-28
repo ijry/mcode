@@ -1069,3 +1069,8 @@ Compatibility and native replication:
   cancellation only through Desktop `acp_cancel`, disable duplicate cancel
   controls while cancellation is pending, and only allow a new prompt after
   `turn_cancelled` or a refreshed snapshot shows no active turn.
+
+Implementation progress:
+
+- Relay coverage now explicitly verifies that `acp_cancel` forwards the same
+  P22 `clientId` metadata as prompt and interaction commands.

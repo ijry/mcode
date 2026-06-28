@@ -51,7 +51,7 @@
 - Consumes: existing `RelayHub.sendProxyRequest(targetId, command, payload, timeoutMs, client)` signature.
 - Produces: test guarantee that `/v1/proxy/acp_cancel` forwards `ClientIdentity`.
 
-- [ ] **Step 1: Add relay API test for `acp_cancel` client identity forwarding**
+- [x] **Step 1: Add relay API test for `acp_cancel` client identity forwarding**
 
 Append this test near the existing `"forwards relay client id on authorized proxy calls"` test in `mcode-relay/test/relay.test.ts`:
 
@@ -95,7 +95,7 @@ it("forwards relay client id on authorized cancel calls", async () => {
 })
 ```
 
-- [ ] **Step 2: Run focused relay test**
+- [x] **Step 2: Run focused relay test**
 
 Run:
 
@@ -106,7 +106,7 @@ npm test -- --run test/relay.test.ts
 
 Expected: PASS. If it fails because `acp_cancel` is not forwarding client identity, fix `mcode-relay/src/server.ts` by ensuring the existing `/v1/proxy/:command` path does not special-case cancel and always passes `buildClientIdentity(req, auth)` to `sendProxyRequest`.
 
-- [ ] **Step 3: Update architecture note progress**
+- [x] **Step 3: Update architecture note progress**
 
 Append under the P23 section in `docs/mcode-architecture-notes/2026-06-25-multi-provider-connection-routing.md`:
 
@@ -117,7 +117,7 @@ Implementation progress:
   P22 `clientId` metadata as prompt and interaction commands.
 ```
 
-- [ ] **Step 4: Commit relay coverage**
+- [x] **Step 4: Commit relay coverage**
 
 Run:
 
