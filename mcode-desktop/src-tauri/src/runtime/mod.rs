@@ -6,6 +6,7 @@ pub mod process_stdio;
 
 pub use events::{normalize_cli_output_events, AcpEventEnvelope};
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -154,6 +155,20 @@ pub struct QueuedPromptItem {
     pub prompt_preview: Option<String>,
     pub created_at_ms: u64,
     pub event_sink: Option<CliEventSink>,
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PersistentQueuedPrompt {
+    pub queue_item_id: String,
+    pub session_id: String,
+    pub runtime: CliRuntimeKind,
+    pub agent_type: String,
+    pub payload: Value,
+    pub source_client_id: Option<String>,
+    pub source_device_name: Option<String>,
+    pub prompt_preview: Option<String>,
+    pub created_at_ms: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
@@ -1272,6 +1287,60 @@ pub fn queued_prompt_snapshots(state: &AppState) -> Vec<QueuedPromptSnapshot> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+pub fn persistent_queued_prompts(state: &AppState) -> Vec<PersistentQueuedPrompt> {
+    state
+        .queued_prompts
+        .lock()
+        .map(|queues| {
+            queues
+                .values()
+                .flat_map(|queue| queue.iter().map(persistent_queued_prompt))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+pub fn restore_persistent_queued_prompts(
+    state: &AppState,
+    prompts: Vec<PersistentQueuedPrompt>,
+) {
+    let mut grouped: HashMap<String, Vec<QueuedPromptItem>> = HashMap::new();
+    for prompt in prompts {
+        grouped
+            .entry(prompt.session_id.clone())
+            .or_default()
+            .push(QueuedPromptItem {
+                queue_item_id: prompt.queue_item_id,
+                session_id: prompt.session_id,
+                runtime: prompt.runtime,
+                agent_type: prompt.agent_type,
+                payload: prompt.payload,
+                source_client_id: prompt.source_client_id,
+                source_device_name: prompt.source_device_name,
+                prompt_preview: prompt.prompt_preview,
+                created_at_ms: prompt.created_at_ms,
+                event_sink: None,
+            });
+    }
+    if let Ok(mut queues) = state.queued_prompts.lock() {
+        *queues = grouped;
+    }
+}
+
+fn persistent_queued_prompt(item: &QueuedPromptItem) -> PersistentQueuedPrompt {
+    PersistentQueuedPrompt {
+        queue_item_id: item.queue_item_id.clone(),
+        session_id: item.session_id.clone(),
+        runtime: item.runtime.clone(),
+        agent_type: item.agent_type.clone(),
+        payload: item.payload.clone(),
+        source_client_id: item.source_client_id.clone(),
+        source_device_name: item.source_device_name.clone(),
+        prompt_preview: item.prompt_preview.clone(),
+        created_at_ms: item.created_at_ms,
+    }
 }
 
 fn turn_queued_event(snapshot: &QueuedPromptSnapshot) -> AcpEventEnvelope {

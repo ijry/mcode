@@ -6,7 +6,10 @@ use anyhow::Result;
 use serde_json::Value;
 
 use crate::app_state::{AppState, DiagnosticEntry, GatewayConfig};
-use crate::runtime::{CliPendingInteraction, CliRuntimeSession, CliSessionStatus};
+use crate::runtime::{
+    persistent_queued_prompts, restore_persistent_queued_prompts, CliPendingInteraction,
+    CliRuntimeSession, CliSessionStatus, PersistentQueuedPrompt,
+};
 use crate::tunnel::LocalServiceConfig;
 
 pub const DESKTOP_STATE_SCHEMA: &str = "mcode.desktop.state.v1";
@@ -43,6 +46,8 @@ pub struct DesktopRecoverySnapshot {
     pub last_ack_local_event_id: Option<u64>,
     pub last_relay_event_id: Option<u64>,
     pub queued_outbound_events: Vec<QueuedOutboundEvent>,
+    #[serde(default)]
+    pub queued_prompts: Vec<PersistentQueuedPrompt>,
     pub cli_sessions: Vec<CliRuntimeSession>,
     pub pending_interactions: Vec<CliPendingInteraction>,
     pub diagnostics: Vec<DiagnosticEntry>,
@@ -197,6 +202,7 @@ pub fn build_recovery_snapshot(state: &AppState) -> Result<DesktopRecoverySnapsh
         last_ack_local_event_id,
         last_relay_event_id,
         queued_outbound_events: queue.map(|queue| queue.pending()).unwrap_or_default(),
+        queued_prompts: persistent_queued_prompts(state),
         cli_sessions: state
             .cli_sessions
             .read()
@@ -246,6 +252,7 @@ pub fn apply_recovery_snapshot(
     if let Ok(mut queue) = state.outbound_event_queue.lock() {
         queue.restore_pending(snapshot.queued_outbound_events);
     }
+    restore_persistent_queued_prompts(state, snapshot.queued_prompts);
 
     let interrupted_session_ids = snapshot
         .cli_sessions

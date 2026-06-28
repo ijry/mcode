@@ -90,3 +90,73 @@ fn p19_snapshot_excludes_pair_codes_and_token_like_fields() {
     assert!(!raw.contains("accessToken"));
     assert!(!raw.contains("refreshToken"));
 }
+
+#[tokio::test]
+async fn p26_snapshot_restores_queued_prompts_without_active_turn_resume() {
+    let path = std::env::temp_dir().join(format!(
+        "mcode-desktop-p26-queue-state-{}.json",
+        std::process::id()
+    ));
+    let state = AppState::new_for_test();
+    let connected = dispatch_desktop_proxy_with_state(
+        &state,
+        "acp_connect",
+        json!({ "agentType": "claude_code", "workingDir": env!("CARGO_MANIFEST_DIR") }),
+    )
+    .await
+    .unwrap();
+    let session_id = connected["sessionId"].as_str().unwrap().to_string();
+    mcode_desktop_lib::runtime::begin_hosted_turn_for_test(
+        &state,
+        &session_id,
+        "turn-live",
+        Some("client-phone".to_string()),
+    )
+    .unwrap();
+    let queued = dispatch_desktop_proxy_with_state(
+        &state,
+        "acp_prompt",
+        json!({
+            "sessionId": session_id,
+            "prompt": "restore queued ask",
+            "sourceClientId": "client-watch",
+            "client": { "deviceName": "Watch" }
+        }),
+    )
+    .await
+    .unwrap();
+    let queue_item_id = queued["queueItemId"].as_str().unwrap().to_string();
+    {
+        let mut sessions = state.cli_sessions.write().unwrap();
+        sessions[0].status = CliSessionStatus::Running;
+    }
+
+    save_recovery_snapshot_to_path(&state, &path).unwrap();
+    let raw = fs::read_to_string(&path).unwrap();
+    assert!(raw.contains("\"queuedPrompts\""));
+    assert!(raw.contains("restore queued ask"));
+
+    let snapshot = load_recovery_snapshot(&path).unwrap().unwrap();
+    let restored = AppState::new_for_test();
+    apply_recovery_snapshot(&restored, snapshot).unwrap();
+    fs::remove_file(&path).ok();
+
+    let health = mcode_desktop_lib::health::build_health_snapshot(&restored);
+    assert_eq!(health.active_turn_count, 0);
+    assert_eq!(health.prompt_queue_count, 1);
+    assert_eq!(health.prompt_queue[0].queue_item_id, queue_item_id);
+    assert_eq!(health.prompt_queue[0].session_id, session_id);
+    assert_eq!(
+        health.prompt_queue[0].source_client_id.as_deref(),
+        Some("client-watch")
+    );
+    assert_eq!(
+        health.prompt_queue[0].source_device_name.as_deref(),
+        Some("Watch")
+    );
+    assert_eq!(
+        health.prompt_queue[0].prompt_preview.as_deref(),
+        Some("restore queued ask")
+    );
+    assert_eq!(health.cli_sessions[0].status, CliSessionStatus::Interrupted);
+}

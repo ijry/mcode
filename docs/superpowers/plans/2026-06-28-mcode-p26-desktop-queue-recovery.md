@@ -41,7 +41,7 @@
 - Produces: `restore_persistent_queued_prompts(state: &AppState, prompts: Vec<PersistentQueuedPrompt>)`
 - Consumes: existing `QueuedPromptItem`, `DesktopRecoverySnapshot`, and `build_health_snapshot(...)`
 
-- [ ] Step 1: Add failing test for queue snapshot restore.
+- [x] Step 1: Add failing test for queue snapshot restore.
 
 Add a test to `mcode-desktop/src-tauri/tests/desktop_p19_recovery_snapshot.rs` that:
 
@@ -108,7 +108,7 @@ async fn p26_snapshot_restores_queued_prompts_without_active_turn_resume() {
 }
 ```
 
-- [ ] Step 2: Run test to verify it fails.
+- [x] Step 2: Run test to verify it fails.
 
 Run:
 
@@ -119,7 +119,7 @@ cargo test --test desktop_p19_recovery_snapshot p26_snapshot_restores_queued_pro
 
 Expected: FAIL because `queuedPrompts` is not present/restored.
 
-- [ ] Step 3: Add persistent queue types and conversion helpers.
+- [x] Step 3: Add persistent queue types and conversion helpers.
 
 In `mcode-desktop/src-tauri/src/runtime/mod.rs`, after `QueuedPromptItem`, add:
 
@@ -198,7 +198,7 @@ fn persistent_queued_prompt(item: &QueuedPromptItem) -> PersistentQueuedPrompt {
 }
 ```
 
-- [ ] Step 4: Extend `DesktopRecoverySnapshot`.
+- [x] Step 4: Extend `DesktopRecoverySnapshot`.
 
 In `mcode-desktop/src-tauri/src/recovery.rs`, import the new helpers:
 
@@ -228,7 +228,7 @@ In `apply_recovery_snapshot(...)`, after restoring outbound event queue, call:
 restore_persistent_queued_prompts(state, snapshot.queued_prompts);
 ```
 
-- [ ] Step 5: Update architecture note.
+- [x] Step 5: Update architecture note.
 
 Append a `## P26 Desktop Queue Recovery Behavior` section to `docs/mcode-architecture-notes/2026-06-25-multi-provider-connection-routing.md` describing:
 
@@ -255,7 +255,7 @@ Native replication:
 - Do not create mobile-side Codex or Claude target agents.
 ```
 
-- [ ] Step 6: Run focused test.
+- [x] Step 6: Run focused test.
 
 Run:
 
