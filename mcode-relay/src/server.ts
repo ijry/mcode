@@ -11,11 +11,13 @@ import {
   verifyRefreshToken,
 } from "./auth/tokens.js"
 import { JsonFilePairingStoreStorage, PairingStore } from "./pairing/store.js"
-import type { PairSessionRecord, TargetRecord, TenantRecord } from "./pairing/store.js"
+import type { AuditEventRecord, PairSessionRecord, TargetRecord, TenantRecord } from "./pairing/store.js"
 import { buildGatewayHealth, buildGatewayInfo } from "./gateway/info.js"
 import { JsonFileReplayStoreStorage, ReplayStore } from "./protocol/replayStore.js"
 import { RelayHub, RelayRequestError } from "./tunnel/hub.js"
 import { normalizeTunnelPath } from "./tunnel/httpProxy.js"
+import { sanitizeAuditEvent } from "./audit/sanitize.js"
+import { AuditWebhookSink } from "./audit/webhookSink.js"
 import {
   authorizeAdminRoute,
   resolveAdminPrincipal,
@@ -34,6 +36,7 @@ export interface RelayAppContext {
   config: RelayConfig
   store: PairingStore
   hub: RelayHub
+  auditWebhookSink: AuditWebhookSink
 }
 
 export function createRelayContext(overrides: Partial<RelayAppContext> = {}): RelayAppContext {
@@ -42,6 +45,7 @@ export function createRelayContext(overrides: Partial<RelayAppContext> = {}): Re
     config,
     store: overrides.store ?? createDefaultPairingStore(config),
     hub: overrides.hub ?? createDefaultRelayHub(config),
+    auditWebhookSink: overrides.auditWebhookSink ?? new AuditWebhookSink(config),
   }
 }
 
@@ -316,25 +320,13 @@ function normalizeOptionalTimestamp(value: unknown): number | undefined {
   return Number.isFinite(timestamp) && timestamp >= 0 ? Math.trunc(timestamp) : undefined
 }
 
-function sanitizeAuditEvent(event: ReturnType<PairingStore["listAuditEvents"]>[number]) {
-  return {
-    ...event,
-    metadata: sanitizeAuditMetadata(event.metadata),
-  }
-}
-
-function sanitizeAuditMetadata(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map((item) => sanitizeAuditMetadata(item))
-  if (!value || typeof value !== "object") return value
-  const result: Record<string, unknown> = {}
-  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-    result[key] = isSensitiveAuditKey(key) ? "[redacted]" : sanitizeAuditMetadata(item)
-  }
-  return result
-}
-
-function isSensitiveAuditKey(key: string): boolean {
-  return /token|secret|authorization|password/i.test(key)
+function recordAuditEvent(
+  context: RelayAppContext,
+  input: Parameters<PairingStore["addAuditEvent"]>[0]
+): AuditEventRecord {
+  const event = context.store.addAuditEvent(input)
+  context.auditWebhookSink.deliver(sanitizeAuditEvent(event))
+  return event
 }
 
 function normalizeTunnelHeaders(headers: FastifyRequest["headers"]) {
@@ -383,7 +375,8 @@ function closeSocketWithError(socket: WebSocket, message: string, code = "gatewa
   }
 }
 
-export async function buildRelayApp(context = createRelayContext()): Promise<FastifyInstance> {
+export async function buildRelayApp(overrides: Partial<RelayAppContext> = {}): Promise<FastifyInstance> {
+  const context = createRelayContext(overrides)
   const app = Fastify({ logger: false })
   await app.register(websocket)
 
@@ -477,7 +470,7 @@ export async function buildRelayApp(context = createRelayContext()): Promise<Fas
       tenantId,
       tenantName: normalizeAdminText(body?.tenantName),
     })
-    context.store.addAuditEvent({
+    recordAuditEvent(context, {
       type: "tenant.upserted",
       tenantId: tenant.tenantId,
       actor: adminActor(req),
@@ -496,7 +489,7 @@ export async function buildRelayApp(context = createRelayContext()): Promise<Fas
     if (!context.store.revokeTarget(targetId, body?.reason)) {
       return reply.code(404).send({ error: "target not found" })
     }
-    context.store.addAuditEvent({
+    recordAuditEvent(context, {
       type: "target.revoked",
       targetId,
       actor: adminActor(req),
@@ -523,7 +516,7 @@ export async function buildRelayApp(context = createRelayContext()): Promise<Fas
     if (!target) {
       return reply.code(404).send({ error: "target not found" })
     }
-    context.store.addAuditEvent({
+    recordAuditEvent(context, {
       type: "target.tenant_changed",
       tenantId: tenant.tenantId,
       targetId,
@@ -549,7 +542,7 @@ export async function buildRelayApp(context = createRelayContext()): Promise<Fas
     if (!context.store.restoreTarget(targetId)) {
       return reply.code(404).send({ error: "target not found" })
     }
-    context.store.addAuditEvent({
+    recordAuditEvent(context, {
       type: "target.restored",
       targetId,
       actor: adminActor(req),
@@ -567,7 +560,7 @@ export async function buildRelayApp(context = createRelayContext()): Promise<Fas
     if (!context.store.revokeSession(sessionId, body?.reason)) {
       return reply.code(404).send({ error: "session not found" })
     }
-    context.store.addAuditEvent({
+    recordAuditEvent(context, {
       type: "session.revoked",
       targetId: session?.targetId ?? null,
       sessionId,
@@ -613,7 +606,7 @@ export async function buildRelayApp(context = createRelayContext()): Promise<Fas
           : null,
       deviceUserAgent: req.headers["user-agent"] ?? null,
     })
-    context.store.addAuditEvent({
+    recordAuditEvent(context, {
       type: "session.created",
       tenantId: target.tenantId,
       targetId: target.targetId,
@@ -682,7 +675,7 @@ export async function buildRelayApp(context = createRelayContext()): Promise<Fas
         context.config.REFRESH_TOKEN_TTL_SECONDS
       )
       context.store.touchSession(session.sessionId)
-      context.store.addAuditEvent({
+      recordAuditEvent(context, {
         type: "session.refreshed",
         tenantId: target.tenantId,
         targetId: claims.targetId,

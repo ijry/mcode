@@ -24,6 +24,9 @@ Standalone relay service for MCode remote control.
 - `LOG_POLICY` default `standard`
 - `AUDIT_POLICY` default `disabled`
 - `AUDIT_EVENT_LIMIT` default `1000`
+- `AUDIT_WEBHOOK_URL` default empty
+- `AUDIT_WEBHOOK_SECRET` default empty
+- `AUDIT_WEBHOOK_TIMEOUT_MS` default `3000`
 - `ACCESS_POLICY` default `allow-all`
 - `ADMIN_TOKEN` default empty
 - `ADMIN_TOKEN_ROLES` default empty JSON policy
@@ -109,8 +112,24 @@ the storage boundary with an external audit sink.
 The endpoint reuses the `audit.read` RBAC policy. Exported metadata recursively
 redacts keys containing `token`, `secret`, `authorization`, or `password`.
 
+## Audit Webhook Sink
+
+Set `AUDIT_WEBHOOK_URL` to forward new audit events to an external collector.
+Relay posts `{ event }` JSON after the local audit event is written. Delivery is
+best-effort and asynchronous: webhook failures, non-2xx responses, and timeouts
+increment sink diagnostics but do not fail pairing, refresh, or admin mutation
+requests.
+
+`AUDIT_WEBHOOK_SECRET` is optional. When set, relay sends it as
+`x-mcode-audit-secret` so the receiver can authenticate relay deliveries.
+`AUDIT_WEBHOOK_TIMEOUT_MS` bounds each delivery attempt. `/health` and
+`/v1/gateway/info` report only safe status fields such as enabled state,
+delivery counts, and last error; they never expose the webhook URL or secret.
+
+Webhook payloads use the same metadata redaction as audit export.
+
 ## Not Included Yet
 
 - Multi-node shared state or session migration.
 - SSO/OIDC integration and external policy engines.
-- Immutable external audit storage.
+- Immutable audit storage implementation inside relay.

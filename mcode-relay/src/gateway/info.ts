@@ -50,6 +50,7 @@ export interface GatewayHealthResponse {
   protocolVersion: string
   environment: RelayConfig["DEPLOYMENT_ENV"]
   storage: GatewayStorageStatus
+  auditWebhook: GatewayAuditWebhookStatus
   security: GatewaySecurityStatus
   stats: GatewayStats
 }
@@ -66,6 +67,7 @@ export interface GatewayInfoResponse {
     logPolicy: string
     auditPolicy: string
     auditRetentionLimit: number
+    auditWebhook: GatewayAuditWebhookStatus
     accessPolicy: string
     policyMode: "token-role"
     policyWarnings: string[]
@@ -79,6 +81,15 @@ export interface GatewayStorageStatus {
   replayStore: "memory" | "json-file"
 }
 
+export interface GatewayAuditWebhookStatus {
+  enabled: boolean
+  deliveredCount: number
+  failedCount: number
+  lastDeliveredAt: number | null
+  lastErrorAt: number | null
+  lastError: string | null
+}
+
 export function buildGatewayHealth(context: RelayAppContext): GatewayHealthResponse {
   const config = context.config
   return {
@@ -90,6 +101,7 @@ export function buildGatewayHealth(context: RelayAppContext): GatewayHealthRespo
     protocolVersion: PROTOCOL_VERSION,
     environment: config.DEPLOYMENT_ENV,
     storage: buildGatewayStorage(config),
+    auditWebhook: context.auditWebhookSink.getStatus(),
     security: buildGatewaySecurity(config),
     stats: buildGatewayStats(context),
   }
@@ -110,6 +122,7 @@ export function buildGatewayInfo(context: RelayAppContext): GatewayInfoResponse 
       logPolicy: config.LOG_POLICY,
       auditPolicy: config.AUDIT_POLICY,
       auditRetentionLimit: context.store.getAuditEventLimit(),
+      auditWebhook: context.auditWebhookSink.getStatus(),
       accessPolicy: config.ACCESS_POLICY,
       policyMode: adminPolicy.mode,
       policyWarnings: adminPolicy.warnings,

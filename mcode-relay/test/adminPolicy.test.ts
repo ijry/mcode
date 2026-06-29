@@ -24,6 +24,9 @@ function config(overrides: Partial<RelayConfig> = {}): RelayConfig {
     LOG_POLICY: "standard",
     AUDIT_POLICY: "external",
     AUDIT_EVENT_LIMIT: 1000,
+    AUDIT_WEBHOOK_URL: "",
+    AUDIT_WEBHOOK_SECRET: "",
+    AUDIT_WEBHOOK_TIMEOUT_MS: 3000,
     ACCESS_POLICY: "token-role",
     ADMIN_TOKEN: OWNER_TOKEN,
     ADMIN_TOKEN_ROLES: JSON.stringify({

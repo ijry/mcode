@@ -1482,5 +1482,38 @@ Compatibility and native replication:
   download or forwarding to compliance tooling.
 - Native admin tools should surface `403` from audit export as RBAC denial and
   must not attempt to widen tenant scope client-side.
-- Immutable external audit sinks and multi-node audit storage remain future
-  gateway work.
+- Multi-node audit storage remains future gateway work.
+
+## P33 Audit Webhook Sink Behavior
+
+P33 adds best-effort external audit forwarding to `mcode-relay`. It keeps the
+P32 local audit retention and export behavior, and it does not change mobile,
+desktop, pairing, proxy, event, HTTP tunnel, or TCP tunnel protocols.
+
+Implemented relay behavior:
+
+- `AUDIT_WEBHOOK_URL` enables audit forwarding when non-empty.
+- `AUDIT_WEBHOOK_SECRET` is optional and is sent only to the webhook receiver as
+  `x-mcode-audit-secret`.
+- `AUDIT_WEBHOOK_TIMEOUT_MS` bounds each delivery attempt.
+- Relay writes the local audit event first, then schedules webhook delivery
+  asynchronously.
+- Webhook delivery uses payload shape `{ event }`.
+- Webhook payload metadata uses the same recursive redaction as P32 audit
+  export for keys containing `token`, `secret`, `authorization`, or `password`.
+- Webhook failures, non-2xx responses, invalid URLs, and timeouts update sink
+  diagnostics but do not fail pairing, refresh, or admin mutation requests.
+- `/health` exposes `auditWebhook` status and `/v1/gateway/info` exposes
+  `deployment.auditWebhook`.
+- Diagnostics include enabled state, delivered count, failed count, last
+  delivery timestamp, last error timestamp, and last error message.
+- Diagnostics never expose webhook URL or webhook secret.
+
+Compatibility and native replication:
+
+- Existing deployments without `AUDIT_WEBHOOK_URL` behave as before.
+- Native iOS/Android clients do not need to implement audit webhook delivery.
+- Native admin screens may display webhook enabled state and delivery health,
+  but must not request or render webhook URL or secret values.
+- External immutable audit storage is now expected to live behind the webhook
+  receiver; relay itself still does not provide immutable audit storage.
