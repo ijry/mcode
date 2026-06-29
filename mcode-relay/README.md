@@ -95,6 +95,14 @@ not for `mcode-app` end users.
   still return `401` or `403`.
 - `npm run build` copies the admin static assets into `dist/adminWeb/assets`
   after TypeScript compilation so compiled deployments can serve the console.
+- The console supports a session-scoped tenant filter. It appends `tenantId` to
+  existing admin list/export APIs and relies on RBAC to allow or reject the
+  selected tenant scope.
+- The audit panel can export JSON or JSONL through
+  `/v1/admin/audit-events/export`; exports are downloaded by the browser and
+  are not stored by the console.
+- Admin static responses include CSP, frame denial, referrer, permissions, and
+  `nosniff` headers.
 
 ## Admin RBAC
 

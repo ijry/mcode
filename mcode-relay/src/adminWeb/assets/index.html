@@ -27,6 +27,11 @@
 
       <section class="toolbar">
         <div id="status" class="status">未连接</div>
+        <form id="tenant-filter-form" class="tenant-filter">
+          <input id="tenant-filter" name="tenantId" placeholder="租户过滤 tenantId（留空为全部）" />
+          <button type="submit">应用过滤</button>
+          <button id="clear-tenant-filter" type="button" class="ghost">清除过滤</button>
+        </form>
         <button id="refresh" type="button">刷新数据</button>
       </section>
 
@@ -85,7 +90,11 @@
         <article class="panel wide">
           <div class="panel-title">
             <h2>审计事件</h2>
-            <span class="hint">最近 100 条</span>
+            <div class="actions">
+              <span class="hint">最近 100 条</span>
+              <button id="export-audit-json" type="button" class="ghost">导出 JSON</button>
+              <button id="export-audit-jsonl" type="button" class="ghost">导出 JSONL</button>
+            </div>
           </div>
           <div id="audit-events" class="table"></div>
         </article>

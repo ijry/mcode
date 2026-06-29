@@ -1,11 +1,13 @@
 const state = {
   token: sessionStorage.getItem("mcodeAdminToken") || "",
+  tenantId: sessionStorage.getItem("mcodeAdminTenantId") || "",
   data: null,
 }
 
 const $ = (selector) => document.querySelector(selector)
 
 $("#admin-token").value = state.token
+$("#tenant-filter").value = state.tenantId
 $("#login-form").addEventListener("submit", async (event) => {
   event.preventDefault()
   state.token = new FormData(event.currentTarget).get("adminToken").trim()
@@ -22,6 +24,27 @@ $("#clear-token").addEventListener("click", () => {
 })
 
 $("#refresh").addEventListener("click", refreshAll)
+
+$("#tenant-filter-form").addEventListener("submit", async (event) => {
+  event.preventDefault()
+  state.tenantId = String(new FormData(event.currentTarget).get("tenantId") || "").trim()
+  if (state.tenantId) {
+    sessionStorage.setItem("mcodeAdminTenantId", state.tenantId)
+  } else {
+    sessionStorage.removeItem("mcodeAdminTenantId")
+  }
+  await refreshAll()
+})
+
+$("#clear-tenant-filter").addEventListener("click", async () => {
+  state.tenantId = ""
+  sessionStorage.removeItem("mcodeAdminTenantId")
+  $("#tenant-filter").value = ""
+  await refreshAll()
+})
+
+$("#export-audit-json").addEventListener("click", () => exportAudit("json"))
+$("#export-audit-jsonl").addEventListener("click", () => exportAudit("jsonl"))
 
 $("#tenant-form").addEventListener("submit", async (event) => {
   event.preventDefault()
@@ -88,15 +111,60 @@ async function refreshAll() {
     const [health, info, tenants, devices, sessions, audit, credentials] = await Promise.all([
       publicApi("/health"),
       publicApi("/v1/gateway/info"),
-      api("/v1/admin/tenants"),
-      api("/v1/admin/devices"),
-      api("/v1/admin/sessions"),
-      api("/v1/admin/audit-events?limit=100"),
+      api(adminPath("/v1/admin/tenants")),
+      api(adminPath("/v1/admin/devices")),
+      api(adminPath("/v1/admin/sessions")),
+      api(adminPath("/v1/admin/audit-events", { limit: "100" })),
       api("/v1/admin/credentials").catch((error) => ({ error: error.message, credentials: [] })),
     ])
     state.data = { health, info, tenants, devices, sessions, audit, credentials }
     renderStatus("已连接")
     render()
+  } catch (error) {
+    renderStatus(error.message, true)
+  }
+}
+
+async function exportAudit(format) {
+  if (!state.token) {
+    renderStatus("请输入 Admin Token", true)
+    return
+  }
+
+  try {
+    renderStatus(`正在导出 ${format.toUpperCase()}...`)
+    const path = adminPath("/v1/admin/audit-events/export", { format, limit: "1000" })
+    const response = await fetch(path, {
+      headers: {
+        "x-mcode-admin-token": state.token,
+        "x-mcode-admin-actor": "relay-web-admin",
+      },
+    })
+    const body = await response.text()
+    if (!response.ok) {
+      let message = body
+      try {
+        const parsed = JSON.parse(body)
+        message = parsed.reason || parsed.error || message
+      } catch {
+        // Keep raw text for non-JSON errors.
+      }
+      throw new Error(message || `export ${response.status}`)
+    }
+
+    const extension = format === "jsonl" ? "jsonl" : "json"
+    const blob = new Blob([body], {
+      type: format === "jsonl" ? "application/x-ndjson" : "application/json",
+    })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement("a")
+    link.href = url
+    link.download = `mcode-relay-audit-${state.tenantId || "all"}.${extension}`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+    renderStatus("审计导出完成")
   } catch (error) {
     renderStatus(error.message, true)
   }
@@ -121,6 +189,13 @@ async function api(path, options = {}) {
   const payload = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(payload.reason || payload.error || `${path} ${response.status}`)
   return payload
+}
+
+function adminPath(path, params = {}) {
+  const query = new URLSearchParams(params)
+  if (state.tenantId) query.set("tenantId", state.tenantId)
+  const queryString = query.toString()
+  return queryString ? `${path}?${queryString}` : path
 }
 
 function cleanBody(body) {
@@ -148,6 +223,7 @@ function render() {
 
   const { health, info, tenants, devices, sessions, audit, credentials } = state.data
   $("#metrics").innerHTML = [
+    metric("Tenant Scope", escapeHtml(state.tenantId || "all")),
     metric("Targets", health.stats?.targets),
     metric("Sessions", health.stats?.sessions),
     metric("Tenants", health.stats?.tenants),

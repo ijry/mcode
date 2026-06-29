@@ -1631,3 +1631,36 @@ Compatibility and security:
   codes, access tokens, refresh tokens, or official CLI credentials.
 - Native iOS/Android clients should continue treating relay admin APIs as
   operator tooling, not as in-app remote-control features.
+
+## P37 Relay Admin Operations Behavior
+
+P37 enhances the P36 relay Web admin console for day-to-day enterprise gateway
+operations. It remains a `mcode-relay` operator feature and does not add
+anything to `mcode-app`.
+
+Implemented behavior:
+
+- Admin static responses now include a restrictive Content-Security-Policy,
+  `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`,
+  `Permissions-Policy`, and `X-Content-Type-Options: nosniff`.
+- The Web console includes a tenant scope filter stored only in browser
+  `sessionStorage` as `mcodeAdminTenantId`.
+- Tenant-scoped reads append `tenantId` to existing admin list APIs:
+  `/v1/admin/tenants`, `/v1/admin/devices`, `/v1/admin/sessions`, and
+  `/v1/admin/audit-events`.
+- Credential reads remain owner-only and are intentionally not tenant-filtered
+  by the browser because the server already enforces credential visibility.
+- The audit panel exports JSON or JSONL by calling the existing
+  `/v1/admin/audit-events/export` endpoint with the current tenant filter and
+  admin token.
+- Browser exports use an ephemeral Blob URL and do not persist audit data in
+  local storage.
+
+Compatibility and security:
+
+- P37 does not change admin RBAC, pairing, proxy, event replay, HTTP tunnel,
+  TCP tunnel, target service discovery, or mobile client protocols.
+- The tenant filter is a request scope hint, not authorization. Relay RBAC still
+  decides whether the token may access that tenant.
+- Native iOS/Android clients should not replicate relay admin filtering or
+  audit export; these remain enterprise operator workflows.

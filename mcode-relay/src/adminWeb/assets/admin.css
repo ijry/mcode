@@ -122,7 +122,8 @@ h2 {
 .actions,
 .toolbar,
 .panel-title,
-.inline-form {
+.inline-form,
+.tenant-filter {
   display: flex;
   gap: 10px;
   align-items: center;
@@ -132,6 +133,15 @@ h2 {
   justify-content: space-between;
   margin: 24px 0;
   padding: 14px 16px;
+}
+
+.tenant-filter {
+  flex: 1;
+  justify-content: flex-end;
+}
+
+.tenant-filter input {
+  max-width: 320px;
 }
 
 .status {
@@ -271,7 +281,10 @@ h2 {
   }
 
   .inline-form,
+  .tenant-filter,
+  .tenant-filter input,
   .inline-form input {
     width: 100%;
+    max-width: none;
   }
 }
