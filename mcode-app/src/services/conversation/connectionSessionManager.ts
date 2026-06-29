@@ -32,6 +32,7 @@ export const connectionSessionManager = {
     agentType: string
     sessionId?: string | null
     status?: ConnectionInfo["status"]
+    capabilities?: string[]
     role?: "owner" | "viewer"
     sharedLive?: boolean
     detachOnly?: boolean
@@ -47,6 +48,7 @@ export const connectionSessionManager = {
         agentType: input.agentType,
         sessionId: input.sessionId || "",
         status: input.status || "connected",
+        capabilities: input.capabilities || [],
       },
       externalId: input.sessionId || null,
       status: "connected",

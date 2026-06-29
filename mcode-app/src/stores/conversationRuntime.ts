@@ -637,6 +637,8 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
 
       case "turn_queued":
       case "turn_queue_updated":
+      case "turn_queue_reordered":
+      case "turn_queue_priority_changed":
       case "turn_dequeued":
       case "turn_started":
       case "turn_queue_cancelled":
@@ -752,6 +754,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
             agentType,
             sessionId: firstString(snapshot?.external_id, snapshot?.externalId) || null,
             status: normalizeConnectionInfoStatus(snapshot?.status),
+            capabilities: Array.isArray(snapshot?.capabilities) ? snapshot.capabilities : [],
             role: "viewer",
             sharedLive: true,
             detachOnly: true,
@@ -1011,6 +1014,7 @@ interface SharedPromptQueueItem {
   queueItemId: string
   sessionId: string | null
   queuePosition: number | null
+  priorityTier: string | null
   sourceClientId: string | null
   sourceDeviceName: string | null
   promptPreview: string | null
@@ -1047,8 +1051,24 @@ function handleTurnQueueEvent(
       session.inputErrorMessage = session.sharedPromptQueue.lastMessage
       break
     case "turn_queue_updated":
+      if (Array.isArray(data.queueSnapshot) && data.queueSnapshot.length > 0) {
+        replaceSharedPromptQueueItems(session.sharedPromptQueue, data.queueSnapshot)
+      }
       upsertSharedPromptQueueItem(session.sharedPromptQueue, data, false)
       applySharedPromptQueueCount(session.sharedPromptQueue, data)
+      break
+    case "turn_queue_reordered":
+    case "turn_queue_priority_changed":
+      if (Array.isArray(data.queueSnapshot) && data.queueSnapshot.length > 0) {
+        replaceSharedPromptQueueItems(session.sharedPromptQueue, data.queueSnapshot)
+      } else {
+        upsertSharedPromptQueueItem(session.sharedPromptQueue, data, false)
+      }
+      applySharedPromptQueueCount(session.sharedPromptQueue, data)
+      session.sharedPromptQueue.lastMessage =
+        data.priorityTier
+          ? `队列已更新为${sharedPromptPriorityText(data.priorityTier)}。`
+          : "队列顺序已更新。"
       break
     case "turn_dequeued":
       removeSharedPromptQueueItem(session.sharedPromptQueue, data.queueItemId)
@@ -1089,6 +1109,8 @@ function normalizeTurnQueueRuntimeEvent(raw: unknown): TurnQueueEvent | null {
       firstNumber(record.queuePosition, record.queue_position) ?? null,
     queueLength:
       firstNumber(record.queueLength, record.queue_length) ?? null,
+    priorityTier:
+      firstString(record.priorityTier, record.priority_tier) || null,
     sourceClientId:
       firstString(record.sourceClientId, record.source_client_id) || null,
     sourceDeviceName:
@@ -1102,6 +1124,9 @@ function normalizeTurnQueueRuntimeEvent(raw: unknown): TurnQueueEvent | null {
     message: firstString(record.message, record.error) || null,
     runtime: firstString(record.runtime) || null,
     agentType: firstString(record.agentType, record.agent_type) || null,
+    queueSnapshot: Array.isArray(record.queueSnapshot)
+      ? (record.queueSnapshot as TurnQueueEvent[])
+      : null,
   }
 }
 
@@ -1136,6 +1161,8 @@ function mapTurnQueueEventToItem(
       typeof data.queuePosition === "number" && Number.isFinite(data.queuePosition)
         ? Math.max(1, Math.trunc(data.queuePosition))
         : null,
+    priorityTier:
+      firstString(data.priorityTier) || null,
     sourceClientId: data.sourceClientId ?? null,
     sourceDeviceName: data.sourceDeviceName ?? null,
     promptPreview: data.promptPreview ?? null,
@@ -1177,11 +1204,40 @@ function applySharedPromptQueueCount(
 
 function sortSharedPromptQueueItems(queue: SharedPromptQueueState) {
   queue.items.sort((left, right) => {
+    const leftPriority = sharedPromptPriorityRank(left.priorityTier)
+    const rightPriority = sharedPromptPriorityRank(right.priorityTier)
+    if (leftPriority !== rightPriority) return leftPriority - rightPriority
     const leftPosition = left.queuePosition ?? Number.MAX_SAFE_INTEGER
     const rightPosition = right.queuePosition ?? Number.MAX_SAFE_INTEGER
     if (leftPosition !== rightPosition) return leftPosition - rightPosition
     return (left.createdAtMs ?? 0) - (right.createdAtMs ?? 0)
   })
+}
+
+function replaceSharedPromptQueueItems(
+  queue: SharedPromptQueueState,
+  items: TurnQueueEvent[] | null | undefined
+) {
+  const nextItems = (items || [])
+    .map((item) => mapTurnQueueEventToItem(item, firstString(item.queueItemId) || ""))
+    .filter((item) => Boolean(item.queueItemId))
+  queue.items = nextItems
+  sortSharedPromptQueueItems(queue)
+}
+
+function sharedPromptPriorityRank(priorityTier?: string | null) {
+  const priority = String(priorityTier || "").trim().toLowerCase()
+  if (priority === "high") return 0
+  if (priority === "normal" || !priority) return 1
+  if (priority === "low") return 2
+  return 1
+}
+
+function sharedPromptPriorityText(priorityTier?: string | null) {
+  const priority = String(priorityTier || "").trim().toLowerCase()
+  if (priority === "high") return "高优先级"
+  if (priority === "low") return "低优先级"
+  return "普通优先级"
 }
 
 function buildAssistantTurn(

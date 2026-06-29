@@ -131,10 +131,11 @@ where
     while let Some(line) = reader.next_line().await? {
         stdout.push_str(&line);
         stdout.push('\n');
+        let events = normalize_cli_output_line_events(runtime, &connection_id, &line);
+        streamed_event_count += events.len();
         if let Some(sink) = event_sink.as_ref() {
-            for event in normalize_cli_output_line_events(runtime, &connection_id, &line) {
+            for event in events {
                 sink(event);
-                streamed_event_count += 1;
             }
         }
     }

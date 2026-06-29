@@ -1,4 +1,5 @@
 import {
+  canEditSharedPromptQueue,
   buildLiveActivitySignature,
   buildOptimisticText,
   draftSummary,
@@ -12,6 +13,7 @@ import {
   queueStatusText,
   sharedPromptQueueItemPreview,
   sharedPromptQueueItemSource,
+  sharedPromptQueuePriorityLabel,
   sharedPromptQueuePositionLabel,
   sharedPromptQueueSummary,
   sharedPromptQueueTitle,
@@ -108,6 +110,7 @@ describe("detailRuntimePresentation", () => {
         {
           queueItemId: "queue-1",
           queuePosition: 1,
+          priorityTier: "high",
           sourceClientId: "client-phone",
           sourceDeviceName: "Phone",
           promptPreview: "run tests",
@@ -116,6 +119,7 @@ describe("detailRuntimePresentation", () => {
         {
           queueItemId: "queue-2",
           queuePosition: 2,
+          priorityTier: "normal",
           sourceClientId: "client-watch",
           sourceDeviceName: "Watch",
           promptPreview: "",
@@ -132,6 +136,15 @@ describe("detailRuntimePresentation", () => {
     expect(sharedPromptQueueItemSource({ queueItemId: "queue-3" }, "client-phone")).toBe("其他设备")
     expect(sharedPromptQueuePositionLabel(queue.items[0], 0)).toBe("#1")
     expect(sharedPromptQueuePositionLabel({ queueItemId: "queue-3" }, 2)).toBe("#3")
+    expect(sharedPromptQueuePriorityLabel(queue.items[0])).toBe("高优先级")
+    expect(sharedPromptQueuePriorityLabel(queue.items[1])).toBe("普通")
+  })
+
+  it("gates shared queue mutations on Desktop capability metadata", () => {
+    const queue = { count: 1, items: [{ queueItemId: "queue-1" }] }
+    expect(canEditSharedPromptQueue(queue, [])).toBe(false)
+    expect(canEditSharedPromptQueue(queue, ["desktop.queue.reorder"])).toBe(true)
+    expect(canEditSharedPromptQueue(queue, ["desktop.queue.priority"])).toBe(true)
   })
 
   it("detects shared queue cancel disabled state", () => {

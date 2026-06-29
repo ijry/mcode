@@ -10,7 +10,8 @@ use uuid::Uuid;
 use crate::recovery::{OutboundEventQueue, DEFAULT_OUTBOUND_QUEUE_LIMIT};
 use crate::runtime::{
     codex_cli::CodexAppServerSession, CliPendingInteraction, CliRuntimeSession, CliRuntimeStatus,
-    QueuedPromptItem, CAPABILITY_TUNNEL_AVAILABLE,
+    QueuedPromptItem, CAPABILITY_QUEUE_PRIORITY, CAPABILITY_QUEUE_REORDER,
+    CAPABILITY_TUNNEL_AVAILABLE,
 };
 use crate::tunnel::{default_code_service, LocalServiceConfig};
 
@@ -166,7 +167,11 @@ impl Default for AppState {
             upstream_status: RwLock::new(UpstreamStatus::Offline),
             upstream_error: RwLock::new(None),
             pair_offer: RwLock::new(None),
-            capabilities: RwLock::new(vec![CAPABILITY_TUNNEL_AVAILABLE.to_string()]),
+            capabilities: RwLock::new(vec![
+                CAPABILITY_TUNNEL_AVAILABLE.to_string(),
+                CAPABILITY_QUEUE_REORDER.to_string(),
+                CAPABILITY_QUEUE_PRIORITY.to_string(),
+            ]),
             cli_runtimes: RwLock::new(Vec::new()),
             cli_sessions: RwLock::new(Vec::new()),
             cli_processes: Mutex::new(HashMap::new()),

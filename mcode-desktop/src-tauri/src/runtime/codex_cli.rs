@@ -119,6 +119,7 @@ async fn run_codex_exec_prompt(
 
     Ok(json!({
         "runtime": "codex-cli",
+        "protocol": "codex-cli-exec",
         "status": if output.canceled { "canceled" } else { "completed" },
         "canceled": output.canceled,
         "exitCode": output.exit_code,

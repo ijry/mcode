@@ -197,10 +197,18 @@ import TodoPageHeader from "./components/TodoPageHeader.vue"
 import TodoSectionBlock from "./components/TodoSectionBlock.vue"
 import { useAuthStore } from "@/stores/auth"
 import { useAccountStore } from "@/stores/account"
-import { createGateway } from "@/services/gateway"
 import { getDirectToken } from "@/services/gateway/directTokenStore"
 import { toErrorMessage } from "@/services/gateway/error"
-import type { RelaySessionInfo } from "@/services/gateway"
+import {
+  buildConnectionKey,
+  connectionKeyMatches,
+  encodeConnectionContext,
+  isConnectionMarkedConnected,
+  readStoredConnections,
+  resolveConnectionContext,
+  type ConnectionContext,
+} from "@/services/connectionContext"
+import type { CodegGateway } from "@/services/gateway"
 import type { ConnectionInfo } from "@/types/acp"
 import { usePetStore } from "@/stores/pet"
 import { XycloudApiError } from "@/services/xycloudAuth"
@@ -225,15 +233,7 @@ import {
 } from "./todoState"
 
 /* ===== 类型 ===== */
-interface ConnectionItem {
-  name: string
-  mode: "direct" | "relay"
-  url: string
-  directToken?: string
-  pairCode?: string
-  pairSecret?: string
-  relaySession?: RelaySessionInfo
-}
+type ConnectionItem = ConnectionContext
 
 interface Project {
   id: number
@@ -645,61 +645,24 @@ function normalizeList(raw: unknown): any[] {
   return []
 }
 
-function normalizeBaseUrl(url: string): string {
-  return String(url || "").trim().replace(/\/+$/, "")
+function connectionKey(conn: ConnectionItem): string {
+  return buildConnectionKey(conn)
 }
 
-function connectionKey(conn: Pick<ConnectionItem, "mode" | "url">): string {
-  return `${conn.mode}::${normalizeBaseUrl(conn.url)}`
+function findConnectedConnectionByKey(key: string): ConnectionItem | undefined {
+  return getConnectedConnections().find((item) => connectionKeyMatches(item, key))
 }
 
 function getConnectedConnections(): ConnectionItem[] {
-  const savedConnections = normalizeList(uni.getStorageSync("mcode_connections")) as ConnectionItem[]
+  const savedConnections = readStoredConnections()
   const connectedMap = (uni.getStorageSync("mcode_connected_map") || {}) as Record<string, boolean>
-  return savedConnections.filter((conn) => Boolean(connectedMap[connectionKey(conn)]))
+  return savedConnections.filter((conn) => isConnectionMarkedConnected(conn, connectedMap))
 }
 
-async function createConnectionGateway(conn: ConnectionItem) {
-  if (conn.mode === "direct") {
-    if (!conn.directToken) {
-      throw new Error(`${conn.name} 缺少直连令牌`)
-    }
-    const gateway = createGateway({
-      mode: "direct",
-      directBaseUrl: conn.url,
-    })
-    await gateway.pair({
-      directBaseUrl: conn.url,
-      token: conn.directToken,
-    })
-    return gateway
-  }
-
-  if (!conn.relaySession?.accessToken) {
-    if (!conn.pairCode || !conn.pairSecret) {
-      throw new Error(`${conn.name} 缺少中继配对信息`)
-    }
-    const pairGateway = createGateway({
-      mode: "relay",
-      relayUrl: conn.url,
-      session: { accessToken: "" },
-    })
-    const session = await pairGateway.pair({
-      relayUrl: conn.url,
-      code: conn.pairCode,
-      secret: conn.pairSecret,
-    })
-    if (!session) {
-      throw new Error(`${conn.name} 中继会话无效`)
-    }
-    conn.relaySession = session
-  }
-
-  return createGateway({
-    mode: "relay",
-    relayUrl: conn.url,
-    session: conn.relaySession,
-  })
+async function createConnectionGateway(conn: ConnectionItem): Promise<CodegGateway> {
+  const resolved = await resolveConnectionContext(conn)
+  Object.assign(conn, resolved.connection)
+  return resolved.gateway
 }
 
 function syncAuthToConnection(conn: ConnectionItem) {
@@ -831,9 +794,7 @@ async function confirmSend() {
 
   sending.value = true
   try {
-    const targetConn = getConnectedConnections().find(
-      (item) => connectionKey(item) === selectedConnectionKey.value
-    )
+    const targetConn = findConnectedConnectionByKey(selectedConnectionKey.value)
     if (!targetConn) {
       throw new Error("连接不存在或已断开")
     }
@@ -900,8 +861,7 @@ async function confirmSend() {
     showSendDialog.value = false
 
     // 跳转到新会话
-    const connKey = selectedConnectionKey.value
-    const encodedConnKey = connKey ? encodeURIComponent(connKey) : ""
+    const encodedConnKey = encodeConnectionContext(targetConn)
     uni.navigateTo({
       url: `/pages/conversation-detail/index?id=${newConversationId}&folderId=${selectedProjectId.value}${encodedConnKey ? `&connectionKey=${encodedConnKey}` : ""}`,
     })

@@ -40,6 +40,43 @@ export function buildConnectionKey(input: ConnectionContextLike) {
   return normalized ? buildConnectionRecordKey(normalized) : ""
 }
 
+export function buildLegacyRouteKey(mode: GatewayMode, url: string) {
+  const normalizedUrl = normalizeBaseUrl(url)
+  return normalizedUrl ? `${mode}::${normalizedUrl}` : ""
+}
+
+export function buildLegacyConnectionKey(input: ConnectionContextLike) {
+  const normalized = normalizeConnectionContext(input)
+  return normalized ? buildLegacyRouteKey(normalized.mode, normalized.url) : ""
+}
+
+export function buildConnectionKeyCandidates(input: ConnectionContextLike) {
+  const normalized = normalizeConnectionContext(input)
+  if (!normalized) return []
+
+  return Array.from(
+    new Set(
+      [
+        buildConnectionRecordKey(normalized),
+        buildLegacyRouteKey(normalized.mode, normalized.url),
+      ].filter(Boolean)
+    )
+  )
+}
+
+export function connectionKeyMatches(input: ConnectionContextLike, lookupKey: string) {
+  const normalizedLookup = String(lookupKey || "").trim()
+  if (!normalizedLookup) return false
+  return buildConnectionKeyCandidates(input).includes(normalizedLookup)
+}
+
+export function isConnectionMarkedConnected(
+  input: ConnectionContextLike,
+  connectedMap: Record<string, unknown> | null | undefined
+) {
+  return buildConnectionKeyCandidates(input).some((key) => Boolean(connectedMap?.[key]))
+}
+
 export function encodeConnectionContext(connection: ConnectionContextLike) {
   return encodeURIComponent(JSON.stringify(sanitizeConnectionContext(connection)))
 }

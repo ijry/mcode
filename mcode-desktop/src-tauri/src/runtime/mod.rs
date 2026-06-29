@@ -22,6 +22,8 @@ use crate::app_state::{AppState, CliInteractionWaiter, HostedActiveTurn};
 pub const CAPABILITY_CODEX_CLI: &str = "desktop.runtime.codex-cli";
 pub const CAPABILITY_CLAUDE_CLI: &str = "desktop.runtime.claude-cli";
 pub const CAPABILITY_TUNNEL_AVAILABLE: &str = "desktop.tunnel.available";
+pub const CAPABILITY_QUEUE_REORDER: &str = "desktop.queue.reorder";
+pub const CAPABILITY_QUEUE_PRIORITY: &str = "desktop.queue.priority";
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -95,8 +97,34 @@ pub enum CliSessionStatus {
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
+pub enum PromptPriorityTier {
+    Low,
+    Normal,
+    High,
+}
+
+impl Default for PromptPriorityTier {
+    fn default() -> Self {
+        Self::Normal
+    }
+}
+
+impl PromptPriorityTier {
+    fn sort_rank(&self) -> u8 {
+        match self {
+            Self::High => 0,
+            Self::Normal => 1,
+            Self::Low => 2,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CliRuntimeSession {
     pub session_id: String,
+    #[serde(default)]
+    pub target_agent: String,
     pub runtime: CliRuntimeKind,
     pub agent_type: String,
     pub working_dir: String,
@@ -148,6 +176,7 @@ pub struct QueuedPromptItem {
     pub session_id: String,
     pub runtime: CliRuntimeKind,
     pub agent_type: String,
+    pub priority_tier: PromptPriorityTier,
     pub payload: Value,
     pub source_client_id: Option<String>,
     pub source_device_name: Option<String>,
@@ -163,6 +192,8 @@ pub struct PersistentQueuedPrompt {
     pub session_id: String,
     pub runtime: CliRuntimeKind,
     pub agent_type: String,
+    #[serde(default)]
+    pub priority_tier: PromptPriorityTier,
     pub payload: Value,
     pub source_client_id: Option<String>,
     pub source_device_name: Option<String>,
@@ -177,6 +208,7 @@ pub struct QueuedPromptSnapshot {
     pub session_id: String,
     pub runtime: CliRuntimeKind,
     pub agent_type: String,
+    pub priority_tier: PromptPriorityTier,
     pub source_client_id: Option<String>,
     pub source_device_name: Option<String>,
     pub prompt_preview: Option<String>,
@@ -295,6 +327,10 @@ pub async fn dispatch_desktop_proxy_with_event_sink(
         "acp_cancel_all_queued_prompts" => {
             cancel_all_queued_prompts(state, payload, event_sink)
         }
+        "acp_reorder_queued_prompt" => reorder_queued_prompt(state, payload, event_sink),
+        "acp_set_queued_prompt_priority" => {
+            set_queued_prompt_priority(state, payload, event_sink)
+        }
         "acp_get_session_snapshot" | "acp_get_sessions" => get_session_snapshot(state, payload),
         "acp_respond_permission" => respond_permission(state, payload),
         "acp_respond_question" => respond_question(state, payload),
@@ -324,6 +360,10 @@ pub async fn dispatch_desktop_proxy_with_event_sink_arc(
         "acp_cancel_queued_prompt" => cancel_queued_prompt(state.as_ref(), payload, event_sink),
         "acp_cancel_all_queued_prompts" => {
             cancel_all_queued_prompts(state.as_ref(), payload, event_sink)
+        }
+        "acp_reorder_queued_prompt" => reorder_queued_prompt(state.as_ref(), payload, event_sink),
+        "acp_set_queued_prompt_priority" => {
+            set_queued_prompt_priority(state.as_ref(), payload, event_sink)
         }
         _ => {
             dispatch_desktop_proxy_with_event_sink(state.as_ref(), command, payload, event_sink)
@@ -389,6 +429,7 @@ fn connect_cli_session(state: &AppState, payload: Value) -> Result<Value> {
         }
         session.working_dir = working_dir;
         session.status = CliSessionStatus::Connected;
+        session.target_agent = "mcode-desktop".to_string();
         session.updated_at_ms = now;
         session.active_request_id = None;
         session.cancel_requested = false;
@@ -400,6 +441,7 @@ fn connect_cli_session(state: &AppState, payload: Value) -> Result<Value> {
     } else {
         CliRuntimeSession {
             session_id: format!("cli-{}", Uuid::new_v4()),
+            target_agent: "mcode-desktop".to_string(),
             runtime: runtime.clone(),
             agent_type: runtime.agent_type().to_string(),
             working_dir,
@@ -528,6 +570,11 @@ async fn cancel_cli_session(
 }
 
 fn get_session_snapshot(state: &AppState, payload: Value) -> Result<Value> {
+    let capabilities = state
+        .capabilities
+        .read()
+        .map(|value| value.clone())
+        .unwrap_or_default();
     let sessions = state
         .cli_sessions
         .read()
@@ -545,12 +592,14 @@ fn get_session_snapshot(state: &AppState, payload: Value) -> Result<Value> {
             "connectionId": session.session_id,
             "sessionId": session.session_id,
             "session_id": session.session_id,
+            "capabilities": capabilities,
             "session": session,
         }));
     }
 
     Ok(json!({
         "sessions": sessions,
+        "capabilities": capabilities,
     }))
 }
 
@@ -1163,6 +1212,7 @@ fn enqueue_prompt_when_busy(
         session_id: session_id.to_string(),
         runtime: session.runtime.clone(),
         agent_type: session.agent_type.clone(),
+        priority_tier: PromptPriorityTier::default(),
         source_client_id: extract_source_client_id(&payload),
         source_device_name: extract_source_device_name(&payload),
         prompt_preview: extract_prompt_preview(&payload),
@@ -1302,6 +1352,132 @@ fn cancel_all_queued_prompts(
     }))
 }
 
+fn reorder_queued_prompt(
+    state: &AppState,
+    payload: Value,
+    event_sink: Option<CliEventSink>,
+) -> Result<Value> {
+    let session_id = extract_session_id(&payload)
+        .ok_or_else(|| anyhow!("cli session id is required"))?
+        .to_string();
+    let queue_item_id = extract_queue_item_id(&payload)
+        .ok_or_else(|| anyhow!("queueItemId is required"))?
+        .to_string();
+    let action = payload
+        .get("action")
+        .and_then(Value::as_str)
+        .or_else(|| payload.get("direction").and_then(Value::as_str))
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let (snapshot, queue_snapshot) = {
+        let mut queues = state
+            .queued_prompts
+            .lock()
+            .map_err(|_| anyhow!("queued prompt lock poisoned"))?;
+        let queue = queues
+            .get_mut(&session_id)
+            .ok_or_else(|| queue_state_error(&session_id, &queue_item_id))?;
+        let index = queue
+            .iter()
+            .position(|item| item.queue_item_id == queue_item_id)
+            .ok_or_else(|| queue_state_error(&session_id, &queue_item_id))?;
+        let snapshot = move_queued_prompt(queue, index, &action)
+            .ok_or_else(|| queue_state_error(&session_id, &queue_item_id))?
+            ;
+        let queue_snapshot = queued_prompt_snapshots_for_queue(queue);
+        (snapshot, queue_snapshot)
+    };
+    let _ = crate::recovery::save_recovery_snapshot(state);
+    emit_event(
+        &event_sink,
+        turn_queue_reordered_event(&snapshot, &queue_snapshot),
+    );
+    emit_event(
+        &event_sink,
+        turn_queue_updated_event_with_snapshot(&snapshot, &queue_snapshot),
+    );
+    Ok(json!({
+        "status": "reordered",
+        "sessionId": snapshot.session_id,
+        "connectionId": snapshot.session_id,
+        "queueItemId": snapshot.queue_item_id,
+        "queuePosition": snapshot.queue_position,
+        "queueLength": snapshot.queue_length,
+        "priorityTier": snapshot.priority_tier,
+    }))
+}
+
+fn set_queued_prompt_priority(
+    state: &AppState,
+    payload: Value,
+    event_sink: Option<CliEventSink>,
+) -> Result<Value> {
+    let session_id = extract_session_id(&payload)
+        .ok_or_else(|| anyhow!("cli session id is required"))?
+        .to_string();
+    let queue_item_id = extract_queue_item_id(&payload)
+        .ok_or_else(|| anyhow!("queueItemId is required"))?
+        .to_string();
+    let priority_tier = parse_priority_tier(&payload)
+        .ok_or_else(|| queue_state_error(&session_id, &queue_item_id))?;
+    let (snapshot, queue_snapshot) = {
+        let mut queues = state
+            .queued_prompts
+            .lock()
+            .map_err(|_| anyhow!("queued prompt lock poisoned"))?;
+        let queue = queues
+            .get_mut(&session_id)
+            .ok_or_else(|| queue_state_error(&session_id, &queue_item_id))?;
+        let index = queue
+            .iter()
+            .position(|item| item.queue_item_id == queue_item_id)
+            .ok_or_else(|| queue_state_error(&session_id, &queue_item_id))?;
+        let item = queue
+            .get_mut(index)
+            .ok_or_else(|| queue_state_error(&session_id, &queue_item_id))?;
+        if item.priority_tier == priority_tier {
+            let queue_length = queue.len();
+            let index = queue
+                .iter()
+                .position(|queued| queued.queue_item_id == queue_item_id)
+                .ok_or_else(|| queue_state_error(&session_id, &queue_item_id))?;
+            let snapshot = queued_prompt_snapshot(&queue[index], index + 1, queue_length);
+            let queue_snapshot = queued_prompt_snapshots_for_queue(queue);
+            (snapshot, queue_snapshot)
+        } else {
+            item.priority_tier = priority_tier;
+            sort_queued_prompts(queue);
+            let queue_length = queue.len();
+            let index = queue
+                .iter()
+                .position(|queued| queued.queue_item_id == queue_item_id)
+                .ok_or_else(|| queue_state_error(&session_id, &queue_item_id))?;
+            let snapshot = queued_prompt_snapshot(&queue[index], index + 1, queue_length);
+            let queue_snapshot = queued_prompt_snapshots_for_queue(queue);
+            (snapshot, queue_snapshot)
+        }
+    };
+    let _ = crate::recovery::save_recovery_snapshot(state);
+    emit_event(
+        &event_sink,
+        turn_queue_priority_changed_event(&snapshot, &queue_snapshot),
+    );
+    emit_event(
+        &event_sink,
+        turn_queue_updated_event_with_snapshot(&snapshot, &queue_snapshot),
+    );
+    Ok(json!({
+        "status": "updated",
+        "sessionId": snapshot.session_id,
+        "connectionId": snapshot.session_id,
+        "queueItemId": snapshot.queue_item_id,
+        "queuePosition": snapshot.queue_position,
+        "queueLength": snapshot.queue_length,
+        "priorityTier": snapshot.priority_tier,
+    }))
+}
+
 fn queued_prompt_snapshot(
     item: &QueuedPromptItem,
     queue_position: usize,
@@ -1312,6 +1488,7 @@ fn queued_prompt_snapshot(
         session_id: item.session_id.clone(),
         runtime: item.runtime.clone(),
         agent_type: item.agent_type.clone(),
+        priority_tier: item.priority_tier.clone(),
         source_client_id: item.source_client_id.clone(),
         source_device_name: item.source_device_name.clone(),
         prompt_preview: item.prompt_preview.clone(),
@@ -1337,6 +1514,15 @@ pub fn queued_prompt_snapshots(state: &AppState) -> Vec<QueuedPromptSnapshot> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+fn queued_prompt_snapshots_for_queue(queue: &[QueuedPromptItem]) -> Vec<QueuedPromptSnapshot> {
+    let queue_length = queue.len();
+    queue
+        .iter()
+        .enumerate()
+        .map(|(index, item)| queued_prompt_snapshot(item, index + 1, queue_length))
+        .collect()
 }
 
 pub fn persistent_queued_prompts(state: &AppState) -> Vec<PersistentQueuedPrompt> {
@@ -1366,6 +1552,7 @@ pub fn restore_persistent_queued_prompts(
                 session_id: prompt.session_id,
                 runtime: prompt.runtime,
                 agent_type: prompt.agent_type,
+                priority_tier: prompt.priority_tier,
                 payload: prompt.payload,
                 source_client_id: prompt.source_client_id,
                 source_device_name: prompt.source_device_name,
@@ -1385,6 +1572,7 @@ fn persistent_queued_prompt(item: &QueuedPromptItem) -> PersistentQueuedPrompt {
         session_id: item.session_id.clone(),
         runtime: item.runtime.clone(),
         agent_type: item.agent_type.clone(),
+        priority_tier: item.priority_tier.clone(),
         payload: item.payload.clone(),
         source_client_id: item.source_client_id.clone(),
         source_device_name: item.source_device_name.clone(),
@@ -1401,8 +1589,29 @@ fn turn_queue_updated_event(snapshot: &QueuedPromptSnapshot) -> AcpEventEnvelope
     queue_event("turn_queue_updated", snapshot)
 }
 
+fn turn_queue_updated_event_with_snapshot(
+    snapshot: &QueuedPromptSnapshot,
+    queue_snapshot: &[QueuedPromptSnapshot],
+) -> AcpEventEnvelope {
+    queue_event_with_snapshot("turn_queue_updated", snapshot, queue_snapshot)
+}
+
 fn turn_queue_cancelled_event(snapshot: &QueuedPromptSnapshot) -> AcpEventEnvelope {
     queue_event("turn_queue_cancelled", snapshot)
+}
+
+fn turn_queue_reordered_event(
+    snapshot: &QueuedPromptSnapshot,
+    queue_snapshot: &[QueuedPromptSnapshot],
+) -> AcpEventEnvelope {
+    queue_event_with_snapshot("turn_queue_reordered", snapshot, queue_snapshot)
+}
+
+fn turn_queue_priority_changed_event(
+    snapshot: &QueuedPromptSnapshot,
+    queue_snapshot: &[QueuedPromptSnapshot],
+) -> AcpEventEnvelope {
+    queue_event_with_snapshot("turn_queue_priority_changed", snapshot, queue_snapshot)
 }
 
 fn turn_dequeued_event(snapshot: &QueuedPromptSnapshot) -> AcpEventEnvelope {
@@ -1440,6 +1649,7 @@ fn queue_event(event_type: &str, snapshot: &QueuedPromptSnapshot) -> AcpEventEnv
             "queueItemId": snapshot.queue_item_id,
             "queuePosition": snapshot.queue_position,
             "queueLength": snapshot.queue_length,
+            "priorityTier": snapshot.priority_tier,
             "sourceClientId": snapshot.source_client_id,
             "sourceDeviceName": snapshot.source_device_name,
             "promptPreview": snapshot.prompt_preview,
@@ -1448,6 +1658,103 @@ fn queue_event(event_type: &str, snapshot: &QueuedPromptSnapshot) -> AcpEventEnv
             "agentType": snapshot.agent_type,
         }),
     }
+}
+
+fn queue_event_with_snapshot(
+    event_type: &str,
+    snapshot: &QueuedPromptSnapshot,
+    queue_snapshot: &[QueuedPromptSnapshot],
+) -> AcpEventEnvelope {
+    AcpEventEnvelope {
+        event_type: event_type.to_string(),
+        connection_id: snapshot.session_id.clone(),
+        data: json!({
+            "sessionId": snapshot.session_id,
+            "queueItemId": snapshot.queue_item_id,
+            "queuePosition": snapshot.queue_position,
+            "queueLength": snapshot.queue_length,
+            "priorityTier": snapshot.priority_tier,
+            "sourceClientId": snapshot.source_client_id,
+            "sourceDeviceName": snapshot.source_device_name,
+            "promptPreview": snapshot.prompt_preview,
+            "createdAtMs": snapshot.created_at_ms,
+            "runtime": snapshot.runtime.id(),
+            "agentType": snapshot.agent_type,
+            "queueSnapshot": queue_snapshot,
+        }),
+    }
+}
+
+fn queue_state_error(session_id: &str, queue_item_id: &str) -> anyhow::Error {
+    anyhow!(
+        "{}",
+        json!({
+            "code": "invalid_queue_state",
+            "message": "queued prompt is not reorderable",
+            "sessionId": session_id,
+            "queueItemId": queue_item_id,
+            "retryable": true,
+        })
+    )
+}
+
+fn parse_priority_tier(payload: &Value) -> Option<PromptPriorityTier> {
+    let raw = payload
+        .get("priorityTier")
+        .and_then(Value::as_str)
+        .or_else(|| payload.get("priority_tier").and_then(Value::as_str))?
+        .trim()
+        .to_ascii_lowercase();
+    match raw.as_str() {
+        "low" => Some(PromptPriorityTier::Low),
+        "normal" => Some(PromptPriorityTier::Normal),
+        "high" => Some(PromptPriorityTier::High),
+        _ => None,
+    }
+}
+
+fn priority_sort_rank(priority_tier: &PromptPriorityTier) -> u8 {
+    priority_tier.sort_rank()
+}
+
+fn sort_queued_prompts(queue: &mut Vec<QueuedPromptItem>) {
+    queue.sort_by(|left, right| {
+        priority_sort_rank(&left.priority_tier)
+            .cmp(&priority_sort_rank(&right.priority_tier))
+            .then_with(|| left.created_at_ms.cmp(&right.created_at_ms))
+            .then_with(|| left.queue_item_id.cmp(&right.queue_item_id))
+    });
+}
+
+fn move_queued_prompt(
+    queue: &mut Vec<QueuedPromptItem>,
+    index: usize,
+    action: &str,
+) -> Option<QueuedPromptSnapshot> {
+    let queue_length = queue.len();
+    if index >= queue_length {
+        return None;
+    }
+    let target_index = match action {
+        "move_up" => index.checked_sub(1)?,
+        "move_down" => {
+            if index + 1 >= queue_length {
+                return None;
+            }
+            index + 1
+        }
+        "move_top" => 0,
+        "move_bottom" => queue_length.saturating_sub(1),
+        _ => return None,
+    };
+    if target_index == index {
+        let item = queue.get(index)?;
+        return Some(queued_prompt_snapshot(item, index + 1, queue_length));
+    }
+    let item = queue.remove(index);
+    queue.insert(target_index, item);
+    let item = queue.get(target_index)?;
+    Some(queued_prompt_snapshot(item, target_index + 1, queue.len()))
 }
 
 fn turn_busy_error(existing: &HostedActiveTurn) -> anyhow::Error {
@@ -1565,11 +1872,10 @@ fn capture_pending_interactions_from_response(state: &AppState, session_id: &str
     let Some(events) = body.get("events").and_then(Value::as_array) else {
         return;
     };
-    let streamed_event_count = body
-        .get("streamedEventCount")
-        .and_then(Value::as_u64)
-        .unwrap_or(0) as usize;
-    for event in events.iter().skip(streamed_event_count) {
+    // Capture from the full response payload. Live streaming already de-duplicates by id,
+    // so replaying the whole batch here keeps permission/question requests visible even
+    // when streamedEventCount counts every emitted event.
+    for event in events {
         let event_type = event
             .get("type")
             .and_then(Value::as_str)
@@ -1652,6 +1958,7 @@ fn respond_interaction(state: &AppState, payload: Value, kind: &str) -> Result<V
         "value": value,
         "responderClientId": interaction.responder_client_id,
         "liveResolved": live_resolved,
+        "targetAgent": "mcode-desktop",
         "interaction": interaction,
         "events": [event],
         "eventCount": 1,
@@ -2002,6 +2309,8 @@ fn session_response(session: &CliRuntimeSession) -> Value {
         "connectionId": session.session_id,
         "sessionId": session.session_id,
         "session_id": session.session_id,
+        "targetAgent": session.target_agent,
+        "capabilities": session_capabilities(session),
         "runtime": session.runtime.id(),
         "agentType": session.agent_type,
         "workingDir": session.working_dir,
@@ -2011,6 +2320,7 @@ fn session_response(session: &CliRuntimeSession) -> Value {
 }
 
 fn attach_session_to_response(body: Value, session: CliRuntimeSession) -> Value {
+    let capabilities = session_capabilities(&session);
     match body {
         Value::Object(mut object) => {
             object.insert(
@@ -2021,7 +2331,12 @@ fn attach_session_to_response(body: Value, session: CliRuntimeSession) -> Value 
                 "connectionId".to_string(),
                 Value::String(session.session_id.clone()),
             );
-            object.insert("session".to_string(), json!(session));
+            object.insert(
+                "targetAgent".to_string(),
+                Value::String(session.target_agent.clone()),
+            );
+            object.insert("capabilities".to_string(), json!(capabilities));
+            object.insert("session".to_string(), json!(&session));
             Value::Object(object)
         }
         other => json!({
@@ -2029,10 +2344,27 @@ fn attach_session_to_response(body: Value, session: CliRuntimeSession) -> Value 
             "connectionId": session.session_id,
             "sessionId": session.session_id,
             "session_id": session.session_id,
-            "session": session,
+            "targetAgent": session.target_agent,
+            "capabilities": capabilities,
+            "session": &session,
             "result": other,
         }),
     }
+}
+
+fn session_capabilities(session: &CliRuntimeSession) -> Vec<String> {
+    let mut capabilities = vec!["mcode.desktop".to_string()];
+    if session.runtime == CliRuntimeKind::CodexCli {
+        capabilities.push(CAPABILITY_CODEX_CLI.to_string());
+    }
+    if session.runtime == CliRuntimeKind::ClaudeCli {
+        capabilities.push(CAPABILITY_CLAUDE_CLI.to_string());
+    }
+    capabilities.push(CAPABILITY_QUEUE_REORDER.to_string());
+    capabilities.push(CAPABILITY_QUEUE_PRIORITY.to_string());
+    capabilities.sort();
+    capabilities.dedup();
+    capabilities
 }
 
 fn merge_session_into_prompt_payload(payload: Value, session: &CliRuntimeSession) -> Value {

@@ -267,6 +267,143 @@ describe('conversationRuntime ACP error handling', () => {
     expect(session.inputErrorMessage).toBeNull()
   })
 
+  it('rebuilds the shared queue from reorder and priority snapshots', () => {
+    const { store, session } = prepareSession()
+
+    store.handleEvent({
+      type: 'turn_queued',
+      connectionId: 'conn-1',
+      data: {
+        sessionId: 'session-1',
+        queueItemId: 'queue-1',
+        queuePosition: 1,
+        queueLength: 3,
+        priorityTier: 'normal',
+        promptPreview: 'first',
+      },
+    } as any)
+    store.handleEvent({
+      type: 'turn_queued',
+      connectionId: 'conn-1',
+      data: {
+        sessionId: 'session-1',
+        queueItemId: 'queue-2',
+        queuePosition: 2,
+        queueLength: 3,
+        priorityTier: 'normal',
+        promptPreview: 'second',
+      },
+    } as any)
+    store.handleEvent({
+      type: 'turn_queued',
+      connectionId: 'conn-1',
+      data: {
+        sessionId: 'session-1',
+        queueItemId: 'queue-3',
+        queuePosition: 3,
+        queueLength: 3,
+        priorityTier: 'normal',
+        promptPreview: 'third',
+      },
+    } as any)
+
+    store.handleEvent({
+      type: 'turn_queue_reordered',
+      connectionId: 'conn-1',
+      data: {
+        sessionId: 'session-1',
+        queueItemId: 'queue-3',
+        queuePosition: 1,
+        queueLength: 3,
+        priorityTier: 'normal',
+        queueSnapshot: [
+          {
+            sessionId: 'session-1',
+            queueItemId: 'queue-3',
+            queuePosition: 1,
+            queueLength: 3,
+            priorityTier: 'normal',
+            promptPreview: 'third',
+            createdAtMs: 3,
+          },
+          {
+            sessionId: 'session-1',
+            queueItemId: 'queue-1',
+            queuePosition: 2,
+            queueLength: 3,
+            priorityTier: 'normal',
+            promptPreview: 'first',
+            createdAtMs: 1,
+          },
+          {
+            sessionId: 'session-1',
+            queueItemId: 'queue-2',
+            queuePosition: 3,
+            queueLength: 3,
+            priorityTier: 'normal',
+            promptPreview: 'second',
+            createdAtMs: 2,
+          },
+        ],
+      },
+    } as any)
+
+    expect(session.sharedPromptQueue.items.map((item) => item.queueItemId)).toEqual([
+      'queue-3',
+      'queue-1',
+      'queue-2',
+    ])
+
+    store.handleEvent({
+      type: 'turn_queue_priority_changed',
+      connectionId: 'conn-1',
+      data: {
+        sessionId: 'session-1',
+        queueItemId: 'queue-2',
+        queuePosition: 1,
+        queueLength: 3,
+        priorityTier: 'high',
+        queueSnapshot: [
+          {
+            sessionId: 'session-1',
+            queueItemId: 'queue-2',
+            queuePosition: 1,
+            queueLength: 3,
+            priorityTier: 'high',
+            promptPreview: 'second',
+            createdAtMs: 2,
+          },
+          {
+            sessionId: 'session-1',
+            queueItemId: 'queue-3',
+            queuePosition: 2,
+            queueLength: 3,
+            priorityTier: 'normal',
+            promptPreview: 'third',
+            createdAtMs: 3,
+          },
+          {
+            sessionId: 'session-1',
+            queueItemId: 'queue-1',
+            queuePosition: 3,
+            queueLength: 3,
+            priorityTier: 'normal',
+            promptPreview: 'first',
+            createdAtMs: 1,
+          },
+        ],
+      },
+    } as any)
+
+    expect(session.sharedPromptQueue.items.map((item) => item.queueItemId)).toEqual([
+      'queue-2',
+      'queue-3',
+      'queue-1',
+    ])
+    expect(session.sharedPromptQueue.items[0].priorityTier).toBe('high')
+    expect(session.sharedPromptQueue.count).toBe(3)
+  })
+
   it('does not reinsert cancelled queue items from queue update events', () => {
     const { store, session } = prepareSession()
 

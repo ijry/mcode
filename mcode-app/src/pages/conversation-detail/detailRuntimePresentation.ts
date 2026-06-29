@@ -71,6 +71,7 @@ export interface SharedPromptQueueViewItem {
   queueItemId?: string | null
   sessionId?: string | null
   queuePosition?: number | null
+  priorityTier?: string | null
   sourceClientId?: string | null
   sourceDeviceName?: string | null
   promptPreview?: string | null
@@ -132,6 +133,24 @@ export function sharedPromptQueuePositionLabel(
     return `#${Math.trunc(position)}`
   }
   return `#${Math.max(1, Math.trunc(fallbackIndex) + 1)}`
+}
+
+export function sharedPromptQueuePriorityLabel(
+  item: SharedPromptQueueViewItem | null | undefined
+) {
+  const priority = String(item?.priorityTier || "").trim().toLowerCase()
+  if (priority === "high") return "高优先级"
+  if (priority === "low") return "低优先级"
+  return "普通"
+}
+
+export function canEditSharedPromptQueue(
+  queue: SharedPromptQueueViewState | null | undefined,
+  capabilities: string[] | null | undefined
+) {
+  if (!hasSharedPromptQueue(queue)) return false
+  const enabledCapabilities = new Set((capabilities || []).map((item) => String(item || "").trim()))
+  return enabledCapabilities.has("desktop.queue.reorder") || enabledCapabilities.has("desktop.queue.priority")
 }
 
 export function isSharedPromptQueueCancelDisabled(

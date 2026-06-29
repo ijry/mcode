@@ -201,6 +201,34 @@ class AcpApiClient {
     })
   }
 
+  async acpReorderQueuedPrompt(
+    connectionId: string,
+    queueItemId: string,
+    action: "move_up" | "move_down" | "move_top" | "move_bottom",
+    sessionId?: string | null
+  ): Promise<any> {
+    return await this.request("/acp_reorder_queued_prompt", {
+      connectionId,
+      sessionId: sessionId || connectionId,
+      queueItemId,
+      action,
+    })
+  }
+
+  async acpSetQueuedPromptPriority(
+    connectionId: string,
+    queueItemId: string,
+    priorityTier: "low" | "normal" | "high",
+    sessionId?: string | null
+  ): Promise<any> {
+    return await this.request("/acp_set_queued_prompt_priority", {
+      connectionId,
+      sessionId: sessionId || connectionId,
+      queueItemId,
+      priorityTier,
+    })
+  }
+
   /**
    * 响应权限请求
    */

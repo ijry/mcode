@@ -84,6 +84,7 @@ export interface ConnectionInfo {
   modes?: ModeInfo[]
   currentMode?: string
   workingDir?: string
+  capabilities?: string[]
 }
 
 export interface ModeInfo {
@@ -156,6 +157,8 @@ export interface EventEnvelope {
     | "turn_cancel_failed"
     | "turn_queued"
     | "turn_queue_updated"
+    | "turn_queue_reordered"
+    | "turn_queue_priority_changed"
     | "turn_dequeued"
     | "turn_started"
     | "turn_queue_cancelled"
@@ -275,6 +278,7 @@ export interface TurnQueueEvent {
   queueItemId?: string | null
   queuePosition?: number | null
   queueLength?: number | null
+  priorityTier?: string | null
   sourceClientId?: string | null
   sourceDeviceName?: string | null
   promptPreview?: string | null
@@ -283,6 +287,7 @@ export interface TurnQueueEvent {
   message?: string | null
   runtime?: string | null
   agentType?: string | null
+  queueSnapshot?: TurnQueueEvent[] | null
 }
 
 export interface UsageUpdateEvent {

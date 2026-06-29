@@ -1,4 +1,10 @@
-import { applyPairMetadata, persistResolvedConnection } from "@/services/connectionContext"
+import {
+  applyPairMetadata,
+  buildConnectionKeyCandidates,
+  connectionKeyMatches,
+  isConnectionMarkedConnected,
+  persistResolvedConnection,
+} from "@/services/connectionContext"
 import { buildConnectionRecordKey } from "@/services/connectionSchema"
 
 describe("connectionContext", () => {
@@ -122,5 +128,32 @@ describe("connectionContext", () => {
         protocolVersion: "1",
       },
     })
+  })
+
+  it("matches v2 and legacy route keys for connected-map compatibility", () => {
+    const connection = {
+      version: 2 as const,
+      name: "OpenCode Gateway",
+      targetAgent: "opencode" as const,
+      routeMode: "gateway" as const,
+      gatewayProvider: "custom" as const,
+      gatewayBaseUrl: "https://relay.example.com/",
+      gatewaySession: {
+        accessToken: "access-token",
+      },
+    }
+
+    expect(buildConnectionKeyCandidates(connection)).toEqual([
+      "opencode::gateway::https://relay.example.com",
+      "relay::https://relay.example.com",
+    ])
+    expect(connectionKeyMatches(connection, "opencode::gateway::https://relay.example.com")).toBe(true)
+    expect(connectionKeyMatches(connection, "relay::https://relay.example.com")).toBe(true)
+    expect(isConnectionMarkedConnected(connection, {
+      "relay::https://relay.example.com": true,
+    })).toBe(true)
+    expect(isConnectionMarkedConnected(connection, {
+      "opencode::gateway::https://relay.example.com": true,
+    })).toBe(true)
   })
 })

@@ -507,6 +507,44 @@
               <view class="shared-queue-item__meta">
                 <text>{{ sharedPromptQueueItemSource(item, localRelayClientId) }}</text>
                 <text v-if="item.createdAtMs">{{ formatQueueTime(item.createdAtMs) }}</text>
+                <text class="shared-queue-item__priority">{{ sharedPromptQueuePriorityLabel(item) }}</text>
+              </view>
+            </view>
+            <view v-if="session?.connectionId && item.queueItemId && sharedPromptQueueControlsEnabled" class="shared-queue-item__controls">
+              <view
+                class="shared-queue-op shared-queue-op--compact"
+                :class="{ 'shared-queue-op--disabled': (item.queuePosition ?? 1) <= 1 || reorderingSharedQueueItemIds.has(item.queueItemId) }"
+                @click.stop="reorderSharedPromptQueueItem(item.queueItemId, item.sessionId, 'move_up')"
+              >
+                上移
+              </view>
+              <view
+                class="shared-queue-op shared-queue-op--compact"
+                :class="{ 'shared-queue-op--disabled': (item.queuePosition ?? 1) >= sharedPromptQueueItems.length || reorderingSharedQueueItemIds.has(item.queueItemId) }"
+                @click.stop="reorderSharedPromptQueueItem(item.queueItemId, item.sessionId, 'move_down')"
+              >
+                下移
+              </view>
+              <view
+                class="shared-queue-op shared-queue-op--compact"
+                :class="{ 'shared-queue-op--disabled': updatingSharedQueuePriorityItemIds.has(item.queueItemId) || item.priorityTier === 'high' }"
+                @click.stop="updateSharedPromptQueuePriority(item.queueItemId, item.sessionId, 'high')"
+              >
+                高
+              </view>
+              <view
+                class="shared-queue-op shared-queue-op--compact"
+                :class="{ 'shared-queue-op--disabled': updatingSharedQueuePriorityItemIds.has(item.queueItemId) || item.priorityTier === 'normal' }"
+                @click.stop="updateSharedPromptQueuePriority(item.queueItemId, item.sessionId, 'normal')"
+              >
+                中
+              </view>
+              <view
+                class="shared-queue-op shared-queue-op--compact"
+                :class="{ 'shared-queue-op--disabled': updatingSharedQueuePriorityItemIds.has(item.queueItemId) || item.priorityTier === 'low' }"
+                @click.stop="updateSharedPromptQueuePriority(item.queueItemId, item.sessionId, 'low')"
+              >
+                低
               </view>
             </view>
             <view
@@ -898,6 +936,7 @@ import {
 } from "./detailPlanPresentation"
 import {
   buildLiveActivitySignature,
+  canEditSharedPromptQueue,
   draftSummary,
   formatQueueTime,
   formatTokenCountK,
@@ -909,6 +948,7 @@ import {
   queueStatusText,
   sharedPromptQueueItemPreview,
   sharedPromptQueueItemSource,
+  sharedPromptQueuePriorityLabel,
   sharedPromptQueuePositionLabel,
   sharedPromptQueueSummary,
   sharedPromptQueueTitle,
@@ -1078,6 +1118,8 @@ const draftQueue = ref<QueuedDraft[]>([])
 const queueExpanded = ref(false)
 const sharedPromptQueueExpanded = ref(false)
 const cancellingSharedQueueItemIds = ref<Set<string>>(new Set())
+const reorderingSharedQueueItemIds = ref<Set<string>>(new Set())
+const updatingSharedQueuePriorityItemIds = ref<Set<string>>(new Set())
 const clearingSharedPromptQueue = ref(false)
 const uploadingCount = ref(0)
 const showPlanDrawer = ref(false)
@@ -1152,6 +1194,10 @@ const managedConversation = computed(() => {
   if (!conversationId.value) return null
   return runtime.getManagedConversation(conversationId.value)
 })
+const sharedPromptQueueCapabilities = computed(() => managedConversation.value?.connection.capabilities || [])
+const sharedPromptQueueControlsEnabled = computed(() =>
+  canEditSharedPromptQueue(sharedPromptQueue.value, sharedPromptQueueCapabilities.value)
+)
 const messageListPageStyle = computed(() => {
   return buildMessageListPageStyle({
     viewportHeight: viewportHeight.value,
@@ -3276,6 +3322,30 @@ function setSharedQueueItemCancelling(queueItemId: string, cancelling: boolean) 
   cancellingSharedQueueItemIds.value = next
 }
 
+function setSharedQueueItemReordering(queueItemId: string, reordering: boolean) {
+  const normalized = String(queueItemId || "").trim()
+  if (!normalized) return
+  const next = new Set(reorderingSharedQueueItemIds.value)
+  if (reordering) {
+    next.add(normalized)
+  } else {
+    next.delete(normalized)
+  }
+  reorderingSharedQueueItemIds.value = next
+}
+
+function setSharedQueueItemPriorityUpdating(queueItemId: string, updating: boolean) {
+  const normalized = String(queueItemId || "").trim()
+  if (!normalized) return
+  const next = new Set(updatingSharedQueuePriorityItemIds.value)
+  if (updating) {
+    next.add(normalized)
+  } else {
+    next.delete(normalized)
+  }
+  updatingSharedQueuePriorityItemIds.value = next
+}
+
 async function cancelSharedPromptQueueItem(queueItemId?: string | null, sessionId?: string | null) {
   const normalizedQueueItemId = String(queueItemId || "").trim()
   const connectionId = firstString(session.value?.connectionId)
@@ -3300,6 +3370,64 @@ async function cancelSharedPromptQueueItem(queueItemId?: string | null, sessionI
     })
   } finally {
     setSharedQueueItemCancelling(normalizedQueueItemId, false)
+  }
+}
+
+async function reorderSharedPromptQueueItem(
+  queueItemId?: string | null,
+  sessionId?: string | null,
+  action: "move_up" | "move_down" | "move_top" | "move_bottom" = "move_up"
+) {
+  const normalizedQueueItemId = String(queueItemId || "").trim()
+  const connectionId = firstString(session.value?.connectionId)
+  if (!connectionId || !normalizedQueueItemId || !sharedPromptQueueControlsEnabled.value) return
+  if (reorderingSharedQueueItemIds.value.has(normalizedQueueItemId)) return
+
+  setSharedQueueItemReordering(normalizedQueueItemId, true)
+  try {
+    await acpApi.acpReorderQueuedPrompt(
+      connectionId,
+      normalizedQueueItemId,
+      action,
+      firstString(sessionId) || connectionId
+    )
+  } catch (error) {
+    uni.showToast({
+      title: "调整队列顺序失败，请稍后重试",
+      icon: "none",
+      duration: 3000,
+    })
+  } finally {
+    setSharedQueueItemReordering(normalizedQueueItemId, false)
+  }
+}
+
+async function updateSharedPromptQueuePriority(
+  queueItemId?: string | null,
+  sessionId?: string | null,
+  priorityTier: "low" | "normal" | "high" = "normal"
+) {
+  const normalizedQueueItemId = String(queueItemId || "").trim()
+  const connectionId = firstString(session.value?.connectionId)
+  if (!connectionId || !normalizedQueueItemId || !sharedPromptQueueControlsEnabled.value) return
+  if (updatingSharedQueuePriorityItemIds.value.has(normalizedQueueItemId)) return
+
+  setSharedQueueItemPriorityUpdating(normalizedQueueItemId, true)
+  try {
+    await acpApi.acpSetQueuedPromptPriority(
+      connectionId,
+      normalizedQueueItemId,
+      priorityTier,
+      firstString(sessionId) || connectionId
+    )
+  } catch (error) {
+    uni.showToast({
+      title: "更新队列优先级失败，请稍后重试",
+      icon: "none",
+      duration: 3000,
+    })
+  } finally {
+    setSharedQueueItemPriorityUpdating(normalizedQueueItemId, false)
   }
 }
 

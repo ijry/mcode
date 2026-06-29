@@ -81,7 +81,7 @@
               <view class="group-section__cards">
                 <view v-if="group.cards.length === 0" class="group-empty">
                   <text class="group-empty__text">
-                    {{ group.loadError ? "该连接加载失败" : "暂无打开中的标签会话" }}
+                    {{ group.loadError || "暂无打开中的标签会话" }}
                   </text>
                 </view>
 
@@ -470,9 +470,22 @@ import { onPullDownRefresh, onShow, onUnload } from "@dcloudio/uni-app"
 import { useAuthStore } from "@/stores/auth"
 import { useConversationRuntimeStore } from "@/stores/conversationRuntime"
 import { acpApi } from "@/api/acp"
-import { createGateway } from "@/services/gateway"
 import { getDirectToken } from "@/services/gateway/directTokenStore"
 import { toErrorMessage } from "@/services/gateway/error"
+import {
+  getConversationOverviewConnections,
+  hasConversationOverviewConnections,
+} from "./overviewState"
+import {
+  buildConnectionKey,
+  buildLegacyRouteKey,
+  connectionKeyMatches,
+  encodeConnectionContext,
+  isConnectionMarkedConnected,
+  readStoredConnections,
+  resolveConnectionContext,
+  type ConnectionContext,
+} from "@/services/connectionContext"
 import { ensureConversationSchema } from "@/services/db/migrations"
 import {
   buildAgentConfigContextKey,
@@ -519,7 +532,7 @@ import {
   upsertConversationSummaries,
 } from "@/services/db/repositories/conversationRepository"
 import { getRegisteredRemoteInstanceDescriptor } from "@/services/realtime/remoteInstanceRegistry"
-import type { RelaySessionInfo } from "@/services/gateway"
+import type { CodegGateway } from "@/services/gateway"
 import type {
   AgentOptionsSnapshot,
   AcpAgentInfo,
@@ -558,6 +571,7 @@ const historyLoadPromiseMap = new Map<string, Promise<void>>()
 const overviewRefreshPromiseMap = new Map<string, Promise<void>>()
 const connectionFolderSnapshotMap = new Map<string, Project[]>()
 const connectionTabSnapshotMap = new Map<string, OpenedTabItem[]>()
+const instanceConnectionKeyMap = new Map<string, string>()
 const loadingCreateAgents = ref(false)
 const createAgentListError = ref("")
 let createAgentProbeToken = 0
@@ -617,16 +631,7 @@ const CREATE_PROGRESS_STAGES = [
 
 type Project = ConversationOverviewProject
 type Conversation = ConversationOverviewConversation
-
-interface ConnectionItem {
-  name: string
-  mode: "direct" | "relay"
-  url: string
-  directToken?: string
-  pairCode?: string
-  pairSecret?: string
-  relaySession?: RelaySessionInfo
-}
+type ConnectionItem = ConnectionContext
 
 type OpenedTabItem = ConversationOverviewOpenedTab
 
@@ -1035,9 +1040,7 @@ function normalizeCreateAgentOptions(raw: unknown): CreateAgentOption[] {
 
 async function loadCreateAgents() {
   if (!showCreateDialog.value || !selectedConnectionKey.value) return
-  const targetConn = getConnectedConnections().find(
-    (item) => connectionKey(item) === selectedConnectionKey.value
-  )
+  const targetConn = findConnectedConnectionByKey(selectedConnectionKey.value)
   if (!targetConn) {
     createAgentOptions.value = []
     createAgentListError.value = "连接不可用，无法读取智能体"
@@ -1093,9 +1096,7 @@ async function loadCreateAgentConfig() {
     return
   }
 
-  const targetConn = getConnectedConnections().find(
-    (item) => connectionKey(item) === selectedConnectionKey.value
-  )
+  const targetConn = findConnectedConnectionByKey(selectedConnectionKey.value)
   if (!targetConn) {
     resetCreateAgentConfig("连接不可用，将使用远端默认配置")
     return
@@ -1165,9 +1166,9 @@ const conversationActions = [
 ]
 
 const hasActiveConnection = computed(() => {
-  if (connectionGroups.value.length > 0) return true
+  if (hasConversationOverviewConnections()) return true
   if (loading.value) return true
-  return getConnectedConnections().length > 0
+  return false
 })
 
 onMounted(() => {
@@ -1227,9 +1228,19 @@ async function loadOverviewData(options?: { force?: boolean }) {
 async function loadOverviewDataInternal() {
   loading.value = true
   try {
-    const connected = getConnectedConnections()
+    const savedConnections = getConversationOverviewConnections()
+    if (!savedConnections.length) {
+      connectionGroups.value = []
+      showHistoryPanel.value = false
+      projects.value = []
+      return
+    }
+    const connectedMap = (uni.getStorageSync("mcode_connected_map") || {}) as Record<string, boolean>
     const groups = await Promise.all(
-      connected.map(async (conn) => {
+      savedConnections.map(async (conn) => {
+        if (!isConnectionMarkedConnected(conn, connectedMap)) {
+          return buildConnectionErrorGroup(conn, "连接离线")
+        }
         try {
           return await loadConnectionGroup(conn)
         } catch (error) {
@@ -1271,9 +1282,9 @@ async function loadOverviewDataInternal() {
 }
 
 function getConnectedConnections(): ConnectionItem[] {
-  const savedConnections = normalizeList(uni.getStorageSync("mcode_connections")) as ConnectionItem[]
+  const savedConnections = readStoredConnections()
   const connectedMap = (uni.getStorageSync("mcode_connected_map") || {}) as Record<string, boolean>
-  return savedConnections.filter((conn) => Boolean(connectedMap[connectionKey(conn)]))
+  return savedConnections.filter((conn) => isConnectionMarkedConnected(conn, connectedMap))
 }
 
 async function loadConnectionGroup(conn: ConnectionItem): Promise<ConnectionGroup> {
@@ -1288,7 +1299,7 @@ async function loadConnectionGroup(conn: ConnectionItem): Promise<ConnectionGrou
   const tabsRaw = await gateway.call<unknown>("list_opened_tabs")
   const tabsSnapshot = normalizeOpenedTabsResponse(descriptor.instanceKey, tabsRaw)
   const tabs = tabsSnapshot.items
-  rememberConnectionRemoteState(connectionKey(conn), folders, tabs)
+  rememberConnectionRemoteState(connectionKey(conn), descriptor.instanceKey, folders, tabs)
   const localConversations = (await loadLocalConversationSummaries(
     descriptor.instanceKey,
     folders
@@ -1344,7 +1355,7 @@ function buildConnectionErrorGroup(
 }
 
 async function fetchRemoteConversations(
-  gateway: Awaited<ReturnType<typeof createConnectionGateway>>,
+  gateway: CodegGateway,
   folders: Project[]
 ): Promise<Conversation[]> {
   if (folders.length === 0) return []
@@ -1401,7 +1412,7 @@ async function refreshConnectionGroupFromRemote(conn: ConnectionItem, current: C
   const tabsRaw = await gateway.call<unknown>("list_opened_tabs")
   const tabsSnapshot = normalizeOpenedTabsResponse(descriptor.instanceKey, tabsRaw)
   const tabs = tabsSnapshot.items
-  rememberConnectionRemoteState(connectionKey(conn), folders, tabs)
+  rememberConnectionRemoteState(connectionKey(conn), descriptor.instanceKey, folders, tabs)
   const nextGroup = await loadRemoteConnectionSnapshot(conn, folders, tabs)
   replaceConnectionGroup(nextGroup)
 }
@@ -1413,13 +1424,12 @@ async function refreshConnectionGroupFromLocalCache(instanceKey: string) {
     return
   }
 
-  const connKey = connectionKey({
-    mode: descriptor.mode,
-    url: descriptor.baseUrl,
-  })
-  const conn = getConnectedConnections().find((item) => connectionKey(item) === connKey)
+  const mappedConnKey = instanceConnectionKeyMap.get(instanceKey) || ""
+  const legacyConnKey = buildLegacyRouteKey(descriptor.mode, descriptor.baseUrl)
+  const conn = findConnectedConnectionByKey(mappedConnKey || legacyConnKey)
   if (!conn) return
 
+  const connKey = connectionKey(conn)
   const folders = connectionFolderSnapshotMap.get(connKey)
   const tabs = connectionTabSnapshotMap.get(connKey)
   if (!folders || !tabs) {
@@ -1440,7 +1450,7 @@ async function refreshConnectionGroupFromLocalCache(instanceKey: string) {
 
 async function scheduleOverviewConversationRefresh(input: {
   conn: ConnectionItem
-  gateway: Awaited<ReturnType<typeof createConnectionGateway>>
+  gateway: CodegGateway
   instanceKey: string
   folders: Project[]
   tabs: OpenedTabItem[]
@@ -1517,9 +1527,13 @@ function buildConnectionGroupSnapshot(input: {
 
 function rememberConnectionRemoteState(
   key: string,
+  instanceKey: string,
   folders: Project[],
   tabs: OpenedTabItem[]
 ) {
+  if (instanceKey) {
+    instanceConnectionKeyMap.set(instanceKey, key)
+  }
   connectionFolderSnapshotMap.set(key, folders)
   connectionTabSnapshotMap.set(key, tabs)
 }
@@ -1547,7 +1561,7 @@ function replaceConnectionGroup(nextGroup: ConnectionGroup) {
 }
 
 async function seedCreatedConversationSummary(input: {
-  gateway: Awaited<ReturnType<typeof createConnectionGateway>>
+  gateway: CodegGateway
   instanceKey: string
   conversationId: number
   folderId: number
@@ -1665,12 +1679,12 @@ function normalizeOpenedTabsChangedPayload(instanceKey: string, payload: unknown
   }
 }
 
-function normalizeBaseUrl(url: string): string {
-  return String(url || "").trim().replace(/\/+$/, "")
+function connectionKey(conn: ConnectionItem): string {
+  return buildConnectionKey(conn)
 }
 
-function connectionKey(conn: Pick<ConnectionItem, "mode" | "url">): string {
-  return `${conn.mode}::${normalizeBaseUrl(conn.url)}`
+function findConnectedConnectionByKey(key: string): ConnectionItem | undefined {
+  return getConnectedConnections().find((item) => connectionKeyMatches(item, key))
 }
 
 function normalizeAgentType(value?: string): string {
@@ -1769,59 +1783,10 @@ function agentLogoPath(agentType: string): string {
   return ""
 }
 
-async function createConnectionGateway(conn: ConnectionItem) {
-  if (conn.mode === "direct") {
-    if (!conn.directToken) {
-      throw new Error(`${conn.name} 缺少直连令牌`)
-    }
-    const gateway = createGateway({
-      mode: "direct",
-      directBaseUrl: conn.url,
-    })
-    await gateway.pair({
-      directBaseUrl: conn.url,
-      token: conn.directToken,
-    })
-    return gateway
-  }
-
-  if (!conn.relaySession?.accessToken) {
-    if (!conn.pairCode || !conn.pairSecret) {
-      throw new Error(`${conn.name} 缺少中继配对信息`)
-    }
-    const pairGateway = createGateway({
-      mode: "relay",
-      relayUrl: conn.url,
-      session: { accessToken: "" },
-    })
-    const session = await pairGateway.pair({
-      relayUrl: conn.url,
-      code: conn.pairCode,
-      secret: conn.pairSecret,
-    })
-    if (!session) {
-      throw new Error(`${conn.name} 中继会话无效`)
-    }
-    conn.relaySession = session
-    persistConnectionSession(conn)
-  }
-
-  return createGateway({
-    mode: "relay",
-    relayUrl: conn.url,
-    session: conn.relaySession,
-  })
-}
-
-function persistConnectionSession(conn: ConnectionItem) {
-  const savedConnections = normalizeList(uni.getStorageSync("mcode_connections")) as ConnectionItem[]
-  const idx = savedConnections.findIndex(
-    (item) => item.mode === conn.mode && normalizeBaseUrl(item.url) === normalizeBaseUrl(conn.url)
-  )
-  if (idx >= 0) {
-    savedConnections[idx] = { ...savedConnections[idx], relaySession: conn.relaySession }
-    uni.setStorageSync("mcode_connections", savedConnections)
-  }
+async function createConnectionGateway(conn: ConnectionItem): Promise<CodegGateway> {
+  const resolved = await resolveConnectionContext(conn)
+  Object.assign(conn, resolved.connection)
+  return resolved.gateway
 }
 
 function applySelectedConnection(connectionKeyValue: string) {
@@ -1930,7 +1895,7 @@ async function ensureHistoryProjectsLoaded(group: ConnectionGroup) {
   const task = (async () => {
     historyLoading.value = true
     try {
-      const conn = getConnectedConnections().find((item) => connectionKey(item) === key)
+      const conn = findConnectedConnectionByKey(key)
       if (!conn) return
       await refreshConnectionGroupFromRemote(conn, group)
     } catch (error) {
@@ -1962,15 +1927,20 @@ function openLiveSession(card: LiveSessionCard, groupKey?: string) {
 
 function syncAuthToConnectionKey(connKey?: string) {
   if (!connKey) return
-  const conn = getConnectedConnections().find((item) => connectionKey(item) === connKey)
+  const conn = findConnectedConnectionByKey(connKey)
   if (conn) {
     syncAuthToConnection(conn)
   }
 }
 
 function openConversation(conv: Conversation, connKey?: string) {
-  syncAuthToConnectionKey(connKey)
-  const encodedConnKey = connKey ? encodeURIComponent(connKey) : ""
+  const conn = connKey ? findConnectedConnectionByKey(connKey) : undefined
+  if (conn) {
+    syncAuthToConnection(conn)
+  } else {
+    syncAuthToConnectionKey(connKey)
+  }
+  const encodedConnKey = conn ? encodeConnectionContext(conn) : connKey ? encodeURIComponent(connKey) : ""
   uni.navigateTo({
     url: `/pages/conversation-detail/index?id=${conv.id}&folderId=${conv.folder_id || 0}${encodedConnKey ? `&connectionKey=${encodedConnKey}` : ""}`,
   })
@@ -2038,7 +2008,7 @@ function selectAgent(agentType: string) {
 }
 
 async function applyCreateAgentConfig(
-  gateway: Awaited<ReturnType<typeof createConnectionGateway>>,
+  gateway: CodegGateway,
   connectionId: string,
   configOptions: SessionConfigOptionInfo[],
   selectedValues: Record<string, string>
@@ -2060,7 +2030,7 @@ function resolveConnectedSessionId(connection: ConnectionInfo | null | undefined
 }
 
 async function shouldSkipCreatePromptReplay(
-  gateway: Awaited<ReturnType<typeof createConnectionGateway>>,
+  gateway: CodegGateway,
   conversationId: number
 ) {
   if (!activeCreateRequestId) return false
@@ -2133,9 +2103,7 @@ async function confirmCreate() {
     persistCurrentCreateAgentConfigSelection()
     showCreateDialog.value = false
     showCreateConfigDialog.value = false
-    const targetConn = getConnectedConnections().find(
-      (item) => connectionKey(item) === selectedConnectionKey.value
-    )
+    const targetConn = findConnectedConnectionByKey(selectedConnectionKey.value)
     if (!targetConn) {
       throw new Error("连接不存在或已断开")
     }

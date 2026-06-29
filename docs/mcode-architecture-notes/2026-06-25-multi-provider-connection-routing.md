@@ -1320,3 +1320,69 @@ P27 first slice status:
 - Implemented app API wrapper and conversation-detail `清空` action.
 - Not implemented: queue reorder, priority scheduling, or hard ownership
   restriction enforcement.
+
+## P28 Official CLI Completion Behavior
+
+P28 completes the Desktop-hosted official CLI session model for Codex and
+Claude. The important boundary is unchanged: the app and relay still only see
+ACP-style session/turn/interaction events, while `mcode-desktop` owns the local
+process lifecycle, credentials, diagnostics, and recovery state.
+
+Implemented Desktop behavior:
+
+- Codex and Claude official CLI sessions now share the same Desktop session
+  shape under `targetAgent = mcode-desktop`.
+- `runtime` / `protocol` remain provider diagnostics only. They identify the
+  local adapter path such as `codex-cli-exec` or `claude-cli-stdio`, but they
+  do not change the connection model seen by the app.
+- Streaming output is normalized into ordered ACP-style `stream_batch` events
+  with stable `eventCount` / `streamedEventCount` accounting.
+- Permission and question requests are captured as pending interactions,
+  resolved through the shared `acp_respond_permission` and
+  `acp_respond_question` paths, and mirrored into health snapshots.
+- `acp_cancel` cancels the active official CLI process through the shared host
+  contract.
+- If Desktop restarts while a CLI session is running, the restored session is
+  marked `interrupted`, not resumable.
+- Session diagnostics surface `exitCode`, `stderrPreview`, `lastEventAtMs`,
+  active turn metadata, and provider-specific protocol details for debugging.
+
+Native iOS/Android replication guidance:
+
+- Keep the same session model and event names; do not expose Codex/Claude as
+  separate mobile target agents.
+- Treat `targetAgent = mcode-desktop` as the stable host identity and use
+  `runtime` / `protocol` only as adapter diagnostics.
+- Preserve interrupted official CLI sessions as terminal state that requires a
+  new prompt rather than a resume.
+- Mirror the same interaction and cancel semantics so multiple clients can
+  observe and resolve a Desktop-hosted turn without taking ownership of the
+  provider process.
+
+## P29 Shared Queue Priority And Reorder Behavior
+
+P29 extends the Desktop-hosted shared prompt queue with reorder and priority
+controls.
+
+Implemented Desktop behavior:
+
+- Desktop exposes queue mutation capability metadata in connect/session health
+  responses so the app can hide unsupported controls.
+- `acp_reorder_queued_prompt` supports `move_up`, `move_down`, `move_top`, and
+  `move_bottom` for queued items.
+- `acp_set_queued_prompt_priority` supports `low`, `normal`, and `high`.
+- Reorder and priority changes broadcast `turn_queue_reordered`,
+  `turn_queue_priority_changed`, and `turn_queue_updated`.
+- Queue mutation events carry a full `queueSnapshot` so all subscribed clients
+  can rebuild the same ordered queue.
+- Queue order and priority persist through the existing Desktop recovery path.
+
+Native iOS/Android replication guidance:
+
+- Treat queue order and priority as shared Desktop state, not local UI state.
+- Rebuild the visible queue from Desktop `queueSnapshot` payloads after each
+  reorder or priority change.
+- Gate mutation controls on Desktop capability metadata instead of assuming
+  every hosted session supports them.
+- Keep official CLI sessions under `targetAgent = mcode-desktop`; do not add
+  mobile-side official CLI agents.
