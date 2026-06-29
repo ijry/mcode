@@ -8,6 +8,7 @@
     </view>
     <view class="conversations-shell">
       <up-sticky class="conversations-sticky" :offset-top="0" :custom-nav-height="0" bg-color="transparent" z-index="20">
+        <up-status-bar></up-status-bar>
         <view class="conversations-header">
           <text class="conversations-header__title">会话</text>
           <view class="conversations-header__action" @click="createConversation()">
@@ -26,7 +27,7 @@
             :color="upThemeVar('--up-main-color', '#1a1b1f')"
             :placeholderColor="upThemeVar('--up-tips-color', '#9ca3af')"
             :searchIconColor="upThemeVar('--up-tips-color', '#8b93a5')"
-            :height="44"
+            :height="40"
             @search="() => {}"
             @clear="() => {}"
           ></up-search>
@@ -2420,8 +2421,11 @@ function formatTime(time?: string): string {
 }
 
 .conversations-searchbar :deep(.u-search__content) {
+  height: 80rpx;
+  display: flex;
+  align-items: center;
   border: 1rpx solid rgba(255, 255, 255, 0.5) !important;
-  border-radius: 28rpx !important;
+  border-radius: 999rpx !important;
   background-color: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 40%, transparent) !important;
   backdrop-filter: blur(25rpx);
   -webkit-backdrop-filter: blur(25rpx);
@@ -2429,8 +2433,10 @@ function formatTime(time?: string): string {
 }
 
 .conversations-searchbar :deep(.u-search__content__input) {
+  height: 80rpx;
   font-size: 26rpx;
   color: var(--up-main-color, #303133);
+  background-color: transparent !important;
 }
 
 .conversations-searchbar :deep(.u-search__content__icon) {

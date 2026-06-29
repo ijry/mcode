@@ -2,6 +2,7 @@
   <view class="page circles-page" :style="[upThemeVars, upThemePageStyle]">
     <view class="circles-shell">
       <up-sticky class="circles-sticky" :offset-top="0" :custom-nav-height="0" :bg-color="upThemeVar('--up-page-bg-color', '#f5f5f7')" z-index="20">
+        <up-status-bar :bg-color="upThemeVar('--up-page-bg-color', '#f5f5f7')"></up-status-bar>
         <view class="circles-header">
           <view class="circles-header__copy">
             <text class="circles-header__eyebrow">COMMUNITY</text>

@@ -2,6 +2,7 @@
   <view class="page todo-page" :style="[upThemeVars, upThemePageStyle]">
     <view class="todo-shell">
       <up-sticky class="todo-sticky" :offset-top="0" :custom-nav-height="0" :bg-color="upThemeVar('--up-page-bg-color', '#f5f5f7')" z-index="20">
+        <up-status-bar :bg-color="upThemeVar('--up-page-bg-color', '#f5f5f7')"></up-status-bar>
         <TodoPageHeader
           v-model:activeTab="activeTab"
           v-model:searchKeyword="searchKeyword"
