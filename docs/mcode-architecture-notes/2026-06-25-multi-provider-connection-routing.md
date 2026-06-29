@@ -1664,3 +1664,39 @@ Compatibility and security:
   decides whether the token may access that tenant.
 - Native iOS/Android clients should not replicate relay admin filtering or
   audit export; these remain enterprise operator workflows.
+
+## P38 App Desktop Readiness Behavior
+
+P38 returns to `mcode-app` user-facing reliability. It adds a Desktop readiness
+panel to the targets page so users can understand whether their paired
+`mcode-desktop/gateway` connection is ready for official CLI and local-service
+tunnel use.
+
+Implemented behavior:
+
+- Desktop-specific readiness logic lives in
+  `mcode-app/src/agents/mcode-desktop/readiness.ts`.
+- The readiness presenter consumes the normalized connection and discovered
+  Desktop services, then returns a UI summary with `level = ready | warning |
+  error`, capability chips, service counts, metadata, and diagnostics.
+- The presenter reuses existing Desktop helpers:
+  `diagnoseDesktopGatewayConnection()`, `getDesktopCapabilityLabels()`, and
+  service discovery output.
+- The targets page now shows a MCode Desktop panel above local services with
+  gateway URL, target id, protocol version, capability availability, diagnostics
+  and actions.
+- If no paired Desktop gateway connection exists, the panel shows an actionable
+  empty state and a button to open the connections tab.
+- “复制诊断” copies only non-secret metadata: readiness level, display name,
+  gateway base URL, target id, protocol version, capability labels, service
+  counts, and diagnostic messages.
+
+Compatibility and security:
+
+- P38 does not change relay, Desktop, pairing, tunnel, proxy, event replay, or
+  official CLI protocols.
+- Copied diagnostics must never include access tokens, refresh tokens, pair
+  secrets, direct tokens, or official CLI credentials.
+- Native iOS/Android clients should replicate the same local presentation model
+  using pair metadata and service discovery results. Do not call relay admin
+  APIs from this readiness panel.
