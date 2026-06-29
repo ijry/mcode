@@ -588,13 +588,13 @@
         <view class="input-tool-row">
           <view class="input-tool-btn" @click="handleChooseImages">
             <view class="input-tool-btn__icon">
-              <image class="input-tool-btn__glyph" src="/static/icons/composer-image.svg" mode="aspectFit"></image>
+              <up-icon name="photo" size="20" :color="upThemeVar('--up-content-color', '#606266')"></up-icon>
             </view>
           </view>
 
           <view class="input-tool-btn" @click="handleChooseFiles">
             <view class="input-tool-btn__icon">
-              <image class="input-tool-btn__glyph" src="/static/icons/composer-file.svg" mode="aspectFit"></image>
+              <up-icon name="file-text" size="20" :color="upThemeVar('--up-content-color', '#606266')"></up-icon>
             </view>
           </view>
 
@@ -603,7 +603,7 @@
             @click="toggleComposerPanel('quick_reply')"
           >
             <view class="input-tool-btn__icon">
-              <image class="input-tool-btn__glyph" src="/static/icons/composer-quick.svg" mode="aspectFit"></image>
+              <up-icon name="share" size="20" :color="upThemeVar('--up-content-color', '#606266')"></up-icon>
             </view>
           </view>
 
@@ -612,7 +612,7 @@
             @click="toggleComposerPanel('config')"
           >
             <view class="input-tool-btn__icon">
-              <image class="input-tool-btn__glyph" src="/static/icons/composer-config.svg" mode="aspectFit"></image>
+              <up-icon name="setting" size="20" :color="upThemeVar('--up-content-color', '#606266')"></up-icon>
             </view>
           </view>
 
