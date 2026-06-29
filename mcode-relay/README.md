@@ -31,6 +31,7 @@ Standalone relay service for MCode remote control.
 - `ADMIN_TOKEN` default empty
 - `ADMIN_TOKEN_ROLES` default empty JSON policy
 - `ADMIN_CREDENTIAL_STORE_PATH` default empty
+- `PROXY_BODY_LIMIT_BYTES` default `8388608`, max `67108864`
 - `ALLOW_DEV_SECRETS` default `true`
 
 ## Pair Response Contract

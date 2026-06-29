@@ -3,7 +3,7 @@ import websocket from "@fastify/websocket"
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify"
 import WebSocket from "ws"
 import { pathToFileURL } from "node:url"
-import { loadConfig, type RelayConfig } from "./config.js"
+import { loadConfig, resolveProxyBodyLimitBytes, type RelayConfig } from "./config.js"
 import {
   signAccessToken,
   signRefreshToken,
@@ -430,7 +430,10 @@ function closeSocketWithError(socket: WebSocket, message: string, code = "gatewa
 
 export async function buildRelayApp(overrides: Partial<RelayAppContext> = {}): Promise<FastifyInstance> {
   const context = createRelayContext(overrides)
-  const app = Fastify({ logger: false })
+  const app = Fastify({
+    logger: false,
+    bodyLimit: resolveProxyBodyLimitBytes(context.config),
+  })
   await app.register(websocket)
   registerAdminWebRoutes(app)
 

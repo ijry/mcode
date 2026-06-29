@@ -2,6 +2,7 @@ import { z } from "zod"
 
 const gatewayProviderSchema = z.enum(["official", "custom"])
 const deploymentEnvSchema = z.enum(["development", "staging", "production"])
+const DEFAULT_PROXY_BODY_LIMIT_BYTES = 8 * 1024 * 1024
 
 const booleanEnvSchema = z.preprocess((value) => {
   if (value === undefined || value === "") return undefined
@@ -38,8 +39,28 @@ const envSchema = z.object({
   ALLOW_DEV_SECRETS: booleanEnvSchema.default(true),
 })
 
-export type RelayConfig = z.infer<typeof envSchema>
+export type RelayConfig = z.infer<typeof envSchema> & {
+  PROXY_BODY_LIMIT_BYTES?: number
+}
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): RelayConfig {
-  return envSchema.parse(env)
+  return {
+    ...envSchema.parse(env),
+    PROXY_BODY_LIMIT_BYTES: parseProxyBodyLimit(env.PROXY_BODY_LIMIT_BYTES),
+  }
+}
+
+export function resolveProxyBodyLimitBytes(config: RelayConfig): number {
+  return parseProxyBodyLimit(config.PROXY_BODY_LIMIT_BYTES)
+}
+
+function parseProxyBodyLimit(value: unknown): number {
+  if (value === undefined || value === null || value === "") {
+    return DEFAULT_PROXY_BODY_LIMIT_BYTES
+  }
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return DEFAULT_PROXY_BODY_LIMIT_BYTES
+  }
+  return Math.min(Math.trunc(parsed), 64 * 1024 * 1024)
 }

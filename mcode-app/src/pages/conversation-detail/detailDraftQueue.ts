@@ -1,5 +1,6 @@
 import type { PromptInputBlock } from "@/types/acp"
 import type { QueuedDraft, UploadedAttachment } from "./detailDataNormalization"
+import { parseImageDataUrl } from "./detailAttachmentUpload"
 import { resolveSlashPreset } from "./detailSlashCommands"
 
 export interface DraftIdFactory {
@@ -63,20 +64,24 @@ export function buildDraftPromptBlocks(draft: QueuedDraft): PromptInputBlock[] {
 
   draft.attachments.forEach((att) => {
     if (att.kind === "image") {
+      const parsedDataUrl = parseImageDataUrl(att.data || att.url)
+      const data = att.data || parsedDataUrl?.data || ""
+      if (!data) {
+        throw new Error("图片缺少可发送数据，请重新选择图片")
+      }
       blocks.push({
         type: "image",
-        source: { type: "url", url: att.url, media_type: att.type },
+        data,
+        mime_type: parsedDataUrl?.mimeType || att.type || "image/png",
+        uri: att.remoteUrl || att.localPath || att.url || null,
       })
       return
     }
     blocks.push({
-      type: "resource",
-      resource: {
-        type: "file",
-        uri: att.url,
-        name: att.name,
-        size: att.size,
-      },
+      type: "resource_link",
+      uri: att.remoteUrl || att.url,
+      name: att.name,
+      mime_type: att.type || "application/octet-stream",
     })
   })
 

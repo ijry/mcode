@@ -1,21 +1,27 @@
 // ACP (Agent Client Protocol) 类型定义
 
-export interface PromptInputBlock {
-  type: "text" | "image" | "resource"
-  text?: string
-  source?: {
-    type: "base64" | "url"
-    media_type?: string
-    data?: string
-    url?: string
-  }
-  resource?: {
-    type: "file" | "url"
-    uri: string
-    name?: string
-    size?: number
-  }
-}
+export type PromptInputBlock =
+  | { type: "text"; text: string }
+  | {
+      type: "image"
+      data: string
+      mime_type: string
+      uri?: string | null
+    }
+  | {
+      type: "resource"
+      uri: string
+      mime_type?: string | null
+      text?: string | null
+      blob?: string | null
+    }
+  | {
+      type: "resource_link"
+      uri: string
+      name: string
+      mime_type?: string | null
+      description?: string | null
+    }
 
 export interface MessageTurn {
   id: string

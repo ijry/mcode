@@ -9,6 +9,43 @@ export interface PickedLocalFile {
   kind: "image" | "file"
 }
 
+export const PROMPT_IMAGE_MAX_BYTES = 1400 * 1024
+
+export function estimateBase64DecodedBytes(data: string): number {
+  const normalized = String(data || "").replace(/\s/g, "")
+  if (!normalized) return 0
+  const padding = normalized.endsWith("==") ? 2 : normalized.endsWith("=") ? 1 : 0
+  return Math.max(0, Math.floor((normalized.length * 3) / 4) - padding)
+}
+
+export function parseImageDataUrl(value: string): { data: string; mimeType: string } | null {
+  const match = String(value || "").match(/^data:([^;,]+)?;base64,([\s\S]+)$/i)
+  if (!match) return null
+  const data = String(match[2] || "").replace(/\s/g, "")
+  if (!data) return null
+  return {
+    data,
+    mimeType: match[1] || "image/png",
+  }
+}
+
+export function isPromptImageTooLarge(input: {
+  size?: number | null
+  data?: string | null
+  limitBytes?: number
+}): boolean {
+  const limit = input.limitBytes ?? PROMPT_IMAGE_MAX_BYTES
+  const size = Number(input.size || 0)
+  if (Number.isFinite(size) && size > limit) return true
+  const data = typeof input.data === "string" ? input.data : ""
+  return data ? estimateBase64DecodedBytes(data) > limit : false
+}
+
+export function promptImageLimitText(limitBytes = PROMPT_IMAGE_MAX_BYTES): string {
+  const mb = limitBytes / (1024 * 1024)
+  return `${mb.toFixed(mb >= 10 ? 0 : 1)}MB`
+}
+
 export function normalizePickedImages(input: {
   tempFilePaths?: unknown
   tempFiles?: unknown
@@ -74,17 +111,22 @@ export function buildUploadedAttachment(input: {
   file: PickedLocalFile
   createId: (prefix: string) => string
 }): UploadedAttachment {
-  const url = firstString(input.uploadResult.url, input.uploadResult.path)
-  if (!url) {
+  const remoteUrl = firstString(input.uploadResult.url, input.uploadResult.path)
+  const previewUrl = input.file.kind === "image"
+    ? firstString(input.file.path, remoteUrl)
+    : remoteUrl
+  if (!previewUrl) {
     throw new Error("上传结果缺少 URL")
   }
 
   return {
     id: input.createId("att"),
-    url,
+    url: previewUrl,
     name: firstString(input.uploadResult.name) || input.file.name,
     size: Number(input.uploadResult.size || input.file.size || 0),
     type: input.file.type,
     kind: input.file.kind,
+    ...(input.file.kind === "image" && input.file.path ? { localPath: input.file.path } : {}),
+    ...(remoteUrl && remoteUrl !== previewUrl ? { remoteUrl } : {}),
   }
 }

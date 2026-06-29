@@ -1,8 +1,12 @@
 import {
   buildUploadTarget,
   buildUploadedAttachment,
+  estimateBase64DecodedBytes,
+  isPromptImageTooLarge,
   normalizePickedImages,
   normalizePickedMessageFiles,
+  parseImageDataUrl,
+  PROMPT_IMAGE_MAX_BYTES,
   type PickedLocalFile,
 } from "@/pages/conversation-detail/detailAttachmentUpload"
 import type { RemoteInstanceDescriptor } from "@/services/realtime/types"
@@ -110,5 +114,42 @@ describe("detailAttachmentUpload", () => {
       file,
       createId: (prefix) => `${prefix}-1`,
     })).toThrow("上传结果缺少 URL")
+  })
+
+  it("keeps image local paths for prompt hydration while preserving remote paths", () => {
+    expect(buildUploadedAttachment({
+      uploadResult: {
+        path: "C:/Users/Admin/.codeg/uploads/session/image.png",
+        name: "server-image.png",
+        size: 20,
+      },
+      file: {
+        path: "/tmp/image.png",
+        name: "image.png",
+        size: 10,
+        type: "image/png",
+        kind: "image",
+      },
+      createId: (prefix) => `${prefix}-1`,
+    })).toEqual({
+      id: "att-1",
+      url: "/tmp/image.png",
+      name: "server-image.png",
+      size: 20,
+      type: "image/png",
+      kind: "image",
+      localPath: "/tmp/image.png",
+      remoteUrl: "C:/Users/Admin/.codeg/uploads/session/image.png",
+    })
+  })
+
+  it("parses data urls and detects prompt image payload limits", () => {
+    expect(parseImageDataUrl("data:image/png;base64,QUJD")).toEqual({
+      data: "QUJD",
+      mimeType: "image/png",
+    })
+    expect(estimateBase64DecodedBytes("QUJD")).toBe(3)
+    expect(isPromptImageTooLarge({ size: PROMPT_IMAGE_MAX_BYTES + 1 })).toBe(true)
+    expect(isPromptImageTooLarge({ data: "QUJD" })).toBe(false)
   })
 })

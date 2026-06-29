@@ -11,6 +11,9 @@ export interface UploadedAttachment {
   size: number
   type: string
   kind: "image" | "file"
+  localPath?: string
+  remoteUrl?: string
+  data?: string
 }
 
 export interface QueuedDraft {
@@ -380,6 +383,8 @@ function normalizeAttachment(
     size: Number(record.size || 0),
     type: typeof record.type === "string" ? record.type : "application/octet-stream",
     kind,
+    ...(typeof record.localPath === "string" && record.localPath ? { localPath: record.localPath } : {}),
+    ...(typeof record.remoteUrl === "string" && record.remoteUrl ? { remoteUrl: record.remoteUrl } : {}),
   }
 }
 

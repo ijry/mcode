@@ -241,6 +241,50 @@ describe("relay api", () => {
     )
   })
 
+  it("accepts image-sized prompt proxy payloads above fastify default body limit", async () => {
+    store.addOffer({
+      code: "654321",
+      secret: "secret",
+      targetId: "desktop-1",
+      targetAgent: "mcode-desktop",
+      ttlSeconds: 300,
+    })
+    const pair = await request(app.server)
+      .post("/v1/pair")
+      .send({ code: "654321", secret: "secret" })
+
+    const sendProxyRequest = vi.spyOn(hub, "sendProxyRequest").mockResolvedValue({
+      status: 200,
+      body: { ok: true },
+    })
+    const imageData = "A".repeat(1200 * 1024)
+
+    const res = await request(app.server)
+      .post("/v1/proxy/acp_prompt")
+      .set("authorization", `Bearer ${pair.body.accessToken}`)
+      .send({
+        connectionId: "conn-1",
+        blocks: [
+          { type: "text", text: "describe this" },
+          { type: "image", data: imageData, mime_type: "image/png" },
+        ],
+      })
+
+    expect(res.status).toBe(200)
+    expect(sendProxyRequest).toHaveBeenCalledWith(
+      "desktop-1",
+      "acp_prompt",
+      expect.objectContaining({
+        connectionId: "conn-1",
+        blocks: expect.arrayContaining([
+          expect.objectContaining({ type: "image", data: imageData }),
+        ]),
+      }),
+      undefined,
+      expect.any(Object)
+    )
+  })
+
   it("forwards relay client id on authorized cancel calls", async () => {
     store.addOffer({
       code: "223344",

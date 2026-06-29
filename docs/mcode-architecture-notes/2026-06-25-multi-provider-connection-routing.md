@@ -1766,3 +1766,37 @@ Native replication guidance:
   routine live-layout sync.
 - During live output, do not periodically restore an old pixel scroll offset.
   Only follow bottom when the user is already in bottom-follow mode.
+
+## P41 Attachment Prompt Send Stability
+
+P41 fixes image-upload plus prompt-send failures in `mcode-app`.
+
+Root cause:
+
+- The app built image prompt blocks as `{ type: "image", source: { url } }`.
+- Codeg ACP expects image blocks as `{ type: "image", data, mime_type, uri? }`.
+- The relay proxy endpoint also inherited Fastify's default JSON body limit,
+  which is too small for image base64 prompt payloads.
+
+Implemented behavior:
+
+- Uploaded image attachments keep `localPath` for preview/send hydration and
+  `remoteUrl` for the uploaded server path. Base64 `data` is not restored from
+  persisted draft state.
+- Before sending, the detail page creates a transient draft copy and reads image
+  bytes from `localPath` into base64.
+- Images over the app prompt image limit, including multi-image total size, are
+  rejected before upload/send with a clear reselect/compress message.
+- Outgoing prompt blocks now use ACP-compatible `image` and `resource_link`
+  shapes.
+- `mcode-relay` exposes `PROXY_BODY_LIMIT_BYTES`, defaults it to 8 MiB, and caps
+  it at 64 MiB so relay-mode prompt images are not rejected at the gateway JSON
+  parser.
+
+Compatibility:
+
+- Text-only prompts are unchanged.
+- Existing restored image attachments without a readable local cache now fail
+  before network send and ask the user to reselect the image.
+- Native clients should keep draft persistence lightweight and hydrate base64
+  only at send time. Do not store image base64 in long-lived composer snapshots.

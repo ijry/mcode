@@ -17,6 +17,7 @@ const attachment = (kind: UploadedAttachment["kind"], name: string): UploadedAtt
   size: 10,
   type: kind === "image" ? "image/png" : "text/plain",
   kind,
+  ...(kind === "image" ? { data: "QUJD", localPath: `/tmp/${name}` } : {}),
 })
 
 const draft = (patch: Partial<QueuedDraft> = {}): QueuedDraft => ({
@@ -44,16 +45,15 @@ describe("detailPromptSend", () => {
         { type: "text", text: "hello" },
         {
           type: "image",
-          source: { type: "url", url: "https://file/image.png", media_type: "image/png" },
+          data: "QUJD",
+          mime_type: "image/png",
+          uri: "/tmp/image.png",
         },
         {
-          type: "resource",
-          resource: {
-            type: "file",
-            uri: "https://file/a.txt",
-            name: "a.txt",
-            size: 10,
-          },
+          type: "resource_link",
+          uri: "https://file/a.txt",
+          name: "a.txt",
+          mime_type: "text/plain",
         },
       ],
     })

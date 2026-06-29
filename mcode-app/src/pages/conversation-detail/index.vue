@@ -1027,8 +1027,13 @@ import {
 import {
   buildUploadTarget,
   buildUploadedAttachment,
+  estimateBase64DecodedBytes,
+  isPromptImageTooLarge,
   normalizePickedImages,
   normalizePickedMessageFiles,
+  parseImageDataUrl,
+  promptImageLimitText,
+  PROMPT_IMAGE_MAX_BYTES,
   type PickedLocalFile,
 } from "./detailAttachmentUpload"
 import {
@@ -3110,6 +3115,77 @@ function createDraftFromComposer(): QueuedDraft | null {
   return draft
 }
 
+async function prepareDraftForSend(draft: QueuedDraft): Promise<QueuedDraft> {
+  const preparedAttachments: UploadedAttachment[] = []
+  let totalImageBytes = 0
+  for (const att of draft.attachments) {
+    if (att.kind !== "image") {
+      preparedAttachments.push({ ...att })
+      continue
+    }
+
+    const parsedInline = parseImageDataUrl(att.data || att.url)
+    let data = att.data || parsedInline?.data || ""
+    const mimeType = parsedInline?.mimeType || att.type || "image/png"
+    if (!data) {
+      const sourcePath = firstString(att.localPath, att.url)
+      if (!sourcePath || /^https?:\/\//i.test(sourcePath)) {
+        throw new Error(`图片 ${att.name || ""} 本地缓存已失效，请重新选择图片`.trim())
+      }
+      data = await readLocalImageBase64(sourcePath)
+    }
+
+    const decodedBytes = estimateBase64DecodedBytes(data)
+    if (decodedBytes > PROMPT_IMAGE_MAX_BYTES) {
+      throw new Error(`图片 ${att.name || ""} 超过 ${promptImageLimitText()}，请压缩后重新选择`.trim())
+    }
+    totalImageBytes += decodedBytes
+    if (totalImageBytes > PROMPT_IMAGE_MAX_BYTES) {
+      throw new Error(`图片总大小超过 ${promptImageLimitText()}，请减少图片数量或压缩后重试`)
+    }
+
+    preparedAttachments.push({
+      ...att,
+      type: mimeType,
+      data,
+    })
+  }
+
+  return {
+    ...draft,
+    attachments: preparedAttachments,
+  }
+}
+
+function stripTransientAttachmentData(att: UploadedAttachment): UploadedAttachment {
+  const { data, ...rest } = att
+  return rest
+}
+
+async function readLocalImageBase64(filePath: string): Promise<string> {
+  const fs = (uni as any).getFileSystemManager?.()
+  if (!fs || typeof fs.readFile !== "function") {
+    throw new Error("当前平台不支持读取图片数据，请重新选择图片")
+  }
+  return await new Promise<string>((resolve, reject) => {
+    fs.readFile({
+      filePath,
+      encoding: "base64",
+      success: (res: { data?: unknown }) => {
+        const data = typeof res.data === "string" ? res.data : ""
+        if (data) {
+          resolve(data)
+          return
+        }
+        reject(new Error("图片读取结果为空，请重新选择图片"))
+      },
+      fail: (err: { errMsg?: string }) => {
+        reject(new Error(err?.errMsg || "图片读取失败，请重新选择图片"))
+      },
+    })
+  })
+}
+
 async function sendDraft(draft: QueuedDraft): Promise<boolean> {
   if (!canSendSharedLive.value) {
     showSharedLiveBlockedToast()
@@ -3127,11 +3203,12 @@ async function sendDraft(draft: QueuedDraft): Promise<boolean> {
     const conn = await ensureConversationReadyForSend()
     if (!conn) throw new Error("未连接到代理")
 
-    const { imageAttachments, optimisticText, blocks } = buildDraftSendPayload(draft)
+    const preparedDraft = await prepareDraftForSend(draft)
+    const { imageAttachments, optimisticText, blocks } = buildDraftSendPayload(preparedDraft)
     const optimisticTurnId = runtime.addOptimisticUserMessage(
       conversationId.value,
       optimisticText,
-      imageAttachments
+      imageAttachments.map(stripTransientAttachmentData)
     )
     scheduleViewportSync(true)
     if (isViewerMode.value) {
@@ -3522,6 +3599,15 @@ function handleChooseFiles() {
 
 async function uploadPickedFiles(files: PickedLocalFile[]) {
   for (const file of files) {
+    if (file.kind === "image" && isPromptImageTooLarge({ size: file.size })) {
+      uni.showToast({
+        title: `${file.name} 超过 ${promptImageLimitText()}，请压缩后重新选择`,
+        icon: "none",
+        duration: 3000,
+      })
+      continue
+    }
+
     const queueItem: UploadQueueItem = {
       id: createLocalId("upload"),
       name: file.name,
