@@ -7,7 +7,9 @@ import {
 import { resolveConnectionDriver } from "@/services/gateway/connectionDriverRegistry"
 import {
   buildConnectionRecordKey,
+  ensureConnectionRecordId,
   normalizeConnectionBaseUrl,
+  normalizeConnectionId,
   normalizeConnectionRecordV2,
   normalizePairTargetProfile,
   type ConnectionRecordV2,
@@ -45,6 +47,11 @@ export function isConnectionMarkedConnected(
 
 export function encodeConnectionContext(connection: ConnectionContextLike) {
   return encodeURIComponent(JSON.stringify(sanitizeConnectionContext(connection)))
+}
+
+export function encodeConnectionReference(connection: ConnectionContextLike) {
+  const normalized = normalizeConnectionContext(connection)
+  return encodeURIComponent(normalized?.id || "")
 }
 
 export function decodeConnectionContext(raw?: string | null): ConnectionContext | null {
@@ -136,9 +143,24 @@ export function applyPairMetadata(
 export function readStoredConnections(): ConnectionContext[] {
   const raw = uni.getStorageSync("mcode_connections")
   if (!Array.isArray(raw)) return []
-  return raw
+  const connections = raw
     .map((item) => normalizeConnectionContext(item))
     .filter((item): item is ConnectionContext => Boolean(item))
+  const needsWriteBack = connections.length !== raw.length ||
+    connections.some((item, index) => {
+      const rawItem = raw[index] as Record<string, unknown> | undefined
+      return !rawItem || rawItem.id !== item.id
+    })
+  if (needsWriteBack) {
+    uni.setStorageSync("mcode_connections", connections.map((item) => sanitizeConnectionContext(item)))
+  }
+  return connections
+}
+
+export function findStoredConnectionById(id: string): ConnectionContext | null {
+  const normalizedId = normalizeConnectionId(decodeURIComponent(String(id || "")))
+  if (!normalizedId) return null
+  return readStoredConnections().find((item) => item.id === normalizedId) || null
 }
 
 function normalizeConnectionContext(input: unknown): ConnectionContext | null {
@@ -156,10 +178,11 @@ function sanitizeConnectionContext(connection: ConnectionContextLike) {
 
 function normalizeConnectionRecordInput(input: unknown): ConnectionRecordV2 | null {
   if (!input || typeof input !== "object") return null
-  return normalizeConnectionRecordV2({
+  const record = normalizeConnectionRecordV2({
     version: 2,
     ...(input as Record<string, unknown>),
   })
+  return record ? ensureConnectionRecordId(record) : null
 }
 
 function toConnectionContext(record: ConnectionRecordV2): ConnectionContext {

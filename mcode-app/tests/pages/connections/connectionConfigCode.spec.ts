@@ -33,6 +33,20 @@ describe("connection config code", () => {
     })
   })
 
+  it("omits local-only connection ids from config code payloads", () => {
+    const code = buildConnectionConfigCode({
+      version: 2,
+      id: "conn_local_123",
+      name: "Local Codeg",
+      targetAgent: "codeg",
+      routeMode: "direct",
+      directBaseUrl: "http://192.168.1.8:3089/",
+      directToken: "direct-token",
+    })
+
+    expect(decodeConnectionConfigCode(code)).not.toHaveProperty("id")
+  })
+
   it("encodes and decodes v2 desktop gateway config codes", () => {
     const code = buildConnectionConfigCode({
       version: 2,

@@ -152,6 +152,7 @@ import { onLoad, onPullDownRefresh } from "@dcloudio/uni-app"
 import type { CodegGateway } from "@/services/gateway"
 import {
   decodeConnectionContext,
+  findStoredConnectionById,
   persistResolvedConnection,
   resolveConnectionContext,
   type ConnectionContext,
@@ -220,7 +221,9 @@ const modelPlaceholder = computed(() =>
 )
 
 onLoad((options) => {
-  connection.value = decodeConnectionContext(options?.connection as string)
+  connection.value =
+    findStoredConnectionById(String(options?.connectionId || "")) ||
+    decodeConnectionContext(options?.connection as string)
   void loadPage()
 })
 

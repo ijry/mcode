@@ -1,5 +1,7 @@
 import {
   buildConnectionRecordKey,
+  ensureConnectionRecordId,
+  normalizeConnectionRecordV2,
   type ConnectionRecordV2,
 } from "@/services/connectionSchema"
 
@@ -37,5 +39,28 @@ describe("connectionSchema", () => {
 
     expect(codegGateway).toBe("codeg::gateway::https://relay.example.com")
     expect(opencodeGateway).toBe("opencode::gateway::https://relay.example.com")
+  })
+
+  it("preserves valid local connection ids and generates missing ids", () => {
+    const normalized = normalizeConnectionRecordV2({
+      version: 2,
+      id: "conn_existing_123",
+      name: "Local Codeg",
+      targetAgent: "codeg",
+      routeMode: "direct",
+      directBaseUrl: "http://127.0.0.1:3089",
+    })
+
+    expect(normalized?.id).toBe("conn_existing_123")
+
+    const withId = ensureConnectionRecordId({
+      version: 2,
+      name: "Local Codeg",
+      targetAgent: "codeg",
+      routeMode: "direct",
+      directBaseUrl: "http://127.0.0.1:3089",
+    })
+
+    expect(withId.id).toMatch(/^conn_/)
   })
 })

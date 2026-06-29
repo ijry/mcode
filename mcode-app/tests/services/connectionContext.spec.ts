@@ -2,8 +2,10 @@ import {
   applyPairMetadata,
   buildConnectionKey,
   connectionKeyMatches,
+  findStoredConnectionById,
   isConnectionMarkedConnected,
   persistResolvedConnection,
+  readStoredConnections,
 } from "@/services/connectionContext"
 import { buildConnectionRecordKey } from "@/services/connectionSchema"
 
@@ -159,5 +161,38 @@ describe("connectionContext", () => {
     expect(isConnectionMarkedConnected(connection, {
       "opencode::gateway::https://relay.example.com": true,
     })).toBe(true)
+  })
+
+  it("adds local ids to stored v2 connections and resolves them by id", () => {
+    uni.setStorageSync("mcode_connections", [
+      {
+        version: 2,
+        name: "Local Codeg",
+        targetAgent: "codeg",
+        routeMode: "direct",
+        directBaseUrl: "http://127.0.0.1:3089",
+      },
+      {
+        version: 2,
+        id: "conn_existing_abc",
+        name: "Desktop Gateway",
+        targetAgent: "mcode-desktop",
+        routeMode: "gateway",
+        gatewayProvider: "official",
+        gatewayBaseUrl: "https://relay.example.com",
+        gatewaySession: { accessToken: "access" },
+      },
+    ])
+
+    const saved = readStoredConnections()
+
+    expect(saved[0].id).toMatch(/^conn_/)
+    expect(saved[1].id).toBe("conn_existing_abc")
+    expect(uni.getStorageSync("mcode_connections")[0].id).toBe(saved[0].id)
+    expect(findStoredConnectionById("conn_existing_abc")).toMatchObject({
+      id: "conn_existing_abc",
+      targetAgent: "mcode-desktop",
+      routeMode: "gateway",
+    })
   })
 })

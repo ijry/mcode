@@ -154,18 +154,18 @@ export function isCurrentBranchHistoryView(
 }
 
 export function buildProjectGitRoute(params: {
-  encodedConnection: string
+  connectionId: string
   folderId: number
   projectName: string
   projectPath?: string | null
 }) {
   const projectName = encodeURIComponent(params.projectName)
   const projectPath = encodeURIComponent(params.projectPath || "")
-  return `/pages/project-git/index?connection=${params.encodedConnection}&folderId=${params.folderId}&projectName=${projectName}&projectPath=${projectPath}`
+  return `/pages/project-git/index?connectionId=${encodeURIComponent(params.connectionId)}&folderId=${params.folderId}&projectName=${projectName}&projectPath=${projectPath}`
 }
 
 export function buildProjectGitCommitRoute(params: {
-  encodedConnection: string
+  connectionId: string
   folderId: number
   projectName: string
   projectPath?: string | null
@@ -174,11 +174,11 @@ export function buildProjectGitCommitRoute(params: {
   const projectName = encodeURIComponent(params.projectName)
   const projectPath = encodeURIComponent(params.projectPath || "")
   const commit = encodeURIComponent(JSON.stringify(params.commit))
-  return `/pages/project-git-commit/index?connection=${params.encodedConnection}&folderId=${params.folderId}&projectName=${projectName}&projectPath=${projectPath}&commit=${commit}`
+  return `/pages/project-git-commit/index?connectionId=${encodeURIComponent(params.connectionId)}&folderId=${params.folderId}&projectName=${projectName}&projectPath=${projectPath}&commit=${commit}`
 }
 
 export function buildProjectGitDiffRoute(params: {
-  encodedConnection: string
+  connectionId: string
   folderId: number
   projectName: string
   projectPath?: string | null
@@ -196,7 +196,7 @@ export function buildProjectGitDiffRoute(params: {
   const branch = encodeURIComponent(params.branch || "")
   const commitHash = encodeURIComponent(params.commitHash || "")
   const commitMessage = encodeURIComponent(params.commitMessage || "")
-  return `/pages/project-git-diff/index?connection=${params.encodedConnection}&folderId=${params.folderId}&projectName=${projectName}&projectPath=${projectPath}&mode=${params.mode}&filePath=${filePath}&fileStatus=${fileStatus}&branch=${branch}&commitHash=${commitHash}&commitMessage=${commitMessage}`
+  return `/pages/project-git-diff/index?connectionId=${encodeURIComponent(params.connectionId)}&folderId=${params.folderId}&projectName=${projectName}&projectPath=${projectPath}&mode=${params.mode}&filePath=${filePath}&fileStatus=${fileStatus}&branch=${branch}&commitHash=${commitHash}&commitMessage=${commitMessage}`
 }
 
 export function parseProjectGitCommitRoute(raw: unknown): GitLogEntry | null {

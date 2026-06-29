@@ -237,6 +237,7 @@ import type { CodegGateway } from "@/services/gateway"
 import type { EventChannelConnection } from "@/services/gateway/types"
 import {
   decodeConnectionContext,
+  findStoredConnectionById,
   persistResolvedConnection,
   resolveConnectionContext,
   type ConnectionContext,
@@ -354,7 +355,9 @@ const currentTaskAgentLabel = computed(() =>
 )
 
 onLoad((options) => {
-  connection.value = decodeConnectionContext(options?.connection as string)
+  connection.value =
+    findStoredConnectionById(String(options?.connectionId || "")) ||
+    decodeConnectionContext(options?.connection as string)
   void loadPage()
 })
 

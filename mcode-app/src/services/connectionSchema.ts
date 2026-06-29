@@ -14,6 +14,7 @@ export interface ConnectionTargetProfile {
 
 export interface ConnectionRecordV2 {
   version: 2
+  id?: string
   name: string
   targetAgent: ConnectionTargetAgent
   routeMode: ConnectionRouteMode
@@ -87,6 +88,7 @@ export function normalizePairTargetProfile(input: unknown): ConnectionTargetProf
 export function normalizeConnectionRecordV2(input: Record<string, unknown>): ConnectionRecordV2 | null {
   if (Number(input.version) !== 2) return null
 
+  const id = normalizeConnectionId(input.id)
   const targetAgent = normalizeTargetAgent(input.targetAgent)
   const routeMode = normalizeRouteMode(input.routeMode)
   if (!targetAgent || !routeMode) return null
@@ -105,6 +107,7 @@ export function normalizeConnectionRecordV2(input: Record<string, unknown>): Con
     if (!directBaseUrl) return null
     return {
       version: 2,
+      ...(id ? { id } : {}),
       name,
       targetAgent,
       routeMode,
@@ -118,6 +121,7 @@ export function normalizeConnectionRecordV2(input: Record<string, unknown>): Con
 
   return {
     version: 2,
+    ...(id ? { id } : {}),
     name,
     targetAgent,
     routeMode,
@@ -127,6 +131,34 @@ export function normalizeConnectionRecordV2(input: Record<string, unknown>): Con
     ...(pairSecret ? { pairSecret } : {}),
     ...(gatewaySession ? { gatewaySession } : {}),
     ...(targetProfile ? { targetProfile } : {}),
+  }
+}
+
+export function normalizeConnectionId(value: unknown): string {
+  return typeof value === "string" && /^[a-zA-Z0-9_-]{8,80}$/.test(value.trim())
+    ? value.trim()
+    : ""
+}
+
+export function createConnectionRecordId(seed?: string): string {
+  const suffix = randomIdSuffix()
+  const normalizedSeed = String(seed || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 24)
+  return ["conn", normalizedSeed, suffix].filter(Boolean).join("_")
+}
+
+export function ensureConnectionRecordId<T extends ConnectionRecordV2>(
+  record: T,
+  seed?: string
+): T & { id: string } {
+  const existing = normalizeConnectionId(record.id)
+  return {
+    ...record,
+    id: existing || createConnectionRecordId(seed || buildConnectionRecordKey(record)),
   }
 }
 
@@ -183,4 +215,16 @@ function pickString(...values: unknown[]) {
     }
   }
   return ""
+}
+
+function randomIdSuffix() {
+  const crypto = (globalThis as { crypto?: { getRandomValues?: (array: Uint32Array) => Uint32Array } }).crypto
+  if (crypto?.getRandomValues) {
+    const values = crypto.getRandomValues(new Uint32Array(2))
+    return Array.from(values)
+      .map((value) => value.toString(36))
+      .join("")
+      .slice(0, 16)
+  }
+  return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
 }

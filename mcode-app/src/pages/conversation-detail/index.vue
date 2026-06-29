@@ -1038,6 +1038,7 @@ import {
 } from "./detailAttachmentUpload"
 import {
   buildDescriptorFromStoredConnection,
+  findStoredConnectionById as findStoredConnectionInListById,
   findStoredConnectionByKey as findStoredConnectionInList,
   normalizeStoredConnectionLike,
   resolveStoredConnectionTargetAgent,
@@ -1096,6 +1097,7 @@ const refreshTapTimer = ref<ReturnType<typeof setTimeout> | null>(null)
 const sequence = ref(0)
 const conversationId = ref<number>(0)
 const folderId = ref<number>(0)
+const routeConnectionId = ref("")
 const routeConnectionKey = ref("")
 const routeConnectionContext = ref<StoredConnectionItem | null>(null)
 const bridgeHealth = ref<RealtimeBridgeHealth | null>(null)
@@ -1576,11 +1578,17 @@ onLoad((options: any) => {
   conversationId.value = Number(options.id || 0)
   folderId.value = Number(options.folderId || 0)
   needsResumeRefresh.value = false
+  const connectionId = typeof options.connectionId === "string"
+    ? decodeURIComponent(options.connectionId)
+    : ""
   const connectionKey = typeof options.connectionKey === "string"
     ? decodeURIComponent(options.connectionKey)
     : ""
+  routeConnectionId.value = connectionId
   routeConnectionKey.value = connectionKey
-  routeConnectionContext.value = normalizeStoredConnectionLike(decodeConnectionContext(connectionKey))
+  routeConnectionContext.value =
+    findStoredConnectionById(connectionId) ||
+    normalizeStoredConnectionLike(decodeConnectionContext(connectionKey))
   syncRouteAuthContext()
   if (conversationId.value) {
     void loadDetailProjectEntries()
@@ -3721,8 +3729,14 @@ function findStoredConnectionByKey(connKey: string) {
   return findStoredConnectionInList(Array.isArray(saved) ? saved : [], connKey)
 }
 
+function findStoredConnectionById(connectionId: string) {
+  const saved = uni.getStorageSync("mcode_connections")
+  return findStoredConnectionInListById(Array.isArray(saved) ? saved : [], connectionId)
+}
+
 function resolveDetailStoredConnection(): StoredConnectionItem | null {
   return routeConnectionContext.value ||
+    findStoredConnectionById(routeConnectionId.value) ||
     findStoredConnectionByKey(routeConnectionKey.value || detailConnectionKey.value)
 }
 

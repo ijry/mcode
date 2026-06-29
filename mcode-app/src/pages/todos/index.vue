@@ -202,7 +202,6 @@ import { getDirectToken } from "@/services/gateway/directTokenStore"
 import { toErrorMessage } from "@/services/gateway/error"
 import {
   buildConnectionKey,
-  encodeConnectionContext,
   readStoredConnections,
   resolveConnectionContext,
   type ConnectionContext,
@@ -869,9 +868,8 @@ async function confirmSend() {
     showSendDialog.value = false
 
     // 跳转到新会话
-    const encodedConnKey = encodeConnectionContext(targetConn)
     uni.navigateTo({
-      url: `/pages/conversation-detail/index?id=${newConversationId}&folderId=${selectedProjectId.value}${encodedConnKey ? `&connectionKey=${encodedConnKey}` : ""}`,
+      url: `/pages/conversation-detail/index?id=${newConversationId}&folderId=${selectedProjectId.value}&connectionId=${encodeURIComponent(targetConn.id)}`,
     })
   } catch (error) {
     const msg = toErrorMessage(error)

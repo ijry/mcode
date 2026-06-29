@@ -67,7 +67,7 @@ import { computed, getCurrentInstance, ref } from "vue"
 import { onLoad, onPullDownRefresh } from "@dcloudio/uni-app"
 import {
   decodeConnectionContext,
-  encodeConnectionContext,
+  findStoredConnectionById,
   persistResolvedConnection,
   resolveConnectionContext,
   type ConnectionContext,
@@ -91,7 +91,9 @@ const folderId = ref(0)
 const sessions = ref<RemoteConversationRecord[]>([])
 
 onLoad((options) => {
-  connection.value = decodeConnectionContext(options?.connection as string)
+  connection.value =
+    findStoredConnectionById(String(options?.connectionId || "")) ||
+    decodeConnectionContext(options?.connection as string)
   folderId.value = Number(options?.folderId || 0)
   projectName.value = decodeURIComponent(String(options?.projectName || "").trim())
   void loadPage()
@@ -127,9 +129,8 @@ async function loadPage(stopPullDown = false) {
 
 function openConversation(item: RemoteConversationRecord) {
   if (!connection.value) return
-  const encodedConnection = encodeConnectionContext(connection.value)
   uni.navigateTo({
-    url: `/pages/conversation-detail/index?id=${item.id}&folderId=${item.folderId || folderId.value}&connectionKey=${encodedConnection}`,
+    url: `/pages/conversation-detail/index?id=${item.id}&folderId=${item.folderId || folderId.value}&connectionId=${encodeURIComponent(connection.value.id)}`,
   })
 }
 

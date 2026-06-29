@@ -154,12 +154,12 @@ export const AGENT_DISPLAY_ORDER: AgentType[] = [
   "hermes",
 ]
 
-export function buildConnectionAgentsRoute(params: { encodedConnection: string }) {
-  return `/pages/connection-agents/index?connection=${params.encodedConnection}`
+export function buildConnectionAgentsRoute(params: { connectionId: string }) {
+  return `/pages/connection-agents/index?connectionId=${encodeURIComponent(params.connectionId)}`
 }
 
-export function buildModelProvidersRoute(params: { encodedConnection: string }) {
-  return `/pages/model-providers/index?connection=${params.encodedConnection}`
+export function buildModelProvidersRoute(params: { connectionId: string }) {
+  return `/pages/model-providers/index?connectionId=${encodeURIComponent(params.connectionId)}`
 }
 
 export function parseEnvText(text: string): Record<string, string> {

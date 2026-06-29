@@ -479,7 +479,6 @@ import {
 } from "./overviewState"
 import {
   buildConnectionKey,
-  encodeConnectionContext,
   readStoredConnections,
   resolveConnectionContext,
   type ConnectionContext,
@@ -1950,9 +1949,9 @@ function openConversation(conv: Conversation, connKey?: string) {
   } else {
     syncAuthToConnectionKey(connKey)
   }
-  const encodedConnKey = conn ? encodeConnectionContext(conn) : connKey ? encodeURIComponent(connKey) : ""
+  const encodedConnectionId = conn?.id ? encodeURIComponent(conn.id) : ""
   uni.navigateTo({
-    url: `/pages/conversation-detail/index?id=${conv.id}&folderId=${conv.folder_id || 0}${encodedConnKey ? `&connectionKey=${encodedConnKey}` : ""}`,
+    url: `/pages/conversation-detail/index?id=${conv.id}&folderId=${conv.folder_id || 0}${encodedConnectionId ? `&connectionId=${encodedConnectionId}` : ""}`,
   })
 }
 

@@ -79,7 +79,7 @@ import { computed, getCurrentInstance, ref } from "vue"
 import { onLoad, onPullDownRefresh } from "@dcloudio/uni-app"
 import {
   decodeConnectionContext,
-  encodeConnectionContext,
+  findStoredConnectionById,
   persistResolvedConnection,
   resolveConnectionContext,
   type ConnectionContext,
@@ -107,7 +107,9 @@ const connectionName = computed(() => connection.value?.name || "项目列表")
 const projectActions = computed(() => [{ name: "Git 管理", color: "#2979ff" }])
 
 onLoad((options) => {
-  connection.value = decodeConnectionContext(options?.connection as string)
+  connection.value =
+    findStoredConnectionById(String(options?.connectionId || "")) ||
+    decodeConnectionContext(options?.connection as string)
   void loadPage()
 })
 
@@ -142,10 +144,9 @@ async function loadPage(stopPullDown = false) {
 
 function openProjectSessions(item: ProjectListItem) {
   if (!connection.value) return
-  const encodedConnection = encodeConnectionContext(connection.value)
   const title = encodeURIComponent(item.name)
   uni.navigateTo({
-    url: `/pages/sessions/index?connection=${encodedConnection}&folderId=${item.id}&projectName=${title}`,
+    url: `/pages/sessions/index?connectionId=${encodeURIComponent(connection.value.id)}&folderId=${item.id}&projectName=${title}`,
   })
 }
 
@@ -158,10 +159,9 @@ function handleProjectActionSelect() {
   const item = currentProjectAction.value
   showProjectActionSheet.value = false
   if (!item || !connection.value) return
-  const encodedConnection = encodeConnectionContext(connection.value)
   uni.navigateTo({
     url: buildProjectGitRoute({
-      encodedConnection,
+      connectionId: connection.value.id,
       folderId: item.id,
       projectName: item.name,
       projectPath: item.path,

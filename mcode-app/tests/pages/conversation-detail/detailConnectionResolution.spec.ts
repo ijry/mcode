@@ -1,5 +1,6 @@
 import {
   buildDescriptorFromStoredConnection,
+  findStoredConnectionById,
   findStoredConnectionByKey,
   normalizeConnectionUrl,
   normalizeStoredConnectionLike,
@@ -90,6 +91,36 @@ describe("detailConnectionResolution", () => {
 
     expect(findStoredConnectionByKey(saved, "relay::https://relay")).toBeNull()
     expect(findStoredConnectionByKey({}, "codeg::gateway::https://relay")).toBeNull()
+  })
+
+  it("finds stored connections by local id without treating route keys as ids", () => {
+    const saved = [
+      {
+        version: 2,
+        id: "conn_codeg_direct_123",
+        name: "Codeg Direct",
+        targetAgent: "codeg",
+        routeMode: "direct",
+        directBaseUrl: "https://one",
+      },
+      {
+        version: 2,
+        id: "conn_codeg_gateway_456",
+        name: "Codeg Gateway",
+        targetAgent: "codeg",
+        routeMode: "gateway",
+        gatewayBaseUrl: "https://relay",
+        gatewaySession: { accessToken: "access", targetId: "target" },
+      },
+    ]
+
+    expect(findStoredConnectionById(saved, "conn_codeg_gateway_456")).toEqual(expect.objectContaining({
+      id: "conn_codeg_gateway_456",
+      targetAgent: "codeg",
+      routeMode: "gateway",
+    }))
+    expect(findStoredConnectionById(saved, "codeg::gateway::https://relay")).toBeNull()
+    expect(findStoredConnectionById({}, "conn_codeg_gateway_456")).toBeNull()
   })
 
   it("resolves target agent with Codeg fallback for missing metadata", () => {

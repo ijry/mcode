@@ -72,7 +72,7 @@ import { computed, getCurrentInstance, ref } from "vue"
 import { onLoad } from "@dcloudio/uni-app"
 import {
   decodeConnectionContext,
-  encodeConnectionContext,
+  findStoredConnectionById,
   type ConnectionContext,
 } from "@/services/connectionContext"
 import {
@@ -97,7 +97,9 @@ const projectPath = ref("")
 const commitEntry = ref<GitLogEntry | null>(null)
 
 onLoad((options) => {
-  connection.value = decodeConnectionContext(options?.connection as string)
+  connection.value =
+    findStoredConnectionById(String(options?.connectionId || "")) ||
+    decodeConnectionContext(options?.connection as string)
   folderId.value = Number(options?.folderId || 0)
   projectName.value = decodeURIComponent(String(options?.projectName || "").trim())
   projectPath.value = decodeURIComponent(String(options?.projectPath || "").trim())
@@ -108,7 +110,7 @@ function openCommitDiff(file: GitLogFileChange) {
   if (!connection.value || !commitEntry.value) return
   uni.navigateTo({
     url: buildProjectGitDiffRoute({
-      encodedConnection: encodeConnectionContext(connection.value),
+      connectionId: connection.value.id,
       folderId: folderId.value,
       projectName: projectName.value,
       projectPath: projectPath.value,

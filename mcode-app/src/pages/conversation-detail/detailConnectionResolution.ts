@@ -2,6 +2,7 @@ import { buildRemoteInstanceKey } from "@/services/realtime/instance-key"
 import type { RemoteInstanceDescriptor } from "@/services/realtime/types"
 import {
   buildConnectionRecordKey,
+  normalizeConnectionId,
   normalizeConnectionRecordV2,
   normalizeRelaySessionInfo,
   type ConnectionRecordV2,
@@ -86,6 +87,18 @@ export function findStoredConnectionByKey(
     }
   }
   return null
+}
+
+export function findStoredConnectionById(
+  input: unknown,
+  connectionId: string
+): StoredConnectionItem | null {
+  if (!Array.isArray(input)) return null
+  const targetId = normalizeConnectionId(connectionId)
+  if (!targetId) return null
+  return input
+    .map((item) => normalizeStoredConnectionLike(item))
+    .find((item): item is StoredConnectionItem => Boolean(item && item.id === targetId)) || null
 }
 
 export function resolveStoredConnectionTargetAgent(

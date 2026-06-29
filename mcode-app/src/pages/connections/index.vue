@@ -396,7 +396,6 @@ import { buildWebSocketProtocols } from "@/services/gateway/wsProtocol"
 import { buildConnectionConfigCode, parseConnectionConfigCodeToConnection } from "./connectionConfigCode"
 import { assertPairTargetAgentMatchesSelection } from "@/services/connectionPairValidation"
 import {
-  encodeConnectionContext,
   readStoredConnections,
   type ConnectionContext,
 } from "@/services/connectionContext"
@@ -878,7 +877,7 @@ function copyConfigCode() {
 function openConnectionAgents(conn: ConnectionItem) {
   uni.navigateTo({
     url: buildConnectionAgentsRoute({
-      encodedConnection: encodeConnectionForRoute(conn),
+      connectionId: conn.id,
     }),
   })
 }
@@ -886,13 +885,9 @@ function openConnectionAgents(conn: ConnectionItem) {
 function openModelProviders(conn: ConnectionItem) {
   uni.navigateTo({
     url: buildModelProvidersRoute({
-      encodedConnection: encodeConnectionForRoute(conn),
+      connectionId: conn.id,
     }),
   })
-}
-
-function encodeConnectionForRoute(conn: ConnectionItem) {
-  return encodeConnectionContext(conn)
 }
 
 async function activateConnection(conn: ConnectionItem) {
@@ -907,9 +902,8 @@ async function activateConnection(conn: ConnectionItem) {
 }
 
 function openProjectList(conn: ConnectionItem) {
-  const encodedConnection = encodeConnectionContext(conn)
   uni.navigateTo({
-    url: `/pages/projects/index?connection=${encodedConnection}`,
+    url: `/pages/projects/index?connectionId=${encodeURIComponent(conn.id)}`,
   })
 }
 

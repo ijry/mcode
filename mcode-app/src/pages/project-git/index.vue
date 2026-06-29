@@ -206,8 +206,8 @@ import { computed, getCurrentInstance, ref } from "vue"
 import { onLoad, onPullDownRefresh } from "@dcloudio/uni-app"
 import type { CodegGateway } from "@/services/gateway"
 import {
-  encodeConnectionContext,
   decodeConnectionContext,
+  findStoredConnectionById,
   persistResolvedConnection,
   resolveConnectionContext,
   type ConnectionContext,
@@ -286,7 +286,9 @@ const commitActions = computed(() => [
 ])
 
 onLoad((options) => {
-  connection.value = decodeConnectionContext(options?.connection as string)
+  connection.value =
+    findStoredConnectionById(String(options?.connectionId || "")) ||
+    decodeConnectionContext(options?.connection as string)
   folderId.value = Number(options?.folderId || 0)
   projectName.value = decodeURIComponent(String(options?.projectName || "").trim())
   projectPath.value = decodeURIComponent(String(options?.projectPath || "").trim())
@@ -393,7 +395,7 @@ function openCommitDetail(entry: GitLogEntry) {
   if (!connection.value) return
   uni.navigateTo({
     url: buildProjectGitCommitRoute({
-      encodedConnection: encodeConnectionContext(connection.value),
+      connectionId: connection.value.id,
       folderId: folderId.value,
       projectName: projectName.value,
       projectPath: projectPath.value,
@@ -406,7 +408,7 @@ function openWorkspaceDiff(entry: GitStatusEntry) {
   if (!connection.value) return
   uni.navigateTo({
     url: buildProjectGitDiffRoute({
-      encodedConnection: encodeConnectionContext(connection.value),
+      connectionId: connection.value.id,
       folderId: folderId.value,
       projectName: projectName.value,
       projectPath: projectPath.value,

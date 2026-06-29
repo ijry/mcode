@@ -51,6 +51,7 @@ import type { CodegGateway } from "@/services/gateway"
 import GitDiffViewer from "@/components/GitDiffViewer.vue"
 import {
   decodeConnectionContext,
+  findStoredConnectionById,
   persistResolvedConnection,
   resolveConnectionContext,
   type ConnectionContext,
@@ -84,7 +85,9 @@ const shortCommitHash = computed(() => commitHash.value.slice(0, 7))
 const diffFiles = computed(() => buildGitDiffView(diffContent.value))
 
 onLoad((options) => {
-  connection.value = decodeConnectionContext(options?.connection as string)
+  connection.value =
+    findStoredConnectionById(String(options?.connectionId || "")) ||
+    decodeConnectionContext(options?.connection as string)
   diffMode.value =
     String(options?.mode || "workspace") === "commit" ? "commit" : "workspace"
   projectPath.value = decodeURIComponent(String(options?.projectPath || "").trim())

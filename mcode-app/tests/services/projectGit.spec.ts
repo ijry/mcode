@@ -72,19 +72,19 @@ describe("projectGit service", () => {
   it("builds a route carrying connection, folder, project name, and project path", () => {
     expect(
       buildProjectGitRoute({
-        encodedConnection: "ctx123",
+        connectionId: "conn123",
         folderId: 42,
         projectName: "demo",
         projectPath: "D:/Repos/demo",
       })
     ).toBe(
-      "/pages/project-git/index?connection=ctx123&folderId=42&projectName=demo&projectPath=D%3A%2FRepos%2Fdemo"
+      "/pages/project-git/index?connectionId=conn123&folderId=42&projectName=demo&projectPath=D%3A%2FRepos%2Fdemo"
     )
   })
 
   it("builds a commit detail route with serialized commit payload", () => {
     const route = buildProjectGitCommitRoute({
-      encodedConnection: "ctx123",
+      connectionId: "conn123",
       folderId: 42,
       projectName: "demo",
       projectPath: "D:/Repos/demo",
@@ -130,7 +130,7 @@ describe("projectGit service", () => {
   it("builds a diff route for commit files and workspace files", () => {
     expect(
       buildProjectGitDiffRoute({
-        encodedConnection: "ctx123",
+        connectionId: "conn123",
         folderId: 42,
         projectName: "demo",
         projectPath: "D:/Repos/demo",
@@ -144,7 +144,7 @@ describe("projectGit service", () => {
 
     expect(
       buildProjectGitDiffRoute({
-        encodedConnection: "ctx123",
+        connectionId: "conn123",
         folderId: 42,
         projectName: "demo",
         projectPath: "D:/Repos/demo",

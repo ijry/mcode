@@ -28,11 +28,11 @@ import {
 
 describe("remoteSettings service", () => {
   it("builds connection-scoped routes", () => {
-    expect(buildConnectionAgentsRoute({ encodedConnection: "ctx123" })).toBe(
-      "/pages/connection-agents/index?connection=ctx123"
+    expect(buildConnectionAgentsRoute({ connectionId: "conn123" })).toBe(
+      "/pages/connection-agents/index?connectionId=conn123"
     )
-    expect(buildModelProvidersRoute({ encodedConnection: "ctx123" })).toBe(
-      "/pages/model-providers/index?connection=ctx123"
+    expect(buildModelProvidersRoute({ connectionId: "conn123" })).toBe(
+      "/pages/model-providers/index?connectionId=conn123"
     )
   })
 

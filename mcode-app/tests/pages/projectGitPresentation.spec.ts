@@ -10,20 +10,20 @@ describe("project git routing helpers", () => {
   it("builds a route carrying connection, folder, project name, and project path", () => {
     expect(
       buildProjectGitRoute({
-        encodedConnection: "ctx123",
+        connectionId: "conn123",
         folderId: 42,
         projectName: "demo",
         projectPath: "D:/Repos/demo",
       })
     ).toBe(
-      "/pages/project-git/index?connection=ctx123&folderId=42&projectName=demo&projectPath=D%3A%2FRepos%2Fdemo"
+      "/pages/project-git/index?connectionId=conn123&folderId=42&projectName=demo&projectPath=D%3A%2FRepos%2Fdemo"
     )
   })
 
   it("builds drill-down routes for commit detail and diff pages", () => {
     expect(
       buildProjectGitCommitRoute({
-        encodedConnection: "ctx123",
+        connectionId: "conn123",
         folderId: 42,
         projectName: "demo",
         projectPath: "D:/Repos/demo",
@@ -41,7 +41,7 @@ describe("project git routing helpers", () => {
 
     expect(
       buildProjectGitDiffRoute({
-        encodedConnection: "ctx123",
+        connectionId: "conn123",
         folderId: 42,
         projectName: "demo",
         projectPath: "D:/Repos/demo",
