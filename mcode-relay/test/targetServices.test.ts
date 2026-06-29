@@ -54,6 +54,7 @@ describe("target services", () => {
       targetId: "desktop-1",
       targetAgent: "mcode-desktop",
       capabilities: ["desktop.tunnel.available"],
+      protocolVersion: "1",
       localServices: [
         { name: "Code", host: "127.0.0.1", port: 1080, protocol: "http", enabled: true },
         { name: "Raw TCP", host: "127.0.0.1", port: 9000, protocol: "tcp", enabled: false },
@@ -94,6 +95,7 @@ describe("target services", () => {
       targetId: "desktop-1",
       targetAgent: "mcode-desktop",
       capabilities: ["desktop.tunnel.available"],
+      protocolVersion: "1",
       localServices: [
         { name: "Unsafe", host: "0.0.0.0" as "127.0.0.1", port: 1080, protocol: "http", enabled: true },
         { name: "Code", host: "127.0.0.1", port: 1080, protocol: "http", enabled: true },

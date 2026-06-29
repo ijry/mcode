@@ -48,8 +48,9 @@ export interface ConversationOverviewCard {
 export interface ConnectionConversationSnapshot {
   key: string
   name: string
-  mode: "direct" | "relay"
-  url: string
+  targetAgent: string
+  routeMode: "direct" | "gateway"
+  baseUrl: string
   projects: ConversationOverviewProject[]
   openTabCards: ConversationOverviewCard[]
   recentActiveCards: ConversationOverviewCard[]
@@ -59,8 +60,9 @@ export interface ConnectionConversationSnapshot {
 interface BuildSnapshotInput {
   connectionKey: string
   connectionName: string
-  mode: "direct" | "relay"
-  url: string
+  targetAgent: string
+  routeMode: "direct" | "gateway"
+  baseUrl: string
   folders: ConversationOverviewProject[]
   tabs: ConversationOverviewOpenedTab[]
   conversations: ConversationOverviewConversation[]
@@ -148,8 +150,9 @@ export function buildConnectionConversationSnapshot(
   return {
     key: input.connectionKey,
     name: input.connectionName,
-    mode: input.mode,
-    url: input.url,
+    targetAgent: input.targetAgent,
+    routeMode: input.routeMode,
+    baseUrl: input.baseUrl,
     projects,
     openTabCards,
     recentActiveCards,

@@ -1,4 +1,4 @@
-import type { GatewayMode, PairTargetMetadata, RelaySessionInfo } from "@/services/gateway"
+import type { PairTargetMetadata, RelaySessionInfo } from "@/services/gateway"
 import {
   toConnectionRuntimeContext,
   type ConnectionRuntimeContext,
@@ -7,27 +7,17 @@ import {
 import { resolveConnectionDriver } from "@/services/gateway/connectionDriverRegistry"
 import {
   buildConnectionRecordKey,
-  migrateConnectionRecord,
   normalizeConnectionBaseUrl,
   normalizeConnectionRecordV2,
   normalizePairTargetProfile,
   type ConnectionRecordV2,
   type ConnectionTargetAgent,
 } from "./connectionSchema"
-
-export interface LegacyConnectionContextInput {
-  name: string
-  mode: GatewayMode
-  url: string
-  directToken?: string
-  pairCode?: string
-  pairSecret?: string
-  relaySession?: RelaySessionInfo | null
-}
+import { assertPairTargetAgentMatchesSelection } from "./connectionPairValidation"
 
 export type ConnectionContext = ConnectionRuntimeContext
 
-export type ConnectionContextLike = ConnectionContext | ConnectionRecordV2 | LegacyConnectionContextInput
+export type ConnectionContextLike = ConnectionContext | ConnectionRecordV2
 
 export type ResolvedConnectionContext = DriverResolvedConnectionContext
 
@@ -40,41 +30,17 @@ export function buildConnectionKey(input: ConnectionContextLike) {
   return normalized ? buildConnectionRecordKey(normalized) : ""
 }
 
-export function buildLegacyRouteKey(mode: GatewayMode, url: string) {
-  const normalizedUrl = normalizeBaseUrl(url)
-  return normalizedUrl ? `${mode}::${normalizedUrl}` : ""
-}
-
-export function buildLegacyConnectionKey(input: ConnectionContextLike) {
-  const normalized = normalizeConnectionContext(input)
-  return normalized ? buildLegacyRouteKey(normalized.mode, normalized.url) : ""
-}
-
-export function buildConnectionKeyCandidates(input: ConnectionContextLike) {
-  const normalized = normalizeConnectionContext(input)
-  if (!normalized) return []
-
-  return Array.from(
-    new Set(
-      [
-        buildConnectionRecordKey(normalized),
-        buildLegacyRouteKey(normalized.mode, normalized.url),
-      ].filter(Boolean)
-    )
-  )
-}
-
 export function connectionKeyMatches(input: ConnectionContextLike, lookupKey: string) {
   const normalizedLookup = String(lookupKey || "").trim()
   if (!normalizedLookup) return false
-  return buildConnectionKeyCandidates(input).includes(normalizedLookup)
+  return buildConnectionKey(input) === normalizedLookup
 }
 
 export function isConnectionMarkedConnected(
   input: ConnectionContextLike,
   connectedMap: Record<string, unknown> | null | undefined
 ) {
-  return buildConnectionKeyCandidates(input).some((key) => Boolean(connectedMap?.[key]))
+  return Boolean(connectedMap?.[buildConnectionKey(input)])
 }
 
 export function encodeConnectionContext(connection: ConnectionContextLike) {
@@ -141,10 +107,13 @@ export function applyPairMetadata(
     ...(session || {}),
     ...(target || {}),
   })
-  const targetAgent =
-    normalizedTarget?.targetAgent ||
-    normalizeTargetAgent(session?.targetAgent) ||
-    normalized.targetAgent
+  const pairedTargetAgent = normalizedTarget?.targetAgent || normalizeTargetAgent(session?.targetAgent)
+  if (session && !pairedTargetAgent) {
+    assertPairTargetAgentMatchesSelection({}, normalized.targetAgent)
+  }
+  if (pairedTargetAgent) {
+    assertPairTargetAgentMatchesSelection({ targetAgent: pairedTargetAgent }, normalized.targetAgent)
+  }
   const targetProfile = normalizedTarget || normalized.targetProfile || null
   const gatewaySession = session
     ? {
@@ -159,7 +128,6 @@ export function applyPairMetadata(
 
   return toConnectionContext({
     ...normalized,
-    targetAgent,
     ...(gatewaySession ? { gatewaySession } : {}),
     ...(targetProfile ? { targetProfile } : {}),
   })
@@ -188,16 +156,10 @@ function sanitizeConnectionContext(connection: ConnectionContextLike) {
 
 function normalizeConnectionRecordInput(input: unknown): ConnectionRecordV2 | null {
   if (!input || typeof input !== "object") return null
-  const raw = input as Record<string, unknown>
-
-  const normalizedV2 = normalizeConnectionRecordV2({
+  return normalizeConnectionRecordV2({
     version: 2,
-    ...raw,
-    gatewaySession: raw.gatewaySession ?? raw.relaySession,
+    ...(input as Record<string, unknown>),
   })
-  if (normalizedV2) return normalizedV2
-
-  return migrateConnectionRecord(raw)
 }
 
 function toConnectionContext(record: ConnectionRecordV2): ConnectionContext {

@@ -479,10 +479,7 @@ import {
 } from "./overviewState"
 import {
   buildConnectionKey,
-  buildLegacyRouteKey,
-  connectionKeyMatches,
   encodeConnectionContext,
-  isConnectionMarkedConnected,
   readStoredConnections,
   resolveConnectionContext,
   type ConnectionContext,
@@ -692,7 +689,7 @@ const filteredConnectionGroups = computed<DisplayConnectionGroup[]>(() => {
       (group) =>
         group.cards.length > 0 ||
         group.name.toLowerCase().includes(kw) ||
-        group.url.toLowerCase().includes(kw)
+        group.baseUrl.toLowerCase().includes(kw)
     )
 })
 
@@ -1239,7 +1236,7 @@ async function loadOverviewDataInternal() {
     const connectedMap = (uni.getStorageSync("mcode_connected_map") || {}) as Record<string, boolean>
     const groups = await Promise.all(
       savedConnections.map(async (conn) => {
-        if (!isConnectionMarkedConnected(conn, connectedMap)) {
+        if (!connectedMap[connectionKey(conn)]) {
           return buildConnectionErrorGroup(conn, "连接离线")
         }
         try {
@@ -1285,7 +1282,7 @@ async function loadOverviewDataInternal() {
 function getConnectedConnections(): ConnectionItem[] {
   const savedConnections = readStoredConnections()
   const connectedMap = (uni.getStorageSync("mcode_connected_map") || {}) as Record<string, boolean>
-  return savedConnections.filter((conn) => isConnectionMarkedConnected(conn, connectedMap))
+  return savedConnections.filter((conn) => Boolean(connectedMap[connectionKey(conn)]))
 }
 
 async function loadConnectionGroup(conn: ConnectionItem): Promise<ConnectionGroup> {
@@ -1345,8 +1342,9 @@ function buildConnectionErrorGroup(
   return {
     key: connectionKey(conn),
     name: conn.name,
-    mode: conn.mode,
-    url: conn.url,
+    targetAgent: conn.targetAgent,
+    routeMode: conn.routeMode,
+    baseUrl: connectionBaseUrl(conn),
     projects: [],
     openTabCards: [],
     recentActiveCards: [],
@@ -1426,8 +1424,11 @@ async function refreshConnectionGroupFromLocalCache(instanceKey: string) {
   }
 
   const mappedConnKey = instanceConnectionKeyMap.get(instanceKey) || ""
-  const legacyConnKey = buildLegacyRouteKey(descriptor.mode, descriptor.baseUrl)
-  const conn = findConnectedConnectionByKey(mappedConnKey || legacyConnKey)
+  if (!mappedConnKey) {
+    await loadOverviewData({ force: true })
+    return
+  }
+  const conn = findConnectedConnectionByKey(mappedConnKey)
   if (!conn) return
 
   const connKey = connectionKey(conn)
@@ -1517,8 +1518,9 @@ function buildConnectionGroupSnapshot(input: {
     buildConnectionConversationSnapshot({
       connectionKey: connectionKey(input.conn),
       connectionName: input.conn.name,
-      mode: input.conn.mode,
-      url: input.conn.url,
+      targetAgent: input.conn.targetAgent,
+      routeMode: input.conn.routeMode,
+      baseUrl: connectionBaseUrl(input.conn),
       folders: input.folders,
       tabs: input.tabs,
       conversations: input.conversations,
@@ -1685,7 +1687,7 @@ function connectionKey(conn: ConnectionItem): string {
 }
 
 function findConnectedConnectionByKey(key: string): ConnectionItem | undefined {
-  return getConnectedConnections().find((item) => connectionKeyMatches(item, key))
+  return getConnectedConnections().find((item) => connectionKey(item) === key)
 }
 
 function normalizeAgentType(value?: string): string {
@@ -1820,15 +1822,22 @@ function applySelectedConnection(connectionKeyValue: string) {
 }
 
 function syncAuthToConnection(conn: ConnectionItem) {
-  if (conn.mode === "direct") {
-    const token = conn.directToken || getDirectToken(conn.url)
+  if (conn.routeMode === "direct") {
+    const baseUrl = connectionBaseUrl(conn)
+    const token = conn.directToken || getDirectToken(baseUrl)
     if (!token) return
-    auth.setDirectMode(conn.url, token)
+    auth.setDirectMode(baseUrl, token)
     return
   }
-  if (conn.relaySession?.accessToken) {
-    auth.setRelayMode(conn.url, conn.relaySession)
+  if (conn.gatewaySession?.accessToken) {
+    auth.setRelayMode(connectionBaseUrl(conn), conn.gatewaySession)
   }
+}
+
+function connectionBaseUrl(conn: ConnectionItem): string {
+  return conn.routeMode === "direct"
+    ? String(conn.directBaseUrl || "").trim().replace(/\/+$/, "")
+    : String(conn.gatewayBaseUrl || "").trim().replace(/\/+$/, "")
 }
 
 function parseConversationId(input: unknown): number {

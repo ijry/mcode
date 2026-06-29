@@ -1037,7 +1037,6 @@ import {
   type PickedLocalFile,
 } from "./detailAttachmentUpload"
 import {
-  buildConnectionKey,
   buildDescriptorFromStoredConnection,
   findStoredConnectionByKey as findStoredConnectionInList,
   normalizeStoredConnectionLike,
@@ -1232,13 +1231,12 @@ const detailConnectionKey = computed(() => {
     const descriptor = managed
       ? getRegisteredRemoteInstanceDescriptor(managed.instanceKey)
       : null
-    if (descriptor?.baseUrl) {
-      return buildConnectionKey(descriptor.mode, descriptor.baseUrl)
+    if (managed && descriptor?.baseUrl) {
+      return managed.instanceKey
     }
     if (managed?.instanceKey) return managed.instanceKey
   }
-  const base = auth.mode === "direct" ? auth.directBaseUrl : auth.relayUrl
-  return base ? buildConnectionKey(auth.mode, base) : resolveDetailInstanceKey()
+  return resolveDetailInstanceKey()
 })
 
 const historyStatusText = computed(() => {
@@ -3700,18 +3698,20 @@ function syncAuthByConnectionKey(connKey: string) {
 function syncAuthByStoredConnection(matched: StoredConnectionItem) {
   if (!matched) return
 
-  if (matched.mode === "direct") {
-    const token = matched.directToken || getDirectToken(matched.url)
-    if (token) auth.setDirectMode(matched.url, token)
+  if (matched.routeMode === "direct") {
+    const baseUrl = matched.directBaseUrl || ""
+    const token = matched.directToken || getDirectToken(baseUrl)
+    if (baseUrl && token) auth.setDirectMode(baseUrl, token)
     return
   }
 
-  const accessToken = matched.relaySession?.accessToken
-  if (accessToken) {
-    auth.setRelayMode(matched.url, {
+  const accessToken = matched.gatewaySession?.accessToken
+  const baseUrl = matched.gatewayBaseUrl || ""
+  if (baseUrl && accessToken) {
+    auth.setRelayMode(baseUrl, {
       accessToken,
-      refreshToken: matched.relaySession?.refreshToken,
-      targetId: matched.relaySession?.targetId,
+      refreshToken: matched.gatewaySession?.refreshToken,
+      targetId: matched.gatewaySession?.targetId,
     })
   }
 }
@@ -3728,7 +3728,7 @@ function resolveDetailStoredConnection(): StoredConnectionItem | null {
 
 function resolveDetailTargetAgent() {
   return resolveStoredConnectionTargetAgent(
-    resolveDetailStoredConnection() || { relaySession: auth.relaySession || undefined }
+    resolveDetailStoredConnection() || { gatewaySession: auth.relaySession || undefined }
   )
 }
 
@@ -3743,7 +3743,10 @@ function resolveDetailDescriptor(): RemoteInstanceDescriptor {
 
   const stored = resolveDetailStoredConnection()
   const fromStored = stored
-    ? buildDescriptorFromStoredConnection(stored, getDirectToken(stored.url))
+    ? buildDescriptorFromStoredConnection(
+        stored,
+        getDirectToken(stored.routeMode === "direct" ? stored.directBaseUrl || "" : "")
+      )
     : null
   if (fromStored) {
     registerRemoteInstanceDescriptor(fromStored)
@@ -3800,21 +3803,27 @@ function persistRelaySessionForDescriptor(
   descriptor: RemoteInstanceDescriptor,
   session: RelaySessionInfo
 ) {
-  const connKey = buildConnectionKey("relay", descriptor.baseUrl)
   const saved = (Array.isArray(uni.getStorageSync("mcode_connections"))
     ? uni.getStorageSync("mcode_connections")
     : []) as StoredConnectionItem[]
-  const index = saved.findIndex((item) => buildConnectionKey(item.mode, item.url) === connKey)
+  const index = saved.findIndex((item) =>
+    item.routeMode === "gateway" &&
+    normalizeStoredBaseUrl(item.gatewayBaseUrl) === normalizeStoredBaseUrl(descriptor.baseUrl)
+  )
   if (index < 0) return
   saved[index] = {
     ...saved[index],
-    relaySession: {
+    gatewaySession: {
       accessToken: session.accessToken,
       refreshToken: session.refreshToken,
       targetId: session.targetId,
     },
   }
   uni.setStorageSync("mcode_connections", saved)
+}
+
+function normalizeStoredBaseUrl(value?: string) {
+  return String(value || "").trim().replace(/\/+$/, "")
 }
 
 function removeAttachment(index: number) {

@@ -33,9 +33,9 @@ export interface DesktopUpstreamHello {
   tenantId?: string | null
   targetName?: string | null
   displayName?: string | null
-  targetAgent?: TargetAgent
+  targetAgent: TargetAgent
   capabilities?: string[]
-  protocolVersion?: string
+  protocolVersion: string
   localServices?: LocalServiceMetadata[]
 }
 

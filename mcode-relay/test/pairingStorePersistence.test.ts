@@ -126,12 +126,13 @@ describe("pairing store persistence", () => {
     withTempDir((dir) => {
       const filePath = join(dir, "pairing-store.json")
       const store = new PairingStore(new JsonFilePairingStoreStorage(filePath))
-      store.upsertTarget({ targetId: "desktop-1", targetAgent: "mcode-desktop" })
+      store.upsertTarget({ targetId: "desktop-1", targetAgent: "mcode-desktop", protocolVersion: "1" })
       store.addOffer({
         code: "123456",
         secret: "secret",
         targetId: "desktop-1",
         targetAgent: "mcode-desktop",
+        protocolVersion: "1",
         ttlSeconds: 300,
       })
 
@@ -142,7 +143,7 @@ describe("pairing store persistence", () => {
     })
   })
 
-  it("restores legacy snapshots into the default tenant", () => {
+  it("drops v1 snapshots missing required target protocol fields", () => {
     withTempDir((dir) => {
       const filePath = join(dir, "pairing-store.json")
       writeFileSync(
@@ -152,10 +153,8 @@ describe("pairing store persistence", () => {
             targets: [
               {
                 targetId: "desktop-legacy",
-                targetAgent: "mcode-desktop",
                 targetName: "Legacy Desktop",
                 capabilities: ["desktop.tunnel.available"],
-                protocolVersion: "1",
                 relayUrl: "https://gateway.example.com",
               },
             ],
@@ -192,26 +191,9 @@ describe("pairing store persistence", () => {
 
       const restored = new PairingStore(new JsonFilePairingStoreStorage(filePath))
 
-      expect(restored.getTarget("desktop-legacy")).toMatchObject({
-        tenantId: "default",
-        targetName: "Legacy Desktop",
-      })
-      expect(restored.listSessions()).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            sessionId: "session-legacy",
-            tenantId: "default",
-          }),
-        ])
-      )
-      expect(restored.listAuditEvents(10)).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            eventId: "event-legacy",
-            tenantId: "default",
-          }),
-        ])
-      )
+      expect(restored.getTarget("desktop-legacy")).toBeNull()
+      expect(restored.listSessions()).toEqual([])
+      expect(restored.listAuditEvents(10)).toEqual([])
       expect(restored.listTenants().map((item) => item.tenantId)).toContain("default")
     })
   })
@@ -234,7 +216,7 @@ describe("pairing store persistence", () => {
       const filePath = join(dir, "pairing-store.json")
       const context = createRelayContext({ config: config({ PAIRING_STORE_PATH: filePath }) })
 
-      context.store.upsertTarget({ targetId: "desktop-1", targetAgent: "mcode-desktop" })
+      context.store.upsertTarget({ targetId: "desktop-1", targetAgent: "mcode-desktop", protocolVersion: "1" })
 
       const restored = new PairingStore(new JsonFilePairingStoreStorage(filePath))
       expect(restored.getTarget("desktop-1")?.targetAgent).toBe("mcode-desktop")

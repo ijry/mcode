@@ -1,6 +1,6 @@
 import {
   applyPairMetadata,
-  buildConnectionKeyCandidates,
+  buildConnectionKey,
   connectionKeyMatches,
   isConnectionMarkedConnected,
   persistResolvedConnection,
@@ -12,7 +12,7 @@ describe("connectionContext", () => {
     const connection = {
       version: 2 as const,
       name: "Desktop Gateway",
-      targetAgent: "codeg" as const,
+      targetAgent: "mcode-desktop" as const,
       routeMode: "gateway" as const,
       gatewayProvider: "official" as const,
       gatewayBaseUrl: "https://relay.example.com",
@@ -54,16 +54,35 @@ describe("connectionContext", () => {
     })
   })
 
-  it("upgrades legacy gateway records in place when pair metadata changes target agent", () => {
+  it("rejects pair metadata for a different target agent", () => {
+    const connection = {
+      version: 2 as const,
+      name: "OpenCode Gateway",
+      targetAgent: "opencode" as const,
+      routeMode: "gateway" as const,
+      gatewayProvider: "official" as const,
+      gatewayBaseUrl: "https://relay.example.com",
+    }
+
+    expect(() =>
+      applyPairMetadata(
+        connection as any,
+        { accessToken: "access-token" },
+        { targetAgent: "mcode-desktop" }
+      )
+    ).toThrow("配对码属于 MCode Desktop，不是 OpenCode")
+  })
+
+  it("updates v2 gateway records in place when pair metadata refreshes target profile", () => {
     const storedRecord = {
       version: 2 as const,
-      name: "Legacy Gateway",
-      targetAgent: "codeg" as const,
+      name: "Desktop Gateway",
+      targetAgent: "mcode-desktop" as const,
       routeMode: "gateway" as const,
       gatewayProvider: "official" as const,
       gatewayBaseUrl: "https://relay.example.com",
       gatewaySession: {
-        accessToken: "legacy-access",
+        accessToken: "old-access",
       },
     }
 
@@ -72,7 +91,6 @@ describe("connectionContext", () => {
     persistResolvedConnection(
       {
         ...storedRecord,
-        targetAgent: "mcode-desktop",
         gatewaySession: {
           accessToken: "next-access",
           refreshToken: "refresh-token",
@@ -100,8 +118,6 @@ describe("connectionContext", () => {
       targetAgent: "mcode-desktop",
       routeMode: "gateway",
       gatewayBaseUrl: "https://relay.example.com",
-      mode: "relay",
-      url: "https://relay.example.com",
       targetProfile: {
         targetAgent: "mcode-desktop",
         targetId: "desktop-1",
@@ -118,19 +134,10 @@ describe("connectionContext", () => {
         capabilities: ["desktop.runtime.codex-cli"],
         protocolVersion: "1",
       },
-      relaySession: {
-        accessToken: "next-access",
-        refreshToken: "refresh-token",
-        targetId: "desktop-1",
-        targetAgent: "mcode-desktop",
-        displayName: "Workstation",
-        capabilities: ["desktop.runtime.codex-cli"],
-        protocolVersion: "1",
-      },
     })
   })
 
-  it("matches v2 and legacy route keys for connected-map compatibility", () => {
+  it("matches only v2 keys for connected-map state", () => {
     const connection = {
       version: 2 as const,
       name: "OpenCode Gateway",
@@ -143,15 +150,12 @@ describe("connectionContext", () => {
       },
     }
 
-    expect(buildConnectionKeyCandidates(connection)).toEqual([
-      "opencode::gateway::https://relay.example.com",
-      "relay::https://relay.example.com",
-    ])
+    expect(buildConnectionKey(connection)).toBe("opencode::gateway::https://relay.example.com")
     expect(connectionKeyMatches(connection, "opencode::gateway::https://relay.example.com")).toBe(true)
-    expect(connectionKeyMatches(connection, "relay::https://relay.example.com")).toBe(true)
+    expect(connectionKeyMatches(connection, "relay::https://relay.example.com")).toBe(false)
     expect(isConnectionMarkedConnected(connection, {
       "relay::https://relay.example.com": true,
-    })).toBe(true)
+    })).toBe(false)
     expect(isConnectionMarkedConnected(connection, {
       "opencode::gateway::https://relay.example.com": true,
     })).toBe(true)

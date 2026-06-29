@@ -2,13 +2,10 @@ import { buildRemoteInstanceKey } from "@/services/realtime/instance-key"
 import type { RemoteInstanceDescriptor } from "@/services/realtime/types"
 import {
   buildConnectionRecordKey,
-  deriveLegacyRouteCompat,
   normalizeConnectionRecordV2,
   normalizeRelaySessionInfo,
-  type ConnectionGatewayProvider,
-  type ConnectionRouteMode,
+  type ConnectionRecordV2,
   type ConnectionTargetAgent,
-  type ConnectionTargetProfile,
 } from "@/services/connectionSchema"
 import { firstString } from "./detailDataNormalization"
 
@@ -22,26 +19,8 @@ export interface StoredRelaySessionInfo {
   protocolVersion?: string
 }
 
-export interface StoredConnectionItem {
-  mode: "direct" | "relay"
-  url: string
-  version?: 2
-  name?: string
-  targetAgent?: ConnectionTargetAgent
-  routeMode?: ConnectionRouteMode
-  directBaseUrl?: string
-  directToken?: string
-  gatewayProvider?: ConnectionGatewayProvider
-  gatewayBaseUrl?: string
-  pairCode?: string
-  pairSecret?: string
+export type StoredConnectionItem = Omit<ConnectionRecordV2, "gatewaySession"> & {
   gatewaySession?: StoredRelaySessionInfo | null
-  targetProfile?: ConnectionTargetProfile | null
-  relaySession?: StoredRelaySessionInfo
-}
-
-export function buildConnectionKey(mode: "direct" | "relay", url: string): string {
-  return `${mode}::${normalizeConnectionUrl(url)}`
 }
 
 export function normalizeConnectionUrl(url: string): string {
@@ -55,35 +34,18 @@ export function normalizeStoredConnectionLike(input: unknown): StoredConnectionI
   const v2 = normalizeConnectionRecordV2({
     version: 2,
     ...raw,
-    gatewaySession: raw.gatewaySession ?? raw.relaySession,
   })
   if (v2) {
-    const compat = deriveLegacyRouteCompat(v2)
-    const relaySession = normalizeStoredRelaySession(v2.gatewaySession ?? raw.relaySession)
+    const gatewaySession = normalizeStoredRelaySession(v2.gatewaySession)
     return {
       ...v2,
-      ...compat,
       directToken: v2.directToken || undefined,
       pairCode: v2.pairCode || undefined,
       pairSecret: v2.pairSecret || undefined,
-      gatewaySession: relaySession || v2.gatewaySession || undefined,
-      relaySession,
+      gatewaySession: gatewaySession || undefined,
     }
   }
-
-  const mode = raw.mode === "relay" ? "relay" : raw.mode === "direct" ? "direct" : null
-  const url = normalizeConnectionUrl(String(raw.url || ""))
-  if (!mode || !url) return null
-
-  const relaySession = normalizeStoredRelaySession(raw.relaySession)
-  return {
-    mode,
-    url,
-    directToken: firstString(raw.directToken) || undefined,
-    pairCode: firstString(raw.pairCode) || undefined,
-    pairSecret: firstString(raw.pairSecret) || undefined,
-    relaySession,
-  }
+  return null
 }
 
 function normalizeStoredRelaySession(input: unknown): StoredRelaySessionInfo | undefined {
@@ -127,12 +89,11 @@ export function findStoredConnectionByKey(
 }
 
 export function resolveStoredConnectionTargetAgent(
-  conn: Pick<StoredConnectionItem, "targetAgent" | "targetProfile" | "gatewaySession" | "relaySession"> | null | undefined
+  conn: Partial<Pick<StoredConnectionItem, "targetAgent" | "targetProfile" | "gatewaySession">> | null | undefined
 ): ConnectionTargetAgent {
   return normalizeTargetAgent(conn?.targetAgent) ||
     normalizeTargetAgent(conn?.targetProfile?.targetAgent) ||
     normalizeTargetAgent(conn?.gatewaySession?.targetAgent) ||
-    normalizeTargetAgent(conn?.relaySession?.targetAgent) ||
     "codeg"
 }
 
@@ -140,10 +101,12 @@ export function buildDescriptorFromStoredConnection(
   conn: StoredConnectionItem,
   directTokenFallback?: string
 ): RemoteInstanceDescriptor | null {
-  const baseUrl = normalizeConnectionUrl(conn.url)
+  const baseUrl = normalizeConnectionUrl(
+    conn.routeMode === "direct" ? conn.directBaseUrl || "" : conn.gatewayBaseUrl || ""
+  )
   if (!baseUrl) return null
 
-  if (conn.mode === "direct") {
+  if (conn.routeMode === "direct") {
     const token = firstString(conn.directToken, directTokenFallback)
     const principal = token ? `direct:${token.slice(0, 16)}` : "direct:anonymous"
     return {
@@ -159,9 +122,9 @@ export function buildDescriptorFromStoredConnection(
     }
   }
 
-  const accessToken = firstString(conn.relaySession?.accessToken)
-  const refreshToken = firstString(conn.relaySession?.refreshToken) || undefined
-  const targetId = firstString(conn.relaySession?.targetId)
+  const accessToken = firstString(conn.gatewaySession?.accessToken)
+  const refreshToken = firstString(conn.gatewaySession?.refreshToken) || undefined
+  const targetId = firstString(conn.gatewaySession?.targetId)
   const principal = targetId || refreshToken || accessToken || "relay:anonymous"
   return {
     instanceKey: buildRemoteInstanceKey({
@@ -178,23 +141,11 @@ export function buildDescriptorFromStoredConnection(
 }
 
 function buildStoredConnectionKeyCandidates(conn: StoredConnectionItem): string[] {
-  return Array.from(new Set([
-    buildStoredConnectionPrimaryKey(conn),
-    buildConnectionKey(conn.mode, conn.url),
-  ].filter(Boolean)))
+  return [buildStoredConnectionPrimaryKey(conn)].filter(Boolean)
 }
 
 function buildStoredConnectionPrimaryKey(conn: StoredConnectionItem): string {
-  if (conn.targetAgent && conn.routeMode) {
-    return buildConnectionRecordKey({
-      targetAgent: conn.targetAgent,
-      routeMode: conn.routeMode,
-      directBaseUrl: conn.directBaseUrl || (conn.mode === "direct" ? conn.url : ""),
-      gatewayBaseUrl: conn.gatewayBaseUrl || (conn.mode === "relay" ? conn.url : ""),
-      gatewayProvider: conn.gatewayProvider,
-    })
-  }
-  return buildConnectionKey(conn.mode, conn.url)
+  return buildConnectionRecordKey(conn)
 }
 
 function normalizeTargetAgent(value: unknown): ConnectionTargetAgent | null {

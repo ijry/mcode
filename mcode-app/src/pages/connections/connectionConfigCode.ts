@@ -1,9 +1,6 @@
 import type { RelaySessionInfo } from "@/services/gateway"
 import {
-  deriveLegacyRouteCompat,
-  migrateConnectionRecord,
   normalizeConnectionRecordV2,
-  normalizeRelaySessionInfo,
   normalizeV2ConfigCodePayload,
   type ConnectionGatewayProvider,
   type ConnectionRecordV2,
@@ -12,36 +9,8 @@ import {
   type ConnectionTargetProfile,
 } from "@/services/connectionSchema"
 
-export type ConfigCodeConnectionMode = "direct" | "relay"
-
-export interface LegacyConfigCodeConnection {
-  name: string
-  mode: ConfigCodeConnectionMode
-  url: string
-  directToken?: string
-  pairCode?: string
-  pairSecret?: string
-  relaySession?: RelaySessionInfo
-}
-
-export type ConfigCodeConnection = ConnectionRecordV2 | LegacyConfigCodeConnection
-export type ParsedConfigCodeConnection = ConnectionRecordV2 & ReturnType<typeof deriveLegacyRouteCompat>
-
-export interface ConfigCodePayload {
-  version: 1
-  name: string
-  mode: ConfigCodeConnectionMode
-  directBaseUrl?: string
-  directToken?: string
-  relayUrl?: string
-  pairCode?: string
-  pairSecret?: string
-  relaySession?: {
-    accessToken: string
-    refreshToken?: string
-    targetId?: string
-  }
-}
+export type ConfigCodeConnection = ConnectionRecordV2
+export type ParsedConfigCodeConnection = ConnectionRecordV2
 
 export interface ConfigCodePayloadV2 {
   version: 2
@@ -62,26 +31,15 @@ export function buildConnectionConfigCode(connection: ConfigCodeConnection): str
   return encodeBase64Url(JSON.stringify(buildConnectionConfigPayload(connection)))
 }
 
-export function decodeConnectionConfigCode(code: string): ConfigCodePayload | ConfigCodePayloadV2 {
-  return JSON.parse(decodeBase64Url(code)) as ConfigCodePayload | ConfigCodePayloadV2
+export function decodeConnectionConfigCode(code: string): ConfigCodePayloadV2 {
+  return JSON.parse(decodeBase64Url(code)) as ConfigCodePayloadV2
 }
 
 export function parseConnectionConfigCodeToConnection(code: string): ParsedConfigCodeConnection {
   const payload = decodeConnectionConfigCode(code)
-  const version = Number((payload as { version?: number }).version || 1)
-  const record =
-    version === 2
-      ? normalizeV2ConfigCodePayload(payload as unknown as Record<string, unknown>)
-      : migrateConnectionRecord(projectConfigCodePayloadToLegacyConnection(payload as ConfigCodePayload))
-
-  if (!record) {
-    throw new Error("不支持的配置码内容")
-  }
+  const record = normalizeV2ConfigCodePayload(payload as unknown as Record<string, unknown>)
   assertConfigCodeCredentials(record)
-  return {
-    ...record,
-    ...deriveLegacyRouteCompat(record),
-  }
+  return record
 }
 
 function buildConnectionConfigPayload(connection: ConfigCodeConnection): ConfigCodePayloadV2 {
@@ -120,7 +78,7 @@ function buildConnectionConfigPayload(connection: ConfigCodeConnection): ConfigC
   }
 }
 
-function normalizeRelaySession(session: RelaySessionInfo | undefined): ConfigCodePayload["relaySession"] {
+function normalizeRelaySession(session: RelaySessionInfo | undefined): ConfigCodePayloadV2["gatewaySession"] {
   const accessToken = session?.accessToken?.trim() || ""
   if (!accessToken) return undefined
   return {
@@ -128,56 +86,6 @@ function normalizeRelaySession(session: RelaySessionInfo | undefined): ConfigCod
     ...(session?.refreshToken?.trim() ? { refreshToken: session.refreshToken.trim() } : {}),
     ...(session?.targetId?.trim() ? { targetId: session.targetId.trim() } : {}),
   }
-}
-
-function normalizeUrl(value: string): string {
-  return String(value || "").trim().replace(/\/+$/, "")
-}
-
-function projectConfigCodePayloadToLegacyConnection(payload: ConfigCodePayload): LegacyConfigCodeConnection {
-  if (payload.version !== 1) throw new Error("不支持的配置码版本")
-
-  const name = String(payload.name || "").trim() || "MCode"
-
-  if (payload.mode === "direct") {
-    const url = normalizeUrl(payload.directBaseUrl || "")
-    const directToken = String(payload.directToken || "").trim()
-    if (!url) throw new Error("配置码缺少直连地址")
-    if (!directToken) throw new Error("配置码缺少直连 token")
-    return {
-      name,
-      mode: "direct",
-      url,
-      directToken,
-    }
-  }
-
-  if (payload.mode === "relay") {
-    const url = normalizeUrl(payload.relayUrl || "")
-    const pairCode = String(payload.pairCode || "").trim()
-    const pairSecret = String(payload.pairSecret || "").trim()
-    const relaySession = normalizeImportedRelaySession(payload.relaySession)
-    if (!url) throw new Error("配置码缺少网关地址")
-    if (!relaySession && (!pairCode || !pairSecret)) {
-      throw new Error("配置码缺少网关凭据")
-    }
-    return {
-      name,
-      mode: "relay",
-      url,
-      ...(pairCode ? { pairCode } : {}),
-      ...(pairSecret ? { pairSecret } : {}),
-      ...(relaySession ? { relaySession } : {}),
-    }
-  }
-
-  throw new Error("不支持的连接模式")
-}
-
-function normalizeImportedRelaySession(
-  session: ConfigCodePayload["relaySession"] | undefined
-): RelaySessionInfo | undefined {
-  return normalizeRelaySessionInfo(session) || undefined
 }
 
 function encodeBase64Url(text: string): string {
@@ -221,23 +129,9 @@ function getBufferCtor():
 
 function normalizeConfigCodeConnection(connection: ConfigCodeConnection): ConnectionRecordV2 | null {
   if (!connection || typeof connection !== "object") return null
-  const raw = connection as unknown as Record<string, unknown>
-
-  const v2 = normalizeConnectionRecordV2({
+  return normalizeConnectionRecordV2({
     version: 2,
-    ...raw,
-    gatewaySession: raw.gatewaySession ?? raw.relaySession,
-  })
-  if (v2) return v2
-
-  return migrateConnectionRecord({
-    name: raw.name,
-    mode: raw.mode,
-    url: raw.url,
-    directToken: raw.directToken,
-    pairCode: raw.pairCode,
-    pairSecret: raw.pairSecret,
-    relaySession: raw.relaySession,
+    ...(connection as unknown as Record<string, unknown>),
   })
 }
 

@@ -63,12 +63,14 @@ function seedStore(store: PairingStore): void {
     tenantId: "tenant-a",
     targetAgent: "mcode-desktop",
     targetName: "Desktop A",
+    protocolVersion: "1",
   })
   store.upsertTarget({
     targetId: "desktop-b",
     tenantId: "tenant-b",
     targetAgent: "mcode-desktop",
     targetName: "Desktop B",
+    protocolVersion: "1",
   })
   store.createSession("desktop-a", { deviceName: "Phone A" })
   store.createSession("desktop-b", { deviceName: "Phone B" })

@@ -1,5 +1,4 @@
 import {
-  buildConnectionKey,
   buildDescriptorFromStoredConnection,
   findStoredConnectionByKey,
   normalizeConnectionUrl,
@@ -8,45 +7,14 @@ import {
 } from "@/pages/conversation-detail/detailConnectionResolution"
 
 describe("detailConnectionResolution", () => {
-  it("normalizes connection urls and builds stable keys", () => {
+  it("normalizes connection urls", () => {
     expect(normalizeConnectionUrl(" https://host/// ")).toBe("https://host")
-    expect(buildConnectionKey("direct", " https://host/// ")).toBe("direct::https://host")
   })
 
-  it("normalizes stored direct and relay connections defensively", () => {
-    expect(normalizeStoredConnectionLike({ mode: "direct", url: " https://host/ ", directToken: " token " }))
-      .toEqual({
-        mode: "direct",
-        url: "https://host",
-        directToken: "token",
-        pairCode: undefined,
-        pairSecret: undefined,
-        relaySession: undefined,
-      })
-
-    expect(normalizeStoredConnectionLike({
-      mode: "relay",
-      url: "https://relay/",
-      relaySession: {
-        accessToken: " access ",
-        refreshToken: " refresh ",
-        targetId: " target ",
-      },
-    })).toEqual({
-      mode: "relay",
-      url: "https://relay",
-      directToken: undefined,
-      pairCode: undefined,
-      pairSecret: undefined,
-      relaySession: {
-        accessToken: "access",
-        refreshToken: "refresh",
-        targetId: "target",
-      },
-    })
-
-    expect(normalizeStoredConnectionLike({ mode: "other", url: "https://host" })).toBeNull()
-    expect(normalizeStoredConnectionLike({ mode: "direct", url: " " })).toBeNull()
+  it("rejects legacy stored connection shapes outside the homepage migration", () => {
+    expect(normalizeStoredConnectionLike({ mode: "direct", url: "https://host", directToken: "token" }))
+      .toBeNull()
+    expect(normalizeStoredConnectionLike({ mode: "relay", url: "https://relay" })).toBeNull()
   })
 
   it("normalizes v2 connection context and preserves target agent metadata", () => {
@@ -75,35 +43,34 @@ describe("detailConnectionResolution", () => {
       routeMode: "gateway",
       gatewayProvider: "official",
       gatewayBaseUrl: "https://relay.example",
+      directToken: undefined,
+      pairCode: undefined,
+      pairSecret: undefined,
       gatewaySession: {
         accessToken: "access",
         refreshToken: "refresh",
         targetId: "target",
         targetAgent: "codeg",
+        displayName: undefined,
         capabilities: ["prompt.attachments"],
+        protocolVersion: undefined,
       },
       targetProfile: {
         targetAgent: "codeg",
         displayName: "Workstation",
       },
-      mode: "relay",
-      url: "https://relay.example",
-      directToken: undefined,
-      pairCode: undefined,
-      pairSecret: undefined,
-      relaySession: {
-        accessToken: "access",
-        refreshToken: "refresh",
-        targetId: "target",
-        targetAgent: "codeg",
-        capabilities: ["prompt.attachments"],
-      },
     })
   })
 
-  it("finds stored connections by normalized key", () => {
+  it("finds stored connections by v2 key only", () => {
     const saved = [
-      { mode: "direct", url: "https://one" },
+      {
+        version: 2,
+        name: "Codeg Direct",
+        targetAgent: "codeg",
+        routeMode: "direct",
+        directBaseUrl: "https://one",
+      },
       {
         version: 2,
         name: "Codeg Gateway",
@@ -112,54 +79,34 @@ describe("detailConnectionResolution", () => {
         gatewayBaseUrl: "https://relay",
         gatewaySession: { accessToken: "access", targetId: "target" },
       },
-      { mode: "relay", url: "https://relay///", relaySession: { targetId: "target" } },
     ]
 
     expect(findStoredConnectionByKey(saved, "codeg::gateway::https://relay")).toEqual(expect.objectContaining({
       version: 2,
       targetAgent: "codeg",
       routeMode: "gateway",
-      mode: "relay",
-      url: "https://relay",
+      gatewayBaseUrl: "https://relay",
     }))
 
-    expect(findStoredConnectionByKey(saved, "relay::https://relay")).toEqual({
-      mode: "relay",
-      url: "https://relay",
-      directToken: undefined,
-      pairCode: undefined,
-      pairSecret: undefined,
-      relaySession: {
-        accessToken: undefined,
-        refreshToken: undefined,
-        targetId: "target",
-      },
-    })
-    expect(findStoredConnectionByKey(saved, "direct::https://missing")).toBeNull()
-    expect(findStoredConnectionByKey({}, "relay::https://relay")).toBeNull()
+    expect(findStoredConnectionByKey(saved, "relay::https://relay")).toBeNull()
+    expect(findStoredConnectionByKey({}, "codeg::gateway::https://relay")).toBeNull()
   })
 
-  it("resolves target agent with legacy Codeg defaults", () => {
-    expect(resolveStoredConnectionTargetAgent({
-      mode: "relay",
-      url: "https://relay",
-    })).toBe("codeg")
+  it("resolves target agent with Codeg fallback for missing metadata", () => {
+    expect(resolveStoredConnectionTargetAgent(null)).toBe("codeg")
 
     expect(resolveStoredConnectionTargetAgent({
-      version: 2,
-      name: "OpenCode",
       targetAgent: "opencode",
-      routeMode: "direct",
-      directBaseUrl: "https://opencode",
-      mode: "direct",
-      url: "https://opencode",
     })).toBe("opencode")
   })
 
   it("builds direct descriptors with explicit or fallback tokens", () => {
     expect(buildDescriptorFromStoredConnection({
-      mode: "direct",
-      url: "https://host/",
+      version: 2,
+      name: "Codeg Direct",
+      targetAgent: "codeg",
+      routeMode: "direct",
+      directBaseUrl: "https://host/",
     }, "fallback-token-1234567890")).toEqual({
       instanceKey: "direct::https://host::direct:fallback-token-1",
       mode: "direct",
@@ -169,8 +116,11 @@ describe("detailConnectionResolution", () => {
     })
 
     expect(buildDescriptorFromStoredConnection({
-      mode: "direct",
-      url: "https://host",
+      version: 2,
+      name: "Codeg Direct",
+      targetAgent: "codeg",
+      routeMode: "direct",
+      directBaseUrl: "https://host",
       directToken: "inline-token",
     }, "fallback-token")).toEqual(expect.objectContaining({
       principal: "direct:inline-token",
@@ -178,11 +128,15 @@ describe("detailConnectionResolution", () => {
     }))
   })
 
-  it("builds relay descriptors from target, refresh, or access token", () => {
+  it("builds gateway descriptors from target, refresh, or access token", () => {
     expect(buildDescriptorFromStoredConnection({
-      mode: "relay",
-      url: "https://relay/",
-      relaySession: {
+      version: 2,
+      name: "Codeg Gateway",
+      targetAgent: "codeg",
+      routeMode: "gateway",
+      gatewayProvider: "official",
+      gatewayBaseUrl: "https://relay/",
+      gatewaySession: {
         accessToken: "access",
         refreshToken: "refresh",
         targetId: "target",
@@ -197,9 +151,13 @@ describe("detailConnectionResolution", () => {
     })
 
     expect(buildDescriptorFromStoredConnection({
-      mode: "relay",
-      url: "https://relay",
-      relaySession: {
+      version: 2,
+      name: "Codeg Gateway",
+      targetAgent: "codeg",
+      routeMode: "gateway",
+      gatewayProvider: "official",
+      gatewayBaseUrl: "https://relay",
+      gatewaySession: {
         refreshToken: "refresh",
       },
     })).toEqual(expect.objectContaining({

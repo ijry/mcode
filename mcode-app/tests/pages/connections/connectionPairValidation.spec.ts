@@ -1,13 +1,16 @@
 import { assertPairTargetAgentMatchesSelection } from "@/services/connectionPairValidation"
 
 describe("connection pair validation", () => {
-  it("allows matching or legacy pair responses without targetAgent", () => {
+  it("allows matching v2 pair responses", () => {
     expect(() =>
       assertPairTargetAgentMatchesSelection({ targetAgent: "opencode" }, "opencode")
     ).not.toThrow()
+  })
+
+  it("rejects obsolete pair responses missing targetAgent", () => {
     expect(() =>
       assertPairTargetAgentMatchesSelection({}, "codeg")
-    ).not.toThrow()
+    ).toThrow("网关配对响应缺少目标类型")
   })
 
   it("rejects gateway pair codes generated for another target agent", () => {

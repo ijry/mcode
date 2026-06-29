@@ -3,7 +3,6 @@ import { DirectGateway } from "@/services/gateway/directGateway"
 import { RelayGateway } from "@/services/gateway/relayGateway"
 import { getDirectToken } from "@/services/gateway/directTokenStore"
 import {
-  deriveLegacyRouteCompat,
   normalizeConnectionBaseUrl,
   normalizeRelaySessionInfo,
   type ConnectionRecordV2,
@@ -21,7 +20,6 @@ export type ConnectionDriverId =
   | "opencode-gateway"
   | "desktop-direct"
   | "desktop-gateway"
-  | "codeg-gateway-legacy"
 
 export interface PairResultMetadata {
   targetId?: string
@@ -31,11 +29,7 @@ export interface PairResultMetadata {
   protocolVersion?: string
 }
 
-export interface ConnectionRuntimeContext extends ConnectionRecordV2 {
-  mode: GatewayMode
-  url: string
-  relaySession?: RelaySessionInfo
-}
+export type ConnectionRuntimeContext = ConnectionRecordV2
 
 export interface DriverResolvedConnectionContext {
   connection: ConnectionRuntimeContext
@@ -85,16 +79,12 @@ export function createGatewayConnectionDriver(id: ConnectionDriverId): Connectio
   return {
     id,
     async connect(connection) {
-      const compat = connection as ConnectionRecordV2 & {
-        relaySession?: RelaySessionInfo | null
-        url?: string
-      }
-      const gatewayBaseUrl = normalizeConnectionBaseUrl(connection.gatewayBaseUrl || compat.url || "")
+      const gatewayBaseUrl = normalizeConnectionBaseUrl(connection.gatewayBaseUrl || "")
       if (!gatewayBaseUrl) {
         throw new Error(`${connection.name} 缺少网关地址`)
       }
 
-      let gatewaySession = normalizeRelaySessionInfo(connection.gatewaySession ?? compat.relaySession)
+      let gatewaySession = normalizeRelaySessionInfo(connection.gatewaySession)
       if (!gatewaySession?.accessToken) {
         if (!connection.pairCode || !connection.pairSecret) {
           throw new Error(`${connection.name} 缺少网关配对信息`)
@@ -145,10 +135,7 @@ export function createGatewayConnectionDriver(id: ConnectionDriverId): Connectio
 }
 
 export function toConnectionRuntimeContext(record: ConnectionRecordV2): ConnectionRuntimeContext {
-  return {
-    ...record,
-    ...deriveLegacyRouteCompat(record),
-  }
+  return { ...record }
 }
 
 function withRegisteredDescriptor(gateway: CodegGateway): CodegGateway {

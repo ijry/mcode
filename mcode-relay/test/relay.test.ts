@@ -64,6 +64,8 @@ describe("relay api", () => {
       secret: "secret",
       targetId: "target-1",
       targetName: "desktop-1",
+      targetAgent: "codeg",
+      protocolVersion: "1",
       relayUrl: "https://relay.example.com",
       ttlSeconds: 300,
     })
@@ -109,6 +111,7 @@ describe("relay api", () => {
       targetId: "codeg-1",
       targetName: "Codeg on Work PC",
       targetAgent: "codeg",
+      protocolVersion: "1",
       ttlSeconds: 300,
     })
     const pair = await request(app.server)
@@ -118,12 +121,14 @@ describe("relay api", () => {
       targetId: "opencode-1",
       targetName: "OpenCode on Work PC",
       targetAgent: "opencode",
+      protocolVersion: "1",
     })
     store.upsertTarget({
       targetId: "desktop-1",
       targetName: "MCode Desktop on Work PC",
       targetAgent: "mcode-desktop",
       capabilities: ["desktop.runtime.codex-cli"],
+      protocolVersion: "1",
     })
 
     const res = await request(app.server)
@@ -146,6 +151,8 @@ describe("relay api", () => {
       code: "123456",
       secret: "secret",
       targetId: "target-1",
+      targetAgent: "codeg",
+      protocolVersion: "1",
       ttlSeconds: 300,
     })
 
@@ -209,6 +216,7 @@ describe("relay api", () => {
       secret: "secret",
       targetId: "desktop-1",
       targetAgent: "mcode-desktop",
+      protocolVersion: "1",
       ttlSeconds: 300,
     })
     const pair = await request(app.server)
@@ -247,6 +255,7 @@ describe("relay api", () => {
       secret: "secret",
       targetId: "desktop-1",
       targetAgent: "mcode-desktop",
+      protocolVersion: "1",
       ttlSeconds: 300,
     })
     const pair = await request(app.server)
@@ -291,6 +300,7 @@ describe("relay api", () => {
       secret: "cancel-secret",
       targetId: "desktop-1",
       targetAgent: "mcode-desktop",
+      protocolVersion: "1",
       ttlSeconds: 300,
     })
     const pair = await request(app.server)
@@ -329,6 +339,7 @@ describe("relay api", () => {
       secret: "secret",
       targetId: "desktop-1",
       targetAgent: "mcode-desktop",
+      protocolVersion: "1",
       ttlSeconds: 300,
     })
     const pair = await request(app.server)
@@ -368,6 +379,7 @@ describe("relay api", () => {
       secret: "secret",
       targetId: "desktop-1",
       targetAgent: "mcode-desktop",
+      protocolVersion: "1",
       ttlSeconds: 300,
     })
     const pair = await request(app.server)
@@ -393,6 +405,7 @@ describe("relay api", () => {
       secret: "secret",
       targetId: "desktop-1",
       targetAgent: "mcode-desktop",
+      protocolVersion: "1",
       ttlSeconds: 300,
     })
     const pair = await request(app.server)
@@ -433,6 +446,7 @@ describe("relay api", () => {
       targetId: "desktop-1",
       tenantId: "tenant-a",
       targetAgent: "mcode-desktop",
+      protocolVersion: "1",
       ttlSeconds: 300,
     })
     const pair = await request(app.server)
@@ -493,6 +507,7 @@ describe("relay api", () => {
       secret: "secret",
       targetId: "desktop-1",
       targetAgent: "mcode-desktop",
+      protocolVersion: "1",
       ttlSeconds: 300,
     })
     const pair = await request(app.server)
@@ -522,6 +537,7 @@ describe("relay api", () => {
       secret: "secret",
       targetId: "desktop-1",
       targetAgent: "mcode-desktop",
+      protocolVersion: "1",
       ttlSeconds: 300,
     })
     const pair = await request(app.server)

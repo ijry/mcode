@@ -219,10 +219,10 @@ function getAdminTenantId(req: FastifyRequest): string | null {
   return header ?? queryTenant
 }
 
-function normalizeTargetAgent(value: unknown, fallback: TargetAgent = "codeg"): TargetAgent {
+function normalizeTargetAgent(value: unknown): TargetAgent | null {
   return value === "codeg" || value === "opencode" || value === "mcode-desktop"
     ? value
-    : fallback
+    : null
 }
 
 function normalizeCapabilities(value: unknown): string[] | undefined {
@@ -1052,15 +1052,18 @@ export async function buildRelayApp(overrides: Partial<RelayAppContext> = {}): P
       if (message?.type === "desktop_hello") {
         activeTargetId = String(message.targetId ?? activeTargetId ?? "").trim()
         if (!activeTargetId) return
+        const targetAgent = normalizeTargetAgent(message.targetAgent)
+        const protocolVersion = normalizeProtocolVersion(message.protocolVersion)
+        if (!targetAgent || !protocolVersion) return
         const targetName = pickDisplayName(message, null)
         context.hub.registerDesktop(activeTargetId, socket, targetName)
         context.store.upsertTarget({
           targetId: activeTargetId,
           tenantId: normalizeAdminTenantId(message.tenantId) ?? undefined,
           targetName,
-          targetAgent: normalizeTargetAgent(message.targetAgent, "mcode-desktop"),
+          targetAgent,
           capabilities: normalizeCapabilities(message.capabilities),
-          protocolVersion: normalizeProtocolVersion(message.protocolVersion),
+          protocolVersion,
           localServices: normalizeLocalServices(message.localServices),
           relayUrl: typeof message.relayUrl === "string" ? message.relayUrl : null,
           preferredMode: "relay",
@@ -1083,6 +1086,9 @@ export async function buildRelayApp(overrides: Partial<RelayAppContext> = {}): P
         const code = String(message.code ?? "").trim()
         const secret = String(message.secret ?? "").trim()
         if (!code || !secret) return
+        const targetAgent = normalizeTargetAgent(message.targetAgent)
+        const protocolVersion = normalizeProtocolVersion(message.protocolVersion)
+        if (!targetAgent || !protocolVersion) return
         const targetName = pickDisplayName(message, null)
         context.store.addOffer({
           code,
@@ -1090,9 +1096,9 @@ export async function buildRelayApp(overrides: Partial<RelayAppContext> = {}): P
           targetId: activeTargetId,
           tenantId: normalizeAdminTenantId(message.tenantId) ?? undefined,
           targetName,
-          targetAgent: normalizeTargetAgent(message.targetAgent, "mcode-desktop"),
+          targetAgent,
           capabilities: normalizeCapabilities(message.capabilities),
-          protocolVersion: normalizeProtocolVersion(message.protocolVersion),
+          protocolVersion,
           localServices: normalizeLocalServices(message.localServices),
           relayUrl: typeof message.relayUrl === "string" ? message.relayUrl : null,
           ttlSeconds: context.config.PAIRING_CODE_TTL_SECONDS,

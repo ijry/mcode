@@ -400,10 +400,9 @@ import {
   readStoredConnections,
   type ConnectionContext,
 } from "@/services/connectionContext"
+import { migrateLegacyStoredConnectionsToV2 } from "@/services/connectionMigration"
 import {
   buildConnectionRecordKey,
-  deriveLegacyRouteCompat,
-  migrateConnectionRecord,
   normalizeConnectionRecordV2,
   type ConnectionRecordV2,
   type ConnectionGatewayProvider,
@@ -594,6 +593,7 @@ function getConnectionIconColor(conn: ConnectionItem) {
 }
 
 onMounted(() => {
+  migrateLegacyStoredConnectionsToV2()
   connectedMap.value = uni.getStorageSync("mcode_connected_map") || {}
   loadConnections()
 })
@@ -921,7 +921,7 @@ async function connectConnection(conn: ConnectionItem): Promise<boolean> {
     attempt: 1,
   })
   try {
-    if (conn.mode === "direct") {
+    if (conn.routeMode === "direct") {
       if (!conn.directToken) {
         uni.showToast({ title: "连接信息不完整", icon: "none" })
         markConnectionFailure(key, "连接信息不完整", "error")
@@ -930,11 +930,11 @@ async function connectConnection(conn: ConnectionItem): Promise<boolean> {
 
       const gateway = createGateway({
         mode: "direct",
-        directBaseUrl: conn.url,
+        directBaseUrl: connectionBaseUrl(conn),
       })
 
       await gateway.pair({
-        directBaseUrl: conn.url,
+        directBaseUrl: connectionBaseUrl(conn),
         token: conn.directToken,
       })
       await assertConnectionReachable(conn)
@@ -989,7 +989,7 @@ function promptUnstableConnection(conn: ConnectionItem) {
 }
 
 function showConnectionTroubleshooting(conn: ConnectionItem) {
-  const host = normalizeBaseUrl(conn.url)
+  const host = connectionBaseUrl(conn)
   uni.showModal({
     title: "连接排查建议",
     content:
@@ -1027,11 +1027,11 @@ function editConnection(conn: ConnectionItem, index: number) {
   form.value.targetAgent = conn.targetAgent
 
   if (conn.routeMode === "direct") {
-    form.value.directBaseUrl = conn.directBaseUrl || conn.url
+    form.value.directBaseUrl = conn.directBaseUrl || ""
     form.value.directToken = conn.directToken || ""
   } else {
     form.value.gatewayProvider = conn.gatewayProvider || "official"
-    form.value.gatewayBaseUrl = conn.gatewayBaseUrl || conn.url || OFFICIAL_GATEWAY_BASE_URL
+    form.value.gatewayBaseUrl = conn.gatewayBaseUrl || OFFICIAL_GATEWAY_BASE_URL
     form.value.pairCode = conn.pairCode || ""
     form.value.pairSecret = conn.pairSecret || ""
   }
@@ -1186,22 +1186,16 @@ function getFormGatewayBaseUrl(): string {
 }
 
 function buildConnectionItem(input: ConnectionRecordV2 | Record<string, unknown>): ConnectionItem {
-  const raw = input as Record<string, unknown>
-  const record =
-    normalizeConnectionRecordV2({
-      version: 2,
-      ...raw,
-      gatewaySession: raw.gatewaySession ?? raw.relaySession,
-    }) || migrateConnectionRecord(raw)
+  const record = normalizeConnectionRecordV2({
+    version: 2,
+    ...(input as Record<string, unknown>),
+  })
 
   if (!record) {
     throw new Error("连接信息无效")
   }
 
-  return {
-    ...record,
-    ...deriveLegacyRouteCompat(record),
-  }
+  return record
 }
 
 function connectionKey(conn: ConnectionItem): string {
@@ -1491,9 +1485,10 @@ function setOnlineStatus(key: string, online: boolean) {
 }
 
 async function createStatusSocket(conn: ConnectionItem): Promise<StatusSocket> {
-  if (conn.mode === "direct") {
+  const baseUrl = connectionBaseUrl(conn)
+  if (conn.routeMode === "direct") {
     const token = conn.directToken || ""
-    const url = `${normalizeBaseUrl(conn.url).replace(/^http/, "ws")}/ws/events`
+    const url = `${baseUrl.replace(/^http/, "ws")}/ws/events`
     if (isH5WebSocketRuntime()) {
       return createH5StatusSocket(url, token)
     }
@@ -1508,7 +1503,7 @@ async function createStatusSocket(conn: ConnectionItem): Promise<StatusSocket> {
   if (!session?.accessToken) {
     throw new Error("missing relay session")
   }
-  const url = `${normalizeBaseUrl(conn.url).replace(/^http/, "ws")}/v1/events`
+  const url = `${baseUrl.replace(/^http/, "ws")}/v1/events`
   if (isH5WebSocketRuntime()) {
     return createH5StatusSocket(url, session.accessToken)
   }
@@ -1527,7 +1522,7 @@ interface ProbeConnectionResult {
 }
 
 async function probeConnectionOnline(conn: ConnectionItem): Promise<ProbeConnectionResult> {
-  if (conn.mode === "direct") {
+  if (conn.routeMode === "direct") {
     return probeDirectOnline(conn)
   }
   return probeRelayOnline(conn)
@@ -1537,7 +1532,7 @@ async function probeDirectOnline(conn: ConnectionItem): Promise<ProbeConnectionR
   try {
     const token = conn.directToken || ""
     const res = await uni.request({
-      url: `${normalizeBaseUrl(conn.url)}/api/health`,
+      url: `${connectionBaseUrl(conn)}/api/health`,
       method: "POST",
       data: {},
       header: {
@@ -1561,7 +1556,7 @@ async function probeRelayOnline(conn: ConnectionItem): Promise<ProbeConnectionRe
     if (!session?.accessToken) return { online: false, error: "网关会话不可用" }
 
     const response = await uni.request({
-      url: `${normalizeBaseUrl(conn.url)}/v1/targets`,
+      url: `${connectionBaseUrl(conn)}/v1/targets`,
       method: "GET",
       header: {
         authorization: `Bearer ${session.accessToken}`,
@@ -1590,25 +1585,30 @@ async function probeRelayOnline(conn: ConnectionItem): Promise<ProbeConnectionRe
 }
 
 async function ensureRelaySession(conn: ConnectionItem): Promise<RelaySessionInfo | null> {
-  if (conn.mode !== "relay") return null
-  if (conn.relaySession?.accessToken) return conn.relaySession
+  if (conn.routeMode !== "gateway") return null
+  if (conn.gatewaySession?.accessToken) return conn.gatewaySession
   if (!conn.pairCode || !conn.pairSecret) return null
+  const gatewayBaseUrl = connectionBaseUrl(conn)
 
   const gateway = createGateway({
     mode: "relay",
-    relayUrl: conn.url,
+    relayUrl: gatewayBaseUrl,
     session: { accessToken: "" },
   })
   const session = await gateway.pair({
-    relayUrl: conn.url,
+    relayUrl: gatewayBaseUrl,
     code: conn.pairCode,
     secret: conn.pairSecret,
   })
   if (!session) return null
 
-  conn.relaySession = session
+  conn.gatewaySession = session
   saveConnection(conn)
   return session
+}
+
+function connectionBaseUrl(conn: ConnectionItem): string {
+  return normalizeBaseUrl(conn.routeMode === "direct" ? conn.directBaseUrl || "" : conn.gatewayBaseUrl || "")
 }
 
 function isH5WebSocketRuntime() {

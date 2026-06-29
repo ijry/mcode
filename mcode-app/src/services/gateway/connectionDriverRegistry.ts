@@ -1,5 +1,5 @@
 import { codegDirectDriver } from "@/agents/codeg/driver"
-import { codegGatewayDriver, legacyGatewayDriver } from "@/agents/codeg/legacyGatewayDriver"
+import { codegGatewayDriver } from "@/agents/codeg/gatewayDriver"
 import { desktopDirectDriver } from "@/agents/mcode-desktop/directDriver"
 import { desktopGatewayDriver } from "@/agents/mcode-desktop/gatewayDriver"
 import { opencodeDirectDriver } from "@/agents/opencode/driver"
@@ -12,7 +12,6 @@ export {
   codegGatewayDriver,
   desktopDirectDriver,
   desktopGatewayDriver,
-  legacyGatewayDriver,
   opencodeDirectDriver,
   opencodeGatewayDriver,
 }

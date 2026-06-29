@@ -4,8 +4,6 @@ import { dirname } from "node:path"
 import { sha256Hex } from "../auth/tokens.js"
 import type { LocalServiceMetadata, TargetAgent } from "../protocol/types.js"
 
-const DEFAULT_TARGET_AGENT: TargetAgent = "codeg"
-const DEFAULT_PROTOCOL_VERSION = "1"
 const DEFAULT_TENANT_ID = "default"
 const DEFAULT_AUDIT_EVENT_LIMIT = 1000
 
@@ -139,9 +137,9 @@ export class PairingStore {
     targetId: string
     tenantId?: string
     targetName?: string | null
-    targetAgent?: TargetAgent
+    targetAgent: TargetAgent
     capabilities?: string[]
-    protocolVersion?: string
+    protocolVersion: string
     localServices?: LocalServiceMetadata[]
     relayUrl?: string | null
     ttlSeconds: number
@@ -153,9 +151,9 @@ export class PairingStore {
       targetId: input.targetId,
       tenantId: normalizeTenantId(input.tenantId),
       targetName: input.targetName ?? null,
-      targetAgent: input.targetAgent ?? DEFAULT_TARGET_AGENT,
+      targetAgent: normalizeTargetAgent(input.targetAgent),
       capabilities: normalizeCapabilities(input.capabilities),
-      protocolVersion: normalizeProtocolVersion(input.protocolVersion),
+      protocolVersion: requireProtocolVersion(input.protocolVersion),
       localServices: normalizeLocalServices(input.localServices),
       relayUrl: input.relayUrl ?? null,
       expiresAt: now + input.ttlSeconds * 1000,
@@ -180,9 +178,9 @@ export class PairingStore {
     targetId: string
     tenantId?: string
     targetName?: string | null
-    targetAgent?: TargetAgent
+    targetAgent: TargetAgent
     capabilities?: string[]
-    protocolVersion?: string
+    protocolVersion: string
     localServices?: LocalServiceMetadata[]
     relayUrl?: string | null
     preferredMode?: "relay" | "direct"
@@ -192,9 +190,9 @@ export class PairingStore {
       targetId: input.targetId,
       tenantId: normalizeTenantId(input.tenantId ?? existing?.tenantId),
       targetName: input.targetName ?? existing?.targetName ?? null,
-      targetAgent: input.targetAgent ?? existing?.targetAgent ?? DEFAULT_TARGET_AGENT,
+      targetAgent: normalizeTargetAgent(input.targetAgent),
       capabilities: normalizeCapabilities(input.capabilities ?? existing?.capabilities),
-      protocolVersion: normalizeProtocolVersion(input.protocolVersion ?? existing?.protocolVersion),
+      protocolVersion: requireProtocolVersion(input.protocolVersion),
       localServices: normalizeLocalServices(input.localServices ?? existing?.localServices),
       relayUrl: input.relayUrl ?? existing?.relayUrl ?? null,
       pairedAt: existing?.pairedAt ?? Date.now(),
@@ -413,14 +411,16 @@ export class PairingStore {
     }
     for (const session of snapshot.sessions ?? []) {
       const normalized = normalizeSessionRecord(session)
-      if (normalized) {
+      if (normalized && this.targets.has(normalized.targetId)) {
         this.sessions.set(normalized.sessionId, normalized)
         this.ensureTenantRecord(normalized.tenantId)
       }
     }
     for (const event of snapshot.auditEvents ?? []) {
       const normalized = normalizeAuditEventRecord(event)
-      if (normalized) {
+      const hasKnownTarget = !normalized?.targetId || this.targets.has(normalized.targetId)
+      const hasKnownSession = !normalized?.sessionId || this.sessions.has(normalized.sessionId)
+      if (normalized && hasKnownTarget && hasKnownSession) {
         this.auditEvents.push(normalized)
         this.ensureTenantRecord(normalized.tenantId)
       }
@@ -500,8 +500,23 @@ function normalizeLocalServices(input?: LocalServiceMetadata[]): LocalServiceMet
   return services
 }
 
-function normalizeProtocolVersion(input?: string): string {
-  return String(input || "").trim() || DEFAULT_PROTOCOL_VERSION
+function normalizeProtocolVersion(input?: string): string | null {
+  return normalizeOptionalString(input)
+}
+
+function requireProtocolVersion(input?: string): string {
+  const protocolVersion = normalizeProtocolVersion(input)
+  if (!protocolVersion) {
+    throw new Error("protocolVersion is required")
+  }
+  return protocolVersion
+}
+
+function normalizeTargetAgent(input?: TargetAgent): TargetAgent {
+  if (input === "codeg" || input === "opencode" || input === "mcode-desktop") {
+    return input
+  }
+  throw new Error("targetAgent is required")
 }
 
 function normalizeTenantId(input?: string | null): string {
@@ -526,17 +541,19 @@ function normalizeTenantRecord(input: Partial<TenantRecord>): TenantRecord | nul
 
 function normalizeTargetRecord(input: Partial<TargetRecord>): TargetRecord | null {
   const targetId = normalizeOptionalString(input.targetId)
-  if (!targetId) return null
+  const targetAgent =
+    input.targetAgent === "codeg" || input.targetAgent === "opencode" || input.targetAgent === "mcode-desktop"
+      ? input.targetAgent
+      : null
+  const protocolVersion = normalizeProtocolVersion(input.protocolVersion)
+  if (!targetId || !targetAgent || !protocolVersion) return null
   return {
     targetId,
     tenantId: normalizeTenantId(input.tenantId),
     targetName: normalizeOptionalString(input.targetName),
-    targetAgent:
-      input.targetAgent === "codeg" || input.targetAgent === "opencode" || input.targetAgent === "mcode-desktop"
-        ? input.targetAgent
-        : DEFAULT_TARGET_AGENT,
+    targetAgent,
     capabilities: normalizeCapabilities(input.capabilities),
-    protocolVersion: normalizeProtocolVersion(input.protocolVersion),
+    protocolVersion,
     localServices: normalizeLocalServices(input.localServices),
     relayUrl: normalizeOptionalString(input.relayUrl),
     pairedAt: normalizeNumber(input.pairedAt, Date.now()),

@@ -24,10 +24,11 @@ function buildSnapshot(input: {
   tabs?: any[]
 }) {
   return buildConnectionConversationSnapshot({
-    connectionKey: "direct::http://localhost:3000",
+    connectionKey: "codeg::direct::http://localhost:3000",
     connectionName: "本地连接",
-    mode: "direct",
-    url: "http://localhost:3000",
+    targetAgent: "codeg",
+    routeMode: "direct",
+    baseUrl: "http://localhost:3000",
     folders: [folder],
     tabs: input.tabs || [],
     conversations: input.conversations || [],

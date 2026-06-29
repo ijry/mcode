@@ -202,9 +202,7 @@ import { getDirectToken } from "@/services/gateway/directTokenStore"
 import { toErrorMessage } from "@/services/gateway/error"
 import {
   buildConnectionKey,
-  connectionKeyMatches,
   encodeConnectionContext,
-  isConnectionMarkedConnected,
   readStoredConnections,
   resolveConnectionContext,
   type ConnectionContext,
@@ -245,8 +243,9 @@ interface Project {
 interface ConnectionGroup {
   key: string
   name: string
-  mode: "direct" | "relay"
-  url: string
+  targetAgent: string
+  routeMode: "direct" | "gateway"
+  baseUrl: string
   projects: Project[]
 }
 
@@ -651,13 +650,13 @@ function connectionKey(conn: ConnectionItem): string {
 }
 
 function findConnectedConnectionByKey(key: string): ConnectionItem | undefined {
-  return getConnectedConnections().find((item) => connectionKeyMatches(item, key))
+  return getConnectedConnections().find((item) => connectionKey(item) === key)
 }
 
 function getConnectedConnections(): ConnectionItem[] {
   const savedConnections = readStoredConnections()
   const connectedMap = (uni.getStorageSync("mcode_connected_map") || {}) as Record<string, boolean>
-  return savedConnections.filter((conn) => isConnectionMarkedConnected(conn, connectedMap))
+  return savedConnections.filter((conn) => Boolean(connectedMap[connectionKey(conn)]))
 }
 
 async function createConnectionGateway(conn: ConnectionItem): Promise<CodegGateway> {
@@ -667,14 +666,15 @@ async function createConnectionGateway(conn: ConnectionItem): Promise<CodegGatew
 }
 
 function syncAuthToConnection(conn: ConnectionItem) {
-  if (conn.mode === "direct") {
-    const token = conn.directToken || getDirectToken(conn.url)
+  if (conn.routeMode === "direct") {
+    const baseUrl = connectionBaseUrl(conn)
+    const token = conn.directToken || getDirectToken(baseUrl)
     if (!token) return
-    auth.setDirectMode(conn.url, token)
+    auth.setDirectMode(baseUrl, token)
     return
   }
-  if (conn.relaySession?.accessToken) {
-    auth.setRelayMode(conn.url, conn.relaySession)
+  if (conn.gatewaySession?.accessToken) {
+    auth.setRelayMode(connectionBaseUrl(conn), conn.gatewaySession)
   }
 }
 
@@ -691,8 +691,9 @@ async function loadConnectionGroups() {
       groups.push({
         key: connectionKey(conn),
         name: conn.name,
-        mode: conn.mode,
-        url: conn.url,
+        targetAgent: conn.targetAgent,
+        routeMode: conn.routeMode,
+        baseUrl: connectionBaseUrl(conn),
         projects: folders,
       })
     } catch (error) {
@@ -700,6 +701,12 @@ async function loadConnectionGroups() {
     }
   }
   connectionGroups.value = groups
+}
+
+function connectionBaseUrl(conn: ConnectionItem): string {
+  return conn.routeMode === "direct"
+    ? String(conn.directBaseUrl || "").trim().replace(/\/+$/, "")
+    : String(conn.gatewayBaseUrl || "").trim().replace(/\/+$/, "")
 }
 
 /* ===== 发送到新会话 ===== */

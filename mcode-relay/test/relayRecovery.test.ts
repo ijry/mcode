@@ -56,6 +56,7 @@ describe("relay recovery behavior", () => {
       secret: "secret",
       targetId: "desktop-1",
       targetAgent: "mcode-desktop",
+      protocolVersion: "1",
       ttlSeconds: 300,
     })
     const pair = await request(app.server).post("/v1/pair").send({
@@ -90,6 +91,7 @@ describe("relay recovery behavior", () => {
           targetId: "desktop-1",
           displayName: "Work Desktop",
           targetAgent: "mcode-desktop",
+          protocolVersion: "1",
         })
       )
       socket.send(

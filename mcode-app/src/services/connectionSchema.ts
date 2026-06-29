@@ -3,7 +3,6 @@ import type { RelaySessionInfo } from "@/services/gateway"
 export type ConnectionTargetAgent = "codeg" | "opencode" | "mcode-desktop"
 export type ConnectionRouteMode = "direct" | "gateway"
 export type ConnectionGatewayProvider = "official" | "custom"
-export type LegacyGatewayMode = "direct" | "relay"
 
 export interface ConnectionTargetProfile {
   targetAgent: ConnectionTargetAgent
@@ -26,12 +25,6 @@ export interface ConnectionRecordV2 {
   pairSecret?: string
   gatewaySession?: RelaySessionInfo | null
   targetProfile?: ConnectionTargetProfile | null
-}
-
-export interface LegacyRouteCompatFields {
-  mode: LegacyGatewayMode
-  url: string
-  relaySession?: RelaySessionInfo
 }
 
 const TARGET_AGENTS = new Set<ConnectionTargetAgent>(["codeg", "opencode", "mcode-desktop"])
@@ -105,7 +98,7 @@ export function normalizeConnectionRecordV2(input: Record<string, unknown>): Con
   const gatewayBaseUrl = normalizeConnectionBaseUrl(pickString(input.gatewayBaseUrl))
   const pairCode = pickString(input.pairCode) || undefined
   const pairSecret = pickString(input.pairSecret) || undefined
-  const gatewaySession = normalizeRelaySessionInfo(input.gatewaySession ?? input.relaySession)
+  const gatewaySession = normalizeRelaySessionInfo(input.gatewaySession)
   const targetProfile = normalizePairTargetProfile(input.targetProfile)
 
   if (routeMode === "direct") {
@@ -137,45 +130,6 @@ export function normalizeConnectionRecordV2(input: Record<string, unknown>): Con
   }
 }
 
-export function migrateConnectionRecord(input: unknown): ConnectionRecordV2 | null {
-  if (!input || typeof input !== "object") return null
-  const raw = input as Record<string, unknown>
-
-  if (Number(raw.version) === 2 || raw.targetAgent || raw.routeMode) {
-    return normalizeConnectionRecordV2({
-      version: 2,
-      ...raw,
-    })
-  }
-
-  const mode = raw.mode === "relay" ? "relay" : raw.mode === "direct" ? "direct" : null
-  const url = normalizeConnectionBaseUrl(pickString(raw.url))
-  if (!mode || !url) return null
-
-  if (mode === "direct") {
-    return normalizeConnectionRecordV2({
-      version: 2,
-      name: raw.name,
-      targetAgent: "codeg",
-      routeMode: "direct",
-      directBaseUrl: url,
-      directToken: raw.directToken,
-    })
-  }
-
-  return normalizeConnectionRecordV2({
-    version: 2,
-    name: raw.name,
-    targetAgent: "codeg",
-    routeMode: "gateway",
-    gatewayProvider: "official",
-    gatewayBaseUrl: url,
-    pairCode: raw.pairCode,
-    pairSecret: raw.pairSecret,
-    gatewaySession: raw.relaySession,
-  })
-}
-
 export function buildConnectionRecordKey(
   record: Pick<
     ConnectionRecordV2,
@@ -191,21 +145,6 @@ export function buildConnectionRecordKey(
       : gatewayBaseUrl || `provider:${gatewayProvider}`
 
   return `${record.targetAgent}::${record.routeMode}::${routeIdentity}`
-}
-
-export function deriveLegacyRouteCompat(record: ConnectionRecordV2): LegacyRouteCompatFields {
-  if (record.routeMode === "direct") {
-    return {
-      mode: "direct",
-      url: normalizeConnectionBaseUrl(record.directBaseUrl || ""),
-    }
-  }
-
-  return {
-    mode: "relay",
-    url: normalizeConnectionBaseUrl(record.gatewayBaseUrl || ""),
-    ...(record.gatewaySession ? { relaySession: record.gatewaySession } : {}),
-  }
 }
 
 export function normalizeV2ConfigCodePayload(input: Record<string, unknown>): ConnectionRecordV2 {
