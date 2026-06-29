@@ -1,4 +1,5 @@
 import type { PromptInputBlock } from "@/types/acp"
+import type { ConnectionTargetAgent } from "@/services/connectionSchema"
 import type { QueuedDraft, UploadedAttachment } from "./detailDataNormalization"
 import { buildOptimisticText } from "./detailRuntimePresentation"
 import { buildDraftPromptBlocks, splitDraftAttachments } from "./detailDraftQueue"
@@ -22,13 +23,16 @@ export interface PromptStartWatchSessionLike {
   } | null
 }
 
-export function buildDraftSendPayload(draft: QueuedDraft): DraftSendPayload {
+export function buildDraftSendPayload(
+  draft: QueuedDraft,
+  options: { targetAgent?: ConnectionTargetAgent | null } = {}
+): DraftSendPayload {
   const { imageAttachments, fileAttachments } = splitDraftAttachments(draft)
   return {
     imageAttachments,
     fileAttachments,
     optimisticText: buildOptimisticText(draft.text, fileAttachments),
-    blocks: buildDraftPromptBlocks(draft),
+    blocks: buildDraftPromptBlocks(draft, options),
   }
 }
 

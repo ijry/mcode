@@ -1,6 +1,7 @@
 import type { PromptInputBlock } from "@/types/acp"
 import type { QueuedDraft, UploadedAttachment } from "./detailDataNormalization"
-import { parseImageDataUrl } from "./detailAttachmentUpload"
+import { buildCodegPromptBlocks } from "@/agents/codeg/attachments"
+import type { ConnectionTargetAgent } from "@/services/connectionSchema"
 import { resolveSlashPreset } from "./detailSlashCommands"
 
 export interface DraftIdFactory {
@@ -56,36 +57,19 @@ export function createComposerDraft(input: {
   }
 }
 
-export function buildDraftPromptBlocks(draft: QueuedDraft): PromptInputBlock[] {
-  const blocks: PromptInputBlock[] = []
-  if (draft.text) {
-    blocks.push({ type: "text", text: draft.text })
+export function buildDraftPromptBlocks(
+  draft: QueuedDraft,
+  options: { targetAgent?: ConnectionTargetAgent | null } = {}
+): PromptInputBlock[] {
+  if (!options.targetAgent || options.targetAgent === "codeg") {
+    return buildCodegPromptBlocks(draft)
   }
 
-  draft.attachments.forEach((att) => {
-    if (att.kind === "image") {
-      const parsedDataUrl = parseImageDataUrl(att.data || att.url)
-      const data = att.data || parsedDataUrl?.data || ""
-      if (!data) {
-        throw new Error("图片缺少可发送数据，请重新选择图片")
-      }
-      blocks.push({
-        type: "image",
-        data,
-        mime_type: parsedDataUrl?.mimeType || att.type || "image/png",
-        uri: att.remoteUrl || att.localPath || att.url || null,
-      })
-      return
-    }
-    blocks.push({
-      type: "resource_link",
-      uri: att.remoteUrl || att.url,
-      name: att.name,
-      mime_type: att.type || "application/octet-stream",
-    })
-  })
+  if (draft.attachments.length > 0) {
+    throw new Error("当前目标暂不支持附件发送")
+  }
 
-  return blocks
+  return draft.text ? [{ type: "text", text: draft.text }] : []
 }
 
 export function splitDraftAttachments(draft: QueuedDraft): {

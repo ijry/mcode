@@ -4,6 +4,7 @@ import {
   findStoredConnectionByKey,
   normalizeConnectionUrl,
   normalizeStoredConnectionLike,
+  resolveStoredConnectionTargetAgent,
 } from "@/pages/conversation-detail/detailConnectionResolution"
 
 describe("detailConnectionResolution", () => {
@@ -48,11 +49,79 @@ describe("detailConnectionResolution", () => {
     expect(normalizeStoredConnectionLike({ mode: "direct", url: " " })).toBeNull()
   })
 
+  it("normalizes v2 connection context and preserves target agent metadata", () => {
+    expect(normalizeStoredConnectionLike({
+      version: 2,
+      name: "Gateway Codeg",
+      targetAgent: "codeg",
+      routeMode: "gateway",
+      gatewayProvider: "official",
+      gatewayBaseUrl: " https://relay.example/ ",
+      gatewaySession: {
+        accessToken: " access ",
+        refreshToken: " refresh ",
+        targetId: " target ",
+        targetAgent: "codeg",
+        capabilities: ["prompt.attachments"],
+      },
+      targetProfile: {
+        targetAgent: "codeg",
+        displayName: "Workstation",
+      },
+    })).toEqual({
+      version: 2,
+      name: "Gateway Codeg",
+      targetAgent: "codeg",
+      routeMode: "gateway",
+      gatewayProvider: "official",
+      gatewayBaseUrl: "https://relay.example",
+      gatewaySession: {
+        accessToken: "access",
+        refreshToken: "refresh",
+        targetId: "target",
+        targetAgent: "codeg",
+        capabilities: ["prompt.attachments"],
+      },
+      targetProfile: {
+        targetAgent: "codeg",
+        displayName: "Workstation",
+      },
+      mode: "relay",
+      url: "https://relay.example",
+      directToken: undefined,
+      pairCode: undefined,
+      pairSecret: undefined,
+      relaySession: {
+        accessToken: "access",
+        refreshToken: "refresh",
+        targetId: "target",
+        targetAgent: "codeg",
+        capabilities: ["prompt.attachments"],
+      },
+    })
+  })
+
   it("finds stored connections by normalized key", () => {
     const saved = [
       { mode: "direct", url: "https://one" },
+      {
+        version: 2,
+        name: "Codeg Gateway",
+        targetAgent: "codeg",
+        routeMode: "gateway",
+        gatewayBaseUrl: "https://relay",
+        gatewaySession: { accessToken: "access", targetId: "target" },
+      },
       { mode: "relay", url: "https://relay///", relaySession: { targetId: "target" } },
     ]
+
+    expect(findStoredConnectionByKey(saved, "codeg::gateway::https://relay")).toEqual(expect.objectContaining({
+      version: 2,
+      targetAgent: "codeg",
+      routeMode: "gateway",
+      mode: "relay",
+      url: "https://relay",
+    }))
 
     expect(findStoredConnectionByKey(saved, "relay::https://relay")).toEqual({
       mode: "relay",
@@ -68,6 +137,23 @@ describe("detailConnectionResolution", () => {
     })
     expect(findStoredConnectionByKey(saved, "direct::https://missing")).toBeNull()
     expect(findStoredConnectionByKey({}, "relay::https://relay")).toBeNull()
+  })
+
+  it("resolves target agent with legacy Codeg defaults", () => {
+    expect(resolveStoredConnectionTargetAgent({
+      mode: "relay",
+      url: "https://relay",
+    })).toBe("codeg")
+
+    expect(resolveStoredConnectionTargetAgent({
+      version: 2,
+      name: "OpenCode",
+      targetAgent: "opencode",
+      routeMode: "direct",
+      directBaseUrl: "https://opencode",
+      mode: "direct",
+      url: "https://opencode",
+    })).toBe("opencode")
   })
 
   it("builds direct descriptors with explicit or fallback tokens", () => {

@@ -1041,6 +1041,7 @@ import {
   buildDescriptorFromStoredConnection,
   findStoredConnectionByKey as findStoredConnectionInList,
   normalizeStoredConnectionLike,
+  resolveStoredConnectionTargetAgent,
   type StoredConnectionItem,
 } from "./detailConnectionResolution"
 
@@ -3203,8 +3204,11 @@ async function sendDraft(draft: QueuedDraft): Promise<boolean> {
     const conn = await ensureConversationReadyForSend()
     if (!conn) throw new Error("未连接到代理")
 
+    const targetAgent = resolveDetailTargetAgent()
     const preparedDraft = await prepareDraftForSend(draft)
-    const { imageAttachments, optimisticText, blocks } = buildDraftSendPayload(preparedDraft)
+    const { imageAttachments, optimisticText, blocks } = buildDraftSendPayload(preparedDraft, {
+      targetAgent,
+    })
     const optimisticTurnId = runtime.addOptimisticUserMessage(
       conversationId.value,
       optimisticText,
@@ -3717,6 +3721,17 @@ function findStoredConnectionByKey(connKey: string) {
   return findStoredConnectionInList(Array.isArray(saved) ? saved : [], connKey)
 }
 
+function resolveDetailStoredConnection(): StoredConnectionItem | null {
+  return routeConnectionContext.value ||
+    findStoredConnectionByKey(routeConnectionKey.value || detailConnectionKey.value)
+}
+
+function resolveDetailTargetAgent() {
+  return resolveStoredConnectionTargetAgent(
+    resolveDetailStoredConnection() || { relaySession: auth.relaySession || undefined }
+  )
+}
+
 function resolveDetailDescriptor(): RemoteInstanceDescriptor {
   const managed = managedConversation.value
   if (managed?.instanceKey) {
@@ -3726,9 +3741,7 @@ function resolveDetailDescriptor(): RemoteInstanceDescriptor {
     }
   }
 
-  const stored =
-    routeConnectionContext.value ||
-    findStoredConnectionByKey(routeConnectionKey.value || detailConnectionKey.value)
+  const stored = resolveDetailStoredConnection()
   const fromStored = stored
     ? buildDescriptorFromStoredConnection(stored, getDirectToken(stored.url))
     : null

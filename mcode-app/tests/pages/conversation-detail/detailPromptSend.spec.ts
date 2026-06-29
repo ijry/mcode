@@ -37,7 +37,7 @@ describe("detailPromptSend", () => {
         attachment("image", "image.png"),
         attachment("file", "a.txt"),
       ],
-    }))).toEqual({
+    }), { targetAgent: "codeg" })).toEqual({
       imageAttachments: [attachment("image", "image.png")],
       fileAttachments: [attachment("file", "a.txt")],
       optimisticText: "hello\n\n已附文件：a.txt",

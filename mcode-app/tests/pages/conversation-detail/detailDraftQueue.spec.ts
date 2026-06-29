@@ -78,7 +78,7 @@ describe("detailDraftQueue", () => {
         attachment("image", "image.png"),
         attachment("file", "a.txt"),
       ],
-    }))).toEqual([
+    }), { targetAgent: "codeg" })).toEqual([
       { type: "text", text: "hello" },
       {
         type: "image",
@@ -102,7 +102,20 @@ describe("detailDraftQueue", () => {
         localPath: undefined,
         url: "/tmp/missing.png",
       }],
-    }))).toThrow("图片缺少可发送数据")
+    }), { targetAgent: "codeg" })).toThrow("图片缺少可发送数据")
+  })
+
+  it("does not apply Codeg attachment blocks to other target agents", () => {
+    expect(buildDraftPromptBlocks(draft({
+      text: "hello",
+    }), { targetAgent: "opencode" })).toEqual([
+      { type: "text", text: "hello" },
+    ])
+
+    expect(() => buildDraftPromptBlocks(draft({
+      text: "hello",
+      attachments: [attachment("file", "a.txt")],
+    }), { targetAgent: "opencode" })).toThrow("当前目标暂不支持附件发送")
   })
 
   it("splits attachments and detects started prompt states", () => {

@@ -1800,3 +1800,20 @@ Compatibility:
   before network send and ask the user to reselect the image.
 - Native clients should keep draft persistence lightweight and hydrate base64
   only at send time. Do not store image base64 in long-lived composer snapshots.
+
+P41 Codeg app follow-up:
+
+- Codeg attachment prompt construction now lives in
+  `mcode-app/src/agents/codeg/attachments.ts`, keeping agent-specific upload
+  normalization, image limit checks, data URL parsing, and ACP block generation
+  out of shared page logic.
+- The conversation detail page preserves v2 connection context when opened from
+  the conversations list, including `targetAgent`, `routeMode`, `gatewaySession`
+  and `targetProfile`. Detail lookup accepts both v2 keys such as
+  `codeg::gateway::https://...` and legacy `relay::https://...` keys.
+- Sending a draft resolves the current `targetAgent` before building prompt
+  blocks. Missing legacy metadata defaults to Codeg; explicit non-Codeg targets
+  can send text but reject attachments until their own adapter is implemented.
+- This follow-up is app-only. It does not require changes in `codeg-main`, and
+  native clients should replicate the same boundary: Codeg attachment blocks are
+  client-side ACP payload construction, not a Codeg server schema migration.
