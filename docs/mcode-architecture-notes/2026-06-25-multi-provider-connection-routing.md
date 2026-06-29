@@ -1734,3 +1734,35 @@ Compatibility and security:
 - Native iOS/Android clients should keep the same local preference semantics:
   remember the selected Desktop connection by identity, then rerun readiness and
   service discovery for that connection.
+
+## P40 Conversation Detail Live Scroll Stability
+
+P40 fixes an Android-visible `mcode-app` conversation detail issue where realtime
+tunnel output could appear to scroll upward every few seconds and expose bottom
+controls. This is an app viewport-sync bug, not a relay/Desktop protocol issue.
+
+Root cause:
+
+- The detail page uses periodic status/layout updates while a turn is streaming,
+  including long-wait status text and live message delta rendering.
+- `scheduleViewportSync()` measured layout and, when not in bottom-follow mode,
+  restored `lastMeasuredScrollTop` as a generic fallback.
+- On Android, that cached pixel value can be stale during realtime output, so
+  repeated viewport sync pulled the page back to an older position.
+
+Implemented behavior:
+
+- `detailScrollState.ts` now exposes `resolveViewportSyncAction()`.
+- Routine viewport sync returns `bottom` only when forced or when
+  `shouldAutoFollowBottom` is true.
+- Routine non-bottom sync returns `none` by default, so it measures layout but
+  does not call `pageScrollTo()` with stale `scrollTop`.
+- Explicit scroll paths remain unchanged: initial restore, history prepend
+  anchor restore, manual scroll-to-bottom, and send-message forced bottom.
+
+Native replication guidance:
+
+- Native clients should separate explicit restore/history positioning from
+  routine live-layout sync.
+- During live output, do not periodically restore an old pixel scroll offset.
+  Only follow bottom when the user is already in bottom-follow mode.

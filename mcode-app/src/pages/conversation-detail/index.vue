@@ -973,6 +973,7 @@ import {
   resolveInitialTurnLimit as resolveInitialTurnLimitValue,
   resolveRenderAnchorId as resolveRenderAnchorIdValue,
   resolveScrollRestoreAction,
+  resolveViewportSyncAction,
   restoreHistoryCursorFromCache as restoreHistoryCursorValueFromCache,
   type HistoryPageCursor,
 } from "./detailScrollState"
@@ -2785,14 +2786,19 @@ function restoreScrollState(
 function scheduleViewportSync(forceBottom = false) {
   nextTick(() => {
     measureMessageListHeight()
-    if (isRestoringScroll.value) return
-    if (forceBottom || shouldAutoFollowBottom.value) {
+    const action = resolveViewportSyncAction({
+      forceBottom,
+      shouldAutoFollowBottom: shouldAutoFollowBottom.value,
+      isRestoringScroll: isRestoringScroll.value,
+      lastMeasuredScrollTop: lastMeasuredScrollTop.value,
+    })
+    if (action.type === "bottom") {
       scrollToBottom(true)
       return
     }
-    if (lastMeasuredScrollTop.value > 0) {
+    if (action.type === "scrollTop") {
       uni.pageScrollTo({
-        scrollTop: lastMeasuredScrollTop.value,
+        scrollTop: action.scrollTop,
         duration: 0,
       })
     }

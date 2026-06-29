@@ -10,6 +10,11 @@ export type ScrollRestoreAction =
   | { type: "scrollTop"; scrollTop: number }
   | { type: "anchor"; anchorMessageId: string }
 
+export type ViewportSyncAction =
+  | { type: "none" }
+  | { type: "bottom" }
+  | { type: "scrollTop"; scrollTop: number }
+
 export function resolveInitialTurnLimit(input: {
   cachedLoadedTurnCount?: number | null
   currentLoadedCount?: number | null
@@ -82,4 +87,22 @@ export function resolveScrollRestoreAction(input: {
   if (cachedAnchor) return { type: "anchor", anchorMessageId: cachedAnchor }
   if (persistedAnchor) return { type: "anchor", anchorMessageId: persistedAnchor }
   return { type: "bottom" }
+}
+
+export function resolveViewportSyncAction(input: {
+  forceBottom?: boolean
+  shouldAutoFollowBottom?: boolean
+  isRestoringScroll?: boolean
+  lastMeasuredScrollTop?: number | null
+  allowScrollTopRestore?: boolean
+}): ViewportSyncAction {
+  if (input.isRestoringScroll) return { type: "none" }
+  if (input.forceBottom || input.shouldAutoFollowBottom) return { type: "bottom" }
+  if (!input.allowScrollTopRestore) return { type: "none" }
+
+  const scrollTop = Number(input.lastMeasuredScrollTop ?? 0)
+  if (Number.isFinite(scrollTop) && scrollTop > 0) {
+    return { type: "scrollTop", scrollTop }
+  }
+  return { type: "none" }
 }

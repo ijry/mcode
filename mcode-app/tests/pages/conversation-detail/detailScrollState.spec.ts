@@ -5,6 +5,7 @@ import {
   resolveInitialTurnLimit,
   resolveRenderAnchorId,
   resolveScrollRestoreAction,
+  resolveViewportSyncAction,
   restoreHistoryCursorFromCache,
 } from "@/pages/conversation-detail/detailScrollState"
 import type { PersistedTurnWithParts } from "@/services/db/repositories/conversationRepository"
@@ -101,5 +102,36 @@ describe("detailScrollState", () => {
       hasCachedViewState: true,
       persistedAnchor: "persisted-anchor",
     })).toEqual({ type: "anchor", anchorMessageId: "persisted-anchor" })
+  })
+
+  it("chooses viewport sync actions without restoring stale scrollTop by default", () => {
+    expect(resolveViewportSyncAction({
+      isRestoringScroll: true,
+      forceBottom: true,
+      shouldAutoFollowBottom: true,
+      lastMeasuredScrollTop: 240,
+    })).toEqual({ type: "none" })
+
+    expect(resolveViewportSyncAction({
+      forceBottom: true,
+      shouldAutoFollowBottom: false,
+      lastMeasuredScrollTop: 240,
+    })).toEqual({ type: "bottom" })
+
+    expect(resolveViewportSyncAction({
+      shouldAutoFollowBottom: true,
+      lastMeasuredScrollTop: 240,
+    })).toEqual({ type: "bottom" })
+
+    expect(resolveViewportSyncAction({
+      shouldAutoFollowBottom: false,
+      lastMeasuredScrollTop: 240,
+    })).toEqual({ type: "none" })
+
+    expect(resolveViewportSyncAction({
+      shouldAutoFollowBottom: false,
+      allowScrollTopRestore: true,
+      lastMeasuredScrollTop: 240,
+    })).toEqual({ type: "scrollTop", scrollTop: 240 })
   })
 })
