@@ -19,6 +19,23 @@
         <view class="title">MCode Desktop</view>
         <button class="btn" size="mini" @click="loadDesktopServices">刷新</button>
       </view>
+      <view v-if="desktopOptions.length > 1" class="desktop-options">
+        <view
+          v-for="option in desktopOptions"
+          :key="option.key"
+          :class="['desktop-option', option.key === selectedDesktopKey ? 'desktop-option--active' : '']"
+          @click="selectDesktopConnection(option.key)"
+        >
+          <view class="row" style="justify-content: space-between;">
+            <text class="desktop-option__label">{{ option.label }}</text>
+            <text :class="['desktop-option__state', option.paired ? 'desktop-option__state--paired' : 'desktop-option__state--unpaired']">
+              {{ option.paired ? "已配对" : "未配对" }}
+            </text>
+          </view>
+          <text class="muted">{{ option.subtitle }}</text>
+          <text class="muted">Target: {{ option.targetId || "-" }}</text>
+        </view>
+      </view>
       <view v-if="readinessSummary" :class="['readiness-card', `readiness-card--${readinessSummary.level}`]">
         <view class="row" style="justify-content: space-between;">
           <text class="readiness-title">{{ readinessSummary.title }}</text>
@@ -99,16 +116,25 @@ import { readStoredConnections, resolveConnectionContext } from "@/services/conn
 import type { ConnectionContext } from "@/services/connectionContext"
 import { buildDesktopServiceEntries, type DesktopDiscoveredServiceEntry } from "@/agents/mcode-desktop/serviceDiscovery"
 import {
+  buildDesktopConnectionOptions,
+  chooseDesktopConnection,
+  type DesktopConnectionOption,
+} from "@/agents/mcode-desktop/connectionSelection"
+import {
   buildDesktopReadinessDiagnosticText,
   buildDesktopReadinessSummary,
   type DesktopReadinessSummary,
 } from "@/agents/mcode-desktop/readiness"
+
+const DESKTOP_SELECTION_STORAGE_KEY = "mcode_desktop_target_connection_key"
 
 const targets = useTargetsStore()
 const serviceEntries = ref<DesktopDiscoveredServiceEntry[]>([])
 const serviceLoading = ref(false)
 const serviceError = ref("")
 const desktopConnection = ref<ConnectionContext | null>(null)
+const desktopOptions = ref<DesktopConnectionOption[]>([])
+const selectedDesktopKey = ref("")
 const readinessSummary = ref<DesktopReadinessSummary | null>(null)
 
 function activate(targetId: string) {
@@ -119,7 +145,8 @@ async function loadDesktopServices() {
   serviceLoading.value = true
   serviceError.value = ""
   try {
-    const connection = findDesktopGatewayConnection()
+    const selectedOption = resolveSelectedDesktopOption()
+    const connection = selectedOption?.connection || null
     desktopConnection.value = connection
     if (!connection) {
       serviceEntries.value = []
@@ -152,14 +179,22 @@ async function loadDesktopServices() {
   }
 }
 
-function findDesktopGatewayConnection(): ConnectionContext | null {
-  return (
-    readStoredConnections().find(
-      (connection) =>
-        connection.targetAgent === "mcode-desktop" &&
-        connection.routeMode === "gateway"
-    ) || null
-  )
+function resolveSelectedDesktopOption(): DesktopConnectionOption | null {
+  const options = buildDesktopConnectionOptions(readStoredConnections())
+  desktopOptions.value = options
+  const preferredKey = selectedDesktopKey.value || String(uni.getStorageSync(DESKTOP_SELECTION_STORAGE_KEY) || "")
+  const selected = chooseDesktopConnection(options, preferredKey)
+  selectedDesktopKey.value = selected?.key || ""
+  if (selected?.key) {
+    uni.setStorageSync(DESKTOP_SELECTION_STORAGE_KEY, selected.key)
+  }
+  return selected
+}
+
+function selectDesktopConnection(key: string) {
+  selectedDesktopKey.value = key
+  uni.setStorageSync(DESKTOP_SELECTION_STORAGE_KEY, key)
+  void loadDesktopServices()
 }
 
 function openConnectionsPage() {
@@ -211,6 +246,44 @@ onMounted(() => {
   border: 1rpx solid var(--up-border-color, #e5e7eb);
   border-radius: 24rpx;
   background: var(--up-card-bg-color, #fff);
+}
+
+.desktop-options {
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+}
+
+.desktop-option {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+  padding: 18rpx;
+  border: 1rpx solid var(--up-border-color, #e5e7eb);
+  border-radius: 18rpx;
+  background: var(--up-card-bg-color, #fff);
+}
+
+.desktop-option--active {
+  border-color: var(--up-primary, #2979ff);
+  box-shadow: 0 0 0 2rpx rgba(41, 121, 255, 0.12);
+}
+
+.desktop-option__label {
+  color: var(--up-main-color, #303133);
+  font-weight: 700;
+}
+
+.desktop-option__state {
+  font-size: 22rpx;
+}
+
+.desktop-option__state--paired {
+  color: #166534;
+}
+
+.desktop-option__state--unpaired {
+  color: #92400e;
 }
 
 .readiness-card--ready {

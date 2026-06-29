@@ -1700,3 +1700,37 @@ Compatibility and security:
 - Native iOS/Android clients should replicate the same local presentation model
   using pair metadata and service discovery results. Do not call relay admin
   APIs from this readiness panel.
+
+## P39 App Desktop Connection Selection Behavior
+
+P39 fixes the P38 single-Desktop assumption. The app can now choose which
+`mcode-desktop/gateway` connection drives the targets page readiness panel and
+local-service discovery.
+
+Implemented behavior:
+
+- Desktop connection selection logic lives in
+  `mcode-app/src/agents/mcode-desktop/connectionSelection.ts`.
+- `buildDesktopConnectionOptions()` filters stored connections to
+  `targetAgent = mcode-desktop` and `routeMode = gateway`, then creates
+  UI-safe option metadata.
+- `chooseDesktopConnection()` resolves selection in this order: remembered key,
+  first paired Desktop gateway, first Desktop gateway.
+- The targets page renders selection cards when more than one Desktop gateway
+  exists.
+- Selecting a card saves only the selected connection key in
+  `mcode_desktop_target_connection_key` and reloads readiness/service discovery
+  for that connection.
+- Unpaired Desktop gateway connections remain selectable so the readiness panel
+  can explain that pairing is missing.
+
+Compatibility and security:
+
+- P39 does not change connection record schema, relay, Desktop, pairing,
+  tunnel, proxy, event replay, or official CLI protocols.
+- The selection preference stores only a derived connection identity key. It
+  does not store access tokens, refresh tokens, pair secrets, direct tokens, or
+  official CLI credentials.
+- Native iOS/Android clients should keep the same local preference semantics:
+  remember the selected Desktop connection by identity, then rerun readiness and
+  service discovery for that connection.
