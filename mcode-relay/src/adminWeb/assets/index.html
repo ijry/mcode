@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MCode Relay Admin</title>
+    <link rel="stylesheet" href="/admin/assets/admin.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">MCode Relay</p>
+          <h1>网关管理后台</h1>
+          <p class="subtitle">用于官方/企业自部署 relay 的设备、会话、租户、审计和凭据运维。</p>
+        </div>
+        <form id="login-form" class="login-card">
+          <label for="admin-token">Admin Token</label>
+          <input id="admin-token" name="adminToken" type="password" autocomplete="off" placeholder="输入 owner/admin/auditor token" />
+          <div class="actions">
+            <button type="submit">连接后台</button>
+            <button id="clear-token" type="button" class="ghost">清除</button>
+          </div>
+          <p class="hint">Token 仅保存到本浏览器 sessionStorage，API 仍由 relay RBAC 校验。</p>
+        </form>
+      </section>
+
+      <section class="toolbar">
+        <div id="status" class="status">未连接</div>
+        <button id="refresh" type="button">刷新数据</button>
+      </section>
+
+      <section class="grid metrics" id="metrics"></section>
+
+      <section class="grid">
+        <article class="panel wide">
+          <div class="panel-title">
+            <h2>租户</h2>
+            <form id="tenant-form" class="inline-form">
+              <input name="tenantId" placeholder="tenantId" />
+              <input name="tenantName" placeholder="tenantName" />
+              <button type="submit">创建/更新</button>
+            </form>
+          </div>
+          <div id="tenants" class="table"></div>
+        </article>
+
+        <article class="panel wide">
+          <div class="panel-title">
+            <h2>设备 Targets</h2>
+            <form id="move-target-form" class="inline-form">
+              <input name="targetId" placeholder="targetId" />
+              <input name="tenantId" placeholder="tenantId" />
+              <button type="submit">移动租户</button>
+            </form>
+          </div>
+          <div id="devices" class="table"></div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-title">
+            <h2>会话</h2>
+          </div>
+          <div id="sessions" class="table"></div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-title">
+            <h2>管理员凭据</h2>
+          </div>
+          <form id="credential-form" class="stack-form">
+            <select name="role">
+              <option value="admin">admin</option>
+              <option value="auditor">auditor</option>
+              <option value="owner">owner</option>
+            </select>
+            <input name="tenantId" placeholder="tenantId（owner 可空）" />
+            <input name="label" placeholder="label" />
+            <button type="submit">创建凭据</button>
+          </form>
+          <pre id="created-token" class="token-output"></pre>
+          <div id="credentials" class="table"></div>
+        </article>
+
+        <article class="panel wide">
+          <div class="panel-title">
+            <h2>审计事件</h2>
+            <span class="hint">最近 100 条</span>
+          </div>
+          <div id="audit-events" class="table"></div>
+        </article>
+      </section>
+    </main>
+    <script type="module" src="/admin/assets/admin.js"></script>
+  </body>
+</html>

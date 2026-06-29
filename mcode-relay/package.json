@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node -e \"require('node:fs').cpSync('src/adminWeb/assets','dist/adminWeb/assets',{recursive:true})\"",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

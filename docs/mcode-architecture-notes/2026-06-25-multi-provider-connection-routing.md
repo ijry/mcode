@@ -1594,3 +1594,40 @@ Compatibility and native replication:
 - Native clients must build service access URLs from relay base URL, target id,
   and service port. They must never try to connect directly to `127.0.0.1`
   values from Desktop metadata.
+
+## P36 Relay Web Admin Console Behavior
+
+P36 adds a Web administration console to `mcode-relay` itself. This console is
+for official gateway operations and enterprise self-hosted relay operators; it
+is not an `mcode-app` feature and native AI remote-control clients should not
+replicate it.
+
+Implemented behavior:
+
+- `GET /admin` serves the built-in admin shell.
+- `GET /admin/assets/admin.css` and `GET /admin/assets/admin.js` serve
+  allowlisted static assets with `nosniff`, no-referrer, and conservative cache
+  headers.
+- `mcode-relay` build output copies these static assets into
+  `dist/adminWeb/assets`, matching the compiled `static.js` runtime path.
+- The Web UI stores the entered admin token only in browser `sessionStorage`.
+- Web UI API calls use `x-mcode-admin-token` and `x-mcode-admin-actor =
+  relay-web-admin`.
+- The console reads existing `/health`, `/v1/gateway/info`,
+  `/v1/admin/tenants`, `/v1/admin/devices`, `/v1/admin/sessions`,
+  `/v1/admin/audit-events`, and `/v1/admin/credentials`.
+- The console performs only existing mutations: create/update tenant, move
+  target tenant, revoke/restore target, revoke session, create credential, and
+  revoke credential.
+
+Compatibility and security:
+
+- P36 does not change pairing, proxy, event replay, HTTP tunnel, TCP tunnel,
+  target service discovery, or mobile client protocols.
+- Public availability of `/admin` is not authorization. Existing admin API RBAC
+  remains the enforcement point, so missing/invalid tokens still return `401`
+  and insufficient roles still return `403`.
+- The shell must not embed admin tokens, dynamic credential token hashes, pair
+  codes, access tokens, refresh tokens, or official CLI credentials.
+- Native iOS/Android clients should continue treating relay admin APIs as
+  operator tooling, not as in-app remote-control features.

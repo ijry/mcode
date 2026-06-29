@@ -18,6 +18,7 @@ import { RelayHub, RelayRequestError } from "./tunnel/hub.js"
 import { normalizeTunnelPath } from "./tunnel/httpProxy.js"
 import { sanitizeAuditEvent } from "./audit/sanitize.js"
 import { AuditWebhookSink } from "./audit/webhookSink.js"
+import { registerAdminWebRoutes } from "./adminWeb/static.js"
 import {
   authorizeAdminRoute,
   resolveAdminPrincipal,
@@ -431,6 +432,7 @@ export async function buildRelayApp(overrides: Partial<RelayAppContext> = {}): P
   const context = createRelayContext(overrides)
   const app = Fastify({ logger: false })
   await app.register(websocket)
+  registerAdminWebRoutes(app)
 
   app.get("/health", async () => buildGatewayHealth(context))
 

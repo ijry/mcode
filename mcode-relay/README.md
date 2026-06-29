@@ -78,6 +78,24 @@ that do not implement tenant administration can ignore it.
 - `GET /v1/admin/audit-events/export` exports tenant-scoped audit events as JSON or JSONL.
 - `GET /health` and `GET /v1/gateway/info` stay diagnostic-only; they report counts and feature flags but do not expose secrets, tokens, pair codes, or storage paths.
 
+## Admin Web Console
+
+`GET /admin` serves the built-in relay administration console. It is intended
+for official gateway operations and enterprise self-hosted gateway operators,
+not for `mcode-app` end users.
+
+- The console stores the entered admin token only in browser `sessionStorage`.
+- API calls send the token as `x-mcode-admin-token`; all RBAC decisions still
+  happen in the existing `/v1/admin/*` handlers.
+- The console can view health/info, tenants, devices, sessions, audit events,
+  and credentials according to the token role.
+- The console exposes existing mutations only: create tenant, move target,
+  revoke/restore target, revoke session, create credential, revoke credential.
+- Serving `/admin` publicly does not grant admin access; unauthorized API calls
+  still return `401` or `403`.
+- `npm run build` copies the admin static assets into `dist/adminWeb/assets`
+  after TypeScript compilation so compiled deployments can serve the console.
+
 ## Admin RBAC
 
 `ADMIN_TOKEN` remains the bootstrap owner token. For role-scoped administration,

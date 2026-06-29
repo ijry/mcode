@@ -1,0 +1,277 @@
+:root {
+  color-scheme: light;
+  --bg: #f4f1e8;
+  --ink: #17211b;
+  --muted: #667067;
+  --card: #fffdf6;
+  --line: #ded6c3;
+  --accent: #0f6d4f;
+  --accent-strong: #084d3a;
+  --danger: #a43c2a;
+  --shadow: 0 22px 70px rgba(42, 37, 26, 0.12);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: var(--ink);
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
+  background:
+    radial-gradient(circle at 8% 8%, rgba(15, 109, 79, 0.16), transparent 28rem),
+    linear-gradient(135deg, #f8f3e7 0%, #eef5ec 55%, #f7efe2 100%);
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button {
+  border: 0;
+  border-radius: 12px;
+  padding: 0.7rem 1rem;
+  color: #fff;
+  background: var(--accent);
+  cursor: pointer;
+}
+
+button:hover {
+  background: var(--accent-strong);
+}
+
+button.ghost {
+  color: var(--accent);
+  background: rgba(15, 109, 79, 0.1);
+}
+
+button.danger {
+  background: var(--danger);
+}
+
+input,
+select {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.7rem 0.8rem;
+  color: var(--ink);
+  background: #fff;
+}
+
+.shell {
+  width: min(1280px, calc(100vw - 32px));
+  margin: 0 auto;
+  padding: 32px 0 56px;
+}
+
+.hero {
+  display: grid;
+  grid-template-columns: 1fr minmax(320px, 420px);
+  gap: 28px;
+  align-items: stretch;
+}
+
+.eyebrow {
+  margin: 0 0 12px;
+  color: var(--accent);
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+h1 {
+  margin: 0;
+  font-size: clamp(2.5rem, 7vw, 5.8rem);
+  line-height: 0.95;
+  letter-spacing: -0.08em;
+}
+
+h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.subtitle {
+  max-width: 680px;
+  color: var(--muted);
+  font-size: 1.08rem;
+}
+
+.login-card,
+.panel,
+.toolbar,
+.metric {
+  border: 1px solid rgba(222, 214, 195, 0.9);
+  border-radius: 28px;
+  background: rgba(255, 253, 246, 0.88);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(14px);
+}
+
+.login-card {
+  display: grid;
+  gap: 12px;
+  padding: 22px;
+}
+
+.actions,
+.toolbar,
+.panel-title,
+.inline-form {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.toolbar {
+  justify-content: space-between;
+  margin: 24px 0;
+  padding: 14px 16px;
+}
+
+.status {
+  color: var(--muted);
+}
+
+.hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 18px;
+}
+
+.metric {
+  padding: 18px;
+}
+
+.metric strong {
+  display: block;
+  margin-top: 10px;
+  font-size: 2rem;
+}
+
+.panel {
+  min-width: 0;
+  padding: 18px;
+}
+
+.panel.wide {
+  grid-column: 1 / -1;
+}
+
+.panel-title {
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.inline-form {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.inline-form input {
+  width: 160px;
+}
+
+.stack-form {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.table {
+  display: grid;
+  gap: 10px;
+  max-height: 420px;
+  overflow: auto;
+}
+
+.row {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.row-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.row-title {
+  overflow: hidden;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.pill {
+  border-radius: 999px;
+  padding: 0.25rem 0.55rem;
+  background: rgba(15, 109, 79, 0.12);
+}
+
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.row-actions button {
+  padding: 0.5rem 0.75rem;
+  font-size: 0.86rem;
+}
+
+.token-output {
+  overflow: auto;
+  border-radius: 14px;
+  padding: 10px;
+  color: #fff;
+  background: #17211b;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 860px) {
+  .hero,
+  .grid,
+  .metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .toolbar,
+  .panel-title {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .inline-form,
+  .inline-form input {
+    width: 100%;
+  }
+}
