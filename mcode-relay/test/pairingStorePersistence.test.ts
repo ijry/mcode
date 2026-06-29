@@ -39,11 +39,15 @@ function config(overrides: Partial<RelayConfig> = {}): RelayConfig {
 }
 
 describe("pairing store persistence", () => {
-  it("restores targets sessions and audit events from json storage", () => {
+  it("restores tenants targets sessions and audit events from json storage", () => {
     withTempDir((dir) => {
       const filePath = join(dir, "pairing-store.json")
       const storage = new JsonFilePairingStoreStorage(filePath)
       const store = new PairingStore(storage)
+      const tenant = store.upsertTenant({
+        tenantId: "enterprise-a",
+        tenantName: "Enterprise A",
+      })
 
       store.upsertTarget({
         targetId: "desktop-1",
@@ -52,6 +56,7 @@ describe("pairing store persistence", () => {
         capabilities: ["desktop.tunnel.available", "agent.codex"],
         protocolVersion: "1",
         relayUrl: "https://gateway.example.com",
+        tenantId: tenant.tenantId,
       })
       store.markTargetSeen("desktop-1")
       const session = store.createSession("desktop-1", {
@@ -61,6 +66,7 @@ describe("pairing store persistence", () => {
       store.revokeSession(session.sessionId, "lost device")
       store.addAuditEvent({
         type: "session.revoked",
+        tenantId: tenant.tenantId,
         targetId: "desktop-1",
         sessionId: session.sessionId,
         actor: "admin",
@@ -71,9 +77,11 @@ describe("pairing store persistence", () => {
       const restoredTarget = restored.getTarget("desktop-1")
       const restoredSession = restored.listSessions().find((item) => item.sessionId === session.sessionId)
       const restoredAuditEvent = restored.listAuditEvents(10).find((item) => item.type === "session.revoked")
+      const restoredTenant = restored.getTenant(tenant.tenantId)
 
       expect(restoredTarget).toMatchObject({
         targetId: "desktop-1",
+        tenantId: tenant.tenantId,
         targetName: "Office Desktop",
         targetAgent: "mcode-desktop",
         capabilities: ["desktop.tunnel.available", "agent.codex"],
@@ -86,6 +94,7 @@ describe("pairing store persistence", () => {
       expect(restoredSession).toMatchObject({
         sessionId: session.sessionId,
         targetId: "desktop-1",
+        tenantId: tenant.tenantId,
         deviceName: "User Phone",
         deviceUserAgent: "MCode Test",
         revokeReason: "lost device",
@@ -93,11 +102,17 @@ describe("pairing store persistence", () => {
       expect(restoredSession?.revokedAt).toEqual(expect.any(Number))
       expect(restoredAuditEvent).toMatchObject({
         type: "session.revoked",
+        tenantId: tenant.tenantId,
         targetId: "desktop-1",
         sessionId: session.sessionId,
         actor: "admin",
         message: "lost device",
       })
+      expect(restoredTenant).toMatchObject({
+        tenantId: tenant.tenantId,
+        tenantName: "Enterprise A",
+      })
+      expect(restored.listTenants().map((item) => item.tenantId)).toContain("default")
     })
   })
 
@@ -118,6 +133,80 @@ describe("pairing store persistence", () => {
 
       expect(restored.getTarget("desktop-1")).not.toBeNull()
       expect(restored.consumeOffer("123456", "secret")).toBeNull()
+    })
+  })
+
+  it("restores legacy snapshots into the default tenant", () => {
+    withTempDir((dir) => {
+      const filePath = join(dir, "pairing-store.json")
+      writeFileSync(
+        filePath,
+        JSON.stringify(
+          {
+            targets: [
+              {
+                targetId: "desktop-legacy",
+                targetAgent: "mcode-desktop",
+                targetName: "Legacy Desktop",
+                capabilities: ["desktop.tunnel.available"],
+                protocolVersion: "1",
+                relayUrl: "https://gateway.example.com",
+              },
+            ],
+            sessions: [
+              {
+                sessionId: "session-legacy",
+                targetId: "desktop-legacy",
+                deviceName: "Legacy Phone",
+                deviceUserAgent: "MCode Legacy",
+                createdAt: 1,
+                updatedAt: 1,
+                revokedAt: null,
+                revokeReason: null,
+              },
+            ],
+            auditEvents: [
+              {
+                eventId: "event-legacy",
+                type: "session.created",
+                targetId: "desktop-legacy",
+                sessionId: "session-legacy",
+                actor: "pair",
+                message: null,
+                createdAt: 1,
+                metadata: {},
+              },
+            ],
+          },
+          null,
+          2
+        ),
+        "utf8"
+      )
+
+      const restored = new PairingStore(new JsonFilePairingStoreStorage(filePath))
+
+      expect(restored.getTarget("desktop-legacy")).toMatchObject({
+        tenantId: "default",
+        targetName: "Legacy Desktop",
+      })
+      expect(restored.listSessions()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            sessionId: "session-legacy",
+            tenantId: "default",
+          }),
+        ])
+      )
+      expect(restored.listAuditEvents(10)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            eventId: "event-legacy",
+            tenantId: "default",
+          }),
+        ])
+      )
+      expect(restored.listTenants().map((item) => item.tenantId)).toContain("default")
     })
   })
 

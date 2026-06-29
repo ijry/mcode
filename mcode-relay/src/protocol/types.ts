@@ -2,6 +2,7 @@ export type TargetAgent = "codeg" | "opencode" | "mcode-desktop"
 
 export interface TargetMetadata {
   targetId: string
+  tenantId: string
   targetAgent: TargetAgent
   displayName: string | null
   capabilities: string[]
@@ -18,6 +19,7 @@ export interface ClientIdentity {
 export interface DesktopUpstreamHello {
   type: "desktop_hello"
   targetId: string
+  tenantId?: string | null
   targetName?: string | null
   displayName?: string | null
   targetAgent?: TargetAgent

@@ -1386,3 +1386,36 @@ Native iOS/Android replication guidance:
   every hosted session supports them.
 - Keep official CLI sessions under `targetAgent = mcode-desktop`; do not add
   mobile-side official CLI agents.
+
+## P30 Enterprise Tenant Model Behavior
+
+P30 turns the first enterprise relay slice into a tenant-aware model without
+changing the relay wire protocol. Existing single-tenant deployments still work
+because legacy snapshots and unaffiliated records fall back to the `default`
+tenant.
+
+Implemented relay behavior:
+
+- `PairingStore` snapshots now persist `tenants`, `targets`, `sessions`, and
+  `auditEvents`.
+- `tenantId` is attached to pairing offers, targets, sessions, and audit
+  events so persisted records stay scoped to the tenant that created them.
+- `GET /v1/admin/tenants` returns tenant summaries.
+- `POST /v1/admin/tenants` creates or updates a tenant record.
+- `POST /v1/admin/devices/:targetId/tenant` reassigns a target to a new tenant
+  and records an audit event.
+- `GET /v1/admin/devices`, `/v1/admin/sessions`, and
+  `/v1/admin/audit-events` accept tenant scoping through `tenantId` query or
+  `x-mcode-tenant-id` header.
+- `/health` reports tenant count in stats and `/v1/gateway/info` advertises
+  `enterprise.tenants`.
+
+Compatibility and native replication:
+
+- Old JSON snapshots without a `tenants` array still restore with
+  `tenantId = "default"`.
+- Clients that do not care about tenant operations can ignore the new field;
+  the public pairing and proxy contract is unchanged.
+- Native admin tooling should keep the same default-tenant fallback and use the
+  same filtering conventions when presenting tenant-scoped devices or audit
+  history.

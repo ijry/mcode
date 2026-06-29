@@ -11,7 +11,7 @@ import {
   verifyRefreshToken,
 } from "./auth/tokens.js"
 import { JsonFilePairingStoreStorage, PairingStore } from "./pairing/store.js"
-import type { PairSessionRecord, TargetRecord } from "./pairing/store.js"
+import type { PairSessionRecord, TargetRecord, TenantRecord } from "./pairing/store.js"
 import { buildGatewayHealth, buildGatewayInfo } from "./gateway/info.js"
 import { JsonFileReplayStoreStorage, ReplayStore } from "./protocol/replayStore.js"
 import { RelayHub, RelayRequestError } from "./tunnel/hub.js"
@@ -141,6 +141,27 @@ function normalizeLimit(req: FastifyRequest): number {
   return Number.isFinite(limit) ? Math.max(1, Math.min(Math.trunc(limit), 500)) : 100
 }
 
+function normalizeAdminTenantId(value: unknown): string | null {
+  if (Array.isArray(value)) return normalizeAdminTenantId(value[0])
+  if (typeof value !== "string") return null
+  const trimmed = value.trim()
+  return trimmed || null
+}
+
+function normalizeAdminText(value: unknown): string | null {
+  if (Array.isArray(value)) return normalizeAdminText(value[0])
+  if (typeof value !== "string") return null
+  const trimmed = value.trim()
+  return trimmed || null
+}
+
+function getAdminTenantId(req: FastifyRequest): string | null {
+  const query = req.query && typeof req.query === "object" ? (req.query as Record<string, unknown>) : {}
+  const header = normalizeAdminTenantId(req.headers["x-mcode-tenant-id"])
+  const queryTenant = normalizeAdminTenantId(query.tenantId ?? query.tenant_id)
+  return header ?? queryTenant
+}
+
 function normalizeTargetAgent(value: unknown, fallback: TargetAgent = "codeg"): TargetAgent {
   return value === "codeg" || value === "opencode" || value === "mcode-desktop"
     ? value
@@ -171,6 +192,7 @@ function pickDisplayName(message: Record<string, unknown>, fallback?: string | n
 function toTargetMetadata(target: TargetRecord): TargetMetadata {
   return {
     targetId: target.targetId,
+    tenantId: target.tenantId,
     targetAgent: target.targetAgent,
     displayName: target.targetName,
     capabilities: target.capabilities,
@@ -225,6 +247,28 @@ function buildClientIdentity(
     sessionId: auth.session.sessionId,
     targetId: auth.claims.targetId,
     deviceName: auth.session.deviceName ?? null,
+  }
+}
+
+function buildTenantAdminList(tenants: TenantRecord[], context: RelayAppContext) {
+  return tenants.map((tenant) => buildTenantAdminRecord(tenant, context))
+}
+
+function buildTenantAdminRecord(tenant: TenantRecord, context: RelayAppContext) {
+  const targets = context.store.listTargets(tenant.tenantId)
+  const sessions = context.store.listSessions(tenant.tenantId)
+  const auditEvents = context.store.listAuditEvents(500, tenant.tenantId)
+  return {
+    tenantId: tenant.tenantId,
+    tenantName: tenant.tenantName,
+    createdAt: tenant.createdAt,
+    updatedAt: tenant.updatedAt,
+    targets: targets.length,
+    sessions: sessions.length,
+    revokedSessions: sessions.filter((session) => session.revokedAt !== null).length,
+    revokedTargets: targets.filter((target) => target.revoked).length,
+    onlineTargets: targets.filter((target) => context.hub.isDesktopOnline(target.targetId)).length,
+    auditEvents: auditEvents.length,
   }
 }
 
@@ -286,8 +330,9 @@ export async function buildRelayApp(context = createRelayContext()): Promise<Fas
     if (!authenticateAdmin(req, context.config)) {
       return reply.code(401).send({ error: "admin token required" })
     }
+    const tenantId = getAdminTenantId(req)
     return reply.send({
-      devices: context.store.listTargets().map((target) => ({
+      devices: context.store.listTargets(tenantId ?? undefined).map((target) => ({
         ...toTargetResponse(target, context),
         pairedAt: target.pairedAt,
         lastSeenAt: target.lastSeenAt,
@@ -300,8 +345,9 @@ export async function buildRelayApp(context = createRelayContext()): Promise<Fas
     if (!authenticateAdmin(req, context.config)) {
       return reply.code(401).send({ error: "admin token required" })
     }
+    const tenantId = getAdminTenantId(req)
     return reply.send({
-      sessions: context.store.listSessions(),
+      sessions: context.store.listSessions(tenantId ?? undefined),
     })
   })
 
@@ -309,9 +355,41 @@ export async function buildRelayApp(context = createRelayContext()): Promise<Fas
     if (!authenticateAdmin(req, context.config)) {
       return reply.code(401).send({ error: "admin token required" })
     }
+    const tenantId = getAdminTenantId(req)
     return reply.send({
-      events: context.store.listAuditEvents(normalizeLimit(req)),
+      events: context.store.listAuditEvents(normalizeLimit(req), tenantId ?? undefined),
     })
+  })
+
+  app.get("/v1/admin/tenants", async (req, reply) => {
+    if (!authenticateAdmin(req, context.config)) {
+      return reply.code(401).send({ error: "admin token required" })
+    }
+    return reply.send({
+      tenants: buildTenantAdminList(context.store.listTenants(), context),
+    })
+  })
+
+  app.post("/v1/admin/tenants", async (req, reply) => {
+    if (!authenticateAdmin(req, context.config)) {
+      return reply.code(401).send({ error: "admin token required" })
+    }
+    const body = req.body as { tenantId?: string; tenantName?: string | null }
+    const tenantId = normalizeAdminTenantId(body?.tenantId)
+    if (!tenantId) {
+      return reply.code(400).send({ error: "tenantId is required" })
+    }
+    const tenant = context.store.upsertTenant({
+      tenantId,
+      tenantName: normalizeAdminText(body?.tenantName),
+    })
+    context.store.addAuditEvent({
+      type: "tenant.upserted",
+      tenantId: tenant.tenantId,
+      actor: adminActor(req),
+      message: tenant.tenantName,
+    })
+    return reply.send({ tenant: buildTenantAdminRecord(tenant, context) })
   })
 
   app.post("/v1/admin/devices/:targetId/revoke", async (req, reply) => {
@@ -331,6 +409,42 @@ export async function buildRelayApp(context = createRelayContext()): Promise<Fas
       message: body?.reason,
     })
     return reply.send({ ok: true })
+  })
+
+  app.post("/v1/admin/devices/:targetId/tenant", async (req, reply) => {
+    if (!authenticateAdmin(req, context.config)) {
+      return reply.code(401).send({ error: "admin token required" })
+    }
+    const params = req.params as { targetId: string }
+    const body = req.body as { tenantId?: string; tenantName?: string | null }
+    const targetId = String(params.targetId || "").trim()
+    const tenantId = normalizeAdminTenantId(body?.tenantId)
+    if (!targetId || !tenantId) {
+      return reply.code(400).send({ error: "targetId and tenantId are required" })
+    }
+    const tenant = context.store.upsertTenant({
+      tenantId,
+      tenantName: normalizeAdminText(body?.tenantName),
+    })
+    const target = context.store.assignTargetTenant(targetId, tenant.tenantId)
+    if (!target) {
+      return reply.code(404).send({ error: "target not found" })
+    }
+    context.store.addAuditEvent({
+      type: "target.tenant_changed",
+      tenantId: tenant.tenantId,
+      targetId,
+      actor: adminActor(req),
+      metadata: { tenantId: tenant.tenantId },
+    })
+    return reply.send({
+      target: {
+        ...toTargetResponse(target, context),
+        pairedAt: target.pairedAt,
+        lastSeenAt: target.lastSeenAt,
+        revoked: target.revoked,
+      },
+    })
   })
 
   app.post("/v1/admin/devices/:targetId/restore", async (req, reply) => {
@@ -392,6 +506,7 @@ export async function buildRelayApp(context = createRelayContext()): Promise<Fas
 
     const target = context.store.upsertTarget({
       targetId: offer.targetId,
+      tenantId: offer.tenantId,
       targetName: offer.targetName,
       targetAgent: offer.targetAgent,
       capabilities: offer.capabilities,
@@ -408,6 +523,7 @@ export async function buildRelayApp(context = createRelayContext()): Promise<Fas
     })
     context.store.addAuditEvent({
       type: "session.created",
+      tenantId: target.tenantId,
       targetId: target.targetId,
       sessionId: session.sessionId,
       actor: "pair",
@@ -476,6 +592,7 @@ export async function buildRelayApp(context = createRelayContext()): Promise<Fas
       context.store.touchSession(session.sessionId)
       context.store.addAuditEvent({
         type: "session.refreshed",
+        tenantId: target.tenantId,
         targetId: claims.targetId,
         sessionId: session.sessionId,
         actor: "refresh",
@@ -498,11 +615,12 @@ export async function buildRelayApp(context = createRelayContext()): Promise<Fas
       return reply.code(401).send({ error: error instanceof Error ? error.message : "Unauthorized" })
     }
     const targets = context.store.listTargets().map((target) => ({
-      ...toTargetResponse(target, context),
-      relayUrl: target.relayUrl,
-      pairedAt: target.pairedAt,
-      lastSeenAt: target.lastSeenAt,
-    }))
+        ...toTargetResponse(target, context),
+        tenantId: target.tenantId,
+        relayUrl: target.relayUrl,
+        pairedAt: target.pairedAt,
+        lastSeenAt: target.lastSeenAt,
+      }))
     return reply.send({
       currentTargetId: auth.claims.targetId,
       targets,
@@ -701,6 +819,7 @@ export async function buildRelayApp(context = createRelayContext()): Promise<Fas
         context.hub.registerDesktop(activeTargetId, socket, targetName)
         context.store.upsertTarget({
           targetId: activeTargetId,
+          tenantId: normalizeAdminTenantId(message.tenantId) ?? undefined,
           targetName,
           targetAgent: normalizeTargetAgent(message.targetAgent, "mcode-desktop"),
           capabilities: normalizeCapabilities(message.capabilities),
@@ -731,6 +850,7 @@ export async function buildRelayApp(context = createRelayContext()): Promise<Fas
           code,
           secret,
           targetId: activeTargetId,
+          tenantId: normalizeAdminTenantId(message.tenantId) ?? undefined,
           targetName,
           targetAgent: normalizeTargetAgent(message.targetAgent, "mcode-desktop"),
           capabilities: normalizeCapabilities(message.capabilities),

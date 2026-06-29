@@ -14,6 +14,7 @@ export const GATEWAY_FEATURES = [
   "tunnel.http",
   "tunnel.tcp",
   "enterprise.devices",
+  "enterprise.tenants",
   "enterprise.sessionRevocation",
   "enterprise.audit",
   "enterprise.accessPolicy",
@@ -30,6 +31,7 @@ export interface GatewaySecurityStatus {
 }
 
 export interface GatewayStats {
+  tenants: number
   targets: number
   sessions: number
   revokedSessions: number
@@ -134,8 +136,10 @@ export function buildGatewaySecurity(config: RelayConfig): GatewaySecurityStatus
 }
 
 function buildGatewayStats(context: RelayAppContext): GatewayStats {
+  const tenants = context.store.listTenants()
   const targets = context.store.listTargets()
   return {
+    tenants: tenants.length,
     targets: targets.length,
     sessions: context.store.listSessions().filter((session) => session.revokedAt === null).length,
     revokedSessions: context.store.listSessions().filter((session) => session.revokedAt !== null).length,

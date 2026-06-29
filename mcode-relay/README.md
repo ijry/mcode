@@ -37,6 +37,9 @@ Standalone relay service for MCode remote control.
 
 Legacy clients can keep using `target.targetName`, `target.relayUrl`, `target.preferredMode`, and `target.online`. Missing target metadata defaults to `codeg` and protocol version `1` at the store boundary.
 
+`target.tenantId` is also present for tenant-aware enterprise tooling. Clients
+that do not implement tenant administration can ignore it.
+
 ## Events And Tunnel
 
 - `/v1/events` emits replayable frames shaped as `{ eventId, channel, payload, controllerId? }`.
@@ -58,8 +61,15 @@ Legacy clients can keep using `target.targetName`, `target.relayUrl`, `target.pr
 - Set `DEPLOYMENT_ENV=production`, `ALLOW_DEV_SECRETS=false`, and a policy label for logging and auditing.
 - Keep TLS termination at the edge and point MCode app / MCode Desktop custom gateway entries at the enterprise domain.
 
+## Tenant Operations
+
+- `GET /v1/admin/tenants` lists tenant summaries for admin tooling.
+- `POST /v1/admin/tenants` creates or updates a tenant record.
+- `POST /v1/admin/devices/:targetId/tenant` moves a paired target into another tenant.
+- `GET /v1/admin/devices`, `GET /v1/admin/sessions`, and `GET /v1/admin/audit-events` accept `tenantId` or `x-mcode-tenant-id` for tenant-scoped administration.
+- `GET /health` and `GET /v1/gateway/info` stay diagnostic-only; they report counts and feature flags but do not expose secrets, tokens, pair codes, or storage paths.
+
 ## Not Included Yet
 
-- Tenant and device management.
-- Connection revocation and access policy admin.
 - Multi-node shared state or session migration.
+- Full RBAC and policy-engine enforcement beyond the current admin token boundary.

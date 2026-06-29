@@ -376,6 +376,67 @@ describe("relay api", () => {
     expect(audit.body.events.some((event: any) => event.type === "session.created")).toBe(true)
   })
 
+  it("scopes enterprise admin data by tenant and allows target reassignment", async () => {
+    store.addOffer({
+      code: "123456",
+      secret: "secret",
+      targetId: "desktop-1",
+      tenantId: "tenant-a",
+      targetAgent: "mcode-desktop",
+      ttlSeconds: 300,
+    })
+    const pair = await request(app.server)
+      .post("/v1/pair")
+      .send({ code: "123456", secret: "secret" })
+
+    const tenantCreated = await request(app.server)
+      .post("/v1/admin/tenants")
+      .set("x-mcode-admin-token", "admin-secret")
+      .send({ tenantId: "tenant-b", tenantName: "Tenant B" })
+
+    const reassigned = await request(app.server)
+      .post("/v1/admin/devices/desktop-1/tenant")
+      .set("x-mcode-admin-token", "admin-secret")
+      .send({ tenantId: "tenant-b" })
+
+    const tenantADevices = await request(app.server)
+      .get("/v1/admin/devices")
+      .query({ tenantId: "tenant-a" })
+      .set("x-mcode-admin-token", "admin-secret")
+    const tenantBDevices = await request(app.server)
+      .get("/v1/admin/devices")
+      .query({ tenantId: "tenant-b" })
+      .set("x-mcode-admin-token", "admin-secret")
+    const tenants = await request(app.server)
+      .get("/v1/admin/tenants")
+      .set("x-mcode-admin-token", "admin-secret")
+
+    expect(pair.status).toBe(200)
+    expect(tenantCreated.status).toBe(200)
+    expect(reassigned.status).toBe(200)
+    expect(reassigned.body.target).toMatchObject({
+      targetId: "desktop-1",
+      tenantId: "tenant-b",
+    })
+    expect(tenantADevices.body.devices).toEqual([])
+    expect(tenantBDevices.body.devices).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          targetId: "desktop-1",
+          tenantId: "tenant-b",
+        }),
+      ])
+    )
+    expect(tenants.body.tenants).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ tenantId: "default" }),
+        expect.objectContaining({ tenantId: "tenant-a" }),
+        expect.objectContaining({ tenantId: "tenant-b", tenantName: "Tenant B" }),
+      ])
+    )
+    expect(store.listAuditEvents().some((event) => event.type === "target.tenant_changed")).toBe(true)
+  })
+
   it("revokes sessions through enterprise admin API", async () => {
     store.addOffer({
       code: "123456",

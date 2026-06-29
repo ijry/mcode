@@ -63,6 +63,7 @@ describe("gateway info", () => {
         productionReady: true,
       },
       stats: {
+        tenants: 1,
         targets: 0,
         sessions: 0,
         revokedSessions: 0,
@@ -97,6 +98,7 @@ describe("gateway info", () => {
         "tunnel.tcp",
         "desktop.upstream",
         "enterprise.devices",
+        "enterprise.tenants",
         "enterprise.sessionRevocation",
         "enterprise.audit",
         "enterprise.accessPolicy",
