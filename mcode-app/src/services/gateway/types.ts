@@ -10,6 +10,16 @@ export interface PairTargetMetadata {
   protocolVersion?: string
 }
 
+export type LocalServiceProtocol = "http" | "tcp"
+
+export interface LocalServiceMetadata {
+  name: string
+  host: "127.0.0.1"
+  port: number
+  protocol: LocalServiceProtocol
+  enabled: boolean
+}
+
 export interface RelaySessionInfo {
   accessToken: string
   refreshToken?: string
@@ -58,6 +68,7 @@ export interface CodegGateway {
   readonly mode: GatewayMode
   pair(params: PairParams): Promise<RelaySessionInfo | null>
   call<T>(command: string, payload?: Record<string, unknown>): Promise<T>
+  listTargetServices?(): Promise<LocalServiceMetadata[]>
   connectEvents(
     onEvent: (event: unknown) => void,
     options?: EventRecoveryOptions

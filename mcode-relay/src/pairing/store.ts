@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname } from "node:path"
 import { sha256Hex } from "../auth/tokens.js"
-import type { TargetAgent } from "../protocol/types.js"
+import type { LocalServiceMetadata, TargetAgent } from "../protocol/types.js"
 
 const DEFAULT_TARGET_AGENT: TargetAgent = "codeg"
 const DEFAULT_PROTOCOL_VERSION = "1"
@@ -18,6 +18,7 @@ export interface PairOfferRecord {
   targetAgent: TargetAgent
   capabilities: string[]
   protocolVersion: string
+  localServices: LocalServiceMetadata[]
   relayUrl: string | null
   expiresAt: number
   consumedAt: number | null
@@ -30,6 +31,7 @@ export interface TargetRecord {
   targetAgent: TargetAgent
   capabilities: string[]
   protocolVersion: string
+  localServices: LocalServiceMetadata[]
   relayUrl: string | null
   pairedAt: number
   lastSeenAt: number | null
@@ -140,6 +142,7 @@ export class PairingStore {
     targetAgent?: TargetAgent
     capabilities?: string[]
     protocolVersion?: string
+    localServices?: LocalServiceMetadata[]
     relayUrl?: string | null
     ttlSeconds: number
   }): PairOfferRecord {
@@ -153,6 +156,7 @@ export class PairingStore {
       targetAgent: input.targetAgent ?? DEFAULT_TARGET_AGENT,
       capabilities: normalizeCapabilities(input.capabilities),
       protocolVersion: normalizeProtocolVersion(input.protocolVersion),
+      localServices: normalizeLocalServices(input.localServices),
       relayUrl: input.relayUrl ?? null,
       expiresAt: now + input.ttlSeconds * 1000,
       consumedAt: null,
@@ -179,6 +183,7 @@ export class PairingStore {
     targetAgent?: TargetAgent
     capabilities?: string[]
     protocolVersion?: string
+    localServices?: LocalServiceMetadata[]
     relayUrl?: string | null
     preferredMode?: "relay" | "direct"
   }): TargetRecord {
@@ -190,6 +195,7 @@ export class PairingStore {
       targetAgent: input.targetAgent ?? existing?.targetAgent ?? DEFAULT_TARGET_AGENT,
       capabilities: normalizeCapabilities(input.capabilities ?? existing?.capabilities),
       protocolVersion: normalizeProtocolVersion(input.protocolVersion ?? existing?.protocolVersion),
+      localServices: normalizeLocalServices(input.localServices ?? existing?.localServices),
       relayUrl: input.relayUrl ?? existing?.relayUrl ?? null,
       pairedAt: existing?.pairedAt ?? Date.now(),
       lastSeenAt: existing?.lastSeenAt ?? null,
@@ -471,6 +477,29 @@ function normalizeCapabilities(input?: string[]): string[] {
   )
 }
 
+function normalizeLocalServices(input?: LocalServiceMetadata[]): LocalServiceMetadata[] {
+  if (!Array.isArray(input)) return []
+  const seenPorts = new Set<number>()
+  const services: LocalServiceMetadata[] = []
+  for (const item of input) {
+    if (!item || typeof item !== "object") continue
+    const name = normalizeOptionalString(item.name)
+    const host = normalizeOptionalString(item.host)
+    const port = Number(item.port)
+    if (!name || host !== "127.0.0.1") continue
+    if (!Number.isInteger(port) || port <= 0 || port > 65535 || seenPorts.has(port)) continue
+    seenPorts.add(port)
+    services.push({
+      name,
+      host: "127.0.0.1",
+      port,
+      protocol: item.protocol === "tcp" ? "tcp" : "http",
+      enabled: Boolean(item.enabled),
+    })
+  }
+  return services
+}
+
 function normalizeProtocolVersion(input?: string): string {
   return String(input || "").trim() || DEFAULT_PROTOCOL_VERSION
 }
@@ -508,6 +537,7 @@ function normalizeTargetRecord(input: Partial<TargetRecord>): TargetRecord | nul
         : DEFAULT_TARGET_AGENT,
     capabilities: normalizeCapabilities(input.capabilities),
     protocolVersion: normalizeProtocolVersion(input.protocolVersion),
+    localServices: normalizeLocalServices(input.localServices),
     relayUrl: normalizeOptionalString(input.relayUrl),
     pairedAt: normalizeNumber(input.pairedAt, Date.now()),
     lastSeenAt: input.lastSeenAt === null || input.lastSeenAt === undefined ? null : normalizeNumber(input.lastSeenAt, Date.now()),

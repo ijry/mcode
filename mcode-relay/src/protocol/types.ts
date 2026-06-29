@@ -7,6 +7,17 @@ export interface TargetMetadata {
   displayName: string | null
   capabilities: string[]
   protocolVersion: string
+  localServices: LocalServiceMetadata[]
+}
+
+export type LocalServiceProtocol = "http" | "tcp"
+
+export interface LocalServiceMetadata {
+  name: string
+  host: "127.0.0.1"
+  port: number
+  protocol: LocalServiceProtocol
+  enabled: boolean
 }
 
 export interface ClientIdentity {
@@ -25,6 +36,7 @@ export interface DesktopUpstreamHello {
   targetAgent?: TargetAgent
   capabilities?: string[]
   protocolVersion?: string
+  localServices?: LocalServiceMetadata[]
 }
 
 export interface RelayEventFrame {

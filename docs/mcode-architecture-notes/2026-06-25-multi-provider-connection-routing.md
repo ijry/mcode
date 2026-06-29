@@ -1559,3 +1559,38 @@ Compatibility and native replication:
 - Native admin clients should treat revocation as immediate and irreversible.
 - Native clients should not cache owner/admin/auditor authorization decisions;
   relay remains the policy enforcement point.
+
+## P35 Tunnel Service Discovery Behavior
+
+P35 returns the product direction to the remote-control client loop. It adds
+service discovery for MCode Desktop local services so the app can show and open
+desktop loopback services through the relay tunnel. It does not add app-side
+gateway administration UI; relay Web administration is reserved for P36.
+
+Implemented behavior:
+
+- Desktop upstream `desktop_hello` and `pair_offer` now include
+  `localServices`.
+- Local service metadata is additive and uses `name`, `host`, `port`,
+  `protocol = http|tcp`, and `enabled`.
+- Relay normalizes local services, accepts only `host = 127.0.0.1`, drops
+  invalid ports and duplicate ports, and stores safe service metadata on the
+  target record.
+- Pair and refresh target metadata include `localServices` when available.
+- `GET /v1/target-services` is authenticated with the normal paired session
+  access token and returns services for the current target only.
+- App `RelayGateway` exposes optional `listTargetServices()`.
+- App Desktop service discovery maps returned services into HTTP/TCP tunnel
+  entries using the existing tunnel URL builder.
+- App target page shows discovered MCode Desktop local services. HTTP services
+  can be opened through relay tunnel URLs; TCP services are shown as discovered
+  but remain informational in P35.
+
+Compatibility and native replication:
+
+- Older Desktop clients that do not send `localServices` produce an empty
+  service list.
+- Older app clients can continue using known tunnel URLs manually.
+- Native clients must build service access URLs from relay base URL, target id,
+  and service port. They must never try to connect directly to `127.0.0.1`
+  values from Desktop metadata.

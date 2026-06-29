@@ -2,6 +2,7 @@ import type {
   CodegGateway,
   EventChannelConnection,
   EventRecoveryOptions,
+  LocalServiceMetadata,
   PairTargetMetadata,
   RelaySessionInfo,
 } from "./types"
@@ -133,6 +134,20 @@ export class RelayGateway implements CodegGateway {
     } catch (error) {
       throw new Error(`${command}: ${toErrorMessage(error)}`)
     }
+  }
+
+  async listTargetServices(): Promise<LocalServiceMetadata[]> {
+    const res = await uni.request({
+      url: `${this.relayUrl.replace(/\/$/, "")}/v1/target-services`,
+      method: "GET",
+      header: getHeaders(this.session),
+    })
+    const statusCode = Number((res as any).statusCode || 0)
+    if (statusCode >= 400) {
+      throw new Error(`target-services: ${toResponseErrorMessage(res.data, statusCode)}`)
+    }
+    const raw = res.data as { services?: unknown }
+    return normalizeLocalServices(raw.services)
   }
 
   async connectEvents(
@@ -348,4 +363,28 @@ export class RelayGateway implements CodegGateway {
       refreshToken: this.session.refreshToken,
     }
   }
+}
+
+function normalizeLocalServices(input: unknown): LocalServiceMetadata[] {
+  if (!Array.isArray(input)) return []
+  const services: LocalServiceMetadata[] = []
+  const seenPorts = new Set<number>()
+  for (const item of input) {
+    if (!item || typeof item !== "object") continue
+    const raw = item as Record<string, unknown>
+    const name = String(raw.name || "").trim()
+    const host = String(raw.host || "").trim()
+    const port = Number(raw.port)
+    if (!name || host !== "127.0.0.1") continue
+    if (!Number.isInteger(port) || port <= 0 || port > 65535 || seenPorts.has(port)) continue
+    seenPorts.add(port)
+    services.push({
+      name,
+      host: "127.0.0.1",
+      port,
+      protocol: raw.protocol === "tcp" ? "tcp" : "http",
+      enabled: Boolean(raw.enabled),
+    })
+  }
+  return services
 }

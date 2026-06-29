@@ -33,6 +33,7 @@ import {
 } from "./admin/credentials.js"
 import type {
   ClientIdentity,
+  LocalServiceMetadata,
   TargetAgent,
   TargetMetadata,
   TunnelHttpResponse,
@@ -239,6 +240,30 @@ function normalizeProtocolVersion(value: unknown): string | undefined {
   return protocolVersion || undefined
 }
 
+function normalizeLocalServices(value: unknown): LocalServiceMetadata[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const services: LocalServiceMetadata[] = []
+  const seenPorts = new Set<number>()
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue
+    const raw = item as Record<string, unknown>
+    const name = String(raw.name || "").trim()
+    const host = String(raw.host || "").trim()
+    const port = Number(raw.port)
+    if (!name || host !== "127.0.0.1") continue
+    if (!Number.isInteger(port) || port <= 0 || port > 65535 || seenPorts.has(port)) continue
+    seenPorts.add(port)
+    services.push({
+      name,
+      host: "127.0.0.1",
+      port,
+      protocol: raw.protocol === "tcp" ? "tcp" : "http",
+      enabled: Boolean(raw.enabled),
+    })
+  }
+  return services
+}
+
 function pickDisplayName(message: Record<string, unknown>, fallback?: string | null): string | null {
   const displayName = String(message.displayName || message.targetName || fallback || "").trim()
   return displayName || null
@@ -252,6 +277,7 @@ function toTargetMetadata(target: TargetRecord): TargetMetadata {
     displayName: target.targetName,
     capabilities: target.capabilities,
     protocolVersion: target.protocolVersion,
+    localServices: target.localServices,
   }
 }
 
@@ -702,6 +728,7 @@ export async function buildRelayApp(overrides: Partial<RelayAppContext> = {}): P
       targetAgent: offer.targetAgent,
       capabilities: offer.capabilities,
       protocolVersion: offer.protocolVersion,
+      localServices: offer.localServices,
       relayUrl: offer.relayUrl,
       preferredMode: mode,
     })
@@ -815,6 +842,20 @@ export async function buildRelayApp(overrides: Partial<RelayAppContext> = {}): P
     return reply.send({
       currentTargetId: auth.claims.targetId,
       targets,
+    })
+  })
+
+  app.get("/v1/target-services", async (req, reply) => {
+    let auth: Awaited<ReturnType<typeof authenticateSession>>
+    try {
+      auth = await authenticateSession(req, context)
+    } catch (error) {
+      return reply.code(401).send({ error: error instanceof Error ? error.message : "Unauthorized" })
+    }
+    return reply.send({
+      targetId: auth.target.targetId,
+      targetAgent: auth.target.targetAgent,
+      services: auth.target.localServices,
     })
   })
 
@@ -1015,6 +1056,7 @@ export async function buildRelayApp(overrides: Partial<RelayAppContext> = {}): P
           targetAgent: normalizeTargetAgent(message.targetAgent, "mcode-desktop"),
           capabilities: normalizeCapabilities(message.capabilities),
           protocolVersion: normalizeProtocolVersion(message.protocolVersion),
+          localServices: normalizeLocalServices(message.localServices),
           relayUrl: typeof message.relayUrl === "string" ? message.relayUrl : null,
           preferredMode: "relay",
         })
@@ -1046,6 +1088,7 @@ export async function buildRelayApp(overrides: Partial<RelayAppContext> = {}): P
           targetAgent: normalizeTargetAgent(message.targetAgent, "mcode-desktop"),
           capabilities: normalizeCapabilities(message.capabilities),
           protocolVersion: normalizeProtocolVersion(message.protocolVersion),
+          localServices: normalizeLocalServices(message.localServices),
           relayUrl: typeof message.relayUrl === "string" ? message.relayUrl : null,
           ttlSeconds: context.config.PAIRING_CODE_TTL_SECONDS,
         })

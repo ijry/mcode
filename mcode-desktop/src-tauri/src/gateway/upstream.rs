@@ -19,7 +19,10 @@ use crate::recovery::QueuedOutboundEvent;
 use crate::runtime::{
     dispatch_desktop_proxy_with_event_sink_arc, refresh_cli_status_into_state, CliEventSink,
 };
-use crate::tunnel::{open_tcp_stream, serve_tunnel_request, TunnelHttpRequest, TunnelHttpResponse};
+use crate::tunnel::{
+    open_tcp_stream, serve_tunnel_request, LocalServiceConfig, TunnelHttpRequest,
+    TunnelHttpResponse,
+};
 
 type OutboundTx = mpsc::UnboundedSender<Message>;
 
@@ -38,6 +41,8 @@ pub struct DesktopUpstreamHello {
     pub protocol_version: String,
     #[serde(rename = "relayUrl", skip_serializing_if = "Option::is_none")]
     pub relay_url: Option<String>,
+    #[serde(rename = "localServices", default)]
+    pub local_services: Vec<LocalServiceConfig>,
 }
 
 impl DesktopUpstreamHello {
@@ -45,6 +50,7 @@ impl DesktopUpstreamHello {
         target_id: impl Into<String>,
         display_name: impl Into<String>,
         capabilities: Vec<String>,
+        local_services: Vec<LocalServiceConfig>,
     ) -> Self {
         Self {
             frame_type: "desktop_hello".to_string(),
@@ -54,6 +60,7 @@ impl DesktopUpstreamHello {
             capabilities,
             protocol_version: "1".to_string(),
             relay_url: None,
+            local_services,
         }
     }
 
@@ -63,7 +70,12 @@ impl DesktopUpstreamHello {
             .read()
             .map(|value| value.clone())
             .unwrap_or_default();
-        Self::new(target_id, display_name, capabilities)
+        let local_services = state
+            .local_services
+            .read()
+            .map(|value| value.clone())
+            .unwrap_or_default();
+        Self::new(target_id, display_name, capabilities, local_services)
     }
 }
 
@@ -148,6 +160,7 @@ pub fn build_pair_offer_frame(
     display_name: &str,
     offer: &PairOffer,
     capabilities: Vec<String>,
+    local_services: Vec<LocalServiceConfig>,
 ) -> serde_json::Value {
     json!({
         "type": "pair_offer",
@@ -156,6 +169,7 @@ pub fn build_pair_offer_frame(
         "displayName": display_name,
         "targetAgent": "mcode-desktop",
         "capabilities": capabilities,
+        "localServices": local_services,
         "protocolVersion": "1",
         "code": offer.code,
         "secret": offer.secret,
@@ -371,7 +385,13 @@ pub async fn connect_upstream(state: Arc<AppState>) -> Result<()> {
 
     let pair_offer = state.pair_offer.read().ok().and_then(|value| value.clone());
     if let Some(offer) = pair_offer {
-        let frame = build_pair_offer_frame(&target_id, &display_name, &offer, capabilities);
+        let local_services = state
+            .local_services
+            .read()
+            .map(|value| value.clone())
+            .unwrap_or_default();
+        let frame =
+            build_pair_offer_frame(&target_id, &display_name, &offer, capabilities, local_services);
         send_outbound_json(&outbound_tx, frame)?;
     }
 

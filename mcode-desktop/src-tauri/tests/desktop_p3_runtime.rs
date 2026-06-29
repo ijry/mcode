@@ -93,12 +93,16 @@ fn p3_builds_pair_offer_frame_for_relay_registration() {
             qr_payload: "{}".to_string(),
         },
         vec!["desktop.tunnel.available".to_string()],
+        vec![default_code_service()],
     );
 
     assert_eq!(frame["type"], "pair_offer");
     assert_eq!(frame["targetAgent"], "mcode-desktop");
     assert_eq!(frame["targetName"], "Workstation");
     assert_eq!(frame["capabilities"][0], "desktop.tunnel.available");
+    assert_eq!(frame["localServices"][0]["name"], "Code");
+    assert_eq!(frame["localServices"][0]["host"], "127.0.0.1");
+    assert_eq!(frame["localServices"][0]["port"], 1080);
 }
 
 #[tokio::test]
@@ -143,6 +147,9 @@ async fn p3_connects_to_gateway_and_sends_registration_frames() {
     assert!(frames
         .iter()
         .any(|frame| frame.contains("\"type\":\"desktop_hello\"")));
+    assert!(frames
+        .iter()
+        .any(|frame| frame.contains("\"localServices\"")));
     assert!(frames
         .iter()
         .any(|frame| frame.contains("\"type\":\"pair_offer\"")));

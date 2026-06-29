@@ -1,4 +1,5 @@
 use mcode_desktop_lib::gateway::upstream::DesktopUpstreamHello;
+use mcode_desktop_lib::tunnel::default_code_service;
 
 #[test]
 fn builds_desktop_upstream_hello_with_target_metadata() {
@@ -6,6 +7,7 @@ fn builds_desktop_upstream_hello_with_target_metadata() {
         "desktop-1",
         "Work Mac Mini",
         vec!["desktop.runtime.codex-cli".to_string()],
+        vec![default_code_service()],
     );
 
     assert_eq!(hello.target_id, "desktop-1");
@@ -15,4 +17,5 @@ fn builds_desktop_upstream_hello_with_target_metadata() {
     let value = serde_json::to_value(&hello).expect("serialize hello");
     assert_eq!(value["targetAgent"], "mcode-desktop");
     assert_eq!(value["protocolVersion"], "1");
+    assert_eq!(value["localServices"][0]["name"], "Code");
 }
