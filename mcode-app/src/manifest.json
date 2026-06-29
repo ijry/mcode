@@ -2,8 +2,8 @@
     "name" : "mcode-app",
     "appid" : "__UNI__A105FB7",
     "description" : "MCode mobile client",
-    "versionName" : "0.1.0",
-    "versionCode" : "1",
+    "versionName" : "0.2.0",
+    "versionCode" : "2",
     "vueVersion" : "3",
     "app-plus" : {
         "usingComponents" : true,
