@@ -99,7 +99,7 @@ export interface DesktopHealthSnapshot {
 }
 
 export const OFFICIAL_GATEWAY_BASE_URL = normalizeGatewayBaseUrl(
-  import.meta.env.VITE_MCODE_OFFICIAL_GATEWAY_BASE_URL || "http://127.0.0.1:8787"
+  import.meta.env.VITE_MCODE_OFFICIAL_GATEWAY_BASE_URL || "https://mcode-relay.lingyun.net"
 )
 
 export function normalizeGatewayBaseUrl(value: string): string {

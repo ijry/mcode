@@ -424,7 +424,7 @@ declare const plus: any
 
 const DEPLOYMENT_GUIDE_URL = "https://pan.quark.cn/s/0008015b1d33"
 const OFFICIAL_GATEWAY_BASE_URL = normalizeBaseUrl(
-  String(import.meta.env.VITE_MCODE_OFFICIAL_GATEWAY_BASE_URL || "")
+  String(import.meta.env.VITE_MCODE_OFFICIAL_GATEWAY_BASE_URL || "https://mcode-relay.lingyun.net")
 )
 const targetAgentOptions = [
   { label: "Codeg", value: "codeg" as ConnectionTargetAgent },

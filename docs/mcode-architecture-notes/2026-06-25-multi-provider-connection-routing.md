@@ -116,7 +116,7 @@ desktop 运行方式：
   `gatewaySession` 时，不能被 relay metadata 静默改写到另一个 `targetAgent`。
 - web/uni-app driver registry 现按 `codeg/gateway`、`opencode/gateway`、`mcode-desktop/gateway`
   分别选择 driver id，避免把 OpenCode 网关连接落到 Codeg 兼容 driver 标签。
-- `MCode 官方网关` 不展示域名输入框，构建时从 `VITE_MCODE_OFFICIAL_GATEWAY_BASE_URL` 读取默认网关地址；如果未配置，保存时提示“官方网关地址未配置”。选择 `自定义` 时必须填写 `gatewayBaseUrl`。
+- `MCode 官方网关` 不展示域名输入框，构建时优先从 `VITE_MCODE_OFFICIAL_GATEWAY_BASE_URL` 读取默认网关地址；未配置时默认使用 `https://mcode-relay.lingyun.net`。选择 `自定义` 时必须填写 `gatewayBaseUrl`。
 
 ## Compatibility
 
