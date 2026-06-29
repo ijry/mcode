@@ -21,6 +21,7 @@ function config(overrides: Partial<RelayConfig> = {}): RelayConfig {
     AUDIT_POLICY: "external",
     ACCESS_POLICY: "allow-all",
     ADMIN_TOKEN: "admin-secret",
+    ADMIN_TOKEN_ROLES: "",
     PAIRING_STORE_PATH: "",
     REPLAY_STORE_PATH: "",
     ALLOW_DEV_SECRETS: false,
@@ -108,6 +109,10 @@ describe("gateway info", () => {
         logPolicy: "metadata-only",
         auditPolicy: "external",
         accessPolicy: "allow-all",
+        policyMode: "token-role",
+        policyWarnings: [
+          "ADMIN_TOKEN_ROLES is not configured; bootstrap token acts as owner",
+        ],
         storage: {
           pairingStore: "memory",
           replayStore: "memory",
@@ -115,6 +120,7 @@ describe("gateway info", () => {
       },
     })
     expect(JSON.stringify(res.body)).not.toContain("test-secret")
+    expect(JSON.stringify(res.body)).not.toContain("admin-secret")
   })
 
   it("reports production warnings for default development secrets", async () => {

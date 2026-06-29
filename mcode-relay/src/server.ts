@@ -16,6 +16,13 @@ import { buildGatewayHealth, buildGatewayInfo } from "./gateway/info.js"
 import { JsonFileReplayStoreStorage, ReplayStore } from "./protocol/replayStore.js"
 import { RelayHub, RelayRequestError } from "./tunnel/hub.js"
 import { normalizeTunnelPath } from "./tunnel/httpProxy.js"
+import {
+  authorizeAdminRoute,
+  resolveAdminPrincipal,
+  resolveAdminScope,
+  type AdminAction,
+  type AdminPrincipal,
+} from "./admin/policy.js"
 import type {
   ClientIdentity,
   TargetAgent,
@@ -124,15 +131,31 @@ function getAdminToken(req: FastifyRequest): string | null {
   return getBearerToken(req)
 }
 
-function authenticateAdmin(req: FastifyRequest, config: RelayConfig): boolean {
-  const expected = config.ADMIN_TOKEN.trim()
-  if (!expected) return false
-  return getAdminToken(req) === expected
-}
-
 function adminActor(req: FastifyRequest): string {
   const actor = req.headers["x-mcode-admin-actor"]
   return typeof actor === "string" && actor.trim() ? actor.trim() : "admin"
+}
+
+function requireAdmin(
+  req: FastifyRequest,
+  reply: FastifyReply,
+  context: RelayAppContext,
+  action: AdminAction,
+  tenantId?: string | null
+): AdminPrincipal | null {
+  const principal = resolveAdminPrincipal(req, context.config)
+  if (!principal) {
+    reply.code(401).send({ error: "admin token required" })
+    return null
+  }
+
+  const decision = authorizeAdminRoute(principal, action, tenantId)
+  if (!decision.allowed) {
+    reply.code(403).send({ error: "forbidden", reason: decision.reason })
+    return null
+  }
+
+  return principal
 }
 
 function normalizeLimit(req: FastifyRequest): number {
@@ -327,10 +350,10 @@ export async function buildRelayApp(context = createRelayContext()): Promise<Fas
   app.get("/v1/gateway/info", async () => buildGatewayInfo(context))
 
   app.get("/v1/admin/devices", async (req, reply) => {
-    if (!authenticateAdmin(req, context.config)) {
-      return reply.code(401).send({ error: "admin token required" })
-    }
-    const tenantId = getAdminTenantId(req)
+    const requestedTenantId = getAdminTenantId(req)
+    const principal = requireAdmin(req, reply, context, "device.read", requestedTenantId)
+    if (!principal) return
+    const tenantId = resolveAdminScope(principal, requestedTenantId)
     return reply.send({
       devices: context.store.listTargets(tenantId ?? undefined).map((target) => ({
         ...toTargetResponse(target, context),
@@ -342,43 +365,46 @@ export async function buildRelayApp(context = createRelayContext()): Promise<Fas
   })
 
   app.get("/v1/admin/sessions", async (req, reply) => {
-    if (!authenticateAdmin(req, context.config)) {
-      return reply.code(401).send({ error: "admin token required" })
-    }
-    const tenantId = getAdminTenantId(req)
+    const requestedTenantId = getAdminTenantId(req)
+    const principal = requireAdmin(req, reply, context, "session.read", requestedTenantId)
+    if (!principal) return
+    const tenantId = resolveAdminScope(principal, requestedTenantId)
     return reply.send({
       sessions: context.store.listSessions(tenantId ?? undefined),
     })
   })
 
   app.get("/v1/admin/audit-events", async (req, reply) => {
-    if (!authenticateAdmin(req, context.config)) {
-      return reply.code(401).send({ error: "admin token required" })
-    }
-    const tenantId = getAdminTenantId(req)
+    const requestedTenantId = getAdminTenantId(req)
+    const principal = requireAdmin(req, reply, context, "audit.read", requestedTenantId)
+    if (!principal) return
+    const tenantId = resolveAdminScope(principal, requestedTenantId)
     return reply.send({
       events: context.store.listAuditEvents(normalizeLimit(req), tenantId ?? undefined),
     })
   })
 
   app.get("/v1/admin/tenants", async (req, reply) => {
-    if (!authenticateAdmin(req, context.config)) {
-      return reply.code(401).send({ error: "admin token required" })
-    }
+    const requestedTenantId = getAdminTenantId(req)
+    const principal = requireAdmin(req, reply, context, "tenant.read", requestedTenantId)
+    if (!principal) return
+    const tenantId = resolveAdminScope(principal, requestedTenantId)
+    const tenants = tenantId
+      ? context.store.listTenants().filter((tenant) => tenant.tenantId === tenantId)
+      : context.store.listTenants()
     return reply.send({
-      tenants: buildTenantAdminList(context.store.listTenants(), context),
+      tenants: buildTenantAdminList(tenants, context),
     })
   })
 
   app.post("/v1/admin/tenants", async (req, reply) => {
-    if (!authenticateAdmin(req, context.config)) {
-      return reply.code(401).send({ error: "admin token required" })
-    }
     const body = req.body as { tenantId?: string; tenantName?: string | null }
     const tenantId = normalizeAdminTenantId(body?.tenantId)
     if (!tenantId) {
       return reply.code(400).send({ error: "tenantId is required" })
     }
+    const principal = requireAdmin(req, reply, context, "tenant.write", tenantId)
+    if (!principal) return
     const tenant = context.store.upsertTenant({
       tenantId,
       tenantName: normalizeAdminText(body?.tenantName),
@@ -393,12 +419,12 @@ export async function buildRelayApp(context = createRelayContext()): Promise<Fas
   })
 
   app.post("/v1/admin/devices/:targetId/revoke", async (req, reply) => {
-    if (!authenticateAdmin(req, context.config)) {
-      return reply.code(401).send({ error: "admin token required" })
-    }
     const params = req.params as { targetId: string }
     const body = req.body as { reason?: string }
     const targetId = String(params.targetId || "").trim()
+    const target = context.store.getTarget(targetId)
+    const principal = requireAdmin(req, reply, context, "device.write", target?.tenantId ?? null)
+    if (!principal) return
     if (!context.store.revokeTarget(targetId, body?.reason)) {
       return reply.code(404).send({ error: "target not found" })
     }
@@ -412,9 +438,6 @@ export async function buildRelayApp(context = createRelayContext()): Promise<Fas
   })
 
   app.post("/v1/admin/devices/:targetId/tenant", async (req, reply) => {
-    if (!authenticateAdmin(req, context.config)) {
-      return reply.code(401).send({ error: "admin token required" })
-    }
     const params = req.params as { targetId: string }
     const body = req.body as { tenantId?: string; tenantName?: string | null }
     const targetId = String(params.targetId || "").trim()
@@ -422,6 +445,8 @@ export async function buildRelayApp(context = createRelayContext()): Promise<Fas
     if (!targetId || !tenantId) {
       return reply.code(400).send({ error: "targetId and tenantId are required" })
     }
+    const principal = requireAdmin(req, reply, context, "device.write", tenantId)
+    if (!principal) return
     const tenant = context.store.upsertTenant({
       tenantId,
       tenantName: normalizeAdminText(body?.tenantName),
@@ -448,11 +473,11 @@ export async function buildRelayApp(context = createRelayContext()): Promise<Fas
   })
 
   app.post("/v1/admin/devices/:targetId/restore", async (req, reply) => {
-    if (!authenticateAdmin(req, context.config)) {
-      return reply.code(401).send({ error: "admin token required" })
-    }
     const params = req.params as { targetId: string }
     const targetId = String(params.targetId || "").trim()
+    const target = context.store.getTarget(targetId)
+    const principal = requireAdmin(req, reply, context, "device.write", target?.tenantId ?? null)
+    if (!principal) return
     if (!context.store.restoreTarget(targetId)) {
       return reply.code(404).send({ error: "target not found" })
     }
@@ -465,13 +490,12 @@ export async function buildRelayApp(context = createRelayContext()): Promise<Fas
   })
 
   app.post("/v1/admin/sessions/:sessionId/revoke", async (req, reply) => {
-    if (!authenticateAdmin(req, context.config)) {
-      return reply.code(401).send({ error: "admin token required" })
-    }
     const params = req.params as { sessionId: string }
     const body = req.body as { reason?: string }
     const sessionId = String(params.sessionId || "").trim()
     const session = context.store.listSessions().find((item) => item.sessionId === sessionId)
+    const principal = requireAdmin(req, reply, context, "session.write", session?.tenantId ?? null)
+    if (!principal) return
     if (!context.store.revokeSession(sessionId, body?.reason)) {
       return reply.code(404).send({ error: "session not found" })
     }

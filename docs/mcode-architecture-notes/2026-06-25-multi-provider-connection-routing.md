@@ -1419,3 +1419,38 @@ Compatibility and native replication:
 - Native admin tooling should keep the same default-tenant fallback and use the
   same filtering conventions when presenting tenant-scoped devices or audit
   history.
+
+## P31 Admin RBAC Policy Behavior
+
+P31 adds a relay-side RBAC layer for `/v1/admin/*` while keeping pairing,
+proxy, event, tunnel, and desktop upstream protocols unchanged.
+
+Implemented relay behavior:
+
+- `ADMIN_TOKEN` remains the bootstrap owner credential for existing
+  deployments.
+- `ADMIN_TOKEN_ROLES` accepts a JSON object mapping admin tokens to
+  `{ role, tenantId }` entries.
+- Supported roles are `owner`, `admin`, and `auditor`.
+- `owner` can read and mutate all admin resources.
+- `admin` can read and mutate resources only inside its assigned tenant.
+- `auditor` can read resources only inside its assigned tenant and cannot
+  mutate state.
+- Missing or invalid admin credentials return `401`.
+- Valid admin credentials without permission return `403` with
+  `{ error: "forbidden", reason }`.
+- `/v1/gateway/info` reports `deployment.policyMode = "token-role"` and
+  `deployment.policyWarnings`, but never exposes admin token values or role
+  mappings.
+
+Compatibility and native replication:
+
+- Existing self-hosted relay deployments continue to work with only
+  `ADMIN_TOKEN`; when `ADMIN_TOKEN_ROLES` is empty, the bootstrap token acts as
+  `owner`.
+- Native admin clients should treat `401` as authentication failure and `403`
+  as an authorization failure.
+- Native admin clients should not duplicate RBAC decisions locally; relay is
+  the policy enforcement point.
+- Mobile app and Desktop runtime clients do not need changes because non-admin
+  relay protocols are untouched.

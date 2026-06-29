@@ -31,6 +31,7 @@ function config(overrides: Partial<RelayConfig> = {}): RelayConfig {
     AUDIT_POLICY: "disabled",
     ACCESS_POLICY: "allow-all",
     ADMIN_TOKEN: "admin-secret",
+    ADMIN_TOKEN_ROLES: "",
     PAIRING_STORE_PATH: "",
     REPLAY_STORE_PATH: "",
     ALLOW_DEV_SECRETS: true,

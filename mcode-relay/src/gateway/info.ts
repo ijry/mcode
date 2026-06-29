@@ -1,5 +1,6 @@
 import type { RelayConfig } from "../config.js"
 import type { RelayAppContext } from "../server.js"
+import { buildAdminPolicySnapshot } from "../admin/policy.js"
 
 export const PROTOCOL_VERSION = "1"
 
@@ -65,6 +66,8 @@ export interface GatewayInfoResponse {
     logPolicy: string
     auditPolicy: string
     accessPolicy: string
+    policyMode: "token-role"
+    policyWarnings: string[]
     storage: GatewayStorageStatus
   }
   security: GatewaySecurityStatus
@@ -93,6 +96,7 @@ export function buildGatewayHealth(context: RelayAppContext): GatewayHealthRespo
 
 export function buildGatewayInfo(context: RelayAppContext): GatewayInfoResponse {
   const config = context.config
+  const adminPolicy = buildAdminPolicySnapshot(config)
   return {
     name: config.GATEWAY_NAME,
     provider: config.GATEWAY_PROVIDER,
@@ -105,6 +109,8 @@ export function buildGatewayInfo(context: RelayAppContext): GatewayInfoResponse 
       logPolicy: config.LOG_POLICY,
       auditPolicy: config.AUDIT_POLICY,
       accessPolicy: config.ACCESS_POLICY,
+      policyMode: adminPolicy.mode,
+      policyWarnings: adminPolicy.warnings,
       storage: buildGatewayStorage(config),
     },
     security: buildGatewaySecurity(config),

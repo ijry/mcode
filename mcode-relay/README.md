@@ -23,6 +23,9 @@ Standalone relay service for MCode remote control.
 - `DEPLOYMENT_ENV` default `development`
 - `LOG_POLICY` default `standard`
 - `AUDIT_POLICY` default `disabled`
+- `ACCESS_POLICY` default `allow-all`
+- `ADMIN_TOKEN` default empty
+- `ADMIN_TOKEN_ROLES` default empty JSON policy
 - `ALLOW_DEV_SECRETS` default `true`
 
 ## Pair Response Contract
@@ -69,7 +72,26 @@ that do not implement tenant administration can ignore it.
 - `GET /v1/admin/devices`, `GET /v1/admin/sessions`, and `GET /v1/admin/audit-events` accept `tenantId` or `x-mcode-tenant-id` for tenant-scoped administration.
 - `GET /health` and `GET /v1/gateway/info` stay diagnostic-only; they report counts and feature flags but do not expose secrets, tokens, pair codes, or storage paths.
 
+## Admin RBAC
+
+`ADMIN_TOKEN` remains the bootstrap owner token. For role-scoped administration,
+set `ADMIN_TOKEN_ROLES` to a JSON object mapping token values to role entries:
+
+```json
+{
+  "owner-secret": { "role": "owner" },
+  "audit-secret": { "role": "auditor", "tenantId": "tenant-a" },
+  "ops-secret": { "role": "admin", "tenantId": "tenant-b" }
+}
+```
+
+- `owner` can read and mutate all admin resources.
+- `admin` can read and mutate resources within its assigned tenant.
+- `auditor` can read resources within its assigned tenant and receives `403` on mutations.
+- Missing or invalid admin credentials return `401`; valid credentials without permission return `403`.
+- `/v1/gateway/info` exposes `deployment.policyMode` and `deployment.policyWarnings`, but never exposes token values or the role mapping.
+
 ## Not Included Yet
 
 - Multi-node shared state or session migration.
-- Full RBAC and policy-engine enforcement beyond the current admin token boundary.
+- SSO/OIDC integration and external policy engines.
