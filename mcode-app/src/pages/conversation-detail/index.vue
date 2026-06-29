@@ -1790,8 +1790,12 @@ watch(
 
 watch(
   () => detailConnectionKey.value,
-  () => {
-    syncDetailBridgeHealth()
+  (_, prev) => {
+    if (prev !== undefined) {
+      syncDetailBridgeHealth()
+    } else {
+      nextTick(() => syncDetailBridgeHealth())
+    }
   },
   { immediate: true }
 )
@@ -1807,8 +1811,12 @@ watch(
 
 watch(
   () => [runtimeStatus.value, conversationActivitySignature.value, session.value?.connectionId || ""] as const,
-  ([status, signature]) => {
-    handleLiveActivityChange(status, signature)
+  ([status, signature], prev) => {
+    if (prev) {
+      handleLiveActivityChange(status, signature)
+    } else {
+      nextTick(() => handleLiveActivityChange(status, signature))
+    }
   },
   { immediate: true }
 )
