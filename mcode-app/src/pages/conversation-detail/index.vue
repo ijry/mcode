@@ -3745,7 +3745,7 @@ function findStoredConnectionById(connectionId: string) {
 function resolveDetailStoredConnection(): StoredConnectionItem | null {
   return routeConnectionContext.value ||
     findStoredConnectionById(routeConnectionId.value) ||
-    findStoredConnectionByKey(routeConnectionKey.value || detailConnectionKey.value)
+    findStoredConnectionByKey(routeConnectionKey.value)
 }
 
 function resolveDetailTargetAgent() {
