@@ -65,6 +65,7 @@ export interface GatewayInfoResponse {
     environment: RelayConfig["DEPLOYMENT_ENV"]
     logPolicy: string
     auditPolicy: string
+    auditRetentionLimit: number
     accessPolicy: string
     policyMode: "token-role"
     policyWarnings: string[]
@@ -108,6 +109,7 @@ export function buildGatewayInfo(context: RelayAppContext): GatewayInfoResponse 
       environment: config.DEPLOYMENT_ENV,
       logPolicy: config.LOG_POLICY,
       auditPolicy: config.AUDIT_POLICY,
+      auditRetentionLimit: context.store.getAuditEventLimit(),
       accessPolicy: config.ACCESS_POLICY,
       policyMode: adminPolicy.mode,
       policyWarnings: adminPolicy.warnings,

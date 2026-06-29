@@ -47,7 +47,9 @@ export function createRelayContext(overrides: Partial<RelayAppContext> = {}): Re
 
 function createDefaultPairingStore(config: RelayConfig): PairingStore {
   const storePath = config.PAIRING_STORE_PATH.trim()
-  return new PairingStore(storePath ? new JsonFilePairingStoreStorage(storePath) : null)
+  return new PairingStore(storePath ? new JsonFilePairingStoreStorage(storePath) : null, {
+    auditEventLimit: config.AUDIT_EVENT_LIMIT,
+  })
 }
 
 function createDefaultRelayHub(config: RelayConfig): RelayHub {
@@ -161,7 +163,7 @@ function requireAdmin(
 function normalizeLimit(req: FastifyRequest): number {
   const query = req.query && typeof req.query === "object" ? (req.query as Record<string, unknown>) : {}
   const limit = Number(query.limit ?? 100)
-  return Number.isFinite(limit) ? Math.max(1, Math.min(Math.trunc(limit), 500)) : 100
+  return Number.isFinite(limit) ? Math.max(1, Math.trunc(limit)) : 100
 }
 
 function normalizeAdminTenantId(value: unknown): string | null {
@@ -295,6 +297,46 @@ function buildTenantAdminRecord(tenant: TenantRecord, context: RelayAppContext) 
   }
 }
 
+function getAuditExportOptions(req: FastifyRequest): {
+  format: "json" | "jsonl"
+  since?: number
+  until?: number
+} {
+  const query = req.query && typeof req.query === "object" ? (req.query as Record<string, unknown>) : {}
+  const format = query.format === "jsonl" ? "jsonl" : "json"
+  return {
+    format,
+    since: normalizeOptionalTimestamp(query.since),
+    until: normalizeOptionalTimestamp(query.until),
+  }
+}
+
+function normalizeOptionalTimestamp(value: unknown): number | undefined {
+  const timestamp = Number(value)
+  return Number.isFinite(timestamp) && timestamp >= 0 ? Math.trunc(timestamp) : undefined
+}
+
+function sanitizeAuditEvent(event: ReturnType<PairingStore["listAuditEvents"]>[number]) {
+  return {
+    ...event,
+    metadata: sanitizeAuditMetadata(event.metadata),
+  }
+}
+
+function sanitizeAuditMetadata(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map((item) => sanitizeAuditMetadata(item))
+  if (!value || typeof value !== "object") return value
+  const result: Record<string, unknown> = {}
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    result[key] = isSensitiveAuditKey(key) ? "[redacted]" : sanitizeAuditMetadata(item)
+  }
+  return result
+}
+
+function isSensitiveAuditKey(key: string): boolean {
+  return /token|secret|authorization|password/i.test(key)
+}
+
 function normalizeTunnelHeaders(headers: FastifyRequest["headers"]) {
   const result: Record<string, string | string[] | undefined> = {}
   for (const [key, value] of Object.entries(headers)) {
@@ -381,6 +423,32 @@ export async function buildRelayApp(context = createRelayContext()): Promise<Fas
     const tenantId = resolveAdminScope(principal, requestedTenantId)
     return reply.send({
       events: context.store.listAuditEvents(normalizeLimit(req), tenantId ?? undefined),
+    })
+  })
+
+  app.get("/v1/admin/audit-events/export", async (req, reply) => {
+    const requestedTenantId = getAdminTenantId(req)
+    const principal = requireAdmin(req, reply, context, "audit.read", requestedTenantId)
+    if (!principal) return
+    const tenantId = resolveAdminScope(principal, requestedTenantId)
+    const options = getAuditExportOptions(req)
+    const events = context.store
+      .listAuditEvents(normalizeLimit(req), tenantId ?? undefined, {
+        since: options.since,
+        until: options.until,
+      })
+      .map((event) => sanitizeAuditEvent(event))
+
+    if (options.format === "jsonl") {
+      reply.header("content-type", "application/x-ndjson; charset=utf-8")
+      return reply.send(events.map((event) => JSON.stringify(event)).join("\n"))
+    }
+
+    return reply.send({
+      format: "json",
+      tenantId,
+      count: events.length,
+      events,
     })
   })
 

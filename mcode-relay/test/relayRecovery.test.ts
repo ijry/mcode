@@ -21,6 +21,7 @@ function config(overrides: Partial<RelayConfig> = {}): RelayConfig {
     DEPLOYMENT_ENV: "development",
     LOG_POLICY: "standard",
     AUDIT_POLICY: "disabled",
+    AUDIT_EVENT_LIMIT: 1000,
     ACCESS_POLICY: "allow-all",
     ADMIN_TOKEN: "admin-secret",
     ADMIN_TOKEN_ROLES: "",

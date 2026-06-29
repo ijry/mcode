@@ -1454,3 +1454,33 @@ Compatibility and native replication:
   the policy enforcement point.
 - Mobile app and Desktop runtime clients do not need changes because non-admin
   relay protocols are untouched.
+
+## P32 Audit Export And Retention Behavior
+
+P32 adds enterprise audit export and configurable audit retention inside
+`mcode-relay`. It builds on P30 tenant scoping and P31 RBAC and does not change
+mobile, desktop, pairing, proxy, event, or tunnel protocols.
+
+Implemented relay behavior:
+
+- `AUDIT_EVENT_LIMIT` configures the retained in-process audit event count.
+- `PairingStore` prunes the oldest audit events after each audit write once the
+  configured limit is exceeded.
+- `/v1/gateway/info` reports `deployment.auditRetentionLimit`.
+- `GET /v1/admin/audit-events/export` exports audit events as JSON or JSONL.
+- Export supports `tenantId` / `x-mcode-tenant-id`, `limit`, `since`, `until`,
+  and `format=json|jsonl`.
+- Export reuses the P31 `audit.read` policy, so owner can export globally while
+  admin/auditor principals remain tenant-scoped.
+- Exported audit metadata recursively redacts fields whose keys contain
+  `token`, `secret`, `authorization`, or `password`.
+
+Compatibility and native replication:
+
+- Existing `/v1/admin/audit-events` behavior is preserved.
+- Native admin tools should use JSON for in-app inspection and JSONL for file
+  download or forwarding to compliance tooling.
+- Native admin tools should surface `403` from audit export as RBAC denial and
+  must not attempt to widen tenant scope client-side.
+- Immutable external audit sinks and multi-node audit storage remain future
+  gateway work.

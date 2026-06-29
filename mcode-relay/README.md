@@ -23,6 +23,7 @@ Standalone relay service for MCode remote control.
 - `DEPLOYMENT_ENV` default `development`
 - `LOG_POLICY` default `standard`
 - `AUDIT_POLICY` default `disabled`
+- `AUDIT_EVENT_LIMIT` default `1000`
 - `ACCESS_POLICY` default `allow-all`
 - `ADMIN_TOKEN` default empty
 - `ADMIN_TOKEN_ROLES` default empty JSON policy
@@ -70,6 +71,7 @@ that do not implement tenant administration can ignore it.
 - `POST /v1/admin/tenants` creates or updates a tenant record.
 - `POST /v1/admin/devices/:targetId/tenant` moves a paired target into another tenant.
 - `GET /v1/admin/devices`, `GET /v1/admin/sessions`, and `GET /v1/admin/audit-events` accept `tenantId` or `x-mcode-tenant-id` for tenant-scoped administration.
+- `GET /v1/admin/audit-events/export` exports tenant-scoped audit events as JSON or JSONL.
 - `GET /health` and `GET /v1/gateway/info` stay diagnostic-only; they report counts and feature flags but do not expose secrets, tokens, pair codes, or storage paths.
 
 ## Admin RBAC
@@ -91,7 +93,24 @@ set `ADMIN_TOKEN_ROLES` to a JSON object mapping token values to role entries:
 - Missing or invalid admin credentials return `401`; valid credentials without permission return `403`.
 - `/v1/gateway/info` exposes `deployment.policyMode` and `deployment.policyWarnings`, but never exposes token values or the role mapping.
 
+## Audit Export
+
+`AUDIT_EVENT_LIMIT` controls the in-process retained audit event count. The
+default is `1000`; larger deployments should configure it explicitly or replace
+the storage boundary with an external audit sink.
+
+`GET /v1/admin/audit-events/export` accepts:
+
+- `tenantId` or `x-mcode-tenant-id`
+- `format=json` or `format=jsonl`
+- `limit`
+- `since` and `until` as millisecond timestamps
+
+The endpoint reuses the `audit.read` RBAC policy. Exported metadata recursively
+redacts keys containing `token`, `secret`, `authorization`, or `password`.
+
 ## Not Included Yet
 
 - Multi-node shared state or session migration.
 - SSO/OIDC integration and external policy engines.
+- Immutable external audit storage.

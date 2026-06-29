@@ -25,6 +25,7 @@ const envSchema = z.object({
   DEPLOYMENT_ENV: deploymentEnvSchema.default("development"),
   LOG_POLICY: z.string().trim().min(1).default("standard"),
   AUDIT_POLICY: z.string().trim().min(1).default("disabled"),
+  AUDIT_EVENT_LIMIT: z.coerce.number().int().positive().max(100000).default(1000),
   ACCESS_POLICY: z.string().trim().min(1).default("allow-all"),
   ADMIN_TOKEN: z.string().trim().default(""),
   ADMIN_TOKEN_ROLES: z.string().trim().default(""),

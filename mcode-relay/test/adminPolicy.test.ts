@@ -23,6 +23,7 @@ function config(overrides: Partial<RelayConfig> = {}): RelayConfig {
     DEPLOYMENT_ENV: "development",
     LOG_POLICY: "standard",
     AUDIT_POLICY: "external",
+    AUDIT_EVENT_LIMIT: 1000,
     ACCESS_POLICY: "token-role",
     ADMIN_TOKEN: OWNER_TOKEN,
     ADMIN_TOKEN_ROLES: JSON.stringify({

@@ -19,6 +19,7 @@ function config(overrides: Partial<RelayConfig> = {}): RelayConfig {
     DEPLOYMENT_ENV: "production",
     LOG_POLICY: "metadata-only",
     AUDIT_POLICY: "external",
+    AUDIT_EVENT_LIMIT: 1000,
     ACCESS_POLICY: "allow-all",
     ADMIN_TOKEN: "admin-secret",
     ADMIN_TOKEN_ROLES: "",
@@ -108,6 +109,7 @@ describe("gateway info", () => {
         environment: "production",
         logPolicy: "metadata-only",
         auditPolicy: "external",
+        auditRetentionLimit: 1000,
         accessPolicy: "allow-all",
         policyMode: "token-role",
         policyWarnings: [

@@ -7,6 +7,7 @@ import type { TargetAgent } from "../protocol/types.js"
 const DEFAULT_TARGET_AGENT: TargetAgent = "codeg"
 const DEFAULT_PROTOCOL_VERSION = "1"
 const DEFAULT_TENANT_ID = "default"
+const DEFAULT_AUDIT_EVENT_LIMIT = 1000
 
 export interface PairOfferRecord {
   code: string
@@ -79,6 +80,15 @@ export interface PairingStoreStorage {
   save(snapshot: PairingStoreSnapshot): void
 }
 
+export interface PairingStoreOptions {
+  auditEventLimit?: number
+}
+
+export interface AuditEventFilters {
+  since?: number
+  until?: number
+}
+
 export class JsonFilePairingStoreStorage implements PairingStoreStorage {
   constructor(private readonly filePath: string) {}
 
@@ -110,7 +120,13 @@ export class PairingStore {
   private readonly sessions = new Map<string, PairSessionRecord>()
   private readonly auditEvents: AuditEventRecord[] = []
 
-  constructor(private readonly storage?: PairingStoreStorage | null) {
+  private readonly auditEventLimit: number
+
+  constructor(
+    private readonly storage?: PairingStoreStorage | null,
+    options: PairingStoreOptions = {}
+  ) {
+    this.auditEventLimit = normalizeAuditEventLimit(options.auditEventLimit)
     this.restore(storage?.load() ?? null)
     this.ensureDefaultTenant()
   }
@@ -337,18 +353,20 @@ export class PairingStore {
       metadata: input.metadata ?? {},
     }
     this.auditEvents.push(record)
-    if (this.auditEvents.length > 1000) {
-      this.auditEvents.splice(0, this.auditEvents.length - 1000)
-    }
+    this.pruneAuditEvents()
     this.ensureTenantRecord(record.tenantId)
     this.persist()
     return record
   }
 
-  listAuditEvents(limit = 100, tenantId?: string): AuditEventRecord[] {
-    const bounded = Number.isFinite(limit) ? Math.max(1, Math.min(Math.trunc(limit), 500)) : 100
-    const source = tenantId ? this.auditEvents.filter((event) => event.tenantId === tenantId) : this.auditEvents
+  listAuditEvents(limit = 100, tenantId?: string, filters: AuditEventFilters = {}): AuditEventRecord[] {
+    const bounded = Number.isFinite(limit) ? Math.max(1, Math.min(Math.trunc(limit), this.auditEventLimit)) : 100
+    const source = this.filterAuditEvents(tenantId, filters)
     return source.slice(-bounded).reverse()
+  }
+
+  getAuditEventLimit(): number {
+    return this.auditEventLimit
   }
 
   listTargets(tenantId?: string): TargetRecord[] {
@@ -401,8 +419,21 @@ export class PairingStore {
         this.ensureTenantRecord(normalized.tenantId)
       }
     }
-    if (this.auditEvents.length > 1000) {
-      this.auditEvents.splice(0, this.auditEvents.length - 1000)
+    this.pruneAuditEvents()
+  }
+
+  private filterAuditEvents(tenantId?: string, filters: AuditEventFilters = {}): AuditEventRecord[] {
+    return this.auditEvents.filter((event) => {
+      if (tenantId && event.tenantId !== tenantId) return false
+      if (typeof filters.since === "number" && event.createdAt < filters.since) return false
+      if (typeof filters.until === "number" && event.createdAt > filters.until) return false
+      return true
+    })
+  }
+
+  private pruneAuditEvents(): void {
+    if (this.auditEvents.length > this.auditEventLimit) {
+      this.auditEvents.splice(0, this.auditEvents.length - this.auditEventLimit)
     }
   }
 
@@ -522,4 +553,9 @@ function normalizeAuditEventRecord(input: Partial<AuditEventRecord>): AuditEvent
 function normalizeNumber(input: unknown, fallback: number): number {
   const value = Number(input)
   return Number.isFinite(value) ? value : fallback
+}
+
+function normalizeAuditEventLimit(input: unknown): number {
+  const value = Number(input)
+  return Number.isFinite(value) && value > 0 ? Math.trunc(value) : DEFAULT_AUDIT_EVENT_LIMIT
 }
