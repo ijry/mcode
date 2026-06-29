@@ -2624,10 +2624,12 @@ function ensureHistoryCursorFromLoadedMessages() {
 }
 
 function measureMessageListHeight() {
+  const instance = getCurrentInstance()?.proxy
+  if (!instance) return
   const windowHeight = getViewportHeight()
   viewportHeight.value = windowHeight
   const navbarHeight = getNavbarHeight()
-  const query = uni.createSelectorQuery().in(getCurrentInstance()?.proxy)
+  const query = uni.createSelectorQuery().in(instance)
   query
     .select(".detail-toolbar")
     .boundingClientRect()
