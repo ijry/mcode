@@ -1,5 +1,6 @@
 import type { FastifyRequest } from "fastify"
 import type { RelayConfig } from "../config.js"
+import type { AdminCredentialStore } from "./credentials.js"
 
 export type AdminRole = "owner" | "admin" | "auditor"
 
@@ -23,6 +24,8 @@ export type AdminAction =
   | "session.read"
   | "session.write"
   | "audit.read"
+  | "credential.read"
+  | "credential.write"
 
 interface AdminPolicyEntry {
   role: AdminRole
@@ -33,10 +36,20 @@ const ADMIN_ROLES = new Set<AdminRole>(["owner", "admin", "auditor"])
 
 export function resolveAdminPrincipal(
   req: FastifyRequest,
-  config: RelayConfig
+  config: RelayConfig,
+  adminCredentialStore?: AdminCredentialStore | null
 ): AdminPrincipal | null {
   const token = getAdminToken(req)
   if (!token) return null
+
+  const dynamicCredential = adminCredentialStore?.resolveToken(token)
+  if (dynamicCredential) {
+    return {
+      token,
+      role: dynamicCredential.role,
+      tenantId: dynamicCredential.tenantId,
+    }
+  }
 
   const snapshot = buildAdminPolicySnapshot(config)
   const principal = snapshot.principals.get(token)
@@ -93,6 +106,10 @@ export function authorizeAdminRoute(
 ): { allowed: boolean; reason?: string } {
   if (principal.role === "owner") {
     return { allowed: true }
+  }
+
+  if (action === "credential.read" || action === "credential.write") {
+    return deny("credential management requires owner")
   }
 
   const scopeTenantId = normalizeScopeTenantId(tenantId)

@@ -23,8 +23,14 @@ import {
   resolveAdminPrincipal,
   resolveAdminScope,
   type AdminAction,
+  type AdminRole,
   type AdminPrincipal,
 } from "./admin/policy.js"
+import {
+  AdminCredentialStore,
+  JsonFileAdminCredentialStoreStorage,
+  toSafeAdminCredentialRecord,
+} from "./admin/credentials.js"
 import type {
   ClientIdentity,
   TargetAgent,
@@ -37,6 +43,7 @@ export interface RelayAppContext {
   store: PairingStore
   hub: RelayHub
   auditWebhookSink: AuditWebhookSink
+  adminCredentialStore: AdminCredentialStore
 }
 
 export function createRelayContext(overrides: Partial<RelayAppContext> = {}): RelayAppContext {
@@ -46,6 +53,7 @@ export function createRelayContext(overrides: Partial<RelayAppContext> = {}): Re
     store: overrides.store ?? createDefaultPairingStore(config),
     hub: overrides.hub ?? createDefaultRelayHub(config),
     auditWebhookSink: overrides.auditWebhookSink ?? new AuditWebhookSink(config),
+    adminCredentialStore: overrides.adminCredentialStore ?? createDefaultAdminCredentialStore(config),
   }
 }
 
@@ -137,6 +145,13 @@ function getAdminToken(req: FastifyRequest): string | null {
   return getBearerToken(req)
 }
 
+function createDefaultAdminCredentialStore(config: RelayConfig): AdminCredentialStore {
+  const storePath = config.ADMIN_CREDENTIAL_STORE_PATH.trim()
+  return new AdminCredentialStore(
+    storePath ? new JsonFileAdminCredentialStoreStorage(storePath) : null
+  )
+}
+
 function adminActor(req: FastifyRequest): string {
   const actor = req.headers["x-mcode-admin-actor"]
   return typeof actor === "string" && actor.trim() ? actor.trim() : "admin"
@@ -149,7 +164,7 @@ function requireAdmin(
   action: AdminAction,
   tenantId?: string | null
 ): AdminPrincipal | null {
-  const principal = resolveAdminPrincipal(req, context.config)
+  const principal = resolveAdminPrincipal(req, context.config, context.adminCredentialStore)
   if (!principal) {
     reply.code(401).send({ error: "admin token required" })
     return null
@@ -182,6 +197,17 @@ function normalizeAdminText(value: unknown): string | null {
   if (typeof value !== "string") return null
   const trimmed = value.trim()
   return trimmed || null
+}
+
+function normalizeAdminRole(value: unknown): AdminRole | null {
+  const role = String(value || "").trim()
+  return role === "owner" || role === "admin" || role === "auditor" ? role : null
+}
+
+function normalizeCredentialExpiresAt(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null
+  const expiresAt = Number(value)
+  return Number.isFinite(expiresAt) && expiresAt > Date.now() ? Math.trunc(expiresAt) : null
 }
 
 function getAdminTenantId(req: FastifyRequest): string | null {
@@ -455,6 +481,86 @@ export async function buildRelayApp(overrides: Partial<RelayAppContext> = {}): P
       : context.store.listTenants()
     return reply.send({
       tenants: buildTenantAdminList(tenants, context),
+    })
+  })
+
+  app.get("/v1/admin/credentials", async (req, reply) => {
+    const principal = requireAdmin(req, reply, context, "credential.read")
+    if (!principal) return
+    return reply.send({
+      credentials: context.adminCredentialStore
+        .listCredentials()
+        .map((credential) => toSafeAdminCredentialRecord(credential)),
+    })
+  })
+
+  app.post("/v1/admin/credentials", async (req, reply) => {
+    const principal = requireAdmin(req, reply, context, "credential.write")
+    if (!principal) return
+    const body = req.body as {
+      role?: string
+      tenantId?: string | null
+      label?: string | null
+      expiresAt?: number | string | null
+    }
+    const role = normalizeAdminRole(body?.role)
+    if (!role) {
+      return reply.code(400).send({ error: "role is required" })
+    }
+    const tenantId = normalizeAdminTenantId(body?.tenantId)
+    if (role !== "owner" && !tenantId) {
+      return reply.code(400).send({ error: "tenantId is required for admin and auditor credentials" })
+    }
+    const created = context.adminCredentialStore.createCredential({
+      role,
+      tenantId,
+      label: normalizeAdminText(body?.label),
+      expiresAt: normalizeCredentialExpiresAt(body?.expiresAt),
+    })
+    recordAuditEvent(context, {
+      type: "admin_credential.created",
+      tenantId: created.record.tenantId,
+      actor: adminActor(req),
+      metadata: {
+        credentialId: created.record.credentialId,
+        role: created.record.role,
+        tenantId: created.record.tenantId,
+        label: created.record.label,
+        expiresAt: created.record.expiresAt,
+      },
+    })
+    return reply.send({
+      token: created.token,
+      credential: toSafeAdminCredentialRecord(created.record),
+    })
+  })
+
+  app.post("/v1/admin/credentials/:credentialId/revoke", async (req, reply) => {
+    const principal = requireAdmin(req, reply, context, "credential.write")
+    if (!principal) return
+    const params = req.params as { credentialId: string }
+    const body = req.body as { reason?: string | null }
+    const credentialId = String(params.credentialId || "").trim()
+    const credential = context.adminCredentialStore.revokeCredential(
+      credentialId,
+      normalizeAdminText(body?.reason)
+    )
+    if (!credential) {
+      return reply.code(404).send({ error: "credential not found" })
+    }
+    recordAuditEvent(context, {
+      type: "admin_credential.revoked",
+      tenantId: credential.tenantId,
+      actor: adminActor(req),
+      message: credential.revokeReason,
+      metadata: {
+        credentialId: credential.credentialId,
+        role: credential.role,
+        tenantId: credential.tenantId,
+      },
+    })
+    return reply.send({
+      credential: toSafeAdminCredentialRecord(credential),
     })
   })
 

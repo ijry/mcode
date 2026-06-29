@@ -28,6 +28,7 @@ function config(overrides: Partial<RelayConfig> = {}): RelayConfig {
     ACCESS_POLICY: "allow-all",
     ADMIN_TOKEN: "admin-secret",
     ADMIN_TOKEN_ROLES: "",
+    ADMIN_CREDENTIAL_STORE_PATH: "",
     PAIRING_STORE_PATH: "",
     REPLAY_STORE_PATH: "",
     ALLOW_DEV_SECRETS: true,

@@ -30,6 +30,7 @@ Standalone relay service for MCode remote control.
 - `ACCESS_POLICY` default `allow-all`
 - `ADMIN_TOKEN` default empty
 - `ADMIN_TOKEN_ROLES` default empty JSON policy
+- `ADMIN_CREDENTIAL_STORE_PATH` default empty
 - `ALLOW_DEV_SECRETS` default `true`
 
 ## Pair Response Contract
@@ -95,6 +96,24 @@ set `ADMIN_TOKEN_ROLES` to a JSON object mapping token values to role entries:
 - `auditor` can read resources within its assigned tenant and receives `403` on mutations.
 - Missing or invalid admin credentials return `401`; valid credentials without permission return `403`.
 - `/v1/gateway/info` exposes `deployment.policyMode` and `deployment.policyWarnings`, but never exposes token values or the role mapping.
+
+## Admin Credential Rotation
+
+Dynamic admin credentials let owners create and revoke admin API tokens without
+editing env vars or restarting relay. Set `ADMIN_CREDENTIAL_STORE_PATH` to a
+JSON file path to persist dynamic credentials; otherwise they are in-memory.
+
+- `GET /v1/admin/credentials` lists safe credential metadata.
+- `POST /v1/admin/credentials` creates a credential and returns the generated token once.
+- `POST /v1/admin/credentials/:credentialId/revoke` revokes a dynamic credential immediately.
+- Only `owner` principals can manage credentials.
+- `admin` and `auditor` credentials require `tenantId`; `owner` credentials are global.
+- Relay stores only token hashes and never returns token hashes in API responses.
+- Credential creation and revocation are audit events and flow through the audit webhook sink when configured.
+
+Dynamic credentials are resolved before static `ADMIN_TOKEN_ROLES` and
+`ADMIN_TOKEN`. Static env tokens remain compatible and can be used as bootstrap
+owner credentials.
 
 ## Audit Export
 

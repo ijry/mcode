@@ -26,6 +26,7 @@ function config(overrides: Partial<RelayConfig> = {}): RelayConfig {
     ACCESS_POLICY: "allow-all",
     ADMIN_TOKEN: "admin-secret",
     ADMIN_TOKEN_ROLES: "",
+    ADMIN_CREDENTIAL_STORE_PATH: "",
     PAIRING_STORE_PATH: "",
     REPLAY_STORE_PATH: "",
     ALLOW_DEV_SECRETS: false,
@@ -60,6 +61,7 @@ describe("gateway info", () => {
       storage: {
         pairingStore: "memory",
         replayStore: "memory",
+        adminCredentialStore: "memory",
       },
       security: {
         jwtSecretConfigured: true,
@@ -74,6 +76,9 @@ describe("gateway info", () => {
         revokedSessions: 0,
         revokedTargets: 0,
         auditEvents: 0,
+        adminCredentials: 0,
+        activeAdminCredentials: 0,
+        revokedAdminCredentials: 0,
         desktopsOnline: 0,
       },
     })
@@ -121,6 +126,7 @@ describe("gateway info", () => {
         storage: {
           pairingStore: "memory",
           replayStore: "memory",
+          adminCredentialStore: "memory",
         },
       },
     })

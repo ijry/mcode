@@ -1517,3 +1517,45 @@ Compatibility and native replication:
   but must not request or render webhook URL or secret values.
 - External immutable audit storage is now expected to live behind the webhook
   receiver; relay itself still does not provide immutable audit storage.
+
+## P34 Admin Credential Rotation Behavior
+
+P34 adds dynamic admin credentials to `mcode-relay` so enterprise operators can
+create and revoke admin API tokens without editing environment variables or
+restarting the gateway. It does not change mobile, desktop, pairing, proxy,
+event, HTTP tunnel, or TCP tunnel protocols.
+
+Implemented relay behavior:
+
+- `ADMIN_CREDENTIAL_STORE_PATH` enables JSON-file persistence for dynamic admin
+  credentials; empty config keeps them in memory.
+- Dynamic credential records contain `credentialId`, `tokenHash`, `role`,
+  `tenantId`, `label`, lifecycle timestamps, and revocation metadata.
+- Relay stores only token hashes. Raw generated tokens are returned only once
+  from `POST /v1/admin/credentials`.
+- Dynamic credential resolution runs before static `ADMIN_TOKEN_ROLES` and
+  bootstrap `ADMIN_TOKEN` fallback.
+- `GET /v1/admin/credentials` returns safe credential metadata and never
+  includes raw tokens or token hashes.
+- `POST /v1/admin/credentials` creates `owner`, `admin`, or `auditor`
+  credentials. `admin` and `auditor` require `tenantId`.
+- `POST /v1/admin/credentials/:credentialId/revoke` revokes a dynamic
+  credential immediately.
+- Credential management requires owner role; tenant admins and auditors receive
+  `403`.
+- Credential create/revoke writes audit events and therefore also flows through
+  P33 audit webhook forwarding when configured.
+- Credential audit metadata includes safe ids, role, tenant scope, label, and
+  expiry, but never includes raw tokens or token hashes.
+- `/health` stats expose dynamic credential counts and
+  `/v1/gateway/info` storage exposes `adminCredentialStore = memory|json-file`
+  without exposing the JSON path.
+
+Compatibility and native replication:
+
+- Existing static `ADMIN_TOKEN` and `ADMIN_TOKEN_ROLES` deployments keep working.
+- Native admin clients should show the generated token only on the create
+  success screen and tell operators it cannot be viewed again.
+- Native admin clients should treat revocation as immediate and irreversible.
+- Native clients should not cache owner/admin/auditor authorization decisions;
+  relay remains the policy enforcement point.

@@ -1,6 +1,7 @@
 import type { RelayConfig } from "../config.js"
 import type { RelayAppContext } from "../server.js"
 import { buildAdminPolicySnapshot } from "../admin/policy.js"
+import { getAdminCredentialStats } from "../admin/credentials.js"
 
 export const PROTOCOL_VERSION = "1"
 
@@ -38,6 +39,9 @@ export interface GatewayStats {
   revokedSessions: number
   revokedTargets: number
   auditEvents: number
+  adminCredentials: number
+  activeAdminCredentials: number
+  revokedAdminCredentials: number
   desktopsOnline: number
 }
 
@@ -79,6 +83,7 @@ export interface GatewayInfoResponse {
 export interface GatewayStorageStatus {
   pairingStore: "memory" | "json-file"
   replayStore: "memory" | "json-file"
+  adminCredentialStore: "memory" | "json-file"
 }
 
 export interface GatewayAuditWebhookStatus {
@@ -159,6 +164,7 @@ export function buildGatewaySecurity(config: RelayConfig): GatewaySecurityStatus
 function buildGatewayStats(context: RelayAppContext): GatewayStats {
   const tenants = context.store.listTenants()
   const targets = context.store.listTargets()
+  const adminCredentials = getAdminCredentialStats(context.adminCredentialStore)
   return {
     tenants: tenants.length,
     targets: targets.length,
@@ -166,6 +172,9 @@ function buildGatewayStats(context: RelayAppContext): GatewayStats {
     revokedSessions: context.store.listSessions().filter((session) => session.revokedAt !== null).length,
     revokedTargets: targets.filter((target) => target.revoked).length,
     auditEvents: context.store.listAuditEvents(500).length,
+    adminCredentials: adminCredentials.total,
+    activeAdminCredentials: adminCredentials.active,
+    revokedAdminCredentials: adminCredentials.revoked,
     desktopsOnline: targets.filter((target) => context.hub.isDesktopOnline(target.targetId)).length,
   }
 }
@@ -179,6 +188,7 @@ function buildGatewayStorage(config: RelayConfig): GatewayStorageStatus {
   return {
     pairingStore: config.PAIRING_STORE_PATH.trim() ? "json-file" : "memory",
     replayStore: config.REPLAY_STORE_PATH.trim() ? "json-file" : "memory",
+    adminCredentialStore: config.ADMIN_CREDENTIAL_STORE_PATH.trim() ? "json-file" : "memory",
   }
 }
 

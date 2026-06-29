@@ -34,6 +34,7 @@ function config(overrides: Partial<RelayConfig> = {}): RelayConfig {
       [AUDITOR_TOKEN]: { role: "auditor", tenantId: "tenant-a" },
       [OPS_TOKEN]: { role: "admin", tenantId: "tenant-b" },
     }),
+    ADMIN_CREDENTIAL_STORE_PATH: "",
     PAIRING_STORE_PATH: "",
     REPLAY_STORE_PATH: "",
     ALLOW_DEV_SECRETS: true,
