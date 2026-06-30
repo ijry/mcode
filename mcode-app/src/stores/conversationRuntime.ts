@@ -686,7 +686,11 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         auth.currentRemoteInstance().instanceKey
       let discovered: ConversationConnectionInfo | null = null
       try {
-        discovered = await acpApi.acpFindConnectionForConversation(conversationId)
+        discovered = await acpApi.acpFindConnectionForConversation(
+          conversationId,
+          agentType,
+          sessionId
+        )
       } catch (error) {
         console.warn("acp_find_connection_for_conversation failed", error)
       }

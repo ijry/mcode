@@ -2040,7 +2040,8 @@ function resolveConnectedSessionId(connection: ConnectionInfo | null | undefined
 
 async function shouldSkipCreatePromptReplay(
   gateway: CodegGateway,
-  conversationId: number
+  conversationId: number,
+  agentType: string
 ) {
   if (!activeCreateRequestId) return false
   if (activeCreateConversationId !== conversationId) return false
@@ -2058,7 +2059,10 @@ async function shouldSkipCreatePromptReplay(
   }
 
   try {
-    const existingConnection = await acpApi.acpFindConnectionForConversation(conversationId)
+    const existingConnection = await acpApi.acpFindConnectionForConversation(
+      conversationId,
+      agentType
+    )
     if (existingConnection?.connection_id) {
       return true
     }
@@ -2166,7 +2170,8 @@ async function confirmCreate() {
     if (taskContent) {
       const skipPromptReplay = await shouldSkipCreatePromptReplay(
         gateway,
-        newConversationId
+        newConversationId,
+        agentType
       )
       if (!skipPromptReplay) {
         activeCreateConversationId = newConversationId

@@ -80,8 +80,8 @@ describe("pcTabSyncService", () => {
       2,
       "save_opened_tabs",
       expect.objectContaining({
-        version: 3,
-        tabs: expect.arrayContaining([
+        expectedVersion: 3,
+        items: expect.arrayContaining([
           expect.objectContaining({
             conversation_id: 99,
             is_active: false,
@@ -170,8 +170,8 @@ describe("pcTabSyncService", () => {
     expect(gateway.call).toHaveBeenCalledWith(
       "save_opened_tabs",
       expect.objectContaining({
-        version: 4,
-        tabs: [expect.objectContaining({ conversation_id: 10 })],
+        expectedVersion: 4,
+        items: [expect.objectContaining({ conversation_id: 10 })],
       }),
     )
     expect(replaceOpenedTabsSnapshot).toHaveBeenCalled()

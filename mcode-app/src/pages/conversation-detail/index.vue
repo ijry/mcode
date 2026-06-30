@@ -3778,7 +3778,11 @@ async function sendDraft(draft: QueuedDraft): Promise<boolean> {
     scheduleViewportSync(true)
     if (isViewerMode.value) {
       const liveInfo = await acpApi
-        .acpFindConnectionForConversation(conversationId.value)
+        .acpFindConnectionForConversation(
+          conversationId.value,
+          currentAgentType.value,
+          session.value?.externalId || undefined
+        )
         .catch(() => null)
       if (liveInfo?.connection_id && liveInfo.connection_id !== conn) {
         throw new Error("该会话已被其他端重新接管，请等待当前轮结束后再发送")

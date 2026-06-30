@@ -290,11 +290,17 @@ class AcpApiClient {
   }
 
   async acpFindConnectionForConversation(
-    conversationId: number
+    conversationId: number,
+    agentType: string,
+    sessionId?: string
   ): Promise<ConversationConnectionInfo | null> {
     return await this.request("/acp_find_connection_for_conversation", {
       conversationId,
       conversation_id: conversationId,
+      agentType,
+      agent_type: agentType,
+      sessionId,
+      session_id: sessionId,
     })
   }
 

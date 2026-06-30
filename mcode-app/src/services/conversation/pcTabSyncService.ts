@@ -47,8 +47,8 @@ export async function ensureConversationTab(input: EnsureConversationTabInput) {
       return baseSnapshot
     }
     const saved = await input.gateway.call<SaveOpenedTabsResult>("save_opened_tabs", {
-      version: baseSnapshot.version,
-      tabs: nextItems,
+      expectedVersion: baseSnapshot.version,
+      items: nextItems,
       origin: input.origin || "mcode-mobile",
     })
     const accepted = saved?.accepted !== false
@@ -93,8 +93,8 @@ export async function closeConversationTab(input: {
       position: index,
     }))
   const saved = await input.gateway.call<SaveOpenedTabsResult>("save_opened_tabs", {
-    version: baseSnapshot.version,
-    tabs: nextItems,
+    expectedVersion: baseSnapshot.version,
+    items: nextItems,
     origin: input.origin || "mcode-mobile",
   })
   const savedVersion = Number(saved?.version || 0)
