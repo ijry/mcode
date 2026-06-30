@@ -74,6 +74,44 @@ export async function ensureConversationTabForPrompt(input: EnsureConversationTa
   })
 }
 
+export async function closeConversationTab(input: {
+  instanceKey: string
+  gateway: CodegGateway
+  conversationId: number
+  origin?: string
+}) {
+  const instanceKey = String(input.instanceKey || "").trim()
+  const conversationId = Number(input.conversationId || 0)
+  if (!instanceKey || !conversationId) {
+    return null
+  }
+  const baseSnapshot = await readOpenedTabsSnapshot(instanceKey, input.gateway)
+  const nextItems = baseSnapshot.items
+    .filter((item) => Number(item.conversation_id || 0) !== conversationId)
+    .map((item, index) => ({
+      ...item,
+      position: index,
+    }))
+  const saved = await input.gateway.call<SaveOpenedTabsResult>("save_opened_tabs", {
+    version: baseSnapshot.version,
+    tabs: nextItems,
+    origin: input.origin || "mcode-mobile",
+  })
+  const savedVersion = Number(saved?.version || 0)
+  const savedItems = normalizeOpenedTabsList(saved?.tabs ?? saved?.items ?? nextItems)
+  replaceOpenedTabsSnapshot(
+    instanceKey,
+    savedVersion || baseSnapshot.version + 1,
+    savedItems,
+    input.origin || "mcode-mobile",
+  )
+  return {
+    instanceKey,
+    version: savedVersion || baseSnapshot.version + 1,
+    items: savedItems,
+  } satisfies OpenedTabsSnapshot
+}
+
 async function readOpenedTabsSnapshot(
   instanceKey: string,
   gateway: CodegGateway,
@@ -169,6 +207,12 @@ export function normalizeOpenedTabsList(raw: unknown): OpenedTabItem[] {
       } satisfies OpenedTabItem
     })
     .filter((item): item is OpenedTabItem => Boolean(item))
+}
+
+export function resolveConversationTabIndex(items: OpenedTabItem[], conversationId: number) {
+  return (Array.isArray(items) ? items : []).findIndex(
+    (item) => Number(item.conversation_id || 0) === Number(conversationId || 0)
+  )
 }
 
 function sameTabSnapshot(left: OpenedTabItem[], right: OpenedTabItem[]) {

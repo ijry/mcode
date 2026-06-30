@@ -1,4 +1,9 @@
-import { ensureConversationTab, normalizeOpenedTabsList } from "@/services/conversation/pcTabSyncService"
+import {
+  closeConversationTab,
+  ensureConversationTab,
+  normalizeOpenedTabsList,
+  resolveConversationTabIndex,
+} from "@/services/conversation/pcTabSyncService"
 import {
   getOpenedTabsSnapshot,
   replaceOpenedTabsSnapshot,
@@ -110,5 +115,88 @@ describe("pcTabSyncService", () => {
         is_active: true,
       }),
     ])
+  })
+
+  it("removes a conversation tab and preserves remaining order", async () => {
+    ;(getOpenedTabsSnapshot as jest.Mock).mockReturnValue({
+      instanceKey: "inst-a",
+      version: 4,
+      items: [
+        {
+          id: 1,
+          folder_id: 2,
+          conversation_id: 10,
+          agent_type: "codex",
+          position: 0,
+          is_active: true,
+          is_pinned: false,
+        },
+        {
+          id: 2,
+          folder_id: 2,
+          conversation_id: 11,
+          agent_type: "codex",
+          position: 1,
+          is_active: false,
+          is_pinned: false,
+        },
+      ],
+    })
+    const gateway = {
+      call: jest.fn().mockResolvedValue({
+        accepted: true,
+        version: 5,
+        tabs: [
+          {
+            id: 1,
+            folder_id: 2,
+            conversation_id: 10,
+            agent_type: "codex",
+            position: 0,
+            is_active: true,
+            is_pinned: false,
+          },
+        ],
+      }),
+    }
+
+    await closeConversationTab({
+      instanceKey: "inst-a",
+      gateway: gateway as any,
+      conversationId: 11,
+      origin: "mcode-mobile",
+    })
+
+    expect(gateway.call).toHaveBeenCalledWith(
+      "save_opened_tabs",
+      expect.objectContaining({
+        version: 4,
+        tabs: [expect.objectContaining({ conversation_id: 10 })],
+      }),
+    )
+    expect(replaceOpenedTabsSnapshot).toHaveBeenCalled()
+  })
+
+  it("finds the correct tab index for a conversation id", () => {
+    expect(resolveConversationTabIndex([
+      {
+        id: 1,
+        folder_id: 2,
+        conversation_id: 10,
+        agent_type: "codex",
+        position: 0,
+        is_active: true,
+        is_pinned: false,
+      },
+      {
+        id: 2,
+        folder_id: 2,
+        conversation_id: 11,
+        agent_type: "codex",
+        position: 1,
+        is_active: false,
+        is_pinned: false,
+      },
+    ], 11)).toBe(1)
   })
 })
