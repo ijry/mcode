@@ -23,6 +23,18 @@ describe("detailLayoutPresentation", () => {
     })).toBeUndefined()
   })
 
+  it("accounts for tabs strip height in the top chrome region", () => {
+    expect(buildMessageListPageStyle({
+      viewportHeight: 900,
+      topChromeHeight: 168,
+      bottomComposerHeight: 180,
+    })).toEqual({
+      paddingTop: "168px",
+      paddingBottom: "180px",
+      minHeight: "552px",
+    })
+  })
+
   it("builds top offset and history status styles", () => {
     expect(buildTopOffsetStyle(88)).toEqual({ top: "88px" })
     expect(buildTopOffsetStyle(-10)).toEqual({ top: "0px" })

@@ -102,20 +102,22 @@
         </view>
       </view>
 
-      <view
-        v-if="historyStatusText"
-        :style="historyStatusStyle"
-        :class="['history-status', planTasks.length > 0 && 'history-status--with-plan']"
+      <ConversationDetailBody
+        :message-list-page-style="messageListPageStyle"
+        :input-wrap-style="upThemeCardStyle"
       >
-        <up-loading-icon v-if="loadingOlder" mode="circle" size="16" :color="upThemeVar('--up-tips-color', '#909193')"></up-loading-icon>
-        <text class="history-status__text">{{ historyStatusText }}</text>
-      </view>
+        <template #history>
+          <view
+            v-if="historyStatusText"
+            :style="historyStatusStyle"
+            :class="['history-status', planTasks.length > 0 && 'history-status--with-plan']"
+          >
+            <up-loading-icon v-if="loadingOlder" mode="circle" size="16" :color="upThemeVar('--up-tips-color', '#909193')"></up-loading-icon>
+            <text class="history-status__text">{{ historyStatusText }}</text>
+          </view>
+        </template>
 
-      <view
-        class="message-list"
-        :style="messageListPageStyle"
-      >
-        <view class="message-list__content">
+        <template #content>
           <view v-if="showInitialConversationLoading" class="empty-messages empty-messages--loading">
             <up-loading-icon
               mode="circle"
@@ -192,10 +194,9 @@
           </view>
 
           <view id="message-list-bottom" class="list-bottom"></view>
-        </view>
-      </view>
+        </template>
 
-    <view class="input-wrap" :style="upThemeCardStyle">
+        <template #composer>
         <view v-if="pendingPermissionCard" class="permission-card">
           <view class="permission-card__header">
             <view class="permission-card__badge"></view>
@@ -740,7 +741,8 @@
             <text class="input-feedback__text">{{ runtimeErrorText }}</text>
           </view>
         </view>
-      </view>
+        </template>
+      </ConversationDetailBody>
 
       <view
         v-if="showScrollToBottomFab"
@@ -898,6 +900,7 @@ import type {
 import type { RelaySessionInfo } from "@/services/gateway"
 import type { RemoteInstanceDescriptor } from "@/services/realtime/types"
 import MessageBubble from "@/components/MessageBubble.vue"
+import ConversationDetailBody from "./ConversationDetailBody.vue"
 import {
   buildRenderMessageItems,
   type RenderMessageItem,
