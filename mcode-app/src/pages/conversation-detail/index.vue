@@ -1209,8 +1209,8 @@ const pageScrollTop = ref(0)
 const topChromeHeight = ref(0)
 const bottomComposerHeight = ref(0)
 const viewportHeight = ref(0)
-const toolbarHeight = ref(0)
-const tabsBarHeight = ref(0)
+const toolbarHeight = ref(48)
+const tabsBarHeight = ref(54)
 const sharedHintHeight = ref(0)
 const hasInitialBottomScroll = ref(false)
 const isRestoringScroll = ref(false)
@@ -3781,7 +3781,7 @@ async function sendDraft(draft: QueuedDraft): Promise<boolean> {
         .acpFindConnectionForConversation(
           conversationId.value,
           currentAgentType.value,
-          session.value?.externalId || undefined
+          managedConversation.value?.externalId || undefined
         )
         .catch(() => null)
       if (liveInfo?.connection_id && liveInfo.connection_id !== conn) {

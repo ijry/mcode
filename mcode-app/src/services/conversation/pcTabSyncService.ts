@@ -185,28 +185,28 @@ function normalizeOpenedTabsSnapshot(instanceKey: string, raw: unknown): OpenedT
 
 export function normalizeOpenedTabsList(raw: unknown): OpenedTabItem[] {
   if (!Array.isArray(raw)) return []
-  return raw
-    .map((item, index) => {
-      const record = item && typeof item === "object" ? (item as Record<string, unknown>) : null
-      if (!record) return null
-      const id = Number(record.id || index + 1)
-      const folderId = Number(record.folder_id || record.folderId || 0)
-      if (!id || !folderId) return null
-      return {
-        id,
-        folder_id: folderId,
-        conversation_id:
-          record.conversation_id == null && record.conversationId == null
-            ? null
-            : Number(record.conversation_id || record.conversationId || 0) || null,
-        agent_type: normalizeString(record.agent_type, record.agentType) || undefined,
-        position:
-          typeof record.position === "number" ? record.position : Number(record.position || index),
-        is_active: Boolean(record.is_active ?? record.isActive),
-        is_pinned: Boolean(record.is_pinned ?? record.isPinned),
-      } satisfies OpenedTabItem
+  const items: OpenedTabItem[] = []
+  raw.forEach((item, index) => {
+    const record = item && typeof item === "object" ? (item as Record<string, unknown>) : null
+    if (!record) return
+    const id = Number(record.id || index + 1)
+    const folderId = Number(record.folder_id || record.folderId || 0)
+    if (!id || !folderId) return
+    items.push({
+      id,
+      folder_id: folderId,
+      conversation_id:
+        record.conversation_id == null && record.conversationId == null
+          ? null
+          : Number(record.conversation_id || record.conversationId || 0) || null,
+      agent_type: normalizeString(record.agent_type, record.agentType) || undefined,
+      position:
+        typeof record.position === "number" ? record.position : Number(record.position || index),
+      is_active: Boolean(record.is_active ?? record.isActive),
+      is_pinned: Boolean(record.is_pinned ?? record.isPinned),
     })
-    .filter((item): item is OpenedTabItem => Boolean(item))
+  })
+  return items
 }
 
 export function resolveConversationTabIndex(items: OpenedTabItem[], conversationId: number) {
