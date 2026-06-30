@@ -5,14 +5,20 @@
     </view>
 
     <view v-else class="detail-container">
+      <view class="detail-atmosphere" aria-hidden="true">
+        <view class="detail-atmosphere__blob detail-atmosphere__blob--primary"></view>
+        <view class="detail-atmosphere__blob detail-atmosphere__blob--secondary"></view>
+        <view class="detail-atmosphere__blob detail-atmosphere__blob--accent"></view>
+      </view>
+
       <up-navbar
         :autoBack="false"
         :fixed="true"
         :placeholder="true"
-        :border="true"
+        :border="false"
         left-icon="arrow-left"
         height="45px"
-        :bgColor="upThemeVar('--up-card-bg-color', '#ffffff')"
+        :bgColor="navbarBgColor"
         :leftIconColor="upThemeVar('--up-content-color', '#303133')"
         @leftClick="handleBackNavigation"
       >
@@ -28,11 +34,48 @@
               <view v-else class="detail-navbar__logo detail-navbar__logo--fallback">
                 <text class="detail-navbar__logo-fallback">{{ conversationTitle.slice(0, 1) }}</text>
               </view>
-              <text class="detail-navbar__title u-line-1">{{ conversationTitle }}</text>
+              <view class="detail-navbar__title-copy">
+                <text class="detail-navbar__title u-line-1">{{ conversationTitle }}</text>
+                <text class="detail-navbar__subtitle u-line-1">{{ detailProjectPath || currentAgentLabel }}</text>
+              </view>
             </view>
           </view>
         </template>
       </up-navbar>
+
+      <view class="detail-tabs-bar" :style="[upThemeCardStyle, detailTabsBarStyle]">
+        <up-tabs
+          :current="activeDetailTabIndex"
+          :list="detailShellTabs"
+          keyName="title"
+          :scrollable="true"
+          shapeMode="capsule"
+          :lineWidth="0"
+          :duration="180"
+          :activeStyle="detailTabsActiveStyle"
+          :inactiveStyle="detailTabsInactiveStyle"
+          :itemStyle="detailTabsItemStyle"
+          @change="handleDetailTabChange"
+        >
+          <template #content="{ item, index }">
+            <view class="detail-tab-pill" :class="{ 'detail-tab-pill--active': index === activeDetailTabIndex }">
+              <view class="detail-tab-pill__dot"></view>
+              <text class="detail-tab-pill__title u-line-1">{{ item.title }}</text>
+              <view
+                v-if="detailShellTabs.length > 1"
+                class="detail-tab-pill__close"
+                @tap.stop="handleCloseDetailTab(index)"
+              >
+                <up-icon
+                  name="close"
+                  size="12"
+                  :color="index === activeDetailTabIndex ? '#ffffff' : upThemeVar('--up-tips-color', '#909193')"
+                ></up-icon>
+              </view>
+            </view>
+          </template>
+        </up-tabs>
+      </view>
 
       <view class="detail-toolbar" :style="[upThemeCardStyle, detailToolbarStyle]">
         <view class="detail-toolbar__status">
@@ -102,10 +145,23 @@
         </view>
       </view>
 
-      <ConversationDetailBody
-        :message-list-page-style="messageListPageStyle"
-        :input-wrap-style="upThemeCardStyle"
+      <swiper
+        class="detail-shell__swiper"
+        :current="detailSwiperCurrent"
+        :duration="220"
+        @change="handleDetailSwiperChange"
       >
+        <swiper-item
+          v-for="(tab, index) in detailShellTabs"
+          :key="tab.tabId || tab.conversationId || index"
+          class="detail-shell__swiper-item"
+        >
+          <view v-if="isDetailTabMounted(mountedDetailTabWindow, index)" class="detail-shell__page">
+            <ConversationDetailBody
+              v-if="index === activeDetailTabIndex"
+              :message-list-page-style="messageListPageStyle"
+              :input-wrap-style="upThemeCardStyle"
+            >
         <template #history>
           <view
             v-if="historyStatusText"
@@ -742,7 +798,23 @@
           </view>
         </view>
         </template>
-      </ConversationDetailBody>
+            </ConversationDetailBody>
+
+            <view v-else class="detail-shell__placeholder">
+              <view class="detail-shell__placeholder-card">
+                <view class="detail-shell__placeholder-badge">
+                  <view class="runtime-dot runtime-dot--pending"></view>
+                  <text class="detail-shell__placeholder-badge-text">切换到此会话即可加载</text>
+                </view>
+                <text class="detail-shell__placeholder-title u-line-1">{{ tab.title }}</text>
+                <text class="detail-shell__placeholder-desc">
+                  左右滑动已和桌面端 tabs 保持同步，当前仅渲染当前页与相邻页。
+                </text>
+              </view>
+            </view>
+          </view>
+        </swiper-item>
+      </swiper>
 
       <view
         v-if="showScrollToBottomFab"
@@ -864,7 +936,21 @@ import {
 import { connectionSessionManager } from "@/services/conversation/connectionSessionManager"
 import { markConversationListDirty } from "@/services/conversation/conversationListRefresh"
 import { persistConversationDetailSnapshot } from "@/services/conversation/conversationDetailPersistence"
-import { ensureConversationTabForPrompt } from "@/services/conversation/pcTabSyncService"
+import {
+  closeConversationTab,
+  ensureConversationTab,
+  ensureConversationTabForPrompt,
+  normalizeOpenedTabsList,
+} from "@/services/conversation/pcTabSyncService"
+import {
+  applyOpenedTabsSnapshot,
+  getOpenedTabsSnapshot,
+  replaceOpenedTabsSnapshot,
+} from "@/services/conversation/openedTabsRealtimeCache"
+import {
+  ensureGlobalConversationSync,
+  subscribeConversationOverviewInvalidation,
+} from "@/services/conversation/globalConversationSync"
 import { touchHotConversation } from "@/services/conversation/hotConversationCoordinator"
 import {
   hasInFlightConversationDetail,
@@ -892,6 +978,7 @@ import {
 } from "@/services/conversation/composerTools"
 import type {
   AgentOptionsSnapshot,
+  OpenedTabItem,
   RealtimeBridgeHealth,
   PermissionRequest,
   PendingQuestionState,
@@ -901,6 +988,17 @@ import type { RelaySessionInfo } from "@/services/gateway"
 import type { RemoteInstanceDescriptor } from "@/services/realtime/types"
 import MessageBubble from "@/components/MessageBubble.vue"
 import ConversationDetailBody from "./ConversationDetailBody.vue"
+import {
+  buildDetailShellTabs,
+  resolveDetailTabCloseTarget,
+  resolveDetailTabWindow,
+  type DetailShellTabItem,
+} from "./detailTabsPresentation"
+import {
+  createDetailTabState,
+  isDetailTabMounted,
+  type DetailTabState,
+} from "./detailTabState"
 import {
   buildRenderMessageItems,
   type RenderMessageItem,
@@ -1112,6 +1210,7 @@ const topChromeHeight = ref(0)
 const bottomComposerHeight = ref(0)
 const viewportHeight = ref(0)
 const toolbarHeight = ref(0)
+const tabsBarHeight = ref(0)
 const sharedHintHeight = ref(0)
 const hasInitialBottomScroll = ref(false)
 const isRestoringScroll = ref(false)
@@ -1145,6 +1244,13 @@ const expandedConfigKey = ref<ComposerConfigKey>("")
 const detailAgentConfig = ref<DetailAgentConfigState>(createEmptyDetailAgentConfigState())
 const currentAgentType = ref("claude_code")
 const detailProjectEntries = ref<DetailProjectEntry[]>([])
+const detailTabsVersion = ref(0)
+const detailOpenedTabs = ref<OpenedTabItem[]>([])
+const detailTabsHydrated = ref(false)
+const detailActiveTabIndex = ref(0)
+const detailSwiperCurrent = ref(0)
+const detailTabTitleMap = ref<Record<number, string>>({})
+const activeDetailTabIndex = detailActiveTabIndex
 const hasLoadedOnce = ref(false)
 const needsResumeRefresh = ref(false)
 const hasRestoredDraftState = ref(false)
@@ -1159,6 +1265,12 @@ let detailAgentProbeToken = 0
 let stuckPromptTimer: ReturnType<typeof setTimeout> | null = null
 let lastLiveActivitySignature = ""
 let stuckPromptShownForSignature = false
+let detailOpenedTabsUnsubscribe: (() => void) | null = null
+let detailOverviewInvalidationUnsubscribe: (() => void) | null = null
+let detailOpenedTabsInstanceKey = ""
+let detailOverviewInstanceKey = ""
+let detailSwitching = false
+const detailTabStateMap = new Map<number, DetailTabState>()
 
 function detailDebugLog(stage: string, payload?: Record<string, unknown>) {
   if (!conversationId.value) return
@@ -1216,11 +1328,17 @@ const messageListPageStyle = computed(() => {
     bottomComposerHeight: bottomComposerHeight.value,
   })
 })
-const detailToolbarStyle = computed(() => buildTopOffsetStyle(getNavbarHeight()))
-const connectingOperationBlockerStyle = computed(() => buildTopOffsetStyle(getNavbarHeight()))
+const detailTabsBarStyle = computed(() => buildTopOffsetStyle(getNavbarHeight()))
+const detailToolbarStyle = computed(() =>
+  buildTopOffsetStyle(getNavbarHeight() + tabsBarHeight.value)
+)
+const connectingOperationBlockerStyle = computed(() =>
+  buildTopOffsetStyle(getNavbarHeight() + tabsBarHeight.value + toolbarHeight.value)
+)
 const historyStatusStyle = computed(() =>
   buildHistoryStatusStyle({
     navbarHeight: getNavbarHeight(),
+    tabsBarHeight: tabsBarHeight.value,
     toolbarHeight: toolbarHeight.value,
   })
 )
@@ -1539,6 +1657,59 @@ const agentLogoPath = computed(() => {
   return ""
 })
 
+const currentAgentLabel = computed(() => {
+  const key = normalizeAgentType(currentAgentType.value)
+  if (key === "claude_code") return "@claude_code"
+  if (key === "codex") return "@codex"
+  if (key === "gemini") return "@gemini"
+  if (key === "cline") return "@cline"
+  if (key === "open_code") return "@open_code"
+  if (key === "open_claw") return "@open_claw"
+  return `@${key || "assistant"}`
+})
+
+const fallbackDetailTabItem = computed<OpenedTabItem[]>(() => {
+  if (detailTabsHydrated.value || !conversationId.value || !folderId.value) {
+    return []
+  }
+  return [{
+    id: conversationId.value,
+    folder_id: folderId.value,
+    conversation_id: conversationId.value,
+    agent_type: currentAgentType.value,
+    position: 0,
+    is_active: true,
+    is_pinned: false,
+  }]
+})
+
+const detailShellTabs = computed<DetailShellTabItem[]>(() =>
+  buildDetailShellTabs({
+    openedTabs: detailTabsHydrated.value ? detailOpenedTabs.value : fallbackDetailTabItem.value,
+    titleByConversationId: detailTabTitleMap.value,
+  })
+)
+
+const mountedDetailTabWindow = computed(() =>
+  resolveDetailTabWindow(activeDetailTabIndex.value, detailShellTabs.value.length)
+)
+
+const navbarBgColor = computed(() =>
+  "color-mix(in srgb, var(--up-card-bg-color, #ffffff) 72%, transparent)"
+)
+const detailTabsItemStyle = {
+  paddingLeft: "0px",
+  paddingRight: "0px",
+  height: "auto",
+  borderRadius: "999px",
+}
+const detailTabsActiveStyle = {
+  color: "#ffffff",
+}
+const detailTabsInactiveStyle = {
+  color: upThemeVar("--up-content-color", "#606266"),
+}
+
 const slashCommands = ref<SlashCommandItem[]>([])
 
 const slashState = computed(() => resolveSlashState(inputText.value || ""))
@@ -1577,6 +1748,355 @@ const showScrollToBottomFab = computed(
 
 const planFilterItems = computed(() => buildPlanFilterItems(planTasks.value))
 
+function ensureDetailLocalTabState(tab: DetailShellTabItem | null | undefined) {
+  if (!tab?.conversationId) return null
+  const existing = detailTabStateMap.get(tab.conversationId)
+  if (existing) {
+    existing.tab = tab
+    return existing
+  }
+  const created = createDetailTabState(tab)
+  detailTabStateMap.set(tab.conversationId, created)
+  return created
+}
+
+function pruneDetailLocalTabStates() {
+  const activeConversationIds = new Set(
+    detailShellTabs.value.map((tab) => Number(tab.conversationId || 0)).filter((id) => id > 0)
+  )
+  Array.from(detailTabStateMap.keys()).forEach((conversationIdValue) => {
+    if (!activeConversationIds.has(conversationIdValue)) {
+      detailTabStateMap.delete(conversationIdValue)
+    }
+  })
+}
+
+function captureActiveDetailLocalState() {
+  const activeTab = detailShellTabs.value[activeDetailTabIndex.value]
+  const state = ensureDetailLocalTabState(activeTab)
+  if (!state) return
+  state.draftText = inputText.value
+  state.showPlanDrawer = showPlanDrawer.value
+  state.questionSubmitting = questionSubmitting.value
+  state.permissionSubmitting = permissionSubmitting.value
+}
+
+function restoreDetailLocalState(tab: DetailShellTabItem | null | undefined) {
+  const state = ensureDetailLocalTabState(tab)
+  if (!state) return
+  inputText.value = state.draftText || ""
+  showPlanDrawer.value = state.showPlanDrawer
+}
+
+function findDetailShellTabIndex(conversationIdValue: number) {
+  return detailShellTabs.value.findIndex(
+    (tab) => Number(tab.conversationId || 0) === Number(conversationIdValue || 0)
+  )
+}
+
+function syncDetailTabSelection(index: number) {
+  const safeIndex = Math.min(
+    Math.max(0, Number(index || 0)),
+    Math.max(0, detailShellTabs.value.length - 1),
+  )
+  detailActiveTabIndex.value = safeIndex
+  detailSwiperCurrent.value = safeIndex
+}
+
+function normalizeOpenedTabsChangedPayload(payload: unknown) {
+  if (!payload || typeof payload !== "object") return null
+  const record = payload as Record<string, unknown>
+  return {
+    version: Number(record.version || 0),
+    origin: firstString(record.origin) || "remote",
+    tabs: normalizeOpenedTabsList(record.tabs),
+  }
+}
+
+function applyDetailOpenedTabsState(input: {
+  instanceKey: string
+  version: number
+  items: OpenedTabItem[]
+  origin?: string
+}) {
+  replaceOpenedTabsSnapshot(input.instanceKey, input.version, input.items, input.origin || "server")
+  detailTabsVersion.value = Number(input.version || 0)
+  detailOpenedTabs.value = normalizeOpenedTabsList(input.items)
+  detailTabsHydrated.value = true
+  pruneDetailLocalTabStates()
+}
+
+async function refreshDetailTabTitles(
+  instanceKey = resolveDetailInstanceKey(),
+  items: OpenedTabItem[] = detailOpenedTabs.value
+) {
+  if (!instanceKey) return
+  const conversationIds = Array.from(new Set(
+    (Array.isArray(items) ? items : [])
+      .map((item) => Number(item.conversation_id || 0))
+      .filter((id) => id > 0)
+  ))
+  if (conversationIds.length === 0) return
+  const entries = await Promise.all(
+    conversationIds.map(async (conversationIdValue) => {
+      const summary = await getConversationSummaryById(instanceKey, conversationIdValue)
+      return [conversationIdValue, firstString(summary?.title)] as const
+    })
+  )
+  const nextMap = { ...detailTabTitleMap.value }
+  entries.forEach(([conversationIdValue, title]) => {
+    if (title) {
+      nextMap[conversationIdValue] = title
+    }
+  })
+  detailTabTitleMap.value = nextMap
+}
+
+async function syncRemoteActiveDetailTab(tab: DetailShellTabItem) {
+  const instanceKey = resolveDetailInstanceKey()
+  if (!instanceKey) return
+  const gateway = await getDetailGateway()
+  const snapshot = await ensureConversationTab({
+    instanceKey,
+    gateway,
+    folderId: tab.folderId,
+    conversationId: tab.conversationId,
+    agentType: tab.agentType,
+    activation: "allow",
+    origin: "mcode-mobile",
+  })
+  if (snapshot) {
+    applyDetailOpenedTabsState({
+      instanceKey,
+      version: snapshot.version,
+      items: snapshot.items,
+      origin: "mcode-mobile",
+    })
+  }
+}
+
+async function switchToDetailTab(
+  index: number,
+  options: { syncRemote?: boolean } = {}
+) {
+  const safeIndex = Number(index)
+  const tab = detailShellTabs.value[safeIndex]
+  if (!tab) return
+  if (detailSwitching) {
+    syncDetailTabSelection(activeDetailTabIndex.value)
+    return
+  }
+  if (loading.value && tab.conversationId !== conversationId.value) {
+    syncDetailTabSelection(activeDetailTabIndex.value)
+    return
+  }
+  captureActiveDetailLocalState()
+  syncDetailTabSelection(safeIndex)
+  if (tab.conversationId === conversationId.value && tab.folderId === folderId.value) {
+    restoreDetailLocalState(tab)
+    if (options.syncRemote !== false) {
+      void syncRemoteActiveDetailTab(tab).catch((error) => {
+        console.warn("sync remote active detail tab failed", error)
+      })
+    }
+    return
+  }
+  detailSwitching = true
+  try {
+    conversationId.value = tab.conversationId
+    folderId.value = tab.folderId
+    currentAgentType.value = normalizeAgentType(tab.agentType)
+    restoreDetailLocalState(tab)
+    syncConversationTitle(detailTabTitleMap.value[tab.conversationId] || tab.title)
+    await loadDetailProjectEntries()
+    await loadConversation()
+    if (options.syncRemote !== false) {
+      await syncRemoteActiveDetailTab(tab)
+    }
+  } finally {
+    detailSwitching = false
+  }
+}
+
+async function switchToDetailConversation(
+  conversationIdValue: number,
+  options: { syncRemote?: boolean } = {}
+) {
+  const index = findDetailShellTabIndex(conversationIdValue)
+  if (index < 0) return
+  await switchToDetailTab(index, options)
+}
+
+function reconcileDetailShellFromOpenedTabs(options: { loadConversation?: boolean } = {}) {
+  if (!detailTabsHydrated.value) return
+  if (detailShellTabs.value.length === 0) {
+    detailTabStateMap.clear()
+    handleBackNavigation()
+    return
+  }
+  const remoteActiveIndex = detailShellTabs.value.findIndex((tab) => tab.active)
+  const currentConversationIndex = findDetailShellTabIndex(conversationId.value)
+  const nextIndex = remoteActiveIndex >= 0
+    ? remoteActiveIndex
+    : currentConversationIndex >= 0
+      ? currentConversationIndex
+      : 0
+  syncDetailTabSelection(nextIndex)
+  const nextTab = detailShellTabs.value[nextIndex]
+  if (!nextTab) return
+  if (options.loadConversation === false) {
+    return
+  }
+  if (nextTab.conversationId !== conversationId.value && !loading.value) {
+    void switchToDetailTab(nextIndex, { syncRemote: false })
+  }
+}
+
+function ensureDetailOpenedTabsSubscription(instanceKey: string) {
+  if (!instanceKey || detailOpenedTabsInstanceKey === instanceKey) return
+  detailOpenedTabsUnsubscribe?.()
+  detailOpenedTabsInstanceKey = instanceKey
+  detailOpenedTabsUnsubscribe = acpApi.subscribeOpenedTabsChanged((payload) => {
+    const snapshot = normalizeOpenedTabsChangedPayload(payload)
+    if (!snapshot) return
+    applyOpenedTabsSnapshot(instanceKey, snapshot)
+    applyDetailOpenedTabsState({
+      instanceKey,
+      version: snapshot.version,
+      items: snapshot.tabs,
+      origin: snapshot.origin,
+    })
+    void refreshDetailTabTitles(instanceKey, snapshot.tabs)
+    reconcileDetailShellFromOpenedTabs()
+  }, instanceKey)
+}
+
+function ensureDetailOverviewInvalidationSubscription(instanceKey: string) {
+  if (!instanceKey || detailOverviewInstanceKey === instanceKey) return
+  detailOverviewInvalidationUnsubscribe?.()
+  detailOverviewInstanceKey = instanceKey
+  detailOverviewInvalidationUnsubscribe = subscribeConversationOverviewInvalidation((changedKey) => {
+    if (changedKey !== instanceKey) return
+    void refreshDetailTabTitles(instanceKey).then(() => {
+      const activeTab = detailShellTabs.value[activeDetailTabIndex.value]
+      if (activeTab?.conversationId === conversationId.value) {
+        syncConversationTitle(detailTabTitleMap.value[conversationId.value] || activeTab.title)
+      }
+    })
+  })
+}
+
+async function initializeDetailTabsShell() {
+  if (!conversationId.value || !folderId.value) return
+  const instanceKey = resolveDetailInstanceKey()
+  if (!instanceKey) return
+  ensureDetailOpenedTabsSubscription(instanceKey)
+  ensureDetailOverviewInvalidationSubscription(instanceKey)
+  void ensureGlobalConversationSync(instanceKey).catch((error) => {
+    console.warn("ensure global conversation sync failed", error)
+  })
+  const cachedSnapshot = getOpenedTabsSnapshot(instanceKey)
+  if (cachedSnapshot) {
+    applyDetailOpenedTabsState({
+      instanceKey,
+      version: cachedSnapshot.version,
+      items: cachedSnapshot.items,
+      origin: "cache",
+    })
+    reconcileDetailShellFromOpenedTabs({ loadConversation: false })
+    void refreshDetailTabTitles(instanceKey, cachedSnapshot.items)
+  }
+  try {
+    const gateway = await getDetailGateway()
+    const snapshot = await ensureConversationTab({
+      instanceKey,
+      gateway,
+      folderId: folderId.value,
+      conversationId: conversationId.value,
+      agentType: currentAgentType.value,
+      activation: "allow",
+      origin: "mcode-mobile",
+    })
+    if (snapshot) {
+      applyDetailOpenedTabsState({
+        instanceKey,
+        version: snapshot.version,
+        items: snapshot.items,
+        origin: "mcode-mobile",
+      })
+      await refreshDetailTabTitles(instanceKey, snapshot.items)
+      reconcileDetailShellFromOpenedTabs({ loadConversation: false })
+    }
+  } catch (error) {
+    console.warn("initialize detail tabs shell failed", error)
+  }
+}
+
+function handleDetailTabChange(payload: { index?: number } | number) {
+  const nextIndex = typeof payload === "number"
+    ? payload
+    : Number(payload?.index ?? -1)
+  if (nextIndex < 0 || nextIndex === activeDetailTabIndex.value) return
+  void switchToDetailTab(nextIndex)
+}
+
+function handleDetailSwiperChange(event: any) {
+  const nextIndex = Number(event?.detail?.current ?? -1)
+  if (nextIndex < 0 || nextIndex === activeDetailTabIndex.value) return
+  void switchToDetailTab(nextIndex)
+}
+
+async function handleCloseDetailTab(index: number) {
+  const safeIndex = Number(index)
+  const tab = detailShellTabs.value[safeIndex]
+  if (!tab) return
+  const isClosingActiveTab = safeIndex === activeDetailTabIndex.value
+  const targetIndex = isClosingActiveTab
+    ? resolveDetailTabCloseTarget(
+      activeDetailTabIndex.value,
+      safeIndex,
+      detailShellTabs.value.length,
+    )
+    : -1
+  const targetConversationId = isClosingActiveTab && targetIndex >= 0
+    ? Number(detailShellTabs.value[targetIndex]?.conversationId || 0)
+    : 0
+  const instanceKey = resolveDetailInstanceKey()
+  if (!instanceKey) return
+  try {
+    const gateway = await getDetailGateway()
+    const snapshot = await closeConversationTab({
+      instanceKey,
+      gateway,
+      conversationId: tab.conversationId,
+      origin: "mcode-mobile",
+    })
+    if (snapshot) {
+      applyDetailOpenedTabsState({
+        instanceKey,
+        version: snapshot.version,
+        items: snapshot.items,
+        origin: "mcode-mobile",
+      })
+      await refreshDetailTabTitles(instanceKey, snapshot.items)
+    }
+    if (targetConversationId > 0) {
+      await switchToDetailConversation(targetConversationId)
+      return
+    }
+    if (!isClosingActiveTab) {
+      reconcileDetailShellFromOpenedTabs({ loadConversation: false })
+      return
+    }
+    handleBackNavigation()
+  } catch (error) {
+    uni.showToast({
+      title: toErrorMessage(error, "关闭会话失败"),
+      icon: "none",
+    })
+  }
+}
+
 onLoad((options: any) => {
   conversationId.value = Number(options.id || 0)
   folderId.value = Number(options.folderId || 0)
@@ -1594,8 +2114,10 @@ onLoad((options: any) => {
     normalizeStoredConnectionLike(decodeConnectionContext(connectionKey))
   syncRouteAuthContext()
   if (conversationId.value) {
-    void loadDetailProjectEntries()
-    loadConversation()
+    void initializeDetailTabsShell().finally(() => {
+      void loadDetailProjectEntries()
+      void loadConversation()
+    })
   }
   hasLoadedOnce.value = true
 })
@@ -1605,6 +2127,7 @@ onShow(() => {
   if (!needsResumeRefresh.value) return
   needsResumeRefresh.value = false
   forceRemoteTurnReconcileOnLoad.value = true
+  void initializeDetailTabsShell()
   syncDetailBridgeHealth()
   syncLongWaitState()
   syncRouteAuthContext()
@@ -1639,6 +2162,7 @@ onHide(() => {
   clearLongWaitTimer()
   clearBridgeRecoveryTimer()
   clearStuckPromptTimer()
+  captureActiveDetailLocalState()
   persistDetailRuntimeState()
   needsResumeRefresh.value = true
   if (conversationId.value) {
@@ -1651,6 +2175,12 @@ onUnload(() => {
   clearLongWaitTimer()
   clearBridgeRecoveryTimer()
   clearStuckPromptTimer()
+  detailOpenedTabsUnsubscribe?.()
+  detailOverviewInvalidationUnsubscribe?.()
+  detailOpenedTabsUnsubscribe = null
+  detailOverviewInvalidationUnsubscribe = null
+  detailOpenedTabsInstanceKey = ""
+  detailOverviewInstanceKey = ""
   persistDetailRuntimeState()
   if (conversationId.value) {
     markConversationListDirty()
@@ -1794,6 +2324,7 @@ watch(
 watch(
   () => detailConnectionKey.value,
   (_, prev) => {
+    void initializeDetailTabsShell()
     if (prev !== undefined) {
       syncDetailBridgeHealth()
     } else {
@@ -2201,6 +2732,12 @@ async function loadConversation() {
 
 function syncConversationTitle(title?: string | null) {
   conversationTitle.value = firstString(title) || "未命名会话"
+  if (conversationId.value) {
+    detailTabTitleMap.value = {
+      ...detailTabTitleMap.value,
+      [conversationId.value]: conversationTitle.value,
+    }
+  }
   uni.setNavigationBarTitle({
     title: conversationTitle.value,
   })
@@ -2634,6 +3171,8 @@ function measureMessageListHeight() {
   const navbarHeight = getNavbarHeight()
   const query = uni.createSelectorQuery().in(instance)
   query
+    .select(".detail-tabs-bar")
+    .boundingClientRect()
     .select(".detail-toolbar")
     .boundingClientRect()
     .select(".shared-live-hint")
@@ -2645,13 +3184,15 @@ function measureMessageListHeight() {
     .select(".message-list__content")
     .boundingClientRect()
     .exec((rects: any[]) => {
-      const toolbarRect = rects?.[0]
-      const sharedHintRect = rects?.[1]
-      const historyStatusRect = rects?.[2]
-      const inputWrapRect = rects?.[3]
-      const contentRect = rects?.[4]
+      const tabsRect = rects?.[0]
+      const toolbarRect = rects?.[1]
+      const sharedHintRect = rects?.[2]
+      const historyStatusRect = rects?.[3]
+      const inputWrapRect = rects?.[4]
+      const contentRect = rects?.[5]
       const topHeight =
         navbarHeight +
+        Math.max(0, Number(tabsRect?.height || 0)) +
         Math.max(0, Number(toolbarRect?.height || 0)) +
         Math.max(0, Number(sharedHintRect?.height || 0)) +
         Math.max(0, Number(historyStatusRect?.height || 0))
@@ -2659,6 +3200,7 @@ function measureMessageListHeight() {
       if (topHeight > 0) {
         topChromeHeight.value = topHeight
       }
+      tabsBarHeight.value = Math.max(0, Number(tabsRect?.height || 0))
       toolbarHeight.value = Math.max(0, Number(toolbarRect?.height || 0))
       sharedHintHeight.value = 0
       if (bottomHeight > 0) {

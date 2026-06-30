@@ -41,9 +41,10 @@ describe("detailLayoutPresentation", () => {
 
     expect(buildHistoryStatusStyle({
       navbarHeight: 96,
+      tabsBarHeight: 52,
       toolbarHeight: 44,
     })).toEqual({
-      top: "140px",
+      top: "192px",
     })
   })
 })

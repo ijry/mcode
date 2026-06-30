@@ -31,9 +31,12 @@ export function buildTopOffsetStyle(topOffsetPx: number) {
 
 export function buildHistoryStatusStyle(input: {
   navbarHeight: number
+  tabsBarHeight?: number
   toolbarHeight: number
 }) {
   return buildTopOffsetStyle(
-    Math.max(0, Number(input.navbarHeight || 0)) + Math.max(0, Number(input.toolbarHeight || 0))
+    Math.max(0, Number(input.navbarHeight || 0))
+    + Math.max(0, Number(input.tabsBarHeight || 0))
+    + Math.max(0, Number(input.toolbarHeight || 0))
   )
 }
