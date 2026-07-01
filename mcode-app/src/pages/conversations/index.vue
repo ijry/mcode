@@ -69,18 +69,44 @@
               class="group-section"
             >
               <view class="group-section__header">
-                <text class="group-section__title">{{ group.name }}</text>
+                <view class="group-section__title-row">
+                  <text class="group-section__title">{{ group.name }}</text>
+                  <view
+                    v-if="group.loadError"
+                    class="group-section__error"
+                    @click.stop="showGroupError(group)"
+                  >
+                    <up-icon name="warning-fill" size="14" color="#fa3534"></up-icon>
+                  </view>
+                </view>
                 <view
-                  v-if="group.loadError"
-                  class="group-section__error"
-                  @click.stop="showGroupError(group)"
+                  v-if="!group.loadError"
+                  class="group-section__add"
+                  @click.stop="openAddProjectBrowser(group.key)"
                 >
-                  <up-icon name="warning-fill" size="14" color="#fa3534"></up-icon>
+                  <up-icon name="plus" size="13" :color="upThemeVar('--up-primary', '#2979ff')"></up-icon>
+                  <text class="group-section__add-text">项目</text>
                 </view>
               </view>
 
               <view class="group-section__cards">
-                <view v-if="group.cards.length === 0" class="group-empty">
+                <view
+                  v-if="group.cards.length === 0 && group.projects.length === 0 && !group.loadError"
+                  class="group-add-empty"
+                  :style="upThemeCardStyle"
+                  @click="openAddProjectBrowser(group.key)"
+                >
+                  <view class="group-add-empty__icon">
+                    <up-icon name="folder" size="22" :color="upThemeVar('--up-primary', '#2979ff')"></up-icon>
+                  </view>
+                  <view class="group-add-empty__copy">
+                    <text class="group-add-empty__title">添加文件夹</text>
+                    <text class="group-add-empty__text">选择这台连接上的目录，作为 MCode 项目使用。</text>
+                  </view>
+                  <up-icon name="arrow-right" size="13" :color="upThemeVar('--up-tips-color', '#909193')"></up-icon>
+                </view>
+
+                <view v-else-if="group.cards.length === 0" class="group-empty">
                   <text class="group-empty__text">
                     {{ group.loadError || "暂无打开中的标签会话" }}
                   </text>
@@ -122,7 +148,12 @@
                   </view>
                 </view>
 
-                <view class="live-card live-card--history" :style="upThemeCardStyle" @click="openHistoryPanel(group)">
+                <view
+                  v-if="group.projects.length > 0 || group.cards.length > 0"
+                  class="live-card live-card--history"
+                  :style="upThemeCardStyle"
+                  @click="openHistoryPanel(group)"
+                >
                   <view class="agent-logo agent-logo--history">
                     <up-icon name="clock" size="18" color="#2f7cf6"></up-icon>
                   </view>
@@ -462,6 +493,13 @@
       @close="showActionSheet = false"
     ></up-action-sheet>
 
+    <RemoteDirectoryBrowser
+      v-model:show="showDirectoryBrowser"
+      :gateway="directoryBrowserGateway"
+      title="添加项目文件夹"
+      @select="handleRemoteFolderSelected"
+    />
+
   </view>
 </template>
 
@@ -471,8 +509,10 @@ import { onPullDownRefresh, onShow, onUnload } from "@dcloudio/uni-app"
 import { useAuthStore } from "@/stores/auth"
 import { useConversationRuntimeStore } from "@/stores/conversationRuntime"
 import { acpApi } from "@/api/acp"
+import RemoteDirectoryBrowser from "@/components/remote/RemoteDirectoryBrowser.vue"
 import { getDirectToken } from "@/services/gateway/directTokenStore"
 import { toErrorMessage } from "@/services/gateway/error"
+import { openRemoteFolder } from "@/services/remoteDirectoryBrowser"
 import {
   getConversationOverviewConnections,
   hasConversationOverviewConnections,
@@ -548,6 +588,10 @@ const showCreateConfigDialog = ref(false)
 const showConnectionPicker = ref(false)
 const showProjectPicker = ref(false)
 const showActionSheet = ref(false)
+const showDirectoryBrowser = ref(false)
+const directoryBrowserGateway = ref<CodegGateway | null>(null)
+const directoryBrowserConnectionKey = ref("")
+const addingProject = ref(false)
 const selectedConnectionKey = ref("")
 const selectedConnectionName = ref("")
 const selectedProjectId = ref<number>(0)
@@ -2011,6 +2055,54 @@ function showGroupError(group: ConnectionGroup) {
   })
 }
 
+async function openAddProjectBrowser(groupKey: string) {
+  if (addingProject.value) return
+  const conn = findConnectedConnectionByKey(groupKey)
+  if (!conn) {
+    uni.showToast({ title: "连接不存在或已断开", icon: "none" })
+    return
+  }
+  try {
+    const gateway = await createConnectionGateway(conn)
+    directoryBrowserGateway.value = gateway
+    directoryBrowserConnectionKey.value = groupKey
+    showDirectoryBrowser.value = true
+  } catch (error) {
+    uni.showToast({ title: toErrorMessage(error), icon: "none", duration: 3000 })
+  }
+}
+
+async function handleRemoteFolderSelected(path: string) {
+  const gateway = directoryBrowserGateway.value
+  const groupKey = directoryBrowserConnectionKey.value
+  if (!gateway || !groupKey || addingProject.value) {
+    return
+  }
+  addingProject.value = true
+  try {
+    await openRemoteFolder(gateway, path)
+    showDirectoryBrowser.value = false
+    const conn = findConnectedConnectionByKey(groupKey)
+    const current = connectionGroups.value.find(
+      (group) => group.key === groupKey
+    )
+    if (conn && current) {
+      await refreshConnectionGroupFromRemote(conn, current)
+    } else {
+      await loadOverviewData({ force: true })
+    }
+    uni.showToast({ title: "已添加项目", icon: "success" })
+  } catch (error) {
+    uni.showToast({ title: toErrorMessage(error), icon: "none", duration: 3000 })
+  } finally {
+    addingProject.value = false
+    if (!showDirectoryBrowser.value) {
+      directoryBrowserConnectionKey.value = ""
+      directoryBrowserGateway.value = null
+    }
+  }
+}
+
 function selectAgent(agentType: string) {
   selectedAgentType.value = normalizeAgentType(agentType)
   persistSelectedAgentType(selectedConnectionKey.value, selectedAgentType.value)
@@ -2488,9 +2580,17 @@ function formatTime(time?: string): string {
 .group-section__header {
   display: flex;
   align-items: center;
-  gap: 8rpx;
+  justify-content: space-between;
+  gap: 12rpx;
   margin-bottom: 12rpx;
   padding: 0 8rpx;
+}
+
+.group-section__title-row {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
 }
 
 .group-section__title {
@@ -2513,6 +2613,22 @@ function formatTime(time?: string): string {
   background: color-mix(in srgb, var(--up-error, #fa3534) 10%, var(--up-card-bg-color, #ffffff) 90%);
 }
 
+.group-section__add {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6rpx;
+  padding: 8rpx 12rpx;
+  border-radius: 999rpx;
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 9%, var(--up-card-bg-color, #ffffff) 91%);
+}
+
+.group-section__add-text {
+  font-size: 22rpx;
+  font-weight: 700;
+  color: var(--up-primary, #2979ff);
+}
+
 .group-section__cards {
   display: flex;
   flex-direction: column;
@@ -2526,6 +2642,48 @@ function formatTime(time?: string): string {
 .group-empty__text {
   font-size: 22rpx;
   color: var(--up-tips-color, #909193);
+}
+
+.group-add-empty {
+  display: flex;
+  align-items: center;
+  gap: 18rpx;
+  padding: 24rpx 22rpx;
+  border-radius: 32rpx;
+  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 45%, transparent) !important;
+  border: 1rpx solid rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(30rpx);
+  -webkit-backdrop-filter: blur(30rpx);
+}
+
+.group-add-empty__icon {
+  width: 62rpx;
+  height: 62rpx;
+  border-radius: 20rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 10%, var(--up-card-bg-color, #ffffff) 90%);
+}
+
+.group-add-empty__copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+}
+
+.group-add-empty__title {
+  font-size: 28rpx;
+  font-weight: 700;
+  color: var(--up-main-color, #303133);
+}
+
+.group-add-empty__text {
+  font-size: 23rpx;
+  line-height: 1.4;
+  color: var(--up-content-color, #606266);
 }
 
 .live-card {

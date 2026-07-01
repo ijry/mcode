@@ -9,8 +9,14 @@
             查看当前连接下的项目，以及每个项目的全部会话数和正在进行中的会话数。
           </text>
         </view>
-        <view class="project-header__badge">
-          <text class="project-header__badge-text">{{ projectItems.length }} 个项目</text>
+        <view class="project-header__actions">
+          <view class="project-header__add" @click="openAddProjectBrowser">
+            <up-icon name="plus" size="14" :color="upThemeVar('--up-primary', '#2979ff')"></up-icon>
+            <text class="project-header__add-text">添加项目</text>
+          </view>
+          <view class="project-header__badge">
+            <text class="project-header__badge-text">{{ projectItems.length }} 个项目</text>
+          </view>
         </view>
       </view>
 
@@ -27,9 +33,20 @@
         </view>
       </view>
 
-      <view v-else-if="projectItems.length === 0" class="project-state" :style="upThemeCardStyle">
-        <text class="project-state__title">暂无项目</text>
-        <text class="project-state__text">当前连接还没有可打开的项目。</text>
+      <view
+        v-else-if="projectItems.length === 0"
+        class="project-state project-state--add"
+        :style="upThemeCardStyle"
+        @click="openAddProjectBrowser"
+      >
+        <view class="project-state__folder">
+          <up-icon name="folder" size="26" :color="upThemeVar('--up-primary', '#2979ff')"></up-icon>
+        </view>
+        <text class="project-state__title">添加文件夹</text>
+        <text class="project-state__text">当前连接还没有项目。选择远端目录后即可创建会话。</text>
+        <view class="project-state__action">
+          <text>选择文件夹</text>
+        </view>
       </view>
 
       <view v-else class="project-list">
@@ -70,6 +87,13 @@
         @select="handleProjectActionSelect"
         @close="showProjectActionSheet = false"
       ></u-action-sheet>
+
+      <RemoteDirectoryBrowser
+        v-model:show="showDirectoryBrowser"
+        :gateway="directoryBrowserGateway"
+        title="添加项目文件夹"
+        @select="handleRemoteFolderSelected"
+      />
     </view>
   </view>
 </template>
@@ -77,6 +101,7 @@
 <script setup lang="ts">
 import { computed, getCurrentInstance, ref } from "vue"
 import { onLoad, onPullDownRefresh } from "@dcloudio/uni-app"
+import RemoteDirectoryBrowser from "@/components/remote/RemoteDirectoryBrowser.vue"
 import {
   decodeConnectionContext,
   findStoredConnectionById,
@@ -90,17 +115,24 @@ import {
   type ProjectListItem,
 } from "@/services/projectSessions"
 import { buildProjectGitRoute } from "@/services/projectGit"
+import type { CodegGateway } from "@/services/gateway"
+import { openRemoteFolder } from "@/services/remoteDirectoryBrowser"
 
 const currentInstance = getCurrentInstance()
 const upThemeVars = computed(() => currentInstance?.proxy?.upThemeVars || {})
 const upThemePageStyle = computed(() => currentInstance?.proxy?.upThemePageStyle || {})
 const upThemeCardStyle = computed(() => currentInstance?.proxy?.upThemeCardStyle || {})
+const upThemeVar = (varName: string, fallbackColor?: string) =>
+  currentInstance?.proxy?.upThemeVar?.(varName, fallbackColor) ?? (fallbackColor || "")
 
 const loading = ref(false)
 const errorMessage = ref("")
 const projectItems = ref<ProjectListItem[]>([])
 const connection = ref<ConnectionContext | null>(null)
 const showProjectActionSheet = ref(false)
+const showDirectoryBrowser = ref(false)
+const directoryBrowserGateway = ref<CodegGateway | null>(null)
+const addingProject = ref(false)
 const currentProjectAction = ref<ProjectListItem | null>(null)
 
 const connectionName = computed(() => connection.value?.name || "项目列表")
@@ -143,10 +175,11 @@ async function loadPage(stopPullDown = false) {
 }
 
 function openProjectSessions(item: ProjectListItem) {
-  if (!connection.value) return
+  const connectionId = getCurrentConnectionId()
+  if (!connectionId) return
   const title = encodeURIComponent(item.name)
   uni.navigateTo({
-    url: `/pages/sessions/index?connectionId=${encodeURIComponent(connection.value.id)}&folderId=${item.id}&projectName=${title}`,
+    url: `/pages/sessions/index?connectionId=${encodeURIComponent(connectionId)}&folderId=${item.id}&projectName=${title}`,
   })
 }
 
@@ -158,10 +191,11 @@ function openProjectActionSheet(item: ProjectListItem) {
 function handleProjectActionSelect() {
   const item = currentProjectAction.value
   showProjectActionSheet.value = false
-  if (!item || !connection.value) return
+  const connectionId = getCurrentConnectionId()
+  if (!item || !connectionId) return
   uni.navigateTo({
     url: buildProjectGitRoute({
-      connectionId: connection.value.id,
+      connectionId,
       folderId: item.id,
       projectName: item.name,
       projectPath: item.path,
@@ -171,6 +205,45 @@ function handleProjectActionSelect() {
 
 function retryLoadPage() {
   void loadPage()
+}
+
+function getCurrentConnectionId() {
+  const connectionId = String(connection.value?.id || "").trim()
+  if (!connectionId) {
+    uni.showToast({ title: "缺少连接信息，请返回连接页重试。", icon: "none" })
+  }
+  return connectionId
+}
+
+async function openAddProjectBrowser() {
+  if (!connection.value) {
+    errorMessage.value = "缺少连接信息，请返回连接页重试。"
+    return
+  }
+  try {
+    const resolved = await resolveConnectionContext(connection.value)
+    connection.value = resolved.connection
+    persistResolvedConnection(resolved.connection)
+    directoryBrowserGateway.value = resolved.gateway
+    showDirectoryBrowser.value = true
+  } catch (error) {
+    uni.showToast({ title: toErrorMessage(error), icon: "none", duration: 3000 })
+  }
+}
+
+async function handleRemoteFolderSelected(path: string) {
+  if (!directoryBrowserGateway.value || addingProject.value) return
+  addingProject.value = true
+  try {
+    await openRemoteFolder(directoryBrowserGateway.value, path)
+    showDirectoryBrowser.value = false
+    await loadPage()
+    uni.showToast({ title: "已添加项目", icon: "success" })
+  } catch (error) {
+    uni.showToast({ title: toErrorMessage(error), icon: "none", duration: 3000 })
+  } finally {
+    addingProject.value = false
+  }
 }
 
 function toErrorMessage(error: unknown) {
@@ -252,6 +325,29 @@ function toErrorMessage(error: unknown) {
   padding: 14rpx 18rpx;
   border-radius: 999rpx;
   background: rgba(41, 121, 255, 0.12);
+}
+
+.project-header__actions {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12rpx;
+}
+
+.project-header__add {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  padding: 14rpx 18rpx;
+  border-radius: 999rpx;
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 10%, var(--up-card-bg-color, #ffffff) 90%);
+}
+
+.project-header__add-text {
+  font-size: 22rpx;
+  font-weight: 700;
+  color: var(--up-primary, #2979ff);
 }
 
 .project-header__badge-text {
@@ -351,6 +447,20 @@ function toErrorMessage(error: unknown) {
 
 .project-state--error {
   align-items: stretch;
+}
+
+.project-state--add {
+  cursor: pointer;
+}
+
+.project-state__folder {
+  width: 82rpx;
+  height: 82rpx;
+  border-radius: 26rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 10%, var(--up-card-bg-color, #ffffff) 90%);
 }
 
 .project-state__action {
