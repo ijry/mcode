@@ -1,8 +1,8 @@
-# App 添加文件夹项目
+# P45 App 添加文件夹项目
 
 ## 背景
 
-MCode App 已能通过 `list_open_folder_details` 读取连接下的项目，但缺少移动端添加文件夹入口。`codeg-main` 已有远端文件系统浏览协议；`mcode-desktop` 当前没有同名 proxy 命令，因此本次设计要求 App 复用同一协议，并在 desktop 端补齐轻量项目注册能力。
+P45 让 MCode App 支持把文件夹添加为项目。MCode App 已能通过 `list_open_folder_details` 读取连接下的项目，但缺少移动端添加文件夹入口。`codeg-main` 已有远端文件系统浏览协议；`mcode-desktop` 当前没有同名 proxy 命令，因此本次设计要求 App 复用同一协议，并在 desktop 端补齐轻量项目注册能力。
 
 ## 架构
 

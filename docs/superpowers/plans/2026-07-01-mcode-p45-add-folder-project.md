@@ -1,8 +1,8 @@
-# MCode Add Folder Project Implementation Plan
+# MCode P45 Add Folder Project Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Let MCode App add folders as projects for both `codeg-main` and `mcode-desktop` connections through a host-backed directory browser.
+**Goal:** P45 lets MCode App add folders as projects for both `codeg-main` and `mcode-desktop` connections through a host-backed directory browser.
 
 **Architecture:** Reuse `codeg-main` command names in the App and add the missing runtime-agnostic proxy commands to `mcode-desktop`. Desktop stores opened folders in its existing recovery snapshot, while the App adds a reusable remote directory browser and refreshes only the affected connection group after `open_folder`.
 
@@ -35,7 +35,7 @@
 - Create `mcode-app/src/components/remote/RemoteDirectoryBrowser.vue`: reusable uview popup for host-backed directory browsing.
 - Modify `mcode-app/src/pages/conversations/index.vue`: add connection-group add-project entry, zero-project empty card, browser popup, and refresh flow.
 - Modify `mcode-app/src/pages/projects/index.vue`: add project-page add action and reusable browser.
-- Update `docs/mcode-architecture-notes/2026-07-01-app-add-folder-project.md`: record final command support, including `list_opened_tabs` desktop compatibility.
+- Update `docs/mcode-architecture-notes/2026-07-01-p45-app-add-folder-project.md`: record final command support, including `list_opened_tabs` desktop compatibility.
 
 ---
 
@@ -1148,7 +1148,7 @@ git commit -m "feat(app): add remote directory browser component"
 **Files:**
 - Modify: `mcode-app/src/pages/conversations/index.vue`
 - Modify: `mcode-app/src/pages/projects/index.vue`
-- Modify: `docs/mcode-architecture-notes/2026-07-01-app-add-folder-project.md`
+- Modify: `docs/mcode-architecture-notes/2026-07-01-p45-app-add-folder-project.md`
 
 **Interfaces:**
 - Consumes: `RemoteDirectoryBrowser`, `openRemoteFolder`, `CodegGateway`.
@@ -1517,7 +1517,7 @@ Add project-page styles:
 
 - [ ] **Step 5: Update architecture note**
 
-Append to `docs/mcode-architecture-notes/2026-07-01-app-add-folder-project.md` under Desktop behavior:
+Append to `docs/mcode-architecture-notes/2026-07-01-p45-app-add-folder-project.md` under Desktop behavior:
 
 ```markdown
 - `list_opened_tabs`：desktop 在本阶段返回 `{ version: 0, items: [] }`，用于兼容 App 会话总览现有加载链路。否则 0 项目连接添加文件夹后仍会因为缺少打开标签协议显示连接错误。
@@ -1540,7 +1540,7 @@ Expected: PASS.
 Run:
 
 ```powershell
-git add -- mcode-app/src/pages/conversations/index.vue mcode-app/src/pages/projects/index.vue docs/mcode-architecture-notes/2026-07-01-app-add-folder-project.md
+git add -- mcode-app/src/pages/conversations/index.vue mcode-app/src/pages/projects/index.vue docs/mcode-architecture-notes/2026-07-01-p45-app-add-folder-project.md
 git commit -m "feat(app): add folder project entry points"
 ```
 

@@ -1,8 +1,8 @@
-# MCode Add Folder Project Design
+# MCode P45 Add Folder Project Design
 
 ## Goal
 
-Support adding folders as projects from MCode App, including connections backed by `mcode-desktop`. The mobile app should let users browse the connected machine filesystem, select a folder, register it as a project, and immediately use it in the existing session and project flows.
+P45 supports adding folders as projects from MCode App, including connections backed by `mcode-desktop`. The mobile app should let users browse the connected machine filesystem, select a folder, register it as a project, and immediately use it in the existing session and project flows.
 
 ## Problem
 
