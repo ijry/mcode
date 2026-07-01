@@ -3,6 +3,8 @@ import {
   buildMessageListContentStyle,
   buildMessageListPageStyle,
   buildTopOffsetStyle,
+  resolveDetailShellViewportHeight,
+  resolveBottomComposerHeight,
 } from "@/pages/conversation-detail/detailLayoutPresentation"
 
 describe("detailLayoutPresentation", () => {
@@ -50,6 +52,40 @@ describe("detailLayoutPresentation", () => {
       paddingBottom: "180px",
     })
     expect(buildMessageListContentStyle(0)).toBeUndefined()
+  })
+
+  it("subtracts navbar placeholder from the shell viewport when it is in document flow", () => {
+    expect(resolveDetailShellViewportHeight({
+      windowHeight: 900,
+      navbarHeight: 88,
+      hasNavbarPlaceholder: true,
+    })).toBe(812)
+
+    expect(resolveDetailShellViewportHeight({
+      windowHeight: 900,
+      navbarHeight: 88,
+      hasNavbarPlaceholder: false,
+    })).toBe(900)
+  })
+
+  it("prefers measured composer stack height for bottom scroll padding", () => {
+    expect(resolveBottomComposerHeight({
+      composerStackHeight: 142,
+      inputStatusHeight: 20,
+      inputMainHeight: 72,
+      inputToolHeight: 64,
+      bottomOffset: 6,
+    })).toBe(148)
+  })
+
+  it("falls back to row measurements when the composer stack is unavailable", () => {
+    expect(resolveBottomComposerHeight({
+      composerStackHeight: 0,
+      inputStatusHeight: 20,
+      inputMainHeight: 72,
+      inputToolHeight: 64,
+      fallbackGap: 36,
+    })).toBe(192)
   })
 
   it("builds top offset and history status styles", () => {

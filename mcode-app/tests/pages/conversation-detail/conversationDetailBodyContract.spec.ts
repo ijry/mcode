@@ -10,6 +10,7 @@ describe("ConversationDetailBody", () => {
 
     expect(source).toContain('class="detail-body"')
     expect(source).toContain('class="message-list"')
+    expect(source).toContain("<scroll-view")
     expect(source).toContain('class="message-list__content" :style="messageListContentStyle"')
     expect(source).toContain('class="composer-stack"')
     expect(source).toContain('class="input-status-wrap"')
@@ -93,9 +94,53 @@ describe("ConversationDetailBody", () => {
 
     expect(source).toContain("detail-shell__page--active")
     expect(source).toContain('.select(".detail-shell__page--active .input-status-row")')
+    expect(source).toContain('.select(".detail-shell__page--active .composer-stack")')
     expect(source).toContain('.select(".detail-shell__page--active .input-main-row")')
     expect(source).toContain('.select(".detail-shell__page--active .input-tool-row")')
     expect(source).toContain('.select(".detail-shell__page--active .message-list__content")')
+  })
+
+  it("subtracts the navbar placeholder from the swiper shell height", () => {
+    const source = fs.readFileSync(
+      path.resolve(__dirname, "../../../src/pages/conversation-detail/index.vue"),
+      "utf8"
+    )
+
+    expect(source).toContain("resolveDetailShellViewportHeight")
+    expect(source).toContain("hasNavbarPlaceholder: true")
+    expect(source).not.toContain("const height = Math.max(0, viewportHeight.value || getDetailViewportHeight())")
+  })
+
+  it("does not add safe-area padding to the bottom scroll anchor", () => {
+    const source = fs.readFileSync(
+      path.resolve(__dirname, "../../../src/pages/conversation-detail/index.scss"),
+      "utf8"
+    )
+
+    expect(source).toMatch(/\.list-bottom\s*\{\s*height:\s*34rpx;\s*\}/)
+  })
+
+  it("locks the outer detail page so only the message scroll-view scrolls", () => {
+    const source = fs.readFileSync(
+      path.resolve(__dirname, "../../../src/pages/conversation-detail/index.scss"),
+      "utf8"
+    )
+
+    expect(source).toMatch(/\.page\s*\{[\s\S]*height:\s*100%;[\s\S]*overflow:\s*hidden;[\s\S]*overscroll-behavior:\s*none;/)
+    expect(source).toMatch(/\.detail-container\s*\{[\s\S]*position:\s*fixed;[\s\S]*inset:\s*0;[\s\S]*overflow:\s*hidden;[\s\S]*overscroll-behavior:\s*none;/)
+  })
+
+  it("keeps per-tab scrolling inside the detail body scroll-view", () => {
+    const source = fs.readFileSync(
+      path.resolve(__dirname, "../../../src/pages/conversation-detail/index.vue"),
+      "utf8"
+    )
+
+    expect(source).not.toContain("onPageScroll")
+    expect(source).not.toContain("uni.pageScrollTo")
+    expect(source).not.toContain("visualViewport")
+    expect(source).toContain("messageScrollTop.value = Number.MAX_SAFE_INTEGER")
+    expect(source).toContain("messageScrollIntoView.value = getBottomAnchorId()")
   })
 
   it("keeps the interactive pane capable of sending attachments", () => {
@@ -109,5 +154,15 @@ describe("ConversationDetailBody", () => {
     expect(source).toContain("handleChooseFiles")
     expect(source).toContain("uploadPickedFiles")
     expect(source).toContain("prepareDraftForSend")
+  })
+
+  it("resyncs layout when interactive composer chrome changes height", () => {
+    const source = fs.readFileSync(
+      path.resolve(__dirname, "../../../src/pages/conversation-detail/ConversationDetailInteractivePane.vue"),
+      "utf8"
+    )
+
+    expect(source).toMatch(/function toggleInputToolRow\(\)[\s\S]*scheduleViewportSync\(\)/)
+    expect(source).toMatch(/function toggleComposerPanel\([\s\S]*scheduleViewportSync\(\)/)
   })
 })

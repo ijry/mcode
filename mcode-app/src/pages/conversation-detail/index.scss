@@ -1,4 +1,5 @@
 .page {
+  height: 100%;
   min-height: 100%;
   padding: 0 !important;
   display: flex;
@@ -7,7 +8,8 @@
     radial-gradient(circle at top right, color-mix(in srgb, var(--up-primary, #2979ff) 16%, transparent 84%) 0, transparent 34%),
     radial-gradient(circle at bottom left, color-mix(in srgb, var(--up-primary, #2979ff) 10%, transparent 90%) 0, transparent 38%),
     var(--up-page-bg-color, var(--up-bg-color, #f3f4f6));
-  overflow: visible;
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 .loading-container,
@@ -19,10 +21,14 @@
 }
 
 .detail-container {
-  min-height: 100vh;
+  position: fixed;
+  inset: 0;
+  height: 100%;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  overflow: visible;
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 .detail-atmosphere {
@@ -805,7 +811,7 @@
 }
 
 .list-bottom {
-  height: calc(34rpx + env(safe-area-inset-bottom));
+  height: 34rpx;
 }
 
 .permission-card {

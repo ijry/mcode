@@ -796,6 +796,7 @@ function toggleInputToolRow() {
   if (!toolRowExpanded.value) {
     composerPanelMode.value = ""
   }
+  scheduleViewportSync()
 }
 
 function toggleComposerPanel(mode: "" | "quick_reply") {
@@ -804,6 +805,7 @@ function toggleComposerPanel(mode: "" | "quick_reply") {
   if (!composerPanelMode.value) {
     toolRowExpanded.value = false
   }
+  scheduleViewportSync()
 }
 
 function createDraftFromComposer(): QueuedDraft | null {

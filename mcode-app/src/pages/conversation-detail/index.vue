@@ -1076,6 +1076,8 @@ import {
   buildMessageListContentStyle,
   buildMessageListPageStyle,
   buildTopOffsetStyle,
+  resolveDetailShellViewportHeight,
+  resolveBottomComposerHeight,
 } from "./detailLayoutPresentation"
 import {
   activeModelStatusLabel as resolveActiveModelStatusLabel,
@@ -1209,7 +1211,7 @@ const messageScrollIntoView = ref("")
 const messageScrollWithAnimation = ref(false)
 const topChromeHeight = ref(0)
 const bottomComposerHeight = ref(0)
-const viewportHeight = ref(0)
+const detailViewportHeight = ref(0)
 const toolbarHeight = ref(DEFAULT_DETAIL_TOOLBAR_HEIGHT)
 const tabsBarHeight = ref(DEFAULT_DETAIL_TABS_BAR_HEIGHT)
 const sharedHintHeight = ref(0)
@@ -1332,7 +1334,7 @@ const messageListPageStyle = computed(() => {
     Math.max(0, Number(tabsBarHeight.value || DEFAULT_DETAIL_TABS_BAR_HEIGHT)) +
     Math.max(0, Number(toolbarHeight.value || DEFAULT_DETAIL_TOOLBAR_HEIGHT))
   return buildMessageListPageStyle({
-    viewportHeight: viewportHeight.value || getDetailViewportHeight(),
+    viewportHeight: detailViewportHeight.value || getDetailViewportHeight(),
     topChromeHeight: Math.max(topChromeHeight.value, fallbackTopHeight),
     bottomComposerHeight: effectiveBottomComposerHeight.value,
   })
@@ -1345,7 +1347,11 @@ const messageListContentStyle = computed(() =>
 )
 const detailTabsBarStyle = computed(() => buildTopOffsetStyle(getNavbarHeight()))
 const detailShellViewportStyle = computed(() => {
-  const height = Math.max(0, viewportHeight.value || getDetailViewportHeight())
+  const height = resolveDetailShellViewportHeight({
+    windowHeight: getViewportHeight(),
+    navbarHeight: getNavbarHeight(),
+    hasNavbarPlaceholder: true,
+  })
   return {
     height: `${height}px`,
     minHeight: `${height}px`,
@@ -3436,8 +3442,8 @@ function ensureHistoryCursorFromLoadedMessages() {
 function measureMessageListHeight() {
   const instance = currentInstance?.proxy
   if (!instance) return
-  const detailViewportHeight = getDetailViewportHeight()
-  viewportHeight.value = detailViewportHeight
+  const currentDetailViewportHeight = getDetailViewportHeight()
+  detailViewportHeight.value = currentDetailViewportHeight
   const fallbackTabsHeight = Math.max(0, Number(tabsBarHeight.value || 0))
   const fallbackToolbarHeight = Math.max(0, Number(toolbarHeight.value || 0))
   const fallbackTopHeight = fallbackTabsHeight + fallbackToolbarHeight
@@ -3451,6 +3457,8 @@ function measureMessageListHeight() {
     .boundingClientRect()
     .select(".history-status")
     .boundingClientRect()
+    .select(".detail-shell__page--active .composer-stack")
+    .boundingClientRect()
     .select(".detail-shell__page--active .input-main-row")
     .boundingClientRect()
     .select(".detail-shell__page--active .input-tool-row")
@@ -3462,22 +3470,33 @@ function measureMessageListHeight() {
       const inputStatusRect = rects?.[1]
       const sharedHintRect = rects?.[2]
       const historyStatusRect = rects?.[3]
-      const inputMainRect = rects?.[4]
-      const inputToolRect = rects?.[5]
-      const contentRect = rects?.[6]
+      const composerStackRect = rects?.[4]
+      const inputMainRect = rects?.[5]
+      const inputToolRect = rects?.[6]
+      const contentRect = rects?.[7]
       const measuredTabsHeight = Math.max(0, Number(tabsRect?.height || 0))
       const measuredToolbarHeight = 0
       const measuredInputStatusHeight = Math.max(0, Number(inputStatusRect?.height || 0))
+      const measuredComposerStackHeight = Math.max(0, Number(composerStackRect?.height || 0))
+      const measuredComposerStackBottom = Math.max(0, Number(composerStackRect?.bottom || 0))
+      const measuredComposerBottomOffset =
+        measuredComposerStackHeight > 0 && measuredComposerStackBottom > 0
+          ? Math.max(0, getViewportHeight() - measuredComposerStackBottom)
+          : undefined
+      const measuredInputMainHeight = Math.max(0, Number(inputMainRect?.height || 0))
+      const measuredInputToolHeight = Math.max(0, Number(inputToolRect?.height || 0))
       const topHeight =
         measuredTabsHeight +
         measuredToolbarHeight +
         Math.max(0, Number(sharedHintRect?.height || 0)) +
         Math.max(0, Number(historyStatusRect?.height || 0))
-      const bottomHeight =
-        measuredInputStatusHeight +
-        Math.max(0, Number(inputMainRect?.height || 0)) +
-        Math.max(0, Number(inputToolRect?.height || 0)) +
-        36
+      const bottomHeight = resolveBottomComposerHeight({
+        composerStackHeight: measuredComposerStackHeight,
+        inputStatusHeight: measuredInputStatusHeight,
+        inputMainHeight: measuredInputMainHeight,
+        inputToolHeight: measuredInputToolHeight,
+        bottomOffset: measuredComposerBottomOffset,
+      })
       if (measuredTabsHeight > 0) {
         tabsBarHeight.value = measuredTabsHeight
       }
@@ -3494,14 +3513,14 @@ function measureMessageListHeight() {
       const contentHeight = Math.max(0, Number(contentRect?.height || 0))
       const effectiveTopHeight = topHeight > 0 ? topHeight : fallbackTopHeight
       const effectiveBottomHeight = bottomHeight > 0 ? bottomHeight : bottomComposerHeight.value
-      const availableHeight = Math.max(0, detailViewportHeight - effectiveTopHeight - effectiveBottomHeight)
+      const availableHeight = Math.max(0, currentDetailViewportHeight - effectiveTopHeight - effectiveBottomHeight)
       measuredPageHeight.value = Math.max(
-        detailViewportHeight,
+        currentDetailViewportHeight,
         effectiveTopHeight + effectiveBottomHeight + Math.max(contentHeight, availableHeight)
       )
       if (availableHeight > 0) {
         detailDebugLog("message-list-height", {
-          detailViewportHeight,
+          detailViewportHeight: currentDetailViewportHeight,
           topHeight: effectiveTopHeight,
           bottomHeight: effectiveBottomHeight,
           contentHeight,
@@ -3509,8 +3528,10 @@ function measureMessageListHeight() {
           measuredTabsHeight,
           measuredToolbarHeight,
           measuredInputStatusHeight,
-          measuredInputMainHeight: Math.max(0, Number(inputMainRect?.height || 0)),
-          measuredInputToolHeight: Math.max(0, Number(inputToolRect?.height || 0)),
+          measuredComposerStackHeight,
+          measuredComposerBottomOffset,
+          measuredInputMainHeight,
+          measuredInputToolHeight,
           activeDetailTabIndex: activeDetailTabIndex.value,
           detailSwiperCurrent: detailSwiperCurrent.value,
           mountedDetailConversationIds: Array.from(mountedDetailConversationIds.value),
