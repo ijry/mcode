@@ -823,6 +823,9 @@ export function TabProvider({ children }: TabProviderProps) {
                 tb.conversationId === it.conversation_id &&
                 tb.folderId === it.folder_id &&
                 tb.agentType === it.agent_type
+            ) ??
+            prev.rawTabs.find(
+              (tb) => tb.conversationId === it.conversation_id
             )
           return {
             id: existing?.id ?? canonicalId,
