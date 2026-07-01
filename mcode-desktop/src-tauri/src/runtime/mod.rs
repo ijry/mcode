@@ -18,6 +18,7 @@ use tokio::sync::oneshot;
 use uuid::Uuid;
 
 use crate::app_state::{AppState, CliInteractionWaiter, HostedActiveTurn};
+use crate::folders::dispatch_folder_proxy;
 
 pub const CAPABILITY_CODEX_CLI: &str = "desktop.runtime.codex-cli";
 pub const CAPABILITY_CLAUDE_CLI: &str = "desktop.runtime.claude-cli";
@@ -335,6 +336,12 @@ pub async fn dispatch_desktop_proxy_with_event_sink(
         "acp_respond_permission" => respond_permission(state, payload),
         "acp_respond_question" => respond_question(state, payload),
         "acp_prompt" => dispatch_prompt_with_state(state, payload, event_sink).await,
+        "get_home_directory"
+        | "list_directory_entries"
+        | "open_folder"
+        | "list_open_folder_details"
+        | "list_opened_tabs"
+        | "list_all_conversations" => dispatch_folder_proxy(state, command, payload).await,
         _ => Err(anyhow!("unsupported desktop proxy command: {command}")),
     }
 }

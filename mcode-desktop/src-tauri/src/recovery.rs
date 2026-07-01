@@ -6,7 +6,7 @@ use std::sync::atomic::Ordering;
 use anyhow::Result;
 use serde_json::Value;
 
-use crate::app_state::{AppState, DiagnosticEntry, GatewayConfig};
+use crate::app_state::{AppState, DesktopOpenFolder, DiagnosticEntry, GatewayConfig};
 use crate::runtime::{
     persistent_queued_prompts, restore_persistent_queued_prompts, CliPendingInteraction,
     CliRuntimeSession, CliSessionStatus, PersistentQueuedPrompt,
@@ -44,6 +44,8 @@ pub struct DesktopRecoverySnapshot {
     pub gateway_config: Option<GatewayConfig>,
     pub relay_url: Option<String>,
     pub local_services: Vec<LocalServiceConfig>,
+    #[serde(default)]
+    pub open_folders: Vec<DesktopOpenFolder>,
     pub last_ack_local_event_id: Option<u64>,
     pub last_relay_event_id: Option<u64>,
     pub queued_outbound_events: Vec<QueuedOutboundEvent>,
@@ -200,6 +202,11 @@ pub fn build_recovery_snapshot(state: &AppState) -> Result<DesktopRecoverySnapsh
             .read()
             .map(|value| value.clone())
             .unwrap_or_default(),
+        open_folders: state
+            .open_folders
+            .read()
+            .map(|value| value.clone())
+            .unwrap_or_default(),
         last_ack_local_event_id,
         last_relay_event_id,
         queued_outbound_events: queue.map(|queue| queue.pending()).unwrap_or_default(),
@@ -240,6 +247,9 @@ pub fn apply_recovery_snapshot(
     }
     if let Ok(mut services) = state.local_services.write() {
         *services = snapshot.local_services;
+    }
+    if let Ok(mut open_folders) = state.open_folders.write() {
+        *open_folders = snapshot.open_folders;
     }
     if let Ok(mut last_ack) = state.last_ack_local_event_id.write() {
         *last_ack = snapshot.last_ack_local_event_id;

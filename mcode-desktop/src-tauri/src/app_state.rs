@@ -57,6 +57,16 @@ pub struct DiagnosticEntry {
     pub created_at_ms: u64,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopOpenFolder {
+    pub id: i32,
+    pub name: String,
+    pub path: String,
+    pub opened_at_ms: u64,
+    pub updated_at_ms: u64,
+}
+
 pub struct CliProcessControl {
     pub request_id: Option<String>,
     pub started_at_ms: u64,
@@ -126,6 +136,7 @@ pub struct AppState {
     pub display_name: RwLock<String>,
     pub diagnostics: RwLock<Vec<DiagnosticEntry>>,
     pub local_services: RwLock<Vec<LocalServiceConfig>>,
+    pub open_folders: RwLock<Vec<DesktopOpenFolder>>,
     pub upstream_reconnect_attempt: RwLock<u32>,
     pub upstream_next_retry_delay_ms: RwLock<Option<u64>>,
     pub last_ack_event_id: RwLock<Option<u64>>,
@@ -185,6 +196,7 @@ impl Default for AppState {
             display_name: RwLock::new("MCode Desktop".to_string()),
             diagnostics: RwLock::new(Vec::new()),
             local_services: RwLock::new(vec![default_code_service()]),
+            open_folders: RwLock::new(Vec::new()),
             upstream_reconnect_attempt: RwLock::new(0),
             upstream_next_retry_delay_ms: RwLock::new(None),
             last_ack_event_id: RwLock::new(None),

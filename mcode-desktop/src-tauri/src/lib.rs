@@ -1,6 +1,7 @@
 pub mod app_state;
 pub mod bridge;
 pub mod commands;
+pub mod folders;
 pub mod gateway;
 pub mod health;
 pub mod pairing;
