@@ -77,76 +77,9 @@
         </up-tabs>
       </view>
 
-      <view class="detail-toolbar" :style="[upThemeCardStyle, detailToolbarStyle]">
-        <view class="detail-toolbar__status">
-          <view class="runtime-dot" :class="`runtime-dot--${runtimeStatusClass}`"></view>
-          <view class="detail-toolbar__status-copy">
-            <swiper
-              class="detail-toolbar__status-swiper"
-              vertical
-              circular
-              autoplay
-              :interval="2800"
-              :duration="280"
-              :disable-touch="toolbarNoticeItems.length <= 1"
-            >
-              <swiper-item
-                v-for="item in toolbarNoticeItems"
-                :key="item.key"
-                class="detail-toolbar__status-swiper-item"
-              >
-                <text class="detail-toolbar__status-text">{{ item.text }}</text>
-              </swiper-item>
-            </swiper>
-          </view>
-        </view>
-        <view class="detail-toolbar__actions">
-          <view
-            v-if="planTasks.length > 0"
-            class="detail-toolbar__action detail-toolbar__action--plan"
-            @click.stop="showPlanDrawer = true"
-          >
-            <up-icon name="list" size="16" :color="upThemeVar('--up-primary', '#2979ff')"></up-icon>
-            <text class="detail-toolbar__action-text detail-toolbar__action-text--plan">
-              计划 {{ completedTaskCount }}/{{ planTasks.length }}
-            </text>
-          </view>
-          <view
-            class="detail-toolbar__icon-action"
-            :class="{ 'detail-toolbar__icon-action--disabled': loading }"
-            @click.stop="refreshConversation"
-          >
-            <up-loading-icon
-              v-if="loading"
-              mode="circle"
-              size="16"
-              :color="upThemeVar('--up-content-color', '#606266')"
-            ></up-loading-icon>
-            <up-icon
-              v-else
-              name="reload"
-              size="18"
-              :color="upThemeVar('--up-content-color', '#606266')"
-            ></up-icon>
-          </view>
-          <view
-            class="detail-toolbar__icon-action detail-toolbar__icon-action--danger"
-            :class="{ 'detail-toolbar__icon-action--disabled': !canStopSession || stoppingSession }"
-            @click.stop="confirmStopSession()"
-          >
-            <up-loading-icon
-              v-if="stoppingSession"
-              mode="circle"
-              size="16"
-              color="#f56c6c"
-            ></up-loading-icon>
-            <view v-else class="detail-toolbar__stop-mark"></view>
-          </view>
-        </view>
-      </view>
-
       <swiper
         class="detail-shell__swiper"
+        :style="detailShellViewportStyle"
         :current="detailSwiperCurrent"
         :duration="220"
         @change="handleDetailSwiperChange"
@@ -156,11 +89,21 @@
           :key="tab.tabId || tab.conversationId || index"
           class="detail-shell__swiper-item"
         >
-          <view v-if="isDetailTabMounted(mountedDetailTabWindow, index)" class="detail-shell__page">
+          <view
+            v-if="shouldMountDetailTabPage(index)"
+            :class="['detail-shell__page', isActiveDetailTabPage(index) && 'detail-shell__page--active']"
+          >
             <ConversationDetailBody
-              v-if="index === activeDetailTabIndex"
+              v-if="false && isActiveDetailTabPage(index)"
               :message-list-page-style="messageListPageStyle"
+              :message-list-content-style="messageListContentStyle"
               :input-wrap-style="upThemeCardStyle"
+              :message-scroll-top="messageScrollTop"
+              :message-scroll-into-view="messageScrollIntoView"
+              :message-scroll-with-animation="messageScrollWithAnimation"
+              :upper-threshold="120"
+              @message-scroll="handleMessageListScroll"
+              @message-scroll-upper="handleMessageListScrollUpper"
             >
         <template #history>
           <view
@@ -252,6 +195,23 @@
           <view id="message-list-bottom" class="list-bottom"></view>
         </template>
 
+        <template #status>
+        <view class="input-status-row">
+          <view class="input-status-row__main">
+            <view class="runtime-dot runtime-dot--compact" :class="`runtime-dot--${runtimeStatusClass}`"></view>
+            <text class="input-status-row__text">{{ inputStatusText }}</text>
+          </view>
+          <view
+            v-if="planTasks.length > 0"
+            class="input-status-row__plan"
+            @click.stop="showPlanDrawer = true"
+          >
+            <up-icon name="list" size="13" :color="upThemeVar('--up-primary', '#2979ff')"></up-icon>
+            <text class="input-status-row__plan-text">计划 {{ completedTaskCount }}/{{ planTasks.length }}</text>
+          </view>
+        </view>
+        </template>
+
         <template #composer>
         <view v-if="pendingPermissionCard" class="permission-card">
           <view class="permission-card__header">
@@ -277,11 +237,11 @@
             </view>
           </scroll-view>
           <view
-            v-if="pendingPermissionCard.options.length > 0"
+            v-if="(pendingPermissionCard?.options || []).length > 0"
             class="permission-card__actions"
           >
             <view
-              v-for="option in pendingPermissionCard.options"
+              v-for="option in pendingPermissionCard?.options || []"
               :key="option.id"
               class="permission-card__option"
             >
@@ -315,15 +275,15 @@
               <text class="ask-question-card__subtitle">选择后点击提交，也可以跳过让智能体自行判断</text>
             </view>
             <text
-              v-if="pendingQuestionCard.questions.length > 1"
+              v-if="(pendingQuestionCard?.questions || []).length > 1"
               class="ask-question-card__counter"
             >
-              {{ questionAnsweredCount }}/{{ pendingQuestionCard.questions.length }}
+              {{ questionAnsweredCount }}/{{ (pendingQuestionCard?.questions || []).length }}
             </text>
           </view>
 
           <view
-            v-for="question in pendingQuestionCard.questions"
+            v-for="question in pendingQuestionCard?.questions || []"
             :key="question.id"
             class="ask-question-card__question"
           >
@@ -563,7 +523,7 @@
               </text>
               <view class="shared-queue-item__meta">
                 <text>{{ sharedPromptQueueItemSource(item, localRelayClientId) }}</text>
-                <text v-if="item.createdAtMs">{{ formatQueueTime(item.createdAtMs) }}</text>
+                <text v-if="item.createdAtMs">{{ formatQueueTime(Number(item.createdAtMs)) }}</text>
                 <text class="shared-queue-item__priority">{{ sharedPromptQueuePriorityLabel(item) }}</text>
               </view>
             </view>
@@ -616,6 +576,18 @@
         </view>
 
         <view class="input-main-row">
+          <view
+            class="tool-toggle-btn"
+            :class="{ 'tool-toggle-btn--active': showInputToolRow }"
+            @click="toggleInputToolRow"
+          >
+            <up-icon
+              :name="showInputToolRow ? 'close' : 'plus'"
+              size="18"
+              :color="showInputToolRow ? upThemeVar('--up-primary', '#2979ff') : upThemeVar('--up-content-color', '#606266')"
+            ></up-icon>
+          </view>
+
           <view class="input-box">
             <up-textarea
               class="composer-textarea"
@@ -642,7 +614,7 @@
           </view>
         </view>
 
-        <view class="input-tool-row">
+        <view v-if="showInputToolRow" class="input-tool-row">
           <view class="input-tool-btn" @click="handleChooseImages">
             <view class="input-tool-btn__icon">
               <up-icon name="photo" size="20" :color="upThemeVar('--up-content-color', '#606266')"></up-icon>
@@ -670,6 +642,22 @@
           >
             <view class="input-tool-btn__icon">
               <up-icon name="setting" size="20" :color="upThemeVar('--up-content-color', '#606266')"></up-icon>
+            </view>
+          </view>
+
+          <view
+            class="input-tool-btn input-tool-btn--danger"
+            :class="{ 'input-tool-btn--disabled': !canStopSession || stoppingSession }"
+            @click.stop="confirmStopSession()"
+          >
+            <view class="input-tool-btn__icon">
+              <up-loading-icon
+                v-if="stoppingSession"
+                mode="circle"
+                size="16"
+                color="#f56c6c"
+              ></up-loading-icon>
+              <view v-else class="input-tool-btn__stop-mark"></view>
             </view>
           </view>
 
@@ -703,13 +691,13 @@
                   class="config-chip-grid"
                 >
                   <view
-                    v-for="value in modelOption.kind.options"
+                    v-for="value in modelOption?.kind.options || []"
                     :key="value.value"
                     :class="[
                       'config-chip',
-                      detailAgentConfig.selectedValues[modelOption.id] === value.value && 'config-chip--active',
+                      detailAgentConfig.selectedValues[modelOption?.id || ''] === value.value && 'config-chip--active',
                     ]"
-                    @click.stop="selectDetailConfigValue(modelOption.id, value.value)"
+                    @click.stop="selectDetailConfigValue(modelOption?.id || '', value.value)"
                   >
                     <text class="config-chip__title">{{ value.name }}</text>
                   </view>
@@ -727,13 +715,13 @@
                   class="config-chip-grid"
                 >
                   <view
-                    v-for="value in reasoningOption.kind.options"
+                    v-for="value in reasoningOption?.kind.options || []"
                     :key="value.value"
                     :class="[
                       'config-chip',
-                      detailAgentConfig.selectedValues[reasoningOption.id] === value.value && 'config-chip--active',
+                      detailAgentConfig.selectedValues[reasoningOption?.id || ''] === value.value && 'config-chip--active',
                     ]"
-                    @click.stop="selectDetailConfigValue(reasoningOption.id, value.value)"
+                    @click.stop="selectDetailConfigValue(reasoningOption?.id || '', value.value)"
                   >
                     <text class="config-chip__title">{{ value.name }}</text>
                   </view>
@@ -764,13 +752,13 @@
                   class="config-chip-grid"
                 >
                   <view
-                    v-for="value in permissionOption.kind.options"
+                    v-for="value in permissionOption?.kind.options || []"
                     :key="value.value"
                     :class="[
                       'config-chip',
-                      detailAgentConfig.selectedValues[permissionOption.id] === value.value && 'config-chip--active',
+                      detailAgentConfig.selectedValues[permissionOption?.id || ''] === value.value && 'config-chip--active',
                     ]"
-                    @click.stop="selectDetailConfigValue(permissionOption.id, value.value)"
+                    @click.stop="selectDetailConfigValue(permissionOption?.id || '', value.value)"
                   >
                     <text class="config-chip__title">{{ value.name }}</text>
                   </view>
@@ -780,17 +768,17 @@
           </scroll-view>
         </view>
 
-        <view v-if="showNetworkReachabilityFeedback" class="input-feedback input-feedback--network">
+        <view v-if="showNetworkReachabilityFeedback" class="input-feedback input-feedback--floating input-feedback--network">
           <up-icon name="error-circle" size="14" color="#fa8c16"></up-icon>
           <text class="input-feedback__text">{{ networkReachabilityFeedbackText }}</text>
         </view>
 
-        <view v-if="showRuntimeRetryFeedback" class="input-feedback input-feedback--retry">
+        <view v-if="showRuntimeRetryFeedback" class="input-feedback input-feedback--floating input-feedback--retry">
           <up-loading-icon mode="circle" size="14" color="#fa8c16"></up-loading-icon>
           <text class="input-feedback__text">{{ runtimeRetryText }}</text>
         </view>
 
-        <view v-if="showRuntimeErrorFeedback" class="input-feedback input-feedback--error">
+        <view v-if="showRuntimeErrorFeedback" class="input-feedback input-feedback--floating input-feedback--error">
           <up-icon name="close-circle-fill" size="14" color="#fa3534"></up-icon>
           <view class="input-feedback__body">
             <text class="input-feedback__label">发送失败</text>
@@ -800,18 +788,19 @@
         </template>
             </ConversationDetailBody>
 
-            <view v-else class="detail-shell__placeholder">
-              <view class="detail-shell__placeholder-card">
-                <view class="detail-shell__placeholder-badge">
-                  <view class="runtime-dot runtime-dot--pending"></view>
-                  <text class="detail-shell__placeholder-badge-text">切换到此会话即可加载</text>
-                </view>
-                <text class="detail-shell__placeholder-title u-line-1">{{ tab.title }}</text>
-                <text class="detail-shell__placeholder-desc">
-                  左右滑动已和桌面端 tabs 保持同步，当前仅渲染当前页与相邻页。
-                </text>
-              </view>
-            </view>
+            <ConversationDetailInteractivePane
+              v-else-if="shouldRenderDetailTabPage(index)"
+              :conversation-id="tab.conversationId"
+              :folder-id="tab.folderId"
+              :agent-type="tab.agentType"
+              :instance-key="detailConnectionKey"
+              :active="isActiveDetailTabPage(index)"
+              :message-list-page-style="messageListPageStyle"
+              :message-list-content-style="messageListContentStyle"
+              :input-wrap-style="upThemeCardStyle"
+              :upload-target="detailUploadTarget"
+              @layout-change="measureMessageListHeight"
+            />
           </view>
         </swiper-item>
       </swiper>
@@ -911,7 +900,7 @@
 
 <script setup lang="ts">
 import { ref, computed, getCurrentInstance, nextTick, watch } from "vue"
-import { onBackPress, onHide, onLoad, onPageScroll, onShow, onUnload } from "@dcloudio/uni-app"
+import { onBackPress, onHide, onLoad, onShow, onUnload } from "@dcloudio/uni-app"
 import { useAuthStore } from "@/stores/auth"
 import { useConversationCacheStore } from "@/stores/conversationCache"
 import { useConversationRuntimeStore } from "@/stores/conversationRuntime"
@@ -961,7 +950,10 @@ import {
   getRegisteredRemoteInstanceDescriptor,
   registerRemoteInstanceDescriptor,
 } from "@/services/realtime/remoteInstanceRegistry"
-import { decodeConnectionContext } from "@/services/connectionContext"
+import {
+  decodeConnectionContext,
+  findStoredConnectionById as findStoredConnectionContextById,
+} from "@/services/connectionContext"
 import { getRelayClientId } from "@/services/gateway/relayClientIdentity"
 import { usePetStore } from "@/stores/pet"
 import {
@@ -988,15 +980,16 @@ import type { RelaySessionInfo } from "@/services/gateway"
 import type { RemoteInstanceDescriptor } from "@/services/realtime/types"
 import MessageBubble from "@/components/MessageBubble.vue"
 import ConversationDetailBody from "./ConversationDetailBody.vue"
+import ConversationDetailInteractivePane from "./ConversationDetailInteractivePane.vue"
 import {
   buildDetailShellTabs,
+  resolveMountedDetailConversationIds,
+  resolveDetailTabChangeIndex,
   resolveDetailTabCloseTarget,
-  resolveDetailTabWindow,
   type DetailShellTabItem,
 } from "./detailTabsPresentation"
 import {
   createDetailTabState,
-  isDetailTabMounted,
   type DetailTabState,
 } from "./detailTabState"
 import {
@@ -1080,6 +1073,7 @@ import {
 } from "./detailScrollState"
 import {
   buildHistoryStatusStyle,
+  buildMessageListContentStyle,
   buildMessageListPageStyle,
   buildTopOffsetStyle,
 } from "./detailLayoutPresentation"
@@ -1179,6 +1173,10 @@ const INITIAL_TURN_MAX_BATCH = 200
 const INITIAL_USER_TURN_TARGET = 8
 const PROMPT_START_TIMEOUT_MS = 4000
 const STUCK_PROMPT_TIMEOUT_MS = 3 * 60 * 1000
+const ENABLE_STUCK_PROMPT_DETECTION = false
+const DEFAULT_DETAIL_TABS_BAR_HEIGHT = 54
+const DEFAULT_DETAIL_TOOLBAR_HEIGHT = 0
+const DEFAULT_DETAIL_COMPOSER_HEIGHT = 156
 const quickReplyItems: QuickReplyItem[] = [
   { label: "yes", value: "yes" },
   { label: "继续", value: "继续" },
@@ -1206,11 +1204,14 @@ const bridgeRecoveredAt = ref(0)
 const conversationTitle = ref("未命名会话")
 const inputText = ref("")
 const pageScrollTop = ref(0)
+const messageScrollTop = ref(0)
+const messageScrollIntoView = ref("")
+const messageScrollWithAnimation = ref(false)
 const topChromeHeight = ref(0)
 const bottomComposerHeight = ref(0)
 const viewportHeight = ref(0)
-const toolbarHeight = ref(48)
-const tabsBarHeight = ref(54)
+const toolbarHeight = ref(DEFAULT_DETAIL_TOOLBAR_HEIGHT)
+const tabsBarHeight = ref(DEFAULT_DETAIL_TABS_BAR_HEIGHT)
 const sharedHintHeight = ref(0)
 const hasInitialBottomScroll = ref(false)
 const isRestoringScroll = ref(false)
@@ -1234,6 +1235,7 @@ const clearingSharedPromptQueue = ref(false)
 const uploadingCount = ref(0)
 const showPlanDrawer = ref(false)
 const composerPanelMode = ref<ComposerPanelMode>("")
+const toolRowExpanded = ref(false)
 const longWaitTick = ref(0)
 const longWaitStartedAt = ref(0)
 const measuredPageHeight = ref(0)
@@ -1249,6 +1251,7 @@ const detailOpenedTabs = ref<OpenedTabItem[]>([])
 const detailTabsHydrated = ref(false)
 const detailActiveTabIndex = ref(0)
 const detailSwiperCurrent = ref(0)
+const mountedDetailConversationIds = ref<Set<number>>(new Set())
 const detailTabTitleMap = ref<Record<number, string>>({})
 const activeDetailTabIndex = detailActiveTabIndex
 const hasLoadedOnce = ref(false)
@@ -1270,6 +1273,9 @@ let detailOverviewInvalidationUnsubscribe: (() => void) | null = null
 let detailOpenedTabsInstanceKey = ""
 let detailOverviewInstanceKey = ""
 let detailSwitching = false
+let pendingDetailTabIndex: number | null = null
+let pendingDetailTabOptions: { syncRemote?: boolean } | null = null
+const connectingBackgroundConversationIds = new Set<number>()
 const detailTabStateMap = new Map<number, DetailTabState>()
 
 function detailDebugLog(stage: string, payload?: Record<string, unknown>) {
@@ -1322,16 +1328,36 @@ const sharedPromptQueueControlsEnabled = computed(() =>
   canEditSharedPromptQueue(sharedPromptQueue.value, sharedPromptQueueCapabilities.value)
 )
 const messageListPageStyle = computed(() => {
+  const fallbackTopHeight =
+    Math.max(0, Number(tabsBarHeight.value || DEFAULT_DETAIL_TABS_BAR_HEIGHT)) +
+    Math.max(0, Number(toolbarHeight.value || DEFAULT_DETAIL_TOOLBAR_HEIGHT))
   return buildMessageListPageStyle({
-    viewportHeight: viewportHeight.value,
-    topChromeHeight: topChromeHeight.value,
-    bottomComposerHeight: bottomComposerHeight.value,
+    viewportHeight: viewportHeight.value || getDetailViewportHeight(),
+    topChromeHeight: Math.max(topChromeHeight.value, fallbackTopHeight),
+    bottomComposerHeight: effectiveBottomComposerHeight.value,
   })
 })
-const detailTabsBarStyle = computed(() => buildTopOffsetStyle(getNavbarHeight()))
-const detailToolbarStyle = computed(() =>
-  buildTopOffsetStyle(getNavbarHeight() + tabsBarHeight.value)
+const effectiveBottomComposerHeight = computed(() =>
+  bottomComposerHeight.value > 0 ? bottomComposerHeight.value : DEFAULT_DETAIL_COMPOSER_HEIGHT
 )
+const messageListContentStyle = computed(() =>
+  buildMessageListContentStyle(effectiveBottomComposerHeight.value)
+)
+const detailTabsBarStyle = computed(() => buildTopOffsetStyle(getNavbarHeight()))
+const detailShellViewportStyle = computed(() => {
+  const height = Math.max(0, viewportHeight.value || getDetailViewportHeight())
+  return {
+    height: `${height}px`,
+    minHeight: `${height}px`,
+  }
+})
+const detailUploadTarget = computed(() => {
+  try {
+    return resolveUploadTarget()
+  } catch {
+    return null
+  }
+})
 const connectingOperationBlockerStyle = computed(() =>
   buildTopOffsetStyle(getNavbarHeight() + tabsBarHeight.value + toolbarHeight.value)
 )
@@ -1389,6 +1415,7 @@ const toolbarNoticeItems = computed(() => {
   }
   return items
 })
+const inputStatusText = computed(() => toolbarNoticeItems.value[0]?.text || "空闲")
 
 const runtimeStatus = computed<string>(() => {
   const status = String(session.value?.status || "idle")
@@ -1489,6 +1516,10 @@ const stats = computed(() => session.value?.stats || {
 function getViewportHeight() {
   const windowInfo = typeof uni.getWindowInfo === "function" ? uni.getWindowInfo() : uni.getSystemInfoSync?.()
   return Number(windowInfo?.windowHeight || 0)
+}
+
+function getDetailViewportHeight() {
+  return Math.max(0, getViewportHeight() - getNavbarHeight())
 }
 
 function getNavbarHeight() {
@@ -1641,6 +1672,9 @@ const runtimeStatusClass = computed(() =>
 )
 
 const showComposerPanel = computed(() => composerPanelMode.value !== "")
+const showInputToolRow = computed(() =>
+  toolRowExpanded.value || showComposerPanel.value
+)
 const composerPanelTitle = computed(() => {
   if (composerPanelMode.value === "config") return "模型配置"
   return "快捷发送"
@@ -1688,10 +1722,6 @@ const detailShellTabs = computed<DetailShellTabItem[]>(() =>
     openedTabs: detailTabsHydrated.value ? detailOpenedTabs.value : fallbackDetailTabItem.value,
     titleByConversationId: detailTabTitleMap.value,
   })
-)
-
-const mountedDetailTabWindow = computed(() =>
-  resolveDetailTabWindow(activeDetailTabIndex.value, detailShellTabs.value.length)
 )
 
 const navbarBgColor = computed(() =>
@@ -1769,6 +1799,24 @@ function pruneDetailLocalTabStates() {
       detailTabStateMap.delete(conversationIdValue)
     }
   })
+  mountedDetailConversationIds.value = resolveMountedDetailConversationIds({
+    mountedConversationIds: mountedDetailConversationIds.value,
+    tabs: detailShellTabs.value,
+  })
+}
+
+function mountAllDetailTabs() {
+  const nextMountedIds = new Set(mountedDetailConversationIds.value)
+  detailShellTabs.value.forEach((tab) => {
+    const conversationIdValue = Number(tab.conversationId || 0)
+    if (conversationIdValue > 0) {
+      nextMountedIds.add(conversationIdValue)
+    }
+  })
+  mountedDetailConversationIds.value = resolveMountedDetailConversationIds({
+    mountedConversationIds: nextMountedIds,
+    tabs: detailShellTabs.value,
+  })
 }
 
 function captureActiveDetailLocalState() {
@@ -1776,6 +1824,20 @@ function captureActiveDetailLocalState() {
   const state = ensureDetailLocalTabState(activeTab)
   if (!state) return
   state.draftText = inputText.value
+  state.attachments = JSON.parse(JSON.stringify(attachments.value || []))
+  state.draftQueue = JSON.parse(JSON.stringify(draftQueue.value || []))
+  state.queueExpanded = queueExpanded.value
+  state.toolRowExpanded = toolRowExpanded.value
+  state.composerPanelMode = composerPanelMode.value
+  state.expandedConfigKey = expandedConfigKey.value
+  state.askQuestionSelectionsJson = JSON.stringify(askQuestionSelections.value || {})
+  state.pageScrollTop = pageScrollTop.value
+  state.lastMeasuredScrollTop = lastMeasuredScrollTop.value
+  state.anchorMessageId = anchorMessageId.value
+  state.shouldAutoFollowBottom = shouldAutoFollowBottom.value
+  state.hasUnreadBelow = hasUnreadBelow.value
+  state.hasMoreHistory = hasMoreHistory.value
+  state.oldestLoadedCursor = oldestLoadedCursor.value
   state.showPlanDrawer = showPlanDrawer.value
   state.questionSubmitting = questionSubmitting.value
   state.permissionSubmitting = permissionSubmitting.value
@@ -1785,6 +1847,23 @@ function restoreDetailLocalState(tab: DetailShellTabItem | null | undefined) {
   const state = ensureDetailLocalTabState(tab)
   if (!state) return
   inputText.value = state.draftText || ""
+  attachments.value = JSON.parse(JSON.stringify(state.attachments || []))
+  draftQueue.value = JSON.parse(JSON.stringify(state.draftQueue || []))
+  queueExpanded.value = Boolean(state.queueExpanded)
+  toolRowExpanded.value = Boolean(state.toolRowExpanded)
+  composerPanelMode.value = (state.composerPanelMode || "") as ComposerPanelMode
+  expandedConfigKey.value = (state.expandedConfigKey || "") as ComposerConfigKey
+  askQuestionSelections.value = JSON.parse(state.askQuestionSelectionsJson || "{}")
+  pageScrollTop.value = Number(state.pageScrollTop || 0)
+  lastMeasuredScrollTop.value = Number(state.lastMeasuredScrollTop || 0)
+  anchorMessageId.value = state.anchorMessageId || ""
+  shouldAutoFollowBottom.value = state.shouldAutoFollowBottom !== false
+  hasUnreadBelow.value = Boolean(state.hasUnreadBelow)
+  hasMoreHistory.value = Boolean(state.hasMoreHistory)
+  oldestLoadedCursor.value = state.oldestLoadedCursor || null
+  messageScrollWithAnimation.value = false
+  messageScrollIntoView.value = ""
+  messageScrollTop.value = Number(state.lastMeasuredScrollTop || state.pageScrollTop || 0)
   showPlanDrawer.value = state.showPlanDrawer
 }
 
@@ -1794,13 +1873,152 @@ function findDetailShellTabIndex(conversationIdValue: number) {
   )
 }
 
+function markDetailTabMounted(index: number) {
+  const safeIndex = Number(index)
+  const tab = detailShellTabs.value[safeIndex]
+  const conversationIdValue = Number(tab?.conversationId || 0)
+  if (!conversationIdValue || mountedDetailConversationIds.value.has(conversationIdValue)) return
+  const nextMountedIds = new Set(mountedDetailConversationIds.value)
+  nextMountedIds.add(conversationIdValue)
+  mountedDetailConversationIds.value = nextMountedIds
+}
+
 function syncDetailTabSelection(index: number) {
   const safeIndex = Math.min(
     Math.max(0, Number(index || 0)),
     Math.max(0, detailShellTabs.value.length - 1),
   )
+  markDetailTabMounted(safeIndex)
   detailActiveTabIndex.value = safeIndex
   detailSwiperCurrent.value = safeIndex
+}
+
+function shouldMountDetailTabPage(index: number) {
+  const tab = detailShellTabs.value[Number(index)]
+  const conversationIdValue = Number(tab?.conversationId || 0)
+  return conversationIdValue > 0 && mountedDetailConversationIds.value.has(conversationIdValue)
+}
+
+function isActiveDetailTabPage(index: number) {
+  return Number(index) === activeDetailTabIndex.value
+}
+
+function shouldRenderDetailTabPage(index: number) {
+  return shouldMountDetailTabPage(index)
+}
+
+async function ensureMountedDetailTabRuntime(tab: DetailShellTabItem | null | undefined) {
+  const targetConversationId = Number(tab?.conversationId || 0)
+  if (!targetConversationId || connectingBackgroundConversationIds.has(targetConversationId)) return
+  const runtimeSession = runtime.getOrCreateSession(targetConversationId)
+  const hasActiveRuntimeConnection =
+    runtimeSession.connectionId &&
+    (runtimeSession.status === "connected" ||
+      runtimeSession.status === "thinking" ||
+      runtimeSession.status === "running_tool" ||
+      runtimeSession.status === "waiting_permission" ||
+      runtimeSession.status === "waiting_question")
+  if (hasActiveRuntimeConnection && runtimeSession.localTurns.length > 0) {
+    return
+  }
+
+  connectingBackgroundConversationIds.add(targetConversationId)
+  try {
+    const instanceKey = resolveDetailInstanceKey()
+    const persistedRuntime = instanceKey
+      ? await getRuntime(instanceKey, targetConversationId).catch(() => null)
+      : null
+    if (runtimeSession.localTurns.length === 0) {
+      const localTurns = await getNewestTurns(targetConversationId, INITIAL_TURN_BATCH).catch(() => [])
+      if (localTurns.length > 0) {
+        runtimeSession.localTurns = localTurns
+          .slice()
+          .reverse()
+          .map(mapPersistedTurnToMessage)
+      }
+    }
+    const managed = connectionSessionManager.getByConversationId(targetConversationId)
+    let agentType = firstString(managed?.connection.agentType, tab?.agentType) || "claude_code"
+    let resumeSessionId = firstString(managed?.externalId, managed?.connection.sessionId)
+    let remoteDetail: any = null
+    if (!resumeSessionId && instanceKey) {
+      const summary = await getConversationSummaryById(instanceKey, targetConversationId).catch(() => null)
+      agentType = firstString(agentType, summary?.agentType) || "claude_code"
+      resumeSessionId = firstString(summary?.externalId)
+    }
+    if (runtimeSession.localTurns.length === 0) {
+      remoteDetail = await fetchRemoteConversationDetailById(targetConversationId).catch(() => null)
+      if (remoteDetail) {
+        runtime.applyConversationDetailStats(targetConversationId, remoteDetail)
+        const metadata = getRemoteConversationMetadata(remoteDetail, agentType, resumeSessionId)
+        agentType = metadata.agentType
+        resumeSessionId = metadata.resumeSessionId
+        if (metadata.title) {
+          detailTabTitleMap.value = {
+            ...detailTabTitleMap.value,
+            [targetConversationId]: metadata.title,
+          }
+        }
+        await persistConversationDetailSnapshot({
+          instanceKey,
+          conversationId: targetConversationId,
+          detail: remoteDetail,
+          fallbackFolderId: Number(tab?.folderId || 0),
+        }).catch((error) => {
+          console.warn("persist mounted detail tab snapshot skipped", error)
+        })
+        const refreshedTurns = await getNewestTurnsWithUserCoverage(
+          targetConversationId,
+          INITIAL_TURN_BATCH
+        ).catch(() => [])
+        if (refreshedTurns.length > 0) {
+          runtimeSession.localTurns = refreshedTurns
+            .slice()
+            .reverse()
+            .map(mapPersistedTurnToMessage)
+        }
+      }
+    }
+    if (hasActiveRuntimeConnection) {
+      const snapshot = await acpApi
+        .acpGetSessionSnapshotByConversation(targetConversationId)
+        .catch(() => null)
+      if (snapshot) {
+        runtime.hydrateLiveSnapshot(targetConversationId, snapshot)
+      }
+      return
+    }
+    const conn = await runtime.connect(
+      targetConversationId,
+      normalizeAgentType(agentType),
+      undefined,
+      resumeSessionId,
+      persistedRuntime?.lastAppliedSeq ?? runtimeSession.lastAppliedSeq ?? undefined,
+      instanceKey
+    )
+    const snapshot = await acpApi
+      .acpGetSessionSnapshotByConversation(targetConversationId)
+      .catch(() => null)
+    if (snapshot) {
+      runtime.hydrateLiveSnapshot(targetConversationId, snapshot)
+    } else if (conn?.id) {
+      const fallbackSnapshot = await acpApi.acpGetSessionSnapshot(conn.id).catch(() => null)
+      if (fallbackSnapshot) {
+        runtime.hydrateLiveSnapshot(targetConversationId, fallbackSnapshot)
+      }
+    }
+  } catch (error) {
+    console.warn("ensure mounted detail tab runtime skipped", error)
+  } finally {
+    connectingBackgroundConversationIds.delete(targetConversationId)
+  }
+}
+
+function ensureMountedDetailTabRuntimes() {
+  detailShellTabs.value.forEach((tab) => {
+    if (!mountedDetailConversationIds.value.has(Number(tab.conversationId || 0))) return
+    void ensureMountedDetailTabRuntime(tab)
+  })
 }
 
 function normalizeOpenedTabsChangedPayload(payload: unknown) {
@@ -1862,7 +2080,7 @@ async function syncRemoteActiveDetailTab(tab: DetailShellTabItem) {
     folderId: tab.folderId,
     conversationId: tab.conversationId,
     agentType: tab.agentType,
-    activation: "allow",
+    activation: "preserve",
     origin: "mcode-mobile",
   })
   if (snapshot) {
@@ -1875,6 +2093,11 @@ async function syncRemoteActiveDetailTab(tab: DetailShellTabItem) {
   }
 }
 
+function queueDetailTabSwitch(index: number, options: { syncRemote?: boolean } = {}) {
+  pendingDetailTabIndex = Number(index)
+  pendingDetailTabOptions = { ...options }
+}
+
 async function switchToDetailTab(
   index: number,
   options: { syncRemote?: boolean } = {}
@@ -1882,16 +2105,17 @@ async function switchToDetailTab(
   const safeIndex = Number(index)
   const tab = detailShellTabs.value[safeIndex]
   if (!tab) return
+  markDetailTabMounted(safeIndex)
+  captureActiveDetailLocalState()
+  syncDetailTabSelection(safeIndex)
   if (detailSwitching) {
-    syncDetailTabSelection(activeDetailTabIndex.value)
+    queueDetailTabSwitch(safeIndex, options)
     return
   }
   if (loading.value && tab.conversationId !== conversationId.value) {
-    syncDetailTabSelection(activeDetailTabIndex.value)
+    queueDetailTabSwitch(safeIndex, options)
     return
   }
-  captureActiveDetailLocalState()
-  syncDetailTabSelection(safeIndex)
   if (tab.conversationId === conversationId.value && tab.folderId === folderId.value) {
     restoreDetailLocalState(tab)
     if (options.syncRemote !== false) {
@@ -1915,7 +2139,28 @@ async function switchToDetailTab(
     }
   } finally {
     detailSwitching = false
+    const queuedIndex = pendingDetailTabIndex
+    const queuedOptions = pendingDetailTabOptions || {}
+    pendingDetailTabIndex = null
+    pendingDetailTabOptions = null
+    if (typeof queuedIndex === "number" && queuedIndex !== activeDetailTabIndex.value) {
+      void switchToDetailTab(queuedIndex, queuedOptions)
+    }
   }
+}
+
+function drainPendingDetailTabSwitch(options: { syncRemote?: boolean } = {}) {
+  if (detailSwitching || loading.value) return
+  const queuedIndex = pendingDetailTabIndex
+  if (typeof queuedIndex !== "number") return
+  const queuedOptions = pendingDetailTabOptions || options
+  pendingDetailTabIndex = null
+  pendingDetailTabOptions = null
+  if (queuedIndex === activeDetailTabIndex.value) {
+    syncDetailTabSelection(queuedIndex)
+    return
+  }
+  void switchToDetailTab(queuedIndex, queuedOptions)
 }
 
 async function switchToDetailConversation(
@@ -1934,13 +2179,10 @@ function reconcileDetailShellFromOpenedTabs(options: { loadConversation?: boolea
     handleBackNavigation()
     return
   }
-  const remoteActiveIndex = detailShellTabs.value.findIndex((tab) => tab.active)
   const currentConversationIndex = findDetailShellTabIndex(conversationId.value)
-  const nextIndex = remoteActiveIndex >= 0
-    ? remoteActiveIndex
-    : currentConversationIndex >= 0
-      ? currentConversationIndex
-      : 0
+  const nextIndex = currentConversationIndex >= 0
+    ? currentConversationIndex
+    : 0
   syncDetailTabSelection(nextIndex)
   const nextTab = detailShellTabs.value[nextIndex]
   if (!nextTab) return
@@ -2014,7 +2256,7 @@ async function initializeDetailTabsShell() {
       folderId: folderId.value,
       conversationId: conversationId.value,
       agentType: currentAgentType.value,
-      activation: "allow",
+      activation: "preserve",
       origin: "mcode-mobile",
     })
     if (snapshot) {
@@ -2032,17 +2274,29 @@ async function initializeDetailTabsShell() {
   }
 }
 
-function handleDetailTabChange(payload: { index?: number } | number) {
-  const nextIndex = typeof payload === "number"
-    ? payload
-    : Number(payload?.index ?? -1)
-  if (nextIndex < 0 || nextIndex === activeDetailTabIndex.value) return
+function handleDetailTabChange(payload: unknown) {
+  const nextIndex = resolveDetailTabChangeIndex(payload, detailShellTabs.value)
+  if (nextIndex < 0) return
+  markDetailTabMounted(nextIndex)
+  if (nextIndex === activeDetailTabIndex.value) {
+    if (detailSwiperCurrent.value !== nextIndex) {
+      detailSwiperCurrent.value = nextIndex
+    }
+    return
+  }
   void switchToDetailTab(nextIndex)
 }
 
 function handleDetailSwiperChange(event: any) {
   const nextIndex = Number(event?.detail?.current ?? -1)
-  if (nextIndex < 0 || nextIndex === activeDetailTabIndex.value) return
+  if (nextIndex < 0) return
+  markDetailTabMounted(nextIndex)
+  if (nextIndex === activeDetailTabIndex.value) {
+    if (detailSwiperCurrent.value !== nextIndex) {
+      detailSwiperCurrent.value = nextIndex
+    }
+    return
+  }
   void switchToDetailTab(nextIndex)
 }
 
@@ -2135,26 +2389,6 @@ onShow(() => {
   void loadConversation().then(() => {
     resumeStuckPromptDetection()
   })
-})
-
-onPageScroll((event) => {
-  const scrollTopValue = Math.max(0, Number(event?.scrollTop || 0))
-  pageScrollTop.value = scrollTopValue
-  lastMeasuredScrollTop.value = scrollTopValue
-  const currentViewportHeight = viewportHeight.value || getViewportHeight()
-  const pageHeight = measuredPageHeight.value
-  if (currentViewportHeight > 0 && pageHeight > 0) {
-    const distanceToBottom = Math.max(0, pageHeight - (scrollTopValue + currentViewportHeight))
-    shouldAutoFollowBottom.value = distanceToBottom <= 72
-    if (shouldAutoFollowBottom.value) {
-      hasUnreadBelow.value = false
-      const tail = renderMessageItems.value[renderMessageItems.value.length - 1]
-      anchorMessageId.value = tail?.anchorId || ""
-    }
-  }
-  if (scrollTopValue <= 120) {
-    void loadOlderTurns()
-  }
 })
 
 onHide(() => {
@@ -2335,6 +2569,28 @@ watch(
 )
 
 watch(
+  () => detailShellTabs.value.map((tab) => Number(tab.conversationId || 0)).join(","),
+  () => {
+    if (detailShellTabs.value.length === 0) return
+    mountAllDetailTabs()
+    const safeIndex = Math.min(
+      Math.max(0, activeDetailTabIndex.value),
+      detailShellTabs.value.length - 1,
+    )
+    syncDetailTabSelection(safeIndex)
+    ensureMountedDetailTabRuntimes()
+  },
+  { immediate: true }
+)
+
+watch(
+  () => Array.from(mountedDetailConversationIds.value).sort((left, right) => left - right).join(","),
+  () => {
+    ensureMountedDetailTabRuntimes()
+  },
+)
+
+watch(
   () => pendingQuestionCard.value?.question_id || "",
   () => {
     resetQuestionSelections()
@@ -2470,6 +2726,13 @@ async function fetchRemoteConversationDetail() {
   const gateway = await getDetailGateway({ refreshAuth: true })
   return await gateway.call<any>("get_folder_conversation", {
     conversationId: conversationId.value,
+  })
+}
+
+async function fetchRemoteConversationDetailById(targetConversationId: number) {
+  const gateway = await getDetailGateway({ refreshAuth: true })
+  return await gateway.call<any>("get_folder_conversation", {
+    conversationId: targetConversationId,
   })
 }
 
@@ -2727,6 +2990,7 @@ async function loadConversation() {
   } finally {
     forceRemoteTurnReconcileOnLoad.value = false
     finishInitialLoad(cachedViewState, persistedRuntime)
+    drainPendingDetailTabSwitch({ syncRemote: false })
   }
 }
 
@@ -2850,6 +3114,12 @@ async function stopCurrentSession(options: { refreshAfterStop?: boolean } = {}) 
 }
 
 function handleLiveActivityChange(status: string, signature: string) {
+  if (!ENABLE_STUCK_PROMPT_DETECTION) {
+    clearStuckPromptTimer()
+    lastLiveActivitySignature = ""
+    stuckPromptShownForSignature = false
+    return
+  }
   if (!isStoppableRuntimeStatus(status) || !session.value?.connectionId) {
     clearStuckPromptTimer()
     lastLiveActivitySignature = ""
@@ -3164,59 +3434,86 @@ function ensureHistoryCursorFromLoadedMessages() {
 }
 
 function measureMessageListHeight() {
-  const instance = getCurrentInstance()?.proxy
+  const instance = currentInstance?.proxy
   if (!instance) return
-  const windowHeight = getViewportHeight()
-  viewportHeight.value = windowHeight
-  const navbarHeight = getNavbarHeight()
+  const detailViewportHeight = getDetailViewportHeight()
+  viewportHeight.value = detailViewportHeight
+  const fallbackTabsHeight = Math.max(0, Number(tabsBarHeight.value || 0))
+  const fallbackToolbarHeight = Math.max(0, Number(toolbarHeight.value || 0))
+  const fallbackTopHeight = fallbackTabsHeight + fallbackToolbarHeight
   const query = uni.createSelectorQuery().in(instance)
   query
     .select(".detail-tabs-bar")
     .boundingClientRect()
-    .select(".detail-toolbar")
+    .select(".detail-shell__page--active .input-status-row")
     .boundingClientRect()
     .select(".shared-live-hint")
     .boundingClientRect()
     .select(".history-status")
     .boundingClientRect()
-    .select(".input-wrap")
+    .select(".detail-shell__page--active .input-main-row")
     .boundingClientRect()
-    .select(".message-list__content")
+    .select(".detail-shell__page--active .input-tool-row")
+    .boundingClientRect()
+    .select(".detail-shell__page--active .message-list__content")
     .boundingClientRect()
     .exec((rects: any[]) => {
       const tabsRect = rects?.[0]
-      const toolbarRect = rects?.[1]
+      const inputStatusRect = rects?.[1]
       const sharedHintRect = rects?.[2]
       const historyStatusRect = rects?.[3]
-      const inputWrapRect = rects?.[4]
-      const contentRect = rects?.[5]
+      const inputMainRect = rects?.[4]
+      const inputToolRect = rects?.[5]
+      const contentRect = rects?.[6]
+      const measuredTabsHeight = Math.max(0, Number(tabsRect?.height || 0))
+      const measuredToolbarHeight = 0
+      const measuredInputStatusHeight = Math.max(0, Number(inputStatusRect?.height || 0))
       const topHeight =
-        navbarHeight +
-        Math.max(0, Number(tabsRect?.height || 0)) +
-        Math.max(0, Number(toolbarRect?.height || 0)) +
+        measuredTabsHeight +
+        measuredToolbarHeight +
         Math.max(0, Number(sharedHintRect?.height || 0)) +
         Math.max(0, Number(historyStatusRect?.height || 0))
-      const bottomHeight = Math.max(0, Number(inputWrapRect?.height || 0))
+      const bottomHeight =
+        measuredInputStatusHeight +
+        Math.max(0, Number(inputMainRect?.height || 0)) +
+        Math.max(0, Number(inputToolRect?.height || 0)) +
+        36
+      if (measuredTabsHeight > 0) {
+        tabsBarHeight.value = measuredTabsHeight
+      }
+      toolbarHeight.value = 0
       if (topHeight > 0) {
         topChromeHeight.value = topHeight
+      } else if (fallbackTopHeight > 0) {
+        topChromeHeight.value = fallbackTopHeight
       }
-      tabsBarHeight.value = Math.max(0, Number(tabsRect?.height || 0))
-      toolbarHeight.value = Math.max(0, Number(toolbarRect?.height || 0))
       sharedHintHeight.value = 0
       if (bottomHeight > 0) {
         bottomComposerHeight.value = bottomHeight
       }
       const contentHeight = Math.max(0, Number(contentRect?.height || 0))
-      const availableHeight = Math.max(0, windowHeight - topHeight - bottomHeight)
-      measuredPageHeight.value = Math.max(windowHeight, topHeight + bottomHeight + Math.max(contentHeight, availableHeight))
+      const effectiveTopHeight = topHeight > 0 ? topHeight : fallbackTopHeight
+      const effectiveBottomHeight = bottomHeight > 0 ? bottomHeight : bottomComposerHeight.value
+      const availableHeight = Math.max(0, detailViewportHeight - effectiveTopHeight - effectiveBottomHeight)
+      measuredPageHeight.value = Math.max(
+        detailViewportHeight,
+        effectiveTopHeight + effectiveBottomHeight + Math.max(contentHeight, availableHeight)
+      )
       if (availableHeight > 0) {
         detailDebugLog("message-list-height", {
-          windowHeight,
-          navbarHeight,
-          topHeight,
-          bottomHeight,
+          detailViewportHeight,
+          topHeight: effectiveTopHeight,
+          bottomHeight: effectiveBottomHeight,
           contentHeight,
           availableHeight,
+          measuredTabsHeight,
+          measuredToolbarHeight,
+          measuredInputStatusHeight,
+          measuredInputMainHeight: Math.max(0, Number(inputMainRect?.height || 0)),
+          measuredInputToolHeight: Math.max(0, Number(inputToolRect?.height || 0)),
+          activeDetailTabIndex: activeDetailTabIndex.value,
+          detailSwiperCurrent: detailSwiperCurrent.value,
+          mountedDetailConversationIds: Array.from(mountedDetailConversationIds.value),
         })
       }
     })
@@ -3265,19 +3562,9 @@ function scrollToBottom(force = false) {
   shouldAutoFollowBottom.value = true
   hasUnreadBelow.value = false
   anchorMessageId.value = ""
-  nextTick(() => {
-    const query = uni.createSelectorQuery().in(getCurrentInstance()?.proxy)
-    query.select("#message-list-bottom").boundingClientRect()
-    query.exec((rects: any[]) => {
-      const rect = rects?.[0]
-      const top = Number(rect?.top || 0)
-      if (!Number.isFinite(top)) return
-      uni.pageScrollTo({
-        scrollTop: Math.max(0, pageScrollTop.value + top - (viewportHeight.value || getViewportHeight()) + bottomComposerHeight.value + 16),
-        duration: force ? 0 : 200,
-      })
-    })
-  })
+  messageScrollWithAnimation.value = !force
+  messageScrollTop.value = Number.MAX_SAFE_INTEGER
+  messageScrollIntoView.value = getBottomAnchorId()
 }
 
 function messageAnchorId(messageId: string) {
@@ -3297,19 +3584,8 @@ function getBottomAnchorId() {
 
 function setProgrammaticAnchor(messageId: string) {
   anchorMessageId.value = messageId
-  nextTick(() => {
-    const query = uni.createSelectorQuery().in(getCurrentInstance()?.proxy)
-    query.select(`#${messageAnchorId(messageId)}`).boundingClientRect()
-    query.exec((rects: any[]) => {
-      const rect = rects?.[0]
-      const top = Number(rect?.top || 0)
-      if (!Number.isFinite(top)) return
-      uni.pageScrollTo({
-        scrollTop: Math.max(0, pageScrollTop.value + top - topChromeHeight.value),
-        duration: 0,
-      })
-    })
-  })
+  messageScrollWithAnimation.value = false
+  messageScrollIntoView.value = messageAnchorId(messageId)
 }
 
 function restoreScrollState(
@@ -3335,10 +3611,9 @@ function restoreScrollState(
   if (action.type === "scrollTop") {
     lastMeasuredScrollTop.value = action.scrollTop
     nextTick(() => {
-      uni.pageScrollTo({
-        scrollTop: action.scrollTop,
-        duration: 0,
-      })
+      messageScrollWithAnimation.value = false
+      messageScrollIntoView.value = ""
+      messageScrollTop.value = action.scrollTop
     })
   } else if (action.type === "anchor") {
     setProgrammaticAnchor(resolveRenderAnchorId(action.anchorMessageId))
@@ -3364,10 +3639,9 @@ function scheduleViewportSync(forceBottom = false) {
       return
     }
     if (action.type === "scrollTop") {
-      uni.pageScrollTo({
-        scrollTop: action.scrollTop,
-        duration: 0,
-      })
+      messageScrollWithAnimation.value = false
+      messageScrollIntoView.value = ""
+      messageScrollTop.value = action.scrollTop
     }
   })
 }
@@ -3375,6 +3649,38 @@ function scheduleViewportSync(forceBottom = false) {
 function handleComposerLayoutChange() {
   if (!hasInitialBottomScroll.value) return
   scheduleViewportSync()
+}
+
+function handleMessageListScroll(event: any) {
+  const scrollTopValue = Math.max(0, Number(event?.detail?.scrollTop || 0))
+  const scrollHeight = Math.max(0, Number(event?.detail?.scrollHeight || 0))
+  const deltaY = Math.max(0, Number(event?.detail?.deltaY || 0))
+  const currentViewportHeight = Math.max(
+    0,
+    Number(
+      event?.detail?.height ||
+      event?.detail?.scrollHeight - event?.detail?.deltaY - event?.detail?.scrollTop ||
+      0
+    )
+  )
+  pageScrollTop.value = scrollTopValue
+  lastMeasuredScrollTop.value = scrollTopValue
+  if (currentViewportHeight > 0 && scrollHeight > 0) {
+    const distanceToBottom = Math.max(0, scrollHeight - (scrollTopValue + currentViewportHeight))
+    shouldAutoFollowBottom.value = distanceToBottom <= 72
+    if (shouldAutoFollowBottom.value) {
+      hasUnreadBelow.value = false
+      const tail = renderMessageItems.value[renderMessageItems.value.length - 1]
+      anchorMessageId.value = tail?.anchorId || ""
+    }
+  }
+  if (deltaY < 0 && scrollTopValue <= 120) {
+    void loadOlderTurns()
+  }
+}
+
+function handleMessageListScrollUpper() {
+  void loadOlderTurns()
 }
 
 function handleScrollToBottomFab() {
@@ -3526,6 +3832,7 @@ async function applyPendingComposerConfig() {
 }
 
 function toggleComposerPanel(mode: ComposerPanelMode) {
+  toolRowExpanded.value = true
   composerPanelMode.value = composerPanelMode.value === mode ? "" : mode
   if (!composerPanelMode.value) {
     expandedConfigKey.value = ""
@@ -3535,6 +3842,13 @@ function toggleComposerPanel(mode: ComposerPanelMode) {
 function closeComposerPanel() {
   composerPanelMode.value = ""
   expandedConfigKey.value = ""
+}
+
+function toggleInputToolRow() {
+  toolRowExpanded.value = !toolRowExpanded.value
+  if (!toolRowExpanded.value) {
+    closeComposerPanel()
+  }
 }
 
 function createStandaloneDraft(text: string): QueuedDraft | null {
@@ -4289,6 +4603,11 @@ function findStoredConnectionByKey(connKey: string) {
 }
 
 function findStoredConnectionById(connectionId: string) {
+  const fromContextStore = normalizeStoredConnectionLike(
+    findStoredConnectionContextById(connectionId)
+  )
+  if (fromContextStore) return fromContextStore
+
   const saved = uni.getStorageSync("mcode_connections")
   return findStoredConnectionInListById(Array.isArray(saved) ? saved : [], connectionId)
 }

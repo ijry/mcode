@@ -14,10 +14,17 @@ export function buildDetailShellTabs(input: {
   openedTabs: OpenedTabItem[]
   titleByConversationId?: Record<number, string>
 }): DetailShellTabItem[] {
+  const seenConversationIds = new Set<number>()
   return (Array.isArray(input.openedTabs) ? input.openedTabs : [])
     .filter((item) => Number(item?.conversation_id || 0) > 0)
     .slice()
     .sort((left, right) => Number(left.position || 0) - Number(right.position || 0))
+    .filter((item) => {
+      const conversationId = Number(item.conversation_id || 0)
+      if (seenConversationIds.has(conversationId)) return false
+      seenConversationIds.add(conversationId)
+      return true
+    })
     .map((item) => {
       const conversationId = Number(item.conversation_id || 0)
       return {
@@ -32,15 +39,51 @@ export function buildDetailShellTabs(input: {
     })
 }
 
-export function resolveDetailTabWindow(activeIndex: number, total: number): number[] {
-  const safeTotal = Math.max(0, Number(total || 0))
-  const safeActive = Math.min(Math.max(0, Number(activeIndex || 0)), Math.max(0, safeTotal - 1))
-  const indexes = new Set<number>()
-  if (safeTotal <= 0) return []
-  indexes.add(safeActive)
-  if (safeActive > 0) indexes.add(safeActive - 1)
-  if (safeActive + 1 < safeTotal) indexes.add(safeActive + 1)
-  return Array.from(indexes).sort((left, right) => left - right)
+export function resolveDetailTabChangeIndex(
+  payload: unknown,
+  tabs: DetailShellTabItem[] = [],
+): number {
+  if (typeof payload === "number") return Number.isFinite(payload) ? payload : -1
+  if (!payload || typeof payload !== "object") return -1
+
+  const record = payload as Record<string, unknown>
+  const directValue = record.index ?? record.current ?? record.name
+  if (typeof directValue === "number" && Number.isFinite(directValue)) return directValue
+  if (typeof directValue === "string" && directValue.trim()) {
+    const parsed = Number(directValue)
+    if (Number.isFinite(parsed)) return parsed
+  }
+
+  const conversationValue = record.conversationId ?? record.conversation_id
+  const conversationId = Number(conversationValue || 0)
+  if (conversationId > 0) {
+    return tabs.findIndex((tab) => Number(tab.conversationId || 0) === conversationId)
+  }
+
+  const tabValue = record.tabId
+  const tabId = Number(tabValue || 0)
+  if (tabId > 0) {
+    return tabs.findIndex((tab) => Number(tab.tabId || 0) === tabId)
+  }
+
+  return -1
+}
+
+export function resolveMountedDetailConversationIds(input: {
+  mountedConversationIds: Iterable<number>
+  tabs: DetailShellTabItem[]
+}): Set<number> {
+  const activeConversationIds = new Set(
+    input.tabs.map((tab) => Number(tab.conversationId || 0)).filter((id) => id > 0)
+  )
+  const nextMountedIds = new Set<number>()
+  for (const conversationId of input.mountedConversationIds) {
+    const normalizedId = Number(conversationId || 0)
+    if (activeConversationIds.has(normalizedId)) {
+      nextMountedIds.add(normalizedId)
+    }
+  }
+  return nextMountedIds
 }
 
 export function resolveDetailTabCloseTarget(

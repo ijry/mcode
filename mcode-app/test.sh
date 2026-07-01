@@ -1,0 +1,10 @@
+#!/usr/bin/env sh
+
+# 当发生错误时中止脚本
+set -e
+
+# 构建
+npm  run build:h5
+
+# 部署
+scp -r dist/build/h5/* root@jiangruyi.com:/home/ly/www/mcode-test/$1

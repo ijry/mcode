@@ -177,6 +177,100 @@ describe("pcTabSyncService", () => {
     expect(replaceOpenedTabsSnapshot).toHaveBeenCalled()
   })
 
+  it("does not save when the existing tab already matches under preserve activation", async () => {
+    ;(getOpenedTabsSnapshot as jest.Mock).mockReturnValue({
+      instanceKey: "inst-a",
+      version: 4,
+      items: [
+        {
+          id: 1,
+          folder_id: 2,
+          conversation_id: 10,
+          agent_type: "codex",
+          position: 0,
+          is_active: true,
+          is_pinned: false,
+        },
+      ],
+    })
+    const gateway = {
+      call: jest.fn(),
+    }
+
+    const result = await ensureConversationTab({
+      instanceKey: "inst-a",
+      gateway: gateway as any,
+      folderId: 2,
+      conversationId: 10,
+      agentType: "codex",
+      activation: "preserve",
+      origin: "mcode-mobile",
+    })
+
+    expect(gateway.call).not.toHaveBeenCalled()
+    expect(result).toEqual(expect.objectContaining({ version: 4 }))
+  })
+
+  it("preserves the existing tab identity fields when matching by conversation id", async () => {
+    ;(getOpenedTabsSnapshot as jest.Mock).mockReturnValue({
+      instanceKey: "inst-a",
+      version: 4,
+      items: [
+        {
+          id: 1,
+          folder_id: 7,
+          conversation_id: 10,
+          agent_type: "claude_code",
+          position: 0,
+          is_active: false,
+          is_pinned: false,
+        },
+      ],
+    })
+    const gateway = {
+      call: jest.fn().mockResolvedValue({
+        accepted: true,
+        version: 5,
+        tabs: [
+          {
+            id: 1,
+            folder_id: 7,
+            conversation_id: 10,
+            agent_type: "claude_code",
+            position: 0,
+            is_active: true,
+            is_pinned: false,
+          },
+        ],
+      }),
+    }
+
+    await ensureConversationTab({
+      instanceKey: "inst-a",
+      gateway: gateway as any,
+      folderId: 21,
+      conversationId: 10,
+      agentType: "codex",
+      activation: "allow",
+      origin: "mcode-mobile",
+    })
+
+    expect(gateway.call).toHaveBeenCalledWith(
+      "save_opened_tabs",
+      expect.objectContaining({
+        expectedVersion: 4,
+        items: [
+          expect.objectContaining({
+            folder_id: 7,
+            conversation_id: 10,
+            agent_type: "claude_code",
+            is_active: true,
+          }),
+        ],
+      }),
+    )
+  })
+
   it("finds the correct tab index for a conversation id", () => {
     expect(resolveConversationTabIndex([
       {
@@ -200,3 +294,4 @@ describe("pcTabSyncService", () => {
     ], 11)).toBe(1)
   })
 })
+

@@ -144,16 +144,15 @@ function buildNextTabs(input: {
     is_active: allowActivation ? Number(item.conversation_id || 0) === input.conversationId : Boolean(item.is_active),
   }))
   if (existing) {
-    return items.map((item) =>
+    const nextItems = items.map((item) =>
       Number(item.conversation_id || 0) === input.conversationId
         ? {
             ...item,
-            folder_id: input.folderId,
-            agent_type: input.agentType || item.agent_type,
             is_active: allowActivation ? true : Boolean(item.is_active),
           }
         : item
     )
+    return sameTabSnapshot(items, nextItems) ? items : nextItems
   }
   const nextId = resolveNextTabId(items)
   return items.concat({
@@ -234,3 +233,4 @@ function normalizeString(...values: unknown[]) {
   }
   return ""
 }
+

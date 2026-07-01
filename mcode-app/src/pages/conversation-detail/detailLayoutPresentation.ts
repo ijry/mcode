@@ -3,23 +3,27 @@ export function buildMessageListPageStyle(input: {
   topChromeHeight: number
   bottomComposerHeight: number
 }) {
-  const minHeight = Math.max(
-    0,
-    Number(input.viewportHeight || 0)
-      - Number(input.topChromeHeight || 0)
-      - Number(input.bottomComposerHeight || 0)
-  )
+  const topChromeHeight = Math.max(0, Number(input.topChromeHeight || 0))
+  const bottomComposerHeight = Math.max(0, Number(input.bottomComposerHeight || 0))
+  const viewportBodyHeight = Math.max(0, Number(input.viewportHeight || 0) - topChromeHeight)
   if (
-    Number(input.topChromeHeight || 0) <= 0
-    && Number(input.bottomComposerHeight || 0) <= 0
-    && minHeight <= 0
+    topChromeHeight <= 0
+    && bottomComposerHeight <= 0
+    && viewportBodyHeight <= 0
   ) {
     return undefined
   }
   return {
-    paddingTop: `${Math.max(0, Number(input.topChromeHeight || 0))}px`,
-    paddingBottom: `${Math.max(0, Number(input.bottomComposerHeight || 0))}px`,
-    minHeight: `${minHeight}px`,
+    marginTop: `${topChromeHeight}px`,
+    height: `${viewportBodyHeight}px`,
+  }
+}
+
+export function buildMessageListContentStyle(bottomComposerHeightPx: number) {
+  const bottomComposerHeight = Math.max(0, Number(bottomComposerHeightPx || 0))
+  if (bottomComposerHeight <= 0) return undefined
+  return {
+    paddingBottom: `${bottomComposerHeight}px`,
   }
 }
 

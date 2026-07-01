@@ -129,8 +129,9 @@ async function loadPage(stopPullDown = false) {
 
 function openConversation(item: RemoteConversationRecord) {
   if (!connection.value) return
+  const encodedConnectionId = encodeURIComponent(connection.value.id)
   uni.navigateTo({
-    url: `/pages/conversation-detail/index?id=${item.id}&folderId=${item.folderId || folderId.value}&connectionId=${encodeURIComponent(connection.value.id)}`,
+    url: `/pages/conversation-detail/index?id=${item.id}&folderId=${item.folderId || folderId.value}&connectionId=${encodedConnectionId}`,
   })
 }
 

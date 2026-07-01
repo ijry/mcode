@@ -1,6 +1,8 @@
-# MCode Conversation Detail Multi-Tab Redesign Design
+# P44 MCode Conversation Detail Multi-Tab Redesign Design
 
 ## Goal
+
+This design defines P44 for mcode-app conversation detail multi-session tab hosting.
 
 Redesign `mcode-app` conversation detail to match the new Stitch mobile detail concept while turning the page into a real multi-session tab host.
 
@@ -241,7 +243,7 @@ Existing permission/question surfaces remain functionally intact but visually mi
 
 ## Routing And Entry
 
-The page continues to accept the current route identity for the initially opened conversation and should continue following P43 short-route expectations:
+As part of `P44`, the page continues to accept the current route identity for the initially opened conversation while still following `P43` short-route expectations:
 
 - prefer `connectionId`
 - keep old encoded connection payloads only as fallback during compatibility windows
@@ -307,3 +309,5 @@ Implement in focused stages:
 5. add close-tab remote sync behavior
 6. apply the new visual system to navbar, tabs strip, canvas, and composer dock
 7. verify existing runtime/detail correctness under multi-tab switching
+
+

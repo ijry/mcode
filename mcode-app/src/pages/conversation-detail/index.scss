@@ -130,25 +130,28 @@
 .detail-tabs-bar {
   position: fixed;
   left: 50%;
-  width: calc(100% - 40rpx);
-  max-width: 920rpx;
+  width: 750rpx;
   transform: translateX(-50%);
   z-index: 24;
-  padding: 10rpx 12rpx;
-  border-radius: 999rpx;
-  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 76%, transparent 24%);
-  border: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 60%, transparent 40%);
-  backdrop-filter: blur(18rpx);
-  box-shadow: 0 16rpx 40rpx rgba(15, 23, 42, 0.05);
+  padding: 0rem 0.375rem;
+  border-radius: 20rpx;
+  background: var(--up-card-bg-color, #ffffff);
+  border: 1rpx solid var(--up-border-color, #dadbde);
   box-sizing: border-box;
 }
 
 :deep(.detail-tabs-bar .u-tabs__wrapper) {
   align-items: center;
+  background: transparent !important;
 }
 
 :deep(.detail-tabs-bar .u-tabs__wrapper__scroll-view) {
   overflow: visible;
+}
+
+:deep(.detail-tabs-bar .u-tabs--shape-capsule .u-tabs__wrapper__scroll-view-wrapper) {
+  background: transparent !important;
+  background-color: transparent !important;
 }
 
 :deep(.detail-tabs-bar .u-tabs__wrapper__nav) {
@@ -169,17 +172,16 @@
   gap: 10rpx;
   min-width: 0;
   max-width: 260rpx;
-  padding: 12rpx 18rpx;
+  padding: 10rpx 16rpx;
   border-radius: 999rpx;
-  background: color-mix(in srgb, var(--up-page-bg-color, #f3f4f6) 76%, var(--up-card-bg-color, #ffffff) 24%);
-  border: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 72%, transparent 28%);
+  background: transparent;
+  border: 1rpx solid transparent;
   box-sizing: border-box;
 }
 
 .detail-tab-pill--active {
-  background: color-mix(in srgb, var(--up-primary, #2979ff) 92%, var(--up-card-bg-color, #ffffff) 8%);
+  background: var(--up-primary, #2979ff);
   border-color: transparent;
-  box-shadow: 0 8rpx 18rpx color-mix(in srgb, var(--up-primary, #2979ff) 18%, transparent 82%);
 }
 
 .detail-tab-pill__dot {
@@ -373,35 +375,20 @@
   100% { transform: scale(1); opacity: 1; }
 }
 
-.message-list {
-  box-sizing: border-box;
-  padding-left: 0;
-  padding-right: 0;
-  width: 100%;
-  max-width: 920rpx;
-  margin: 0 auto;
-}
-
-.message-list__content {
-  min-height: 100%;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-}
-
 .detail-shell__swiper {
   position: relative;
   z-index: 1;
-  flex: 1;
   width: 100%;
-  min-height: 100vh;
-  height: 100vh;
+  min-height: 0;
+  display: block;
+  overflow: hidden;
 }
 
 .detail-shell__swiper-item,
 .detail-shell__page {
-  min-height: 100vh;
-  overflow: visible;
+  height: 100%;
+  min-height: 100%;
+  overflow: hidden;
 }
 
 .detail-shell__placeholder {
@@ -821,24 +808,6 @@
   height: calc(34rpx + env(safe-area-inset-bottom));
 }
 
-.input-wrap {
-  position: fixed;
-  left: 50%;
-  width: calc(100% - 40rpx);
-  bottom: 0;
-  z-index: 30;
-  max-width: 920rpx;
-  transform: translateX(-50%);
-  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 76%, transparent 24%);
-  border: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 64%, transparent 36%);
-  border-radius: 34rpx;
-  padding: 16rpx 16rpx;
-  padding-bottom: calc(16rpx + env(safe-area-inset-bottom));
-  box-shadow: 0 -4rpx 24rpx rgba(15, 23, 42, 0.03), 0 18rpx 42rpx rgba(15, 23, 42, 0.08);
-  backdrop-filter: blur(22rpx);
-  box-sizing: border-box;
-}
-
 .permission-card {
   display: flex;
   flex-direction: column;
@@ -1242,6 +1211,16 @@
   min-width: 0;
 }
 
+.input-feedback--floating {
+  position: absolute;
+  left: 16rpx;
+  right: 16rpx;
+  bottom: calc(100% + 12rpx);
+  z-index: 2;
+  margin-top: 0;
+  box-sizing: border-box;
+}
+
 .input-feedback--retry {
   color: #fa8c16;
 }
@@ -1566,6 +1545,12 @@
   }
 }
 
+.runtime-dot--compact {
+  width: 12rpx;
+  height: 12rpx;
+  box-shadow: none;
+}
+
 .shared-queue-bar {
   margin-bottom: 10rpx;
   padding: 12rpx 14rpx;
@@ -1719,6 +1704,77 @@
   gap: 12rpx;
 }
 
+.tool-toggle-btn {
+  width: 64rpx;
+  height: 64rpx;
+  flex-shrink: 0;
+  border-radius: 20rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--up-page-bg-color, var(--up-bg-color, #f5f6f8)) 72%, var(--up-card-bg-color, #ffffff) 28%);
+  transition: background-color 0.2s ease, transform 0.2s ease;
+  box-sizing: border-box;
+}
+
+.tool-toggle-btn--active {
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 12%, var(--up-card-bg-color, #ffffff) 88%);
+  transform: translateY(-1rpx);
+}
+
+.input-status-row {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  min-height: 30rpx;
+  padding: 0;
+  width: auto;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.input-status-row__main {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  align-items: center;
+  gap: 8rpx;
+}
+
+.input-status-row__text {
+  display: block;
+  min-width: 0;
+  flex: 1;
+  font-size: 19rpx;
+  line-height: 1.25;
+  color: var(--up-tips-color, #909193);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.input-status-row__plan {
+  display: flex;
+  align-items: center;
+  gap: 6rpx;
+  max-width: 220rpx;
+  min-height: 28rpx;
+  padding: 0 8rpx;
+  border-radius: 999rpx;
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 10%, transparent 90%);
+  box-sizing: border-box;
+}
+
+.input-status-row__plan-text {
+  min-width: 0;
+  font-size: 19rpx;
+  line-height: 1.2;
+  color: var(--up-primary, #2979ff);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .input-box {
   flex: 1;
   background-color: color-mix(in srgb, var(--up-page-bg-color, var(--up-bg-color, #f5f6f8)) 72%, var(--up-card-bg-color, #ffffff) 28%);
@@ -1829,6 +1885,21 @@
 .input-tool-btn--active .input-tool-btn__icon {
   background: color-mix(in srgb, var(--up-primary, #2979ff) 12%, var(--up-card-bg-color, #ffffff) 88%);
   transform: translateY(-1rpx);
+}
+
+.input-tool-btn--danger .input-tool-btn__icon {
+  background: color-mix(in srgb, #f56c6c 10%, var(--up-card-bg-color, #ffffff) 90%);
+}
+
+.input-tool-btn--danger.input-tool-btn--disabled {
+  opacity: 0.55;
+}
+
+.input-tool-btn__stop-mark {
+  width: 18rpx;
+  height: 18rpx;
+  border-radius: 4rpx;
+  background: #f56c6c;
 }
 
 .composer-panel {

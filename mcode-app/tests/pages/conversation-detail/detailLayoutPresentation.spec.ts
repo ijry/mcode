@@ -1,5 +1,6 @@
 import {
   buildHistoryStatusStyle,
+  buildMessageListContentStyle,
   buildMessageListPageStyle,
   buildTopOffsetStyle,
 } from "@/pages/conversation-detail/detailLayoutPresentation"
@@ -11,9 +12,8 @@ describe("detailLayoutPresentation", () => {
       topChromeHeight: 120,
       bottomComposerHeight: 180,
     })).toEqual({
-      paddingTop: "120px",
-      paddingBottom: "180px",
-      minHeight: "600px",
+      marginTop: "120px",
+      height: "780px",
     })
 
     expect(buildMessageListPageStyle({
@@ -29,10 +29,27 @@ describe("detailLayoutPresentation", () => {
       topChromeHeight: 168,
       bottomComposerHeight: 180,
     })).toEqual({
-      paddingTop: "168px",
-      paddingBottom: "180px",
-      minHeight: "552px",
+      marginTop: "168px",
+      height: "732px",
     })
+  })
+
+  it("keeps top and bottom chrome space before async measurement finishes", () => {
+    expect(buildMessageListPageStyle({
+      viewportHeight: 653,
+      topChromeHeight: 103,
+      bottomComposerHeight: 156,
+    })).toEqual({
+      marginTop: "103px",
+      height: "550px",
+    })
+  })
+
+  it("builds content padding style from the composer height", () => {
+    expect(buildMessageListContentStyle(180)).toEqual({
+      paddingBottom: "180px",
+    })
+    expect(buildMessageListContentStyle(0)).toBeUndefined()
   })
 
   it("builds top offset and history status styles", () => {

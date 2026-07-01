@@ -145,8 +145,11 @@ class AcpApiClient {
   ): Promise<void> {
     await this.request("/acp_set_config_option", {
       connectionId,
+      connection_id: connectionId,
       configId,
+      config_id: configId,
       valueId,
+      value_id: valueId,
     })
   }
 

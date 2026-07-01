@@ -1,8 +1,8 @@
-# MCode Conversation Detail Multi-Tab Redesign Implementation Plan
+# P44 MCode Conversation Detail Multi-Tab Redesign Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Turn `mcode-app` conversation detail into a real multi-session tab host with `up-tabs`, `swiper` gesture switching, lazy adjacent-page mounting, remote PC tab synchronization, close-tab writeback, and the new Stitch-inspired glass redesign while preserving existing runtime/detail correctness.
+**Goal:** Turn `mcode-app` conversation detail into a real multi-session tab host with `up-tabs`, `swiper` gesture switching, lazy adjacent-page mounting, remote PC tab synchronization, close-tab writeback, and the new Stitch-inspired glass redesign while preserving existing runtime/detail correctness. This plan tracks `P44`.
 
 **Architecture:** Keep remote opened tabs as the only membership/order truth, and split the current monolithic detail page into a tab shell plus reusable single-session detail body/state units. Reuse `openedTabsRealtimeCache`, `pcTabSyncService`, existing detail helper modules, and current conversation runtime authority so the redesign changes UI architecture and page composition without changing ACP, realtime, SQLite, or opened-tab protocols.
 
@@ -17,7 +17,7 @@
 - Prefer `--up-page-bg-color`, `--up-card-bg-color`, `--up-main-color`, `--up-content-color`, `--up-tips-color`, `--up-border-color`, and `--up-primary` for the redesign.
 - Do not add new `--mcode-*` aliases for the redesign colors.
 - Keep dark-mode compatibility by mapping the glass and contrast system to existing `uview-plus` runtime theme variables.
-- The page should continue following P43 short-route expectations and prefer `connectionId`.
+- `P44` continues to depend on `P43` short-route expectations and should still prefer `connectionId`.
 - Every mcode change must include or update a Markdown note under `docs/mcode-architecture-notes/`.
 - The architecture note must describe architecture, protocol/data-flow changes, UI behavior, compatibility considerations, and native iOS/Android replication guidance.
 
@@ -579,8 +579,8 @@ git commit -m "feat(app): redesign conversation detail with glass multi-tab layo
 
 **Files:**
 - Create: `docs/mcode-architecture-notes/2026-06-30-conversation-detail-multi-tab-redesign.md`
-- Modify: `docs/superpowers/specs/2026-06-30-mcode-conversation-detail-multi-tab-redesign-design.md`
-- Modify: `docs/superpowers/plans/2026-06-30-mcode-conversation-detail-multi-tab-redesign.md`
+- Modify: `docs/superpowers/specs/2026-06-30-p44-mcode-conversation-detail-multi-tab-redesign-design.md`
+- Modify: `docs/superpowers/plans/2026-06-30-p44-mcode-conversation-detail-multi-tab-redesign.md`
 
 **Interfaces:**
 - Consumes: implemented tab shell/body split, opened-tabs sync, close-tab behavior, lazy mount behavior
@@ -614,7 +614,7 @@ Native clients should use remote opened tabs as the only tab truth source, keep 
 
 - [ ] **Step 2: Self-review the note and plan references**
 
-Run: `rg -n "up-tabs|swiper|tabs://changed|conversation://changed|lazy mount|right-first" docs/mcode-architecture-notes/2026-06-30-conversation-detail-multi-tab-redesign.md docs/superpowers/specs/2026-06-30-mcode-conversation-detail-multi-tab-redesign-design.md docs/superpowers/plans/2026-06-30-mcode-conversation-detail-multi-tab-redesign.md`
+Run: `rg -n "up-tabs|swiper|tabs://changed|conversation://changed|lazy mount|right-first" docs/mcode-architecture-notes/2026-06-30-conversation-detail-multi-tab-redesign.md docs/superpowers/specs/2026-06-30-p44-mcode-conversation-detail-multi-tab-redesign-design.md docs/superpowers/plans/2026-06-30-p44-mcode-conversation-detail-multi-tab-redesign.md`
 Expected: matches in all three files with no `TODO`, `TBD`, or contradictory tab-truth language
 
 - [ ] **Step 3: Run final targeted regression checks**
@@ -625,6 +625,9 @@ Expected: PASS
 - [ ] **Step 4: Commit**
 
 ```bash
-git add docs/mcode-architecture-notes/2026-06-30-conversation-detail-multi-tab-redesign.md docs/superpowers/specs/2026-06-30-mcode-conversation-detail-multi-tab-redesign-design.md docs/superpowers/plans/2026-06-30-mcode-conversation-detail-multi-tab-redesign.md
+git add docs/mcode-architecture-notes/2026-06-30-conversation-detail-multi-tab-redesign.md docs/superpowers/specs/2026-06-30-p44-mcode-conversation-detail-multi-tab-redesign-design.md docs/superpowers/plans/2026-06-30-p44-mcode-conversation-detail-multi-tab-redesign.md
 git commit -m "docs(app): record conversation detail multi-tab redesign"
 ```
+
+
+
