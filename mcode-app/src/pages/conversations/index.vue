@@ -510,6 +510,7 @@ import { useAuthStore } from "@/stores/auth"
 import { useConversationRuntimeStore } from "@/stores/conversationRuntime"
 import { acpApi } from "@/api/acp"
 import RemoteDirectoryBrowser from "@/components/remote/RemoteDirectoryBrowser.vue"
+import { resolveOverviewCardDisplayStatus } from "@/pages/conversations/conversationOverviewPresentation"
 import { getDirectToken } from "@/services/gateway/directTokenStore"
 import { toErrorMessage } from "@/services/gateway/error"
 import { openRemoteFolder } from "@/services/remoteDirectoryBrowser"
@@ -710,7 +711,7 @@ const filteredConnectionGroups = computed<DisplayConnectionGroup[]>(() => {
     ...group,
     cards: group.cards.map((card) => ({
       ...card,
-      displayStatus: resolveOverviewCardStatus(card),
+      displayStatus: resolveOverviewCardDisplayStatus(card.status, runtime.sessions.get(card.conversationId || 0)?.status),
     })),
   }))
   if (!kw) return groups
@@ -1749,41 +1750,6 @@ function normalizeAgentType(value?: string): string {
 
 function normalizeConversationStatus(value?: string): string {
   return normalizeConversationSummaryStatus(value)
-}
-
-function mapRuntimeStatusToOverviewStatus(status?: string | null): string | null {
-  const normalized = String(status || "").trim().toLowerCase()
-  if (!normalized) return null
-  if (
-    normalized === "waiting_permission" ||
-    normalized === "thinking" ||
-    normalized === "running_tool" ||
-    normalized === "connecting" ||
-    normalized === "connected"
-  ) {
-    return "in_progress"
-  }
-  if (normalized === "error") {
-    return "failed"
-  }
-  if (normalized === "idle") {
-    return null
-  }
-  return null
-}
-
-function resolveOverviewCardStatus(card: LiveSessionCard): string {
-  const conversationId = Number(card.conversationId || 0)
-  if (conversationId <= 0) {
-    return card.status
-  }
-
-  const runtimeSession = runtime.sessions.get(conversationId)
-  if (!runtimeSession) {
-    return card.status
-  }
-
-  return mapRuntimeStatusToOverviewStatus(runtimeSession.status) || card.status
 }
 
 function statusLabel(status: string): string {
