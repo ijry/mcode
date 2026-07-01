@@ -51,7 +51,7 @@
 
 **Interfaces:**
 - Consumes: `AppState`, `save_recovery_snapshot`, `now_ms`.
-- Produces: `DesktopOpenFolder`, `dispatch_folder_proxy(state, command, payload) -> anyhow::Result<serde_json::Value>`, and dispatcher support for `get_home_directory`, `list_directory_entries`, `open_folder`, `list_open_folder_details`, `list_opened_tabs`.
+- Produces: `DesktopOpenFolder`, `dispatch_folder_proxy(state, command, payload) -> anyhow::Result<serde_json::Value>`, and dispatcher support for `get_home_directory`, `list_directory_entries`, `open_folder`, `list_open_folder_details`, `list_opened_tabs`, `list_all_conversations`.
 
 - [ ] **Step 1: Write failing desktop integration tests**
 
@@ -176,6 +176,20 @@ async fn p30_returns_empty_opened_tabs_for_app_overview_compatibility() {
     assert_eq!(response["version"], 0);
     assert!(response["items"].as_array().unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn p30_returns_empty_conversation_history_for_desktop_projects() {
+    let state = AppState::new_for_test();
+    let response = dispatch_desktop_proxy_with_state(
+        &state,
+        "list_all_conversations",
+        json!({ "folderIds": [1] }),
+    )
+    .await
+    .unwrap();
+
+    assert!(response.as_array().unwrap().is_empty());
+}
 ```
 
 - [ ] **Step 2: Run tests and verify they fail**
@@ -290,6 +304,7 @@ pub async fn dispatch_folder_proxy(
         }
         "list_open_folder_details" => Ok(json!(list_open_folder_details(state))),
         "list_opened_tabs" => Ok(json!({ "version": 0, "items": [] })),
+        "list_all_conversations" => Ok(json!([])),
         _ => Err(anyhow!("unsupported desktop folder command: {command}")),
     }
 }
@@ -431,7 +446,8 @@ Add these match arms in `dispatch_desktop_proxy_with_event_sink` before the fina
 | "list_directory_entries"
 | "open_folder"
 | "list_open_folder_details"
-| "list_opened_tabs" => dispatch_folder_proxy(state, command, payload).await,
+| "list_opened_tabs"
+| "list_all_conversations" => dispatch_folder_proxy(state, command, payload).await,
 ```
 
 - [ ] **Step 7: Run desktop tests**
