@@ -15,22 +15,22 @@ export interface RemoteProjectFolder {
 
 export function normalizeDirectoryEntries(input: unknown): RemoteDirectoryEntry[] {
   const list = normalizeList(input)
-  return list
-    .map((item) => {
-      const raw = item && typeof item === "object" ? (item as Record<string, unknown>) : null
-      if (!raw) return null
-      const name = pickString(raw.name)
-      const path = pickString(raw.path)
-      const isDirectory = Boolean(raw.isDirectory ?? raw.is_dir)
-      if (!name || !path || !isDirectory) return null
-      return {
-        name,
-        path,
-        isDirectory: true,
-        hasChildren: Boolean(raw.hasChildren ?? raw.has_children),
-      } satisfies RemoteDirectoryEntry
+  const entries: RemoteDirectoryEntry[] = []
+  list.forEach((item) => {
+    const raw = item && typeof item === "object" ? (item as Record<string, unknown>) : null
+    if (!raw) return
+    const name = pickString(raw.name)
+    const path = pickString(raw.path)
+    const isDirectory = Boolean(raw.isDirectory ?? raw.is_dir)
+    if (!name || !path || !isDirectory) return
+    entries.push({
+      name,
+      path,
+      isDirectory,
+      hasChildren: Boolean(raw.hasChildren ?? raw.has_children),
     })
-    .filter((item): item is RemoteDirectoryEntry => Boolean(item))
+  })
+  return entries
 }
 
 export function normalizeRemoteProjectFolder(input: unknown): RemoteProjectFolder | null {
