@@ -88,6 +88,17 @@ describe("ConversationDetailBody", () => {
     expect(source).not.toContain("const remoteActiveIndex = detailShellTabs.value.findIndex((tab) => tab.active)")
   })
 
+  it("does not replay cached config into a live session when the connection attaches", () => {
+    const source = fs.readFileSync(
+      path.resolve(__dirname, "../../../src/pages/conversation-detail/index.vue"),
+      "utf8"
+    )
+
+    expect(source).toContain("void loadDetailAgentConfig()")
+    expect(source).not.toContain("void applyPendingComposerConfig()")
+    expect(source).toContain("conversationId.value || null")
+  })
+
   it("does not append the route conversation while hydrating detail tabs", () => {
     const source = fs.readFileSync(
       path.resolve(__dirname, "../../../src/pages/conversation-detail/index.vue"),

@@ -82,6 +82,10 @@ function normalizeProjectPath(path?: string) {
   return String(path || "").trim()
 }
 
+function normalizeContextScope(scope?: string | number | null) {
+  return String(scope ?? "").trim()
+}
+
 function isFreshCache(updatedAt: number, ttlMs = CREATE_AGENT_CACHE_TTL_MS): boolean {
   return Number.isFinite(updatedAt) && updatedAt > 0 && Date.now() - updatedAt < ttlMs
 }
@@ -111,13 +115,19 @@ function writeCreateAgentConfigSelectionMap(
 export function buildAgentConfigContextKey(
   connectionKeyValue: string,
   agentType: string,
-  projectPath?: string
+  projectPath?: string,
+  scope?: string | number | null
 ): string {
-  return JSON.stringify([
+  const key = [
     String(connectionKeyValue || "").trim(),
     String(agentType || "").trim().toLowerCase(),
     normalizeProjectPath(projectPath),
-  ])
+  ]
+  const normalizedScope = normalizeContextScope(scope)
+  if (normalizedScope) {
+    key.push(normalizedScope)
+  }
+  return JSON.stringify(key)
 }
 
 export function readFreshAgentConfigCache(contextKey: string): AgentOptionsSnapshot | null {

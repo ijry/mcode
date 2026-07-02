@@ -1128,7 +1128,6 @@ import {
   detailConfigOptionSummary,
   detailPermissionSummary,
   nextExpandedConfigKey,
-  pendingComposerConfigActions,
   withSelectedDetailConfigValue,
   withSelectedDetailMode,
 } from "./detailComposerPresentation"
@@ -1604,7 +1603,8 @@ const detailAgentConfigContextKey = computed(() => {
   return buildAgentConfigContextKey(
     detailConnectionKey.value,
     currentAgentType.value,
-    detailProjectPath.value
+    detailProjectPath.value,
+    conversationId.value || null
   )
 })
 
@@ -2824,7 +2824,6 @@ watch(
   ([agentType, connectionId]) => {
     if (!conversationId.value || !agentType || !connectionId) return
     void loadDetailAgentConfig()
-    void applyPendingComposerConfig()
   }
 )
 
@@ -4274,20 +4273,6 @@ async function selectDetailConfigValue(configId: string, valueId: string) {
     )
   } catch (error) {
     uni.showToast({ title: `配置切换失败: ${toErrorMessage(error)}`, icon: "none" })
-  }
-}
-
-async function applyPendingComposerConfig() {
-  const conn = session.value?.connectionId
-  if (!conn) return
-
-  const pending = pendingComposerConfigActions(detailAgentConfig.value)
-  if (pending.modeId) {
-    await acpApi.acpSetMode(conn, pending.modeId).catch(() => {})
-  }
-
-  for (const item of pending.configValues) {
-    await acpApi.acpSetConfigOption(conn, item.configId, item.valueId).catch(() => {})
   }
 }
 
