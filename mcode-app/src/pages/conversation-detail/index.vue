@@ -2037,6 +2037,24 @@ function normalizeOpenedTabsChangedPayload(payload: unknown) {
   }
 }
 
+function normalizeOpenedTabsResponse(instanceKey: string, raw: unknown) {
+  if (Array.isArray(raw)) {
+    return {
+      instanceKey,
+      version: 0,
+      items: normalizeOpenedTabsList(raw),
+    }
+  }
+  const record = raw && typeof raw === "object"
+    ? (raw as Record<string, unknown>)
+    : {}
+  return {
+    instanceKey,
+    version: Number(record.version || 0),
+    items: normalizeOpenedTabsList(record.items),
+  }
+}
+
 function applyDetailOpenedTabsState(input: {
   instanceKey: string
   version: number
@@ -2256,25 +2274,16 @@ async function initializeDetailTabsShell() {
   }
   try {
     const gateway = await getDetailGateway()
-    const snapshot = await ensureConversationTab({
+    const tabsRaw = await gateway.call<unknown>("list_opened_tabs")
+    const snapshot = normalizeOpenedTabsResponse(instanceKey, tabsRaw)
+    applyDetailOpenedTabsState({
       instanceKey,
-      gateway,
-      folderId: folderId.value,
-      conversationId: conversationId.value,
-      agentType: currentAgentType.value,
-      activation: "preserve",
-      origin: "mcode-mobile",
+      version: snapshot.version,
+      items: snapshot.items,
+      origin: "server",
     })
-    if (snapshot) {
-      applyDetailOpenedTabsState({
-        instanceKey,
-        version: snapshot.version,
-        items: snapshot.items,
-        origin: "mcode-mobile",
-      })
-      await refreshDetailTabTitles(instanceKey, snapshot.items)
-      reconcileDetailShellFromOpenedTabs({ loadConversation: false })
-    }
+    await refreshDetailTabTitles(instanceKey, snapshot.items)
+    reconcileDetailShellFromOpenedTabs({ loadConversation: false })
   } catch (error) {
     console.warn("initialize detail tabs shell failed", error)
   }

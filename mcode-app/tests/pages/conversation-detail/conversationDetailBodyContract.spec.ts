@@ -86,6 +86,20 @@ describe("ConversationDetailBody", () => {
     expect(source).not.toContain("const remoteActiveIndex = detailShellTabs.value.findIndex((tab) => tab.active)")
   })
 
+  it("does not append the route conversation while hydrating detail tabs", () => {
+    const source = fs.readFileSync(
+      path.resolve(__dirname, "../../../src/pages/conversation-detail/index.vue"),
+      "utf8"
+    )
+
+    expect(source).toContain('gateway.call<unknown>("list_opened_tabs")')
+    expect(source).not.toContain(`folderId: folderId.value,
+      conversationId: conversationId.value,
+      agentType: currentAgentType.value,
+      activation: "preserve",
+      origin: "mcode-mobile",`)
+  })
+
   it("measures composer chrome from the active swiper page only", () => {
     const source = fs.readFileSync(
       path.resolve(__dirname, "../../../src/pages/conversation-detail/index.vue"),
