@@ -1952,12 +1952,29 @@ function syncAuthToConnectionKey(connKey?: string) {
   }
 }
 
-function openConversation(conv: Conversation, connKey?: string) {
+async function openConversation(conv: Conversation, connKey?: string) {
   const conn = connKey ? findConnectedConnectionByKey(connKey) : undefined
   if (conn) {
     syncAuthToConnection(conn)
   } else {
     syncAuthToConnectionKey(connKey)
+  }
+  const targetFolderId = Number(conv.folder_id || 0)
+  if (conn && targetFolderId > 0 && Number(conv.id || 0) > 0) {
+    try {
+      const gateway = await createConnectionGateway(conn)
+      await ensureConversationTab({
+        instanceKey: gateway.getRemoteInstanceDescriptor().instanceKey,
+        gateway,
+        folderId: targetFolderId,
+        conversationId: Number(conv.id || 0),
+        agentType: conv.agent_type,
+        activation: "allow",
+        origin: "mcode-mobile-open",
+      })
+    } catch (error) {
+      console.warn("ensure conversation tab before open skipped:", error)
+    }
   }
   const encodedConnectionId = conn?.id ? encodeURIComponent(conn.id) : ""
   uni.navigateTo({

@@ -72,6 +72,7 @@ import {
   resolveConnectionContext,
   type ConnectionContext,
 } from "@/services/connectionContext"
+import { ensureConversationTab } from "@/services/conversation/pcTabSyncService"
 import {
   loadRemoteProjectConversations,
   type RemoteConversationRecord,
@@ -127,8 +128,27 @@ async function loadPage(stopPullDown = false) {
   }
 }
 
-function openConversation(item: RemoteConversationRecord) {
+async function openConversation(item: RemoteConversationRecord) {
   if (!connection.value) return
+  const targetFolderId = Number(item.folderId || folderId.value)
+  if (targetFolderId > 0 && Number(item.id || 0) > 0) {
+    try {
+      const resolved = await resolveConnectionContext(connection.value)
+      connection.value = resolved.connection
+      persistResolvedConnection(resolved.connection)
+      await ensureConversationTab({
+        instanceKey: resolved.gateway.getRemoteInstanceDescriptor().instanceKey,
+        gateway: resolved.gateway,
+        folderId: targetFolderId,
+        conversationId: Number(item.id || 0),
+        agentType: item.agentType,
+        activation: "allow",
+        origin: "mcode-mobile-open",
+      })
+    } catch (error) {
+      console.warn("ensure conversation tab before open skipped", error)
+    }
+  }
   const encodedConnectionId = encodeURIComponent(connection.value.id)
   uni.navigateTo({
     url: `/pages/conversation-detail/index?id=${item.id}&folderId=${item.folderId || folderId.value}&connectionId=${encodedConnectionId}`,
