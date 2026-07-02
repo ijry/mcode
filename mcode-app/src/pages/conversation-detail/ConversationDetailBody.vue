@@ -104,7 +104,7 @@ const emit = defineEmits<{
   height: calc(env(safe-area-inset-bottom) + 12rpx);
   z-index: 29;
   pointer-events: none;
-  background: var(--up-page-bg-color, var(--up-bg-color, #f3f4f6));
+  background: transparent;
 }
 
 .input-status-wrap {

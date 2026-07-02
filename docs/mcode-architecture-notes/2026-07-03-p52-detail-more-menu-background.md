@@ -71,6 +71,9 @@ User bubbles keep a lighter blur at `0.1625rem` so the primary-color fill still
 separates from the photo background without becoming too foggy. The
 implementation changes only panel backgrounds and borders, not container
 `opacity`, so text, markdown, icons, and bubble content remain fully opaque.
+The bottom `composer-safe-area` spacer stays transparent so the background
+image can continue through the safe-area region instead of being patched with a
+solid page-color block.
 Tab titles stay single-line and truncate with ellipsis instead of wrapping when
 the available capsule width becomes tight. The web implementation also
 normalizes embedded line breaks and repeated whitespace in tab titles before
