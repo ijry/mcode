@@ -102,6 +102,30 @@ describe('conversationRuntime ACP error handling', () => {
     expect(session.inputErrorMessage).toBe('ACP protocol error: Internal error')
   })
 
+  it('routes realtime events by bound conversation id when connection ids overlap', () => {
+    const store = useConversationRuntimeStore()
+    const firstSession = store.getOrCreateSession(1)
+    firstSession.connectionId = 'shared-conn'
+    firstSession.status = 'connected'
+    const secondSession = store.getOrCreateSession(2)
+    secondSession.connectionId = 'shared-conn'
+    secondSession.status = 'connected'
+
+    store.handleEventForConversation(2, {
+      type: 'stream_batch',
+      connectionId: 'shared-conn',
+      data: {
+        delta: 'second tab only',
+        contentType: 'text',
+      },
+    } as any)
+
+    expect(store.getMessages(1)).toEqual([])
+    expect(store.getMessages(2)[0]?.content).toEqual([
+      { type: 'text', text: 'second tab only' },
+    ])
+  })
+
   it('still clears stale errors on ordinary idle transitions', () => {
     const { store, session } = prepareSession('connected', 'stale error')
 

@@ -1189,7 +1189,7 @@ async function sendDraft(draft: QueuedDraft): Promise<boolean> {
     if (isQueuedPromptResponse(promptResponse)) {
       runtime.removeOptimisticUserMessage(Number(props.conversationId || 0), optimisticTurnId)
       runtime.clearLiveMessage(Number(props.conversationId || 0))
-      runtime.handleEvent({
+      runtime.handleEventForConversation(Number(props.conversationId || 0), {
         connectionId: conn,
         type: "turn_queued",
         data: promptResponse,

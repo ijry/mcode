@@ -417,11 +417,26 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
    * 处理事件
    */
   function handleEvent(event: EventEnvelope) {
+    handleEventForConversation(null, event)
+  }
+
+  function handleEventForConversation(conversationId: number | null, event: EventEnvelope) {
     connectionSessionManager.touchConnection(event.connectionId)
-    const session = Array.from(sessions.value.values()).find(
-      (s) => s.connectionId === event.connectionId
-    )
+    const targetConversationId = Number(conversationId || 0)
+    const session = targetConversationId > 0
+      ? sessions.value.get(targetConversationId)
+      : Array.from(sessions.value.values()).find(
+          (s) => s.connectionId === event.connectionId
+        )
     if (!session) return
+    if (
+      targetConversationId > 0 &&
+      event.connectionId &&
+      session.connectionId &&
+      session.connectionId !== event.connectionId
+    ) {
+      return
+    }
     const eventSeq = firstNumber(event.seq)
     if (eventSeq != null) {
       const currentSeq = session.lastAppliedSeq
@@ -695,9 +710,10 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         console.warn("acp_find_connection_for_conversation failed", error)
       }
 
+      const discoveredRecord = (discovered || {}) as Record<string, unknown>
       const discoveredConnectionId = firstString(
-        discovered?.connection_id,
-        discovered?.connectionId
+        discoveredRecord.connection_id,
+        discoveredRecord.connectionId
       )
       if (
         managed &&
@@ -709,11 +725,11 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
           instanceKey: targetInstanceKey,
           connectionId: discoveredConnectionId,
           agentType:
-            firstString(discovered?.agent_type, discovered?.agentType) ||
+            firstString(discoveredRecord.agent_type, discoveredRecord.agentType) ||
             managed.connection.agentType ||
             agentType,
           sessionId:
-            firstString(discovered?.session_id, discovered?.sessionId) ||
+            firstString(discoveredRecord.session_id, discoveredRecord.sessionId) ||
             managed.externalId ||
             sessionId ||
             null,
@@ -785,7 +801,9 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       session.apiRetry = null
       syncManagedSendPermission(conversationId)
 
-      bindConversationEventHandler(conversationId, handleEvent)
+      bindConversationEventHandler(conversationId, (event) => {
+        handleEventForConversation(conversationId, event)
+      })
       await attachConversationRealtime({
         conversationId,
         instanceKey: managed.instanceKey,
@@ -971,6 +989,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     appendLiveContent,
     completeTurn,
     handleEvent,
+    handleEventForConversation,
     hydrateLiveSnapshot,
     connect,
     disconnect,

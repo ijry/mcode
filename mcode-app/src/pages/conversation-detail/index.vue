@@ -1267,6 +1267,7 @@ let detailOverviewInvalidationUnsubscribe: (() => void) | null = null
 let detailOpenedTabsInstanceKey = ""
 let detailOverviewInstanceKey = ""
 let detailSwitching = false
+let detailLoadSequence = 0
 let pendingDetailTabIndex: number | null = null
 let pendingDetailTabOptions: { syncRemote?: boolean } | null = null
 const connectingBackgroundConversationIds = new Set<number>()
@@ -1279,6 +1280,34 @@ function detailDebugLog(stage: string, payload?: Record<string, unknown>) {
     stage,
     ...(payload || {}),
   })
+}
+
+function isCurrentDetailTarget(input: {
+  conversationId: number
+  folderId?: number
+  instanceKey?: string
+}) {
+  const activeTab = detailShellTabs.value[activeDetailTabIndex.value]
+  const activeTabConversationId = Number(activeTab?.conversationId || 0)
+  if (
+    activeTabConversationId > 0 &&
+    activeTabConversationId !== Number(input.conversationId || 0)
+  ) {
+    return false
+  }
+  if (Number(conversationId.value || 0) !== Number(input.conversationId || 0)) {
+    return false
+  }
+  if (
+    input.folderId != null &&
+    Number(folderId.value || 0) !== Number(input.folderId || 0)
+  ) {
+    return false
+  }
+  if (input.instanceKey && resolveDetailInstanceKey() !== input.instanceKey) {
+    return false
+  }
+  return true
 }
 
 const timelineTurns = computed(() => {
@@ -1818,7 +1847,17 @@ function mountAllDetailTabs() {
 
 function captureActiveDetailLocalState() {
   const activeTab = detailShellTabs.value[activeDetailTabIndex.value]
-  const state = ensureDetailLocalTabState(activeTab)
+  const currentTab = detailShellTabs.value.find((tab) =>
+    Number(tab.conversationId || 0) === Number(conversationId.value || 0) &&
+    Number(tab.folderId || 0) === Number(folderId.value || 0)
+  )
+  const stateTab = currentTab || (
+    activeTab?.conversationId === conversationId.value && activeTab?.folderId === folderId.value
+      ? activeTab
+      : null
+  )
+  if (!stateTab) return
+  const state = ensureDetailLocalTabState(stateTab)
   if (!state) return
   state.draftText = inputText.value
   state.attachments = JSON.parse(JSON.stringify(attachments.value || []))
@@ -2113,6 +2152,16 @@ function queueDetailTabSwitch(index: number, options: { syncRemote?: boolean } =
   pendingDetailTabOptions = { ...options }
 }
 
+function shouldRunQueuedDetailTabSwitch(index: number) {
+  const tab = detailShellTabs.value[Number(index)]
+  if (!tab) return false
+  return (
+    Number(index) !== activeDetailTabIndex.value ||
+    Number(tab.conversationId || 0) !== Number(conversationId.value || 0) ||
+    Number(tab.folderId || 0) !== Number(folderId.value || 0)
+  )
+}
+
 async function switchToDetailTab(
   index: number,
   options: { syncRemote?: boolean } = {}
@@ -2158,7 +2207,7 @@ async function switchToDetailTab(
     const queuedOptions = pendingDetailTabOptions || {}
     pendingDetailTabIndex = null
     pendingDetailTabOptions = null
-    if (typeof queuedIndex === "number" && queuedIndex !== activeDetailTabIndex.value) {
+    if (typeof queuedIndex === "number" && shouldRunQueuedDetailTabSwitch(queuedIndex)) {
       void switchToDetailTab(queuedIndex, queuedOptions)
     }
   }
@@ -2171,7 +2220,7 @@ function drainPendingDetailTabSwitch(options: { syncRemote?: boolean } = {}) {
   const queuedOptions = pendingDetailTabOptions || options
   pendingDetailTabIndex = null
   pendingDetailTabOptions = null
-  if (queuedIndex === activeDetailTabIndex.value) {
+  if (!shouldRunQueuedDetailTabSwitch(queuedIndex)) {
     syncDetailTabSelection(queuedIndex)
     return
   }
@@ -2679,6 +2728,7 @@ function syncRouteAuthContext() {
 
 async function hydrateLocalConversationState(input: {
   instanceKey: string
+  conversationId: number
   initialTurnLimit: number
   hasHotRuntime: boolean
 }) {
@@ -2687,12 +2737,19 @@ async function hydrateLocalConversationState(input: {
   let localTurns: PersistedTurnWithParts[] = []
   try {
     await ensureConversationSchema()
-    localSummary = await getConversationSummaryById(input.instanceKey, conversationId.value)
-    syncConversationTitle(localSummary?.title)
-    persistedRuntime = await getRuntime(input.instanceKey, conversationId.value)
+    localSummary = await getConversationSummaryById(input.instanceKey, input.conversationId)
+    if (isCurrentDetailTarget(input)) {
+      syncConversationTitle(localSummary?.title)
+    } else if (localSummary?.title) {
+      detailTabTitleMap.value = {
+        ...detailTabTitleMap.value,
+        [input.conversationId]: localSummary.title,
+      }
+    }
+    persistedRuntime = await getRuntime(input.instanceKey, input.conversationId)
     if (!input.hasHotRuntime) {
       localTurns = await getNewestTurns(
-        conversationId.value,
+        input.conversationId,
         Math.min(input.initialTurnLimit, INITIAL_TURN_BATCH)
       )
     }
@@ -2728,10 +2785,10 @@ function getRemoteConversationMetadata(
   }
 }
 
-async function fetchRemoteConversationDetail() {
+async function fetchRemoteConversationDetail(targetConversationId = conversationId.value) {
   const gateway = await getDetailGateway({ refreshAuth: true })
   return await gateway.call<any>("get_folder_conversation", {
-    conversationId: conversationId.value,
+    conversationId: targetConversationId,
   })
 }
 
@@ -2745,26 +2802,35 @@ async function fetchRemoteConversationDetailById(targetConversationId: number) {
 async function hydrateRemoteConversationMetadata(input: {
   managed: ReturnType<typeof connectionSessionManager.getByConversationId>
   instanceKey: string
+  conversationId: number
+  folderId: number
   agentType: string
   resumeSessionId?: string
   remoteDetail: any
 }) {
   if (input.managed || input.resumeSessionId || input.remoteDetail) return input
   try {
-    const remoteDetail = await fetchRemoteConversationDetail()
-    applyRemoteDetailStats(remoteDetail)
+    const remoteDetail = await fetchRemoteConversationDetail(input.conversationId)
+    applyRemoteDetailStats(remoteDetail, input.conversationId)
     const metadata = getRemoteConversationMetadata(
       remoteDetail,
       input.agentType,
       input.resumeSessionId
     )
-    currentAgentType.value = normalizeAgentType(metadata.agentType)
-    syncConversationTitle(metadata.title)
+    if (isCurrentDetailTarget(input)) {
+      currentAgentType.value = normalizeAgentType(metadata.agentType)
+      syncConversationTitle(metadata.title)
+    } else if (metadata.title) {
+      detailTabTitleMap.value = {
+        ...detailTabTitleMap.value,
+        [input.conversationId]: metadata.title,
+      }
+    }
     await persistConversationDetailSnapshot({
       instanceKey: input.instanceKey,
-      conversationId: conversationId.value,
+      conversationId: input.conversationId,
       detail: remoteDetail,
-      fallbackFolderId: folderId.value,
+      fallbackFolderId: input.folderId,
       persistTurns: false,
     })
     return {
@@ -2781,15 +2847,17 @@ async function hydrateRemoteConversationMetadata(input: {
 
 async function persistInitialRemoteDetail(input: {
   instanceKey: string
+  conversationId: number
+  folderId: number
   detail: any
 }) {
   try {
     detailDebugLog("initial-remote-detail", summarizeDetailTurns(input.detail))
     await persistConversationDetailSnapshot({
       instanceKey: input.instanceKey,
-      conversationId: conversationId.value,
+      conversationId: input.conversationId,
       detail: input.detail,
-      fallbackFolderId: folderId.value,
+      fallbackFolderId: input.folderId,
     })
   } catch (error) {
     detailDebugLog("initial-persist-failed", { message: toErrorMessage(error) })
@@ -2797,11 +2865,11 @@ async function persistInitialRemoteDetail(input: {
   }
 }
 
-async function loadLiveConversationSnapshot(connectionId?: string) {
+async function loadLiveConversationSnapshot(targetConversationId: number, connectionId?: string) {
   let snapshot: any = null
   let snapshotFromConversation = false
   try {
-    snapshot = await acpApi.acpGetSessionSnapshotByConversation(conversationId.value)
+    snapshot = await acpApi.acpGetSessionSnapshotByConversation(targetConversationId)
     snapshotFromConversation = Boolean(snapshot)
   } catch (error) {
     console.warn("acp_get_session_snapshot_by_conversation failed", error)
@@ -2821,6 +2889,8 @@ async function loadLiveConversationSnapshot(connectionId?: string) {
 
 async function persistLiveSnapshotMetadata(input: {
   instanceKey: string
+  conversationId: number
+  folderId: number
   snapshot: any
   snapshotFromConversation: boolean
   resumeSessionId?: string
@@ -2837,7 +2907,7 @@ async function persistLiveSnapshotMetadata(input: {
   try {
     await persistConversationDetailSnapshot({
       instanceKey: input.instanceKey,
-      conversationId: conversationId.value,
+      conversationId: input.conversationId,
       detail: {
         session_id: snapshotSessionId,
         agent_type: input.agentType,
@@ -2846,7 +2916,7 @@ async function persistLiveSnapshotMetadata(input: {
           agent_type: input.agentType,
         },
       },
-      fallbackFolderId: folderId.value,
+      fallbackFolderId: input.folderId,
       fallbackConnectionId: input.connectionId,
       persistTurns: false,
     })
@@ -2861,11 +2931,23 @@ function hydrateSlashCommandsFromSnapshot(snapshot: any) {
 
 async function loadConversation() {
   syncRouteAuthContext()
+  const targetConversationId = Number(conversationId.value || 0)
+  const targetFolderId = Number(folderId.value || 0)
+  if (!targetConversationId) return
+  const loadToken = ++detailLoadSequence
+  const instanceKey = resolveDetailInstanceKey()
+  const isActiveLoad = () =>
+    loadToken === detailLoadSequence &&
+    isCurrentDetailTarget({
+      conversationId: targetConversationId,
+      folderId: targetFolderId,
+      instanceKey,
+    })
   loading.value = true
   isRestoringScroll.value = false
   restoredInitialScroll.value = false
   hasRestoredDraftState.value = false
-  const cachedViewState = cacheStore.restore(conversationId.value)
+  const cachedViewState = cacheStore.restore(targetConversationId)
   cachedOldestLoadedSortKey.value = Number(cachedViewState?.oldestLoadedSeq || 0) || null
   let persistedRuntime: ConversationRuntimeRecord | null = null
   let initialLoadFinished = false
@@ -2875,25 +2957,29 @@ async function loadConversation() {
   ) => {
     if (initialLoadFinished) return
     initialLoadFinished = true
-    loading.value = false
+    if (loadToken === detailLoadSequence) {
+      loading.value = false
+    }
+    if (!isActiveLoad()) return
     nextTick(() => {
+      if (!isActiveLoad()) return
       measureMessageListHeight()
       restoreScrollState(cachedViewState, persistedRuntime)
       hasInitialBottomScroll.value = true
     })
   }
   try {
-    const runtimeSession = runtime.getOrCreateSession(conversationId.value)
-    const instanceKey = resolveDetailInstanceKey()
+    const runtimeSession = runtime.getOrCreateSession(targetConversationId)
     const initialTurnLimit = resolveInitialTurnLimit(
       cachedViewState,
       runtimeSession.localTurns.length
     )
-    const managed = connectionSessionManager.getByConversationId(conversationId.value)
+    const managed = connectionSessionManager.getByConversationId(targetConversationId)
     const hasHotRuntime = hasRenderableRuntimeState(runtimeSession)
 
     const localState = await hydrateLocalConversationState({
       instanceKey,
+      conversationId: targetConversationId,
       initialTurnLimit,
       hasHotRuntime,
     })
@@ -2905,19 +2991,25 @@ async function loadConversation() {
       forceRemoteTurnReconcileOnLoad.value ||
       shouldReconcileTurnsFromPersistedRuntime(persistedRuntime)
 
-    restoreDraftState(cachedViewState, persistedRuntime)
+    if (isActiveLoad()) {
+      restoreDraftState(cachedViewState, persistedRuntime)
+    }
 
     let agentType =
       firstString(managed?.connection.agentType, localSummary?.agentType) || "claude_code"
     let resumeSessionId =
       firstString(managed?.externalId, managed?.connection.sessionId, localSummary?.externalId)
     let remoteDetail: any = null
-    currentAgentType.value = normalizeAgentType(agentType)
+    if (isActiveLoad()) {
+      currentAgentType.value = normalizeAgentType(agentType)
+    }
 
     const hydrateRemoteMetadata = async () => {
       const hydrated = await hydrateRemoteConversationMetadata({
         managed,
         instanceKey,
+        conversationId: targetConversationId,
+        folderId: targetFolderId,
         agentType,
         resumeSessionId,
         remoteDetail,
@@ -2928,35 +3020,72 @@ async function loadConversation() {
     }
 
     if (hasHotRuntime) {
-      oldestLoadedCursor.value =
-        restoreHistoryCursorFromCache(cachedViewState) ?? oldestLoadedCursor.value
-      hasMoreHistory.value = cachedViewState?.hasMoreHistory ?? hasMoreHistory.value
+      if (isActiveLoad()) {
+        oldestLoadedCursor.value =
+          restoreHistoryCursorFromCache(cachedViewState) ?? oldestLoadedCursor.value
+        hasMoreHistory.value = cachedViewState?.hasMoreHistory ?? hasMoreHistory.value
+      }
       finishInitialLoad(cachedViewState, persistedRuntime)
       if (shouldForceRemoteTurnReconcile) {
-        void reconcileRemoteTurnsAfterResume(runtimeSession, cachedViewState, initialTurnLimit)
+        void reconcileRemoteTurnsAfterResume({
+          conversationId: targetConversationId,
+          folderId: targetFolderId,
+          instanceKey,
+          runtimeSession,
+          cachedViewState,
+          limit: initialTurnLimit,
+        })
       }
     } else if (localTurns.length > 0) {
-      const totalLocalTurnCount = await countConversationTurns(conversationId.value)
+      const totalLocalTurnCount = await countConversationTurns(targetConversationId)
       runtimeSession.localTurns = localTurns
         .slice()
         .reverse()
         .map(mapPersistedTurnToMessage)
-      oldestLoadedCursor.value = getOldestCursorFromPersistedTurns(localTurns)
-      hasMoreHistory.value = totalLocalTurnCount > localTurns.length
+      if (isActiveLoad()) {
+        oldestLoadedCursor.value = getOldestCursorFromPersistedTurns(localTurns)
+        hasMoreHistory.value = totalLocalTurnCount > localTurns.length
+      }
       finishInitialLoad(cachedViewState, persistedRuntime)
-      void reconcileRemoteTurnsAfterLocalHydrate(runtimeSession, cachedViewState, initialTurnLimit)
+      void reconcileRemoteTurnsAfterLocalHydrate({
+        conversationId: targetConversationId,
+        folderId: targetFolderId,
+        instanceKey,
+        runtimeSession,
+        cachedViewState,
+        limit: initialTurnLimit,
+      })
     } else {
       await hydrateRemoteMetadata()
-      const result = remoteDetail || await fetchRemoteConversationDetail()
-      applyRemoteDetailStats(result)
+      const result = remoteDetail || await fetchRemoteConversationDetail(targetConversationId)
+      applyRemoteDetailStats(result, targetConversationId)
       const metadata = getRemoteConversationMetadata(result)
-      syncConversationTitle(metadata.title)
+      if (isActiveLoad()) {
+        syncConversationTitle(metadata.title)
+      } else if (metadata.title) {
+        detailTabTitleMap.value = {
+          ...detailTabTitleMap.value,
+          [targetConversationId]: metadata.title,
+        }
+      }
       agentType = metadata.agentType
       resumeSessionId = metadata.resumeSessionId
-      currentAgentType.value = normalizeAgentType(agentType)
-      await persistInitialRemoteDetail({ instanceKey, detail: result })
+      if (isActiveLoad()) {
+        currentAgentType.value = normalizeAgentType(agentType)
+      }
+      await persistInitialRemoteDetail({
+        instanceKey,
+        conversationId: targetConversationId,
+        folderId: targetFolderId,
+        detail: result,
+      })
 
-      await refreshSessionTurnsFromDb(runtimeSession, cachedViewState, initialTurnLimit)
+      await refreshSessionTurnsFromDb({
+        conversationId: targetConversationId,
+        runtimeSession,
+        cachedViewState,
+        limit: initialTurnLimit,
+      })
       finishInitialLoad(cachedViewState, persistedRuntime)
     }
 
@@ -2964,19 +3093,23 @@ async function loadConversation() {
       await hydrateRemoteMetadata()
     }
     const conn = await runtime.connect(
-      conversationId.value,
+      targetConversationId,
       agentType,
       undefined,
       resumeSessionId,
       persistedRuntime?.lastAppliedSeq ?? runtimeSession.lastAppliedSeq ?? undefined,
       instanceKey
     )
-    persistDetailRuntimeState()
+    if (isActiveLoad()) {
+      persistDetailRuntimeState()
+    }
 
-    const { snapshot, snapshotFromConversation } = await loadLiveConversationSnapshot(conn.id)
+    const { snapshot, snapshotFromConversation } = await loadLiveConversationSnapshot(targetConversationId, conn.id)
     if (snapshot) {
       await persistLiveSnapshotMetadata({
         instanceKey,
+        conversationId: targetConversationId,
+        folderId: targetFolderId,
         snapshot,
         snapshotFromConversation,
         resumeSessionId,
@@ -2984,19 +3117,29 @@ async function loadConversation() {
         agentType,
         connectionId: conn.id,
       })
-      runtime.hydrateLiveSnapshot(conversationId.value, snapshot)
-      persistDetailRuntimeState()
+      runtime.hydrateLiveSnapshot(targetConversationId, snapshot)
+      if (isActiveLoad()) {
+        persistDetailRuntimeState()
+      }
     }
-    await loadDetailAgentConfig()
-    hydrateSlashCommandsFromSnapshot(snapshot)
+    if (isActiveLoad()) {
+      await loadDetailAgentConfig()
+      hydrateSlashCommandsFromSnapshot(snapshot)
+    }
 
   } catch (error) {
-    const message = toErrorMessage(error)
-    uni.showToast({ title: `加载失败: ${message}`, icon: "none", duration: 3000 })
+    if (isActiveLoad()) {
+      const message = toErrorMessage(error)
+      uni.showToast({ title: `加载失败: ${message}`, icon: "none", duration: 3000 })
+    }
   } finally {
-    forceRemoteTurnReconcileOnLoad.value = false
+    if (loadToken === detailLoadSequence) {
+      forceRemoteTurnReconcileOnLoad.value = false
+    }
     finishInitialLoad(cachedViewState, persistedRuntime)
-    drainPendingDetailTabSwitch({ syncRemote: false })
+    if (loadToken === detailLoadSequence) {
+      drainPendingDetailTabSwitch({ syncRemote: false })
+    }
   }
 }
 
@@ -3177,13 +3320,15 @@ function resumeStuckPromptDetection() {
   handleLiveActivityChange(runtimeStatus.value, conversationActivitySignature.value)
 }
 
-async function refreshSessionTurnsFromDb(
-  runtimeSession: ReturnType<typeof runtime.getOrCreateSession>,
-  cachedViewState: ReturnType<typeof cacheStore.restore>,
-  limit = resolveInitialTurnLimit(cachedViewState)
-) {
-  const refreshedTurns = await getNewestTurnsWithUserCoverage(conversationId.value, limit)
-  const totalTurnCount = await countConversationTurns(conversationId.value)
+async function refreshSessionTurnsFromDb(input: {
+  conversationId: number
+  runtimeSession: ReturnType<typeof runtime.getOrCreateSession>
+  cachedViewState: ReturnType<typeof cacheStore.restore>
+  limit?: number
+}) {
+  const limit = input.limit ?? resolveInitialTurnLimit(input.cachedViewState)
+  const refreshedTurns = await getNewestTurnsWithUserCoverage(input.conversationId, limit)
+  const totalTurnCount = await countConversationTurns(input.conversationId)
   detailDebugLog("db-refresh", {
     limit,
     count: refreshedTurns.length,
@@ -3194,52 +3339,59 @@ async function refreshSessionTurnsFromDb(
     oldestSeq: refreshedTurns[refreshedTurns.length - 1]?.seq ?? null,
   })
   if (refreshedTurns.length === 0) {
-    runtimeSession.localTurns = []
-    oldestLoadedCursor.value = null
-    hasMoreHistory.value = false
+    input.runtimeSession.localTurns = []
+    if (isCurrentDetailTarget(input)) {
+      oldestLoadedCursor.value = null
+      hasMoreHistory.value = false
+    }
     return
   }
 
-  runtimeSession.localTurns = refreshedTurns
+  input.runtimeSession.localTurns = refreshedTurns
     .slice()
     .reverse()
     .map(mapPersistedTurnToMessage)
-  oldestLoadedCursor.value = getOldestCursorFromPersistedTurns(refreshedTurns)
-  hasMoreHistory.value = totalTurnCount > refreshedTurns.length
+  if (isCurrentDetailTarget(input)) {
+    oldestLoadedCursor.value = getOldestCursorFromPersistedTurns(refreshedTurns)
+    hasMoreHistory.value = totalTurnCount > refreshedTurns.length
+  }
 }
 
-async function reconcileRemoteTurnsAfterLocalHydrate(
-  runtimeSession: ReturnType<typeof runtime.getOrCreateSession>,
-  cachedViewState: ReturnType<typeof cacheStore.restore>,
+async function reconcileRemoteTurnsAfterLocalHydrate(input: {
+  conversationId: number
+  folderId: number
+  instanceKey: string
+  runtimeSession: ReturnType<typeof runtime.getOrCreateSession>
+  cachedViewState: ReturnType<typeof cacheStore.restore>
   limit: number
-) {
-  if (!conversationId.value) return
-  if (hasVolatileRuntimeState(runtimeSession)) return
+}) {
+  if (!input.conversationId) return
+  if (hasVolatileRuntimeState(input.runtimeSession)) return
 
   try {
     const gateway = await getDetailGateway()
     const result = await gateway.call<any>("get_folder_conversation", {
-      conversationId: conversationId.value,
+      conversationId: input.conversationId,
     })
-    applyRemoteDetailStats(result)
+    applyRemoteDetailStats(result, input.conversationId)
     detailDebugLog("local-hydrate-remote-reconcile", summarizeDetailTurns(result))
-    if (hasInFlightConversationDetail(result) || hasVolatileRuntimeState(runtimeSession)) {
+    if (hasInFlightConversationDetail(result) || hasVolatileRuntimeState(input.runtimeSession)) {
       await persistConversationDetailSnapshot({
-        instanceKey: resolveDetailInstanceKey(),
-        conversationId: conversationId.value,
+        instanceKey: input.instanceKey,
+        conversationId: input.conversationId,
         detail: result,
-        fallbackFolderId: folderId.value,
+        fallbackFolderId: input.folderId,
         persistTurns: false,
       })
       return
     }
     await persistConversationDetailSnapshot({
-      instanceKey: resolveDetailInstanceKey(),
-      conversationId: conversationId.value,
+      instanceKey: input.instanceKey,
+      conversationId: input.conversationId,
       detail: result,
-      fallbackFolderId: folderId.value,
+      fallbackFolderId: input.folderId,
     })
-    await refreshSessionTurnsFromDb(runtimeSession, cachedViewState, limit)
+    await refreshSessionTurnsFromDb(input)
   } catch (error) {
     detailDebugLog("local-hydrate-remote-reconcile-failed", {
       message: toErrorMessage(error),
@@ -3300,9 +3452,10 @@ function summarizeDetailTurns(detail: any) {
   }
 }
 
-function applyRemoteDetailStats(detail: any) {
-  if (!conversationId.value) return
-  runtime.applyConversationDetailStats(conversationId.value, detail)
+function applyRemoteDetailStats(detail: any, targetConversationId = conversationId.value) {
+  const normalizedConversationId = Number(targetConversationId || 0)
+  if (!normalizedConversationId) return
+  runtime.applyConversationDetailStats(normalizedConversationId, detail)
 }
 
 function shouldReconcileTurnsFromPersistedRuntime(
@@ -3896,37 +4049,40 @@ async function submitPreparedDraft(draft: QueuedDraft) {
   }
 }
 
-async function reconcileRemoteTurnsAfterResume(
-  runtimeSession: ReturnType<typeof runtime.getOrCreateSession>,
-  cachedViewState: ReturnType<typeof cacheStore.restore>,
+async function reconcileRemoteTurnsAfterResume(input: {
+  conversationId: number
+  folderId: number
+  instanceKey: string
+  runtimeSession: ReturnType<typeof runtime.getOrCreateSession>
+  cachedViewState: ReturnType<typeof cacheStore.restore>
   limit: number
-) {
-  if (!conversationId.value) return
+}) {
+  if (!input.conversationId) return
 
   try {
     const gateway = await getDetailGateway({ refreshAuth: true })
     const result = await gateway.call<any>("get_folder_conversation", {
-      conversationId: conversationId.value,
+      conversationId: input.conversationId,
     })
-    applyRemoteDetailStats(result)
+    applyRemoteDetailStats(result, input.conversationId)
     detailDebugLog("resume-remote-reconcile", summarizeDetailTurns(result))
-    if (hasInFlightConversationDetail(result) || hasVolatileRuntimeState(runtimeSession)) {
+    if (hasInFlightConversationDetail(result) || hasVolatileRuntimeState(input.runtimeSession)) {
       await persistConversationDetailSnapshot({
-        instanceKey: resolveDetailInstanceKey(),
-        conversationId: conversationId.value,
+        instanceKey: input.instanceKey,
+        conversationId: input.conversationId,
         detail: result,
-        fallbackFolderId: folderId.value,
+        fallbackFolderId: input.folderId,
         persistTurns: false,
       })
       return
     }
     await persistConversationDetailSnapshot({
-      instanceKey: resolveDetailInstanceKey(),
-      conversationId: conversationId.value,
+      instanceKey: input.instanceKey,
+      conversationId: input.conversationId,
       detail: result,
-      fallbackFolderId: folderId.value,
+      fallbackFolderId: input.folderId,
     })
-    await refreshSessionTurnsFromDb(runtimeSession, cachedViewState, limit)
+    await refreshSessionTurnsFromDb(input)
   } catch (error) {
     detailDebugLog("resume-remote-reconcile-failed", {
       message: toErrorMessage(error),
@@ -4127,7 +4283,7 @@ async function sendDraft(draft: QueuedDraft): Promise<boolean> {
     if (isQueuedPromptResponse(promptResponse)) {
       runtime.removeOptimisticUserMessage(conversationId.value, optimisticTurnId)
       runtime.clearLiveMessage(conversationId.value)
-      runtime.handleEvent({
+      runtime.handleEventForConversation(conversationId.value, {
         connectionId: conn,
         type: "turn_queued",
         data: promptResponse,
