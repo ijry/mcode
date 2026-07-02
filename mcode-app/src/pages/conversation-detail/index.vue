@@ -799,6 +799,7 @@
               :message-list-page-style="messageListPageStyle"
               :message-list-content-style="messageListContentStyle"
               :input-wrap-style="upThemeCardStyle"
+              :slash-commands="slashCommands"
               :upload-target="detailUploadTarget"
               @layout-change="measureMessageListHeight"
             />
@@ -1366,7 +1367,10 @@ const effectiveBottomComposerHeight = computed(() =>
 const messageListContentStyle = computed(() =>
   buildMessageListContentStyle(effectiveBottomComposerHeight.value)
 )
-const detailTabsBarStyle = computed(() => buildTopOffsetStyle(getNavbarHeight()))
+const detailTabsBarStyle = computed(() => ({
+  ...buildTopOffsetStyle(getNavbarHeight()),
+  borderRadius: "0",
+}))
 const detailShellViewportStyle = computed(() => {
   const height = resolveDetailShellViewportHeight({
     windowHeight: getViewportHeight(),
@@ -3606,10 +3610,6 @@ function measureMessageListHeight() {
     .boundingClientRect()
     .select(".detail-shell__page--active .input-status-row")
     .boundingClientRect()
-    .select(".shared-live-hint")
-    .boundingClientRect()
-    .select(".history-status")
-    .boundingClientRect()
     .select(".detail-shell__page--active .composer-stack")
     .boundingClientRect()
     .select(".detail-shell__page--active .input-main-row")
@@ -3621,12 +3621,10 @@ function measureMessageListHeight() {
     .exec((rects: any[]) => {
       const tabsRect = rects?.[0]
       const inputStatusRect = rects?.[1]
-      const sharedHintRect = rects?.[2]
-      const historyStatusRect = rects?.[3]
-      const composerStackRect = rects?.[4]
-      const inputMainRect = rects?.[5]
-      const inputToolRect = rects?.[6]
-      const contentRect = rects?.[7]
+      const composerStackRect = rects?.[2]
+      const inputMainRect = rects?.[3]
+      const inputToolRect = rects?.[4]
+      const contentRect = rects?.[5]
       const measuredTabsHeight = Math.max(0, Number(tabsRect?.height || 0))
       const measuredToolbarHeight = 0
       const measuredInputStatusHeight = Math.max(0, Number(inputStatusRect?.height || 0))
@@ -3638,11 +3636,7 @@ function measureMessageListHeight() {
           : undefined
       const measuredInputMainHeight = Math.max(0, Number(inputMainRect?.height || 0))
       const measuredInputToolHeight = Math.max(0, Number(inputToolRect?.height || 0))
-      const topHeight =
-        measuredTabsHeight +
-        measuredToolbarHeight +
-        Math.max(0, Number(sharedHintRect?.height || 0)) +
-        Math.max(0, Number(historyStatusRect?.height || 0))
+      const topHeight = measuredTabsHeight + measuredToolbarHeight
       const bottomHeight = resolveBottomComposerHeight({
         composerStackHeight: measuredComposerStackHeight,
         inputStatusHeight: measuredInputStatusHeight,

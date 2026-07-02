@@ -264,6 +264,23 @@
         </view>
       </view>
 
+      <view
+        v-if="slashState.visible && filteredSlashCommands.length > 0"
+        class="slash-panel"
+      >
+        <view
+          v-for="item in filteredSlashCommands"
+          :key="item.key"
+          class="slash-item"
+          @click="applySlashCommand(item)"
+        >
+          <view class="slash-item__left">
+            <text class="slash-item__key">{{ item.key }}</text>
+          </view>
+          <text class="slash-item__desc">{{ getSlashCommandDesc(item) }}</text>
+        </view>
+      </view>
+
       <view v-if="uploadQueue.length > 0" class="upload-queue">
         <view
           v-for="item in uploadQueue"
@@ -578,6 +595,13 @@ import {
   resolveRenderAnchorId,
   type HistoryPageCursor,
 } from "./detailScrollState"
+import {
+  applySlashCommandText,
+  filterSlashCommands,
+  resolveSlashState,
+  slashCommandDescription,
+  type SlashCommandItem,
+} from "./detailSlashCommands"
 
 interface UploadQueueItem {
   id: string
@@ -599,6 +623,7 @@ const props = defineProps<{
   messageListPageStyle?: StyleValue
   messageListContentStyle?: StyleValue
   inputWrapStyle?: StyleValue
+  slashCommands?: SlashCommandItem[]
   uploadTarget?: { url: string; header: Record<string, string> } | null
 }>()
 
@@ -742,6 +767,10 @@ const runtimeStatusClass = computed(() =>
 const canStopSession = computed(() => isStoppableRuntimeStatus(runtimeStatus.value))
 const canSendSharedLive = computed(() => runtime.canSend(Number(props.conversationId || 0)))
 const canSend = computed(() => Boolean(inputText.value.trim() || attachments.value.length > 0))
+const slashState = computed(() => resolveSlashState(inputText.value || ""))
+const filteredSlashCommands = computed(() =>
+  filterSlashCommands(props.slashCommands || [], slashState.value)
+)
 const composerPanelMode = ref<"" | "quick_reply">("")
 const showComposerPanel = computed(() => composerPanelMode.value !== "")
 const showInputToolRow = computed(() => toolRowExpanded.value || showComposerPanel.value)
@@ -797,6 +826,17 @@ watch(
       hasUnreadBelow.value = true
     }
     if (preservingHistoryAnchor) return
+    scheduleViewportSync()
+  }
+)
+
+watch(
+  () => [
+    slashState.value.visible,
+    filteredSlashCommands.value.length,
+    props.slashCommands?.length || 0,
+  ] as const,
+  () => {
     scheduleViewportSync()
   }
 )
@@ -1024,6 +1064,15 @@ function toggleComposerPanel(mode: "" | "quick_reply") {
   if (!composerPanelMode.value) {
     toolRowExpanded.value = false
   }
+  scheduleViewportSync()
+}
+
+function getSlashCommandDesc(item: SlashCommandItem) {
+  return slashCommandDescription(item)
+}
+
+function applySlashCommand(item: SlashCommandItem) {
+  inputText.value = applySlashCommandText(inputText.value || "", item)
   scheduleViewportSync()
 }
 

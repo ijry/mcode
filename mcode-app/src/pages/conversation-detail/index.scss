@@ -139,8 +139,8 @@
   width: 750rpx;
   transform: translateX(-50%);
   z-index: 24;
-  padding: 0rem 0.375rem;
-  border-radius: 20rpx;
+  padding: 0 12rpx;
+  border-radius: 0 !important;
   background: var(--up-card-bg-color, #ffffff);
   border: 1rpx solid var(--up-border-color, #dadbde);
   box-sizing: border-box;
@@ -166,10 +166,15 @@
 
 :deep(.detail-tabs-bar .u-tabs__wrapper__nav__item) {
   margin-right: 10rpx;
+  background: transparent !important;
 }
 
 :deep(.detail-tabs-bar .u-tabs__wrapper__nav__item:last-child) {
   margin-right: 0;
+}
+
+:deep(.detail-tabs-bar .u-tabs__wrapper__nav__item-active) {
+  background: transparent !important;
 }
 
 .detail-tab-pill {
