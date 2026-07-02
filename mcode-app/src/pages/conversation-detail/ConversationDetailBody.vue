@@ -16,6 +16,7 @@
         <slot name="content"></slot>
       </view>
     </scroll-view>
+    <view class="composer-safe-area"></view>
     <view class="composer-stack">
       <view class="input-status-wrap">
         <slot name="status"></slot>
@@ -77,7 +78,7 @@ const emit = defineEmits<{
   position: absolute;
   left: 50%;
   width: calc(100% - 40rpx);
-  bottom: 6px;
+  bottom: calc(env(safe-area-inset-bottom) + 10rpx);
   z-index: 30;
   max-width: 920rpx;
   transform: translateX(-50%);
@@ -85,6 +86,17 @@ const emit = defineEmits<{
   flex-direction: column;
   align-items: center;
   gap: 10rpx;
+}
+
+.composer-safe-area {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: calc(env(safe-area-inset-bottom) + 12rpx);
+  z-index: 29;
+  pointer-events: none;
+  background: var(--up-page-bg-color, var(--up-bg-color, #f3f4f6));
 }
 
 .input-status-wrap {
@@ -103,11 +115,10 @@ const emit = defineEmits<{
   width: 100%;
   background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 76%, transparent 24%);
   border: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 64%, transparent 36%);
-  border-radius: 34rpx;
-  padding: 16rpx 16rpx;
-  padding-bottom: calc(16rpx + env(safe-area-inset-bottom));
-  box-shadow: 0 -4rpx 24rpx rgba(15, 23, 42, 0.03), 0 18rpx 42rpx rgba(15, 23, 42, 0.08);
-  backdrop-filter: blur(22rpx);
+  border-radius: 30rpx;
+  padding: 14rpx 16rpx 16rpx;
+  box-shadow: 0 -2rpx 18rpx rgba(15, 23, 42, 0.025), 0 14rpx 36rpx rgba(15, 23, 42, 0.07);
+  backdrop-filter: blur(20rpx);
   box-sizing: border-box;
 }
 </style>

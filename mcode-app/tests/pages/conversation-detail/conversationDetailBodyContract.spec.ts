@@ -13,6 +13,7 @@ describe("ConversationDetailBody", () => {
     expect(source).toContain("<scroll-view")
     expect(source).toContain('class="message-list__content" :style="messageListContentStyle"')
     expect(source).toContain('class="composer-stack"')
+    expect(source).toContain('class="composer-safe-area"')
     expect(source).toContain('class="input-status-wrap"')
     expect(source).toContain('class="input-wrap"')
   })
@@ -27,6 +28,7 @@ describe("ConversationDetailBody", () => {
     expect(source).toContain(".message-list__content")
     expect(source).toContain("messageListContentStyle?: StyleValue")
     expect(source).toContain(".composer-stack")
+    expect(source).toContain(".composer-safe-area")
     expect(source).toContain(".input-status-wrap")
     expect(source).toContain(".input-wrap")
     expect(source).toContain(".detail-body")
@@ -125,6 +127,17 @@ describe("ConversationDetailBody", () => {
     expect(source).not.toContain("const height = Math.max(0, viewportHeight.value || getDetailViewportHeight())")
   })
 
+  it("extends the detail navbar background into the phone status bar", () => {
+    const source = fs.readFileSync(
+      path.resolve(__dirname, "../../../src/pages/conversation-detail/index.vue"),
+      "utf8"
+    )
+
+    expect(source).toContain(':statusBarBgColor="navbarStatusBarBgColor"')
+    expect(source).toContain('const navbarStatusBarBgColor = computed(() => upThemeVar("--up-card-bg-color", "#ffffff"))')
+    expect(source).toContain("const navbarBgColor = computed(() => navbarStatusBarBgColor.value)")
+  })
+
   it("does not add safe-area padding to the bottom scroll anchor", () => {
     const source = fs.readFileSync(
       path.resolve(__dirname, "../../../src/pages/conversation-detail/index.scss"),
@@ -132,6 +145,17 @@ describe("ConversationDetailBody", () => {
     )
 
     expect(source).toMatch(/\.list-bottom\s*\{\s*height:\s*34rpx;\s*\}/)
+  })
+
+  it("keeps the composer card above the bottom safe area", () => {
+    const source = fs.readFileSync(
+      path.resolve(__dirname, "../../../src/pages/conversation-detail/ConversationDetailBody.vue"),
+      "utf8"
+    )
+
+    expect(source).toMatch(/\.composer-stack\s*\{[\s\S]*bottom:\s*calc\(env\(safe-area-inset-bottom\) \+ 10rpx\);/)
+    expect(source).toMatch(/\.composer-safe-area\s*\{[\s\S]*height:\s*calc\(env\(safe-area-inset-bottom\) \+ 12rpx\);[\s\S]*background:\s*var\(--up-page-bg-color, var\(--up-bg-color, #f3f4f6\)\);/)
+    expect(source).not.toContain("padding-bottom: calc(16rpx + env(safe-area-inset-bottom))")
   })
 
   it("locks the outer detail page so only the message scroll-view scrolls", () => {

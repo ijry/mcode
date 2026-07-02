@@ -19,6 +19,7 @@
         left-icon="arrow-left"
         height="45px"
         :bgColor="navbarBgColor"
+        :statusBarBgColor="navbarStatusBarBgColor"
         :leftIconColor="upThemeVar('--up-content-color', '#303133')"
         @leftClick="handleBackNavigation"
       >
@@ -1721,9 +1722,8 @@ const detailShellTabs = computed<DetailShellTabItem[]>(() =>
   })
 )
 
-const navbarBgColor = computed(() =>
-  "color-mix(in srgb, var(--up-card-bg-color, #ffffff) 72%, transparent)"
-)
+const navbarStatusBarBgColor = computed(() => upThemeVar("--up-card-bg-color", "#ffffff"))
+const navbarBgColor = computed(() => navbarStatusBarBgColor.value)
 const detailTabsItemStyle = {
   paddingLeft: "0px",
   paddingRight: "0px",
