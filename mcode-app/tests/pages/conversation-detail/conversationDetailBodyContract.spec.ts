@@ -165,4 +165,31 @@ describe("ConversationDetailBody", () => {
     expect(source).toMatch(/function toggleInputToolRow\(\)[\s\S]*scheduleViewportSync\(\)/)
     expect(source).toMatch(/function toggleComposerPanel\([\s\S]*scheduleViewportSync\(\)/)
   })
+
+  it("keeps history pagination inside the interactive pane", () => {
+    const source = fs.readFileSync(
+      path.resolve(__dirname, "../../../src/pages/conversation-detail/ConversationDetailInteractivePane.vue"),
+      "utf8"
+    )
+
+    expect(source).toContain("getOlderTurns")
+    expect(source).toContain("countConversationTurns")
+    expect(source).toContain("getOldestCursorFromPersistedTurns")
+    expect(source).toContain("mapPersistedTurnToMessage")
+    expect(source).toContain("const oldestLoadedCursor")
+    expect(source).toContain("runtimeSession.localTurns = [")
+  })
+
+  it("opens the plan drawer from the interactive pane status pill", () => {
+    const source = fs.readFileSync(
+      path.resolve(__dirname, "../../../src/pages/conversation-detail/ConversationDetailInteractivePane.vue"),
+      "utf8"
+    )
+
+    expect(source).toContain('class="input-status-row__plan"')
+    expect(source).toContain('@click.stop="showPlanDrawer = true"')
+    expect(source).toContain('<up-popup v-model:show="showPlanDrawer" mode="bottom" :round="20">')
+    expect(source).toContain("buildPlanFilterItems")
+    expect(source).toContain("taskStatusLabel(task.status)")
+  })
 })

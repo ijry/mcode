@@ -19,6 +19,11 @@ preserves independent scroll positions for each mounted `swiper` tab. Page-level
 scrolling has only one global `scrollTop`, so it would require manual save and
 restore on every tab switch and can visibly jump during `swiper` transitions.
 
+Each mounted `ConversationDetailInteractivePane` owns the interaction state for
+its tab. That includes the internal scroll position, the oldest loaded history
+cursor, and the plan drawer state. The parent shell only measures the active
+page and should not host interaction affordances that belong to one tab.
+
 The `up-navbar` uses `placeholder=true`, so the navbar already occupies normal
 document flow above the multi-tab `swiper`. The shell `swiper` therefore uses
 `windowHeight - navbarHeight`; otherwise the page becomes
@@ -37,6 +42,12 @@ measurement: the active `ConversationDetailInteractivePane` emits
 `layout-change`, and the parent recalculates scroll padding from the active
 page only.
 
+Older-history loading is local to the active pane. The pane rebuilds its oldest
+loaded DB cursor from `conversation_turns`, calls `getOlderTurns()` when the
+internal message `scroll-view` reaches the top, prepends those turns into the
+runtime session, and restores the previous first visible message via
+`scroll-into-view`. This keeps each swiper tab's history paging independent.
+
 ## UI Behavior
 
 The bottom anchor remains available for `scroll-into-view`, but it is now a
@@ -48,6 +59,11 @@ home-screen fullscreen mode.
 Composer chrome changes, such as expanding the tool row or quick reply panel,
 now trigger a layout sync so the scroll padding follows the current composer
 height.
+
+The compact plan pill in the input status row opens a bottom `up-popup` from the
+same interactive pane. The drawer filters task state from the tab's own
+messages and live content, so tapping a plan in one tab cannot show another
+tab's plan data.
 
 ## Compatibility
 

@@ -1,4 +1,5 @@
 <template>
+  <view class="detail-interactive-pane">
   <ConversationDetailBody
     :message-list-page-style="messageListPageStyle"
     :message-list-content-style="messageListContentStyle"
@@ -88,7 +89,11 @@
           <view class="runtime-dot runtime-dot--compact" :class="`runtime-dot--${runtimeStatusClass}`"></view>
           <text class="input-status-row__text">{{ inputStatusText }}</text>
         </view>
-        <view v-if="planTasks.length > 0" class="input-status-row__plan">
+        <view
+          v-if="planTasks.length > 0"
+          class="input-status-row__plan"
+          @click.stop="showPlanDrawer = true"
+        >
           <up-icon name="list" size="13" :color="upThemeVar('--up-primary', '#2979ff')"></up-icon>
           <text class="input-status-row__plan-text">计划 {{ completedTaskCount }}/{{ planTasks.length }}</text>
         </view>
@@ -413,6 +418,66 @@
       </view>
     </template>
   </ConversationDetailBody>
+
+    <up-popup v-model:show="showPlanDrawer" mode="bottom" :round="20">
+      <view class="plan-drawer" :style="upThemeCardStyle">
+        <view class="plan-drawer__hd">
+          <text class="plan-drawer__title">计划任务</text>
+          <text class="plan-drawer__count">{{ completedTaskCount }}/{{ planTasks.length }}</text>
+        </view>
+
+        <view class="plan-filters">
+          <view
+            v-for="item in planFilterItems"
+            :key="item.key"
+            :class="['plan-filter', planStatusFilter === item.key && 'plan-filter--active']"
+            @click="planStatusFilter = item.key"
+          >
+            <text>{{ item.label }}</text>
+            <text class="plan-filter__count">{{ item.count }}</text>
+          </view>
+        </view>
+
+        <scroll-view scroll-y class="plan-drawer__list">
+          <view v-if="filteredPlanTasks.length === 0" class="plan-empty">
+            <up-empty
+              mode="list"
+              :text="planTasks.length === 0 ? '暂无任务' : '该状态下暂无任务'"
+            ></up-empty>
+          </view>
+
+          <view
+            v-for="task in filteredPlanTasks"
+            :key="task.id"
+            class="plan-task"
+          >
+            <view class="plan-task__left">
+              <view
+                :class="[
+                  'plan-task__dot',
+                  `plan-task__dot--${task.status}`,
+                ]"
+              ></view>
+            </view>
+            <view class="plan-task__main">
+              <text class="plan-task__subject">{{ task.subject }}</text>
+              <text v-if="task.description" class="plan-task__desc">{{ task.description }}</text>
+            </view>
+            <view
+              :class="[
+                'plan-task__badge',
+                `plan-task__badge--${task.status}`,
+              ]"
+            >
+              {{ taskStatusLabel(task.status) }}
+            </view>
+          </view>
+
+          <view class="plan-drawer__safe"></view>
+        </scroll-view>
+      </view>
+    </up-popup>
+  </view>
 </template>
 
 <script setup lang="ts">
@@ -422,6 +487,11 @@ import MessageBubble from "@/components/MessageBubble.vue"
 import { useConversationRuntimeStore } from "@/stores/conversationRuntime"
 import { usePetStore } from "@/stores/pet"
 import { touchHotConversation } from "@/services/conversation/hotConversationCoordinator"
+import {
+  countConversationTurns,
+  getNewestTurns,
+  getOlderTurns,
+} from "@/services/db/repositories/conversationRepository"
 import { toErrorMessage } from "@/services/gateway/error"
 import type { PendingQuestionState, PermissionRequest, QuestionAnswer } from "@/types/acp"
 import ConversationDetailBody from "./ConversationDetailBody.vue"
@@ -429,6 +499,7 @@ import { buildRenderMessageItems } from "./detailMessagePresentation"
 import {
   firstString,
   getTurnContentParts,
+  mapPersistedTurnToMessage,
   normalizeAgentType,
   type QueuedDraft,
   type UploadedAttachment,
@@ -464,8 +535,11 @@ import {
   waitingStateTitle as resolveWaitingStateTitle,
 } from "./detailStatusPresentation"
 import {
+  buildPlanFilterItems,
   buildPlanTasks,
+  taskStatusLabel,
   type PlanTask,
+  type PlanTaskFilter,
 } from "./detailPlanPresentation"
 import {
   buildQuestionAnswer as buildPendingQuestionAnswer,
@@ -490,7 +564,10 @@ import {
 } from "./detailAttachmentUpload"
 import {
   bottomAnchorId,
+  getOldestCursorFromPersistedTurns,
   messageAnchorId as buildMessageAnchorId,
+  resolveRenderAnchorId,
+  type HistoryPageCursor,
 } from "./detailScrollState"
 
 interface UploadQueueItem {
@@ -524,6 +601,7 @@ const runtime = useConversationRuntimeStore()
 const currentInstance = getCurrentInstance()
 const upThemeVar = (varName: string, fallbackColor?: string) =>
   currentInstance?.proxy?.upThemeVar?.(varName, fallbackColor) ?? (fallbackColor || "")
+const upThemeCardStyle = computed(() => currentInstance?.proxy?.upThemeCardStyle || {})
 
 const PROMPT_START_TIMEOUT_MS = 4000
 const HISTORY_LOADING_MIN_MS = 480
@@ -554,11 +632,18 @@ const lastMeasuredScrollTop = ref(0)
 const anchorMessageId = ref("")
 const loadingOlder = ref(false)
 const hasMoreHistory = ref(false)
+const oldestLoadedCursor = ref<HistoryPageCursor | null>(null)
 const questionSubmitting = ref(false)
 const permissionSubmitting = ref(false)
 const pendingPermissionSubmittingOptionId = ref("")
 const askQuestionSelections = ref<Record<string, QuestionSelectionState>>({})
 const sequence = ref(0)
+const showPlanDrawer = ref(false)
+const planStatusFilter = ref<PlanTaskFilter>("all")
+let syncedHistoryConversationId = 0
+let syncedHistoryLocalTurnCount = -1
+let historySyncToken = 0
+let preservingHistoryAnchor = false
 
 const normalizedAgentType = computed(() => normalizeAgentType(props.agentType))
 const session = computed(() => runtime.getOrCreateSession(Number(props.conversationId || 0)))
@@ -626,6 +711,11 @@ const planTasks = computed<PlanTask[]>(() =>
 const completedTaskCount = computed(() =>
   planTasks.value.filter((task) => task.status === "completed").length
 )
+const filteredPlanTasks = computed(() => {
+  if (planStatusFilter.value === "all") return planTasks.value
+  return planTasks.value.filter((task) => task.status === planStatusFilter.value)
+})
+const planFilterItems = computed(() => buildPlanFilterItems(planTasks.value))
 const runtimeStatusLabel = computed(() =>
   buildRuntimeStatusLabel({
     detailStatusCode: runtimeStatus.value === "idle" ? "idle" : (runtimeStatus.value as any),
@@ -693,6 +783,7 @@ watch(
     if (!shouldAutoFollowBottom.value && hasAssistantDelta) {
       hasUnreadBelow.value = true
     }
+    if (preservingHistoryAnchor) return
     scheduleViewportSync()
   }
 )
@@ -707,6 +798,19 @@ watch(
   { immediate: true }
 )
 
+watch(
+  () => [
+    Number(props.conversationId || 0),
+    Boolean(props.active),
+    session.value.localTurns.length,
+  ] as const,
+  ([conversationId, active]) => {
+    if (!conversationId || !active) return
+    void ensureHistoryCursorFromLoadedMessages()
+  },
+  { immediate: true }
+)
+
 function createLocalId(prefix: string): string {
   sequence.value += 1
   return `${prefix}-${Date.now()}-${sequence.value}`
@@ -714,6 +818,12 @@ function createLocalId(prefix: string): string {
 
 function messageAnchorId(messageId: string) {
   return buildMessageAnchorId(messageId)
+}
+
+function setProgrammaticAnchor(messageId: string) {
+  anchorMessageId.value = messageId
+  messageScrollWithAnimation.value = false
+  messageScrollIntoView.value = messageAnchorId(messageId)
 }
 
 function scrollToBottom(force = false) {
@@ -776,12 +886,92 @@ function handleMessageListScrollUpper() {
   void loadOlderTurns()
 }
 
+async function ensureHistoryCursorFromLoadedMessages(force = false) {
+  const targetConversationId = Number(props.conversationId || 0)
+  const loadedTurnCount = session.value.localTurns.length
+  if (!targetConversationId || loadedTurnCount <= 0) {
+    oldestLoadedCursor.value = null
+    hasMoreHistory.value = false
+    syncedHistoryConversationId = targetConversationId
+    syncedHistoryLocalTurnCount = loadedTurnCount
+    return
+  }
+
+  if (
+    !force &&
+    syncedHistoryConversationId === targetConversationId &&
+    syncedHistoryLocalTurnCount === loadedTurnCount
+  ) {
+    return
+  }
+
+  const token = ++historySyncToken
+  try {
+    const [totalTurnCount, newestTurns] = await Promise.all([
+      countConversationTurns(targetConversationId),
+      getNewestTurns(targetConversationId, loadedTurnCount),
+    ])
+    if (token !== historySyncToken || Number(props.conversationId || 0) !== targetConversationId) return
+
+    oldestLoadedCursor.value = getOldestCursorFromPersistedTurns(newestTurns)
+    hasMoreHistory.value = totalTurnCount > newestTurns.length
+    syncedHistoryConversationId = targetConversationId
+    syncedHistoryLocalTurnCount = loadedTurnCount
+  } catch (error) {
+    console.warn("sync history cursor skipped", error)
+    if (token === historySyncToken) {
+      oldestLoadedCursor.value = null
+      hasMoreHistory.value = false
+    }
+  }
+}
+
 async function loadOlderTurns() {
-  if (loadingOlder.value || !hasMoreHistory.value) return
+  if (loadingOlder.value) return
+  const targetConversationId = Number(props.conversationId || 0)
+  if (!targetConversationId) return
   loadingOlder.value = true
   const startedAt = Date.now()
   try {
+    await ensureHistoryCursorFromLoadedMessages()
+    if (!hasMoreHistory.value || oldestLoadedCursor.value == null) return
+
+    const older = await getOlderTurns(targetConversationId, oldestLoadedCursor.value, 20)
+    if (older.length === 0) {
+      hasMoreHistory.value = false
+      return
+    }
+
+    const runtimeSession = runtime.getOrCreateSession(targetConversationId)
+    const firstVisibleMessageId = resolveRenderAnchorId({
+      messageId: messages.value[0]?.id || anchorMessageId.value || "",
+      items: renderMessageItems.value,
+    })
+
+    preservingHistoryAnchor = true
+    runtimeSession.localTurns = [
+      ...older.slice().reverse().map(mapPersistedTurnToMessage),
+      ...runtimeSession.localTurns,
+    ]
+    oldestLoadedCursor.value = getOldestCursorFromPersistedTurns(older)
+
+    if (firstVisibleMessageId) {
+      nextTick(() => {
+        setProgrammaticAnchor(firstVisibleMessageId)
+        preservingHistoryAnchor = false
+      })
+    } else {
+      preservingHistoryAnchor = false
+    }
+
+    const totalTurnCount = await countConversationTurns(targetConversationId)
+    hasMoreHistory.value = totalTurnCount > runtimeSession.localTurns.length
+    syncedHistoryConversationId = targetConversationId
+    syncedHistoryLocalTurnCount = runtimeSession.localTurns.length
+  } catch (error) {
+    console.warn("load older turns skipped", error)
     hasMoreHistory.value = false
+    preservingHistoryAnchor = false
   } finally {
     const elapsed = Date.now() - startedAt
     if (elapsed < HISTORY_LOADING_MIN_MS) {
@@ -1414,6 +1604,13 @@ function showSharedLiveBlockedToast() {
 
 <style scoped lang="scss">
 @import "./index.scss";
+
+.detail-interactive-pane {
+  position: relative;
+  height: 100%;
+  min-height: 100%;
+  overflow: hidden;
+}
 
 .input-tool-btn--text {
   min-width: 58rpx;
