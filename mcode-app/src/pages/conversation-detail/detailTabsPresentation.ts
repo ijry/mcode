@@ -10,6 +10,14 @@ export interface DetailShellTabItem {
   position: number
 }
 
+export function normalizeDetailTabTitleText(value?: string): string {
+  const normalized = String(value || "")
+    .replace(/[\r\n\t]+/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim()
+  return normalized || "未命名会话"
+}
+
 export function buildDetailShellTabs(input: {
   openedTabs: OpenedTabItem[]
   titleByConversationId?: Record<number, string>
@@ -32,7 +40,9 @@ export function buildDetailShellTabs(input: {
         folderId: Number(item.folder_id || 0),
         conversationId,
         agentType: String(item.agent_type || "claude_code"),
-        title: input.titleByConversationId?.[conversationId] || `会话 ${conversationId}`,
+        title: normalizeDetailTabTitleText(
+          input.titleByConversationId?.[conversationId] || `会话 ${conversationId}`
+        ),
         active: Boolean(item.is_active),
         position: Number(item.position || 0),
       } satisfies DetailShellTabItem

@@ -39,6 +39,23 @@
   z-index: 0;
 }
 
+.detail-atmosphere__background-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0.95;
+  transform: scale(1.04);
+}
+
+.detail-atmosphere__background-scrim {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.22) 0%, rgba(255, 255, 255, 0.08) 24%, rgba(255, 255, 255, 0.16) 100%),
+    color-mix(in srgb, var(--up-page-bg-color, var(--up-bg-color, #f3f4f6)) 16%, transparent 84%);
+}
+
 .detail-atmosphere__blob {
   position: absolute;
   border-radius: 999rpx;
@@ -125,6 +142,48 @@
   gap: 4rpx;
 }
 
+.detail-navbar__menu {
+  min-width: 56rpx;
+  min-height: 56rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999rpx;
+}
+
+.detail-dropdown-mask {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 32;
+}
+
+.detail-dropdown-menu {
+  width: 252rpx;
+  margin-left: auto;
+  margin-right: 18rpx;
+  padding: 10rpx 0;
+  border-radius: 24rpx;
+  border: 1rpx solid var(--up-border-color, #dadbde);
+  box-shadow: 0 18rpx 48rpx rgba(15, 23, 42, 0.12);
+  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 92%, transparent 8%);
+  backdrop-filter: blur(20rpx);
+}
+
+.detail-dropdown-menu__item {
+  display: flex;
+  align-items: center;
+  min-height: 72rpx;
+  padding: 0 24rpx;
+}
+
+.detail-dropdown-menu__label {
+  font-size: 24rpx;
+  line-height: 1.3;
+  color: var(--up-main-color, #303133);
+}
+
 .detail-navbar__subtitle {
   display: block;
   min-width: 0;
@@ -144,6 +203,12 @@
   background: var(--up-card-bg-color, #ffffff);
   border: 1rpx solid var(--up-border-color, #dadbde);
   box-sizing: border-box;
+}
+
+.detail-tabs-bar--translucent {
+  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 50%, transparent 50%);
+  border-color: color-mix(in srgb, var(--up-border-color, #dadbde) 42%, transparent 58%);
+  backdrop-filter: blur(22rpx);
 }
 
 :deep(.detail-tabs-bar .u-tabs__wrapper) {
@@ -183,11 +248,18 @@
   gap: 10rpx;
   min-width: 0;
   max-width: 260rpx;
+  min-height: 52rpx;
   padding: 10rpx 16rpx;
   border-radius: 999rpx;
   background: transparent;
   border: 1rpx solid transparent;
   box-sizing: border-box;
+  overflow: hidden;
+}
+
+.detail-tab-pill--translucent {
+  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 42%, transparent 58%);
+  border-color: color-mix(in srgb, var(--up-border-color, #dadbde) 36%, transparent 64%);
 }
 
 .detail-tab-pill--active {
@@ -210,9 +282,14 @@
 .detail-tab-pill__title {
   flex: 1;
   min-width: 0;
+  display: block;
   font-size: 22rpx;
   line-height: 1.2;
   color: var(--up-content-color, #606266);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: keep-all;
 }
 
 .detail-tab-pill--active .detail-tab-pill__title {
@@ -227,6 +304,7 @@
   height: 26rpx;
   flex-shrink: 0;
   border-radius: 999rpx;
+  margin-left: -2rpx;
 }
 
 .detail-toolbar {
@@ -494,6 +572,24 @@
   box-sizing: border-box;
 }
 
+.pending-response-card--translucent {
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--up-primary, #2979ff) 10%, transparent 90%) 0%,
+      color-mix(in srgb, var(--up-card-bg-color, #ffffff) 50%, transparent 50%) 100%
+    );
+  border: 1rpx solid color-mix(in srgb, var(--up-primary, #2979ff) 24%, transparent 76%);
+  box-shadow: 0 18rpx 40rpx rgba(41, 121, 255, 0.06);
+  backdrop-filter: blur(22rpx);
+}
+
+.pending-response-card--translucent .pending-response-card__badge {
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 10%, transparent 90%);
+  border: 1rpx solid color-mix(in srgb, var(--up-primary, #2979ff) 18%, transparent 82%);
+  backdrop-filter: blur(14rpx);
+}
+
 .pending-response-card__pulse {
   position: absolute;
   top: -120rpx;
@@ -712,6 +808,18 @@
   box-sizing: border-box;
 }
 
+.bottom-generating--translucent {
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--up-primary, #2979ff) 12%, transparent 88%) 0%,
+      color-mix(in srgb, var(--up-card-bg-color, #ffffff) 50%, transparent 50%) 78%
+    );
+  border: 1rpx solid color-mix(in srgb, var(--up-primary, #2979ff) 24%, transparent 76%);
+  box-shadow: 0 6rpx 16rpx rgba(41, 121, 255, 0.05);
+  backdrop-filter: blur(20rpx);
+}
+
 .bottom-generating__orb {
   position: relative;
   width: 42rpx;
@@ -833,6 +941,30 @@
   box-shadow: 0 10rpx 28rpx rgba(250, 173, 20, 0.08);
   overflow: hidden;
   box-sizing: border-box;
+}
+
+.permission-card--translucent {
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--up-warning, #f9ae3d) 12%, transparent 88%) 0%,
+      color-mix(in srgb, var(--up-card-bg-color, #ffffff) 50%, transparent 50%) 100%
+    );
+  border: 1rpx solid color-mix(in srgb, var(--up-warning, #f9ae3d) 24%, transparent 76%);
+  box-shadow: 0 10rpx 28rpx rgba(250, 173, 20, 0.06);
+  backdrop-filter: blur(22rpx);
+}
+
+.permission-card--translucent .permission-card__command-scroll {
+  background: color-mix(in srgb, var(--up-main-color, #303133) 4%, transparent 96%);
+  border: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 36%, transparent 64%);
+  backdrop-filter: blur(14rpx);
+}
+
+.permission-card--translucent .permission-card__action {
+  background: color-mix(in srgb, var(--up-warning, #f9ae3d) 14%, transparent 86%);
+  border: 1rpx solid color-mix(in srgb, var(--up-warning, #f9ae3d) 18%, transparent 82%);
+  backdrop-filter: blur(12rpx);
 }
 
 .permission-card__header {
@@ -969,6 +1101,22 @@
   box-sizing: border-box;
 }
 
+.ask-question-card--translucent {
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--up-primary, #2979ff) 10%, transparent 90%) 0%,
+      color-mix(in srgb, var(--up-card-bg-color, #ffffff) 50%, transparent 50%) 100%
+    );
+  border: 1rpx solid color-mix(in srgb, var(--up-primary, #2979ff) 22%, transparent 78%);
+  box-shadow: 0 12rpx 30rpx rgba(41, 121, 255, 0.06);
+  backdrop-filter: blur(22rpx);
+}
+
+.ask-question-card--translucent .ask-question-card__question + .ask-question-card__question {
+  border-top-color: color-mix(in srgb, var(--up-border-color, #dadbde) 42%, transparent 58%);
+}
+
 .ask-question-card__header {
   display: flex;
   align-items: flex-start;
@@ -1075,9 +1223,20 @@
   box-sizing: border-box;
 }
 
+.ask-question-card--translucent .ask-question-option {
+  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 48%, transparent 52%);
+  border-color: color-mix(in srgb, var(--up-border-color, #dadbde) 42%, transparent 58%);
+  backdrop-filter: blur(14rpx);
+}
+
 .ask-question-option--active {
   border-color: color-mix(in srgb, var(--up-primary, #2979ff) 62%, var(--up-border-color, #dadbde) 38%);
   background: color-mix(in srgb, var(--up-primary, #2979ff) 9%, var(--up-card-bg-color, #ffffff) 91%);
+}
+
+.ask-question-card--translucent .ask-question-option--active {
+  border-color: color-mix(in srgb, var(--up-primary, #2979ff) 58%, transparent 42%);
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 12%, transparent 88%);
 }
 
 .ask-question-option--disabled {
@@ -1169,6 +1328,12 @@
   color: var(--up-main-color, #303133);
   font-size: 24rpx;
   box-sizing: border-box;
+}
+
+.ask-question-card--translucent .ask-question-card__other-input {
+  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 48%, transparent 52%);
+  border-color: color-mix(in srgb, var(--up-border-color, #dadbde) 42%, transparent 58%);
+  backdrop-filter: blur(14rpx);
 }
 
 .ask-question-card__footer {
@@ -1288,6 +1453,12 @@
   overflow: hidden;
 }
 
+.slash-panel--translucent {
+  border-color: color-mix(in srgb, var(--up-border-color, #dadbde) 42%, transparent 58%);
+  background-color: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 50%, transparent 50%);
+  backdrop-filter: blur(18rpx);
+}
+
 .composer-config-row {
   display: flex;
   align-items: center;
@@ -1380,6 +1551,12 @@
   gap: 8rpx;
 }
 
+.upload-queue--translucent {
+  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 50%, transparent 50%);
+  border: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 42%, transparent 58%);
+  backdrop-filter: blur(18rpx);
+}
+
 .upload-queue__item {
   display: flex;
   align-items: center;
@@ -1418,6 +1595,17 @@
   gap: 12rpx;
   padding-bottom: 12rpx;
   overflow-x: auto;
+}
+
+.attachments-preview--translucent .attachment-file {
+  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 50%, transparent 50%);
+  border-color: color-mix(in srgb, var(--up-border-color, #dadbde) 42%, transparent 58%);
+  backdrop-filter: blur(16rpx);
+}
+
+.attachments-preview--translucent .attachment-remove {
+  background-color: color-mix(in srgb, var(--up-main-color, #303133) 34%, transparent 66%);
+  backdrop-filter: blur(12rpx);
 }
 
 .attachment-item {
@@ -1728,6 +1916,12 @@
   box-sizing: border-box;
 }
 
+.tool-toggle-btn--translucent {
+  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 42%, transparent 58%);
+  border: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 36%, transparent 64%);
+  backdrop-filter: blur(14rpx);
+}
+
 .tool-toggle-btn--active {
   background: color-mix(in srgb, var(--up-primary, #2979ff) 12%, var(--up-card-bg-color, #ffffff) 88%);
   transform: translateY(-1rpx);
@@ -1795,6 +1989,12 @@
   display: flex;
   align-items: center;
   box-sizing: border-box;
+}
+
+.input-box--translucent {
+  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 42%, transparent 58%);
+  border: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 36%, transparent 64%);
+  backdrop-filter: blur(14rpx);
 }
 
 .composer-textarea {
@@ -1887,6 +2087,12 @@
   transition: background-color 0.2s ease, transform 0.2s ease;
 }
 
+.input-tool-btn__icon--translucent {
+  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 42%, transparent 58%);
+  border: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 36%, transparent 64%);
+  backdrop-filter: blur(14rpx);
+}
+
 .input-tool-btn__glyph {
   width: 32rpx;
   height: 32rpx;
@@ -1923,6 +2129,18 @@
   flex-direction: column;
   overflow: hidden;
   box-sizing: border-box;
+}
+
+.composer-panel--translucent {
+  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 50%, transparent 50%);
+  border: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 42%, transparent 58%);
+  backdrop-filter: blur(20rpx);
+}
+
+.composer-panel--translucent .composer-quick-chip {
+  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 46%, transparent 54%);
+  border-color: color-mix(in srgb, var(--up-border-color, #dadbde) 42%, transparent 58%);
+  backdrop-filter: blur(14rpx);
 }
 
 .composer-panel__body {

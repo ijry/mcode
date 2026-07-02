@@ -6,6 +6,14 @@
 
     <view v-else class="detail-container">
       <view class="detail-atmosphere" aria-hidden="true">
+        <image
+          v-if="detailBackgroundImageUrl"
+          class="detail-atmosphere__background-image"
+          :src="detailBackgroundImageUrl"
+          mode="aspectFill"
+          @error="handleDetailBackgroundLoadError"
+        />
+        <view v-if="detailBackgroundImageUrl" class="detail-atmosphere__background-scrim"></view>
         <view class="detail-atmosphere__blob detail-atmosphere__blob--primary"></view>
         <view class="detail-atmosphere__blob detail-atmosphere__blob--secondary"></view>
         <view class="detail-atmosphere__blob detail-atmosphere__blob--accent"></view>
@@ -42,9 +50,42 @@
             </view>
           </view>
         </template>
+        <template #right>
+          <view class="detail-navbar__menu" @click="openDetailMoreMenu">
+            <up-icon
+              name="more-dot-fill"
+              size="18"
+              :color="upThemeVar('--up-content-color', '#303133')"
+            ></up-icon>
+          </view>
+        </template>
       </up-navbar>
 
-      <view class="detail-tabs-bar" :style="[upThemeCardStyle, detailTabsBarStyle]">
+      <view
+        v-if="showDetailMoreMenu"
+        class="detail-dropdown-mask"
+        :style="detailDropdownMaskStyle"
+        @click="closeDetailMoreMenu"
+      >
+        <view class="detail-dropdown-menu" :style="upThemeCardStyle" @click.stop>
+          <view
+            v-for="action in detailMoreActions"
+            :key="action.name"
+            class="detail-dropdown-menu__item"
+            @click="handleDetailMoreMenuClick(action.name)"
+          >
+            <text class="detail-dropdown-menu__label">{{ action.name }}</text>
+          </view>
+        </view>
+      </view>
+
+      <view
+        :class="[
+          'detail-tabs-bar',
+          hasDetailBackgroundImage && 'detail-tabs-bar--translucent',
+        ]"
+        :style="[detailTabsBarThemeStyle, detailTabsBarStyle]"
+      >
         <up-tabs
           :current="activeDetailTabIndex"
           :list="detailShellTabs"
@@ -59,9 +100,15 @@
           @change="handleDetailTabChange"
         >
           <template #content="{ item, index }">
-            <view class="detail-tab-pill" :class="{ 'detail-tab-pill--active': index === activeDetailTabIndex }">
+            <view
+              :class="[
+                'detail-tab-pill',
+                hasDetailBackgroundImage && 'detail-tab-pill--translucent',
+                index === activeDetailTabIndex && 'detail-tab-pill--active',
+              ]"
+            >
               <view class="detail-tab-pill__dot"></view>
-              <text class="detail-tab-pill__title u-line-1">{{ item.title }}</text>
+              <view class="detail-tab-pill__title">{{ normalizeDetailTabTitleText(item.title) }}</view>
               <view
                 v-if="detailShellTabs.length > 1"
                 class="detail-tab-pill__close"
@@ -99,6 +146,7 @@
               :message-list-page-style="messageListPageStyle"
               :message-list-content-style="messageListContentStyle"
               :input-wrap-style="upThemeCardStyle"
+              :translucent-message-list="hasDetailBackgroundImage"
               :message-scroll-top="messageScrollTop"
               :message-scroll-into-view="messageScrollIntoView"
               :message-scroll-with-animation="messageScrollWithAnimation"
@@ -799,6 +847,7 @@
               :message-list-page-style="messageListPageStyle"
               :message-list-content-style="messageListContentStyle"
               :input-wrap-style="upThemeCardStyle"
+              :translucent-message-list="hasDetailBackgroundImage"
               :slash-commands="slashCommands"
               :upload-target="detailUploadTarget"
               @layout-change="measureMessageListHeight"
@@ -976,6 +1025,7 @@ import ConversationDetailBody from "./ConversationDetailBody.vue"
 import ConversationDetailInteractivePane from "./ConversationDetailInteractivePane.vue"
 import {
   buildDetailShellTabs,
+  normalizeDetailTabTitleText,
   resolveMountedDetailConversationIds,
   resolveDetailTabChangeIndex,
   resolveDetailTabCloseTarget,
@@ -1134,6 +1184,7 @@ import {
   resolveStoredConnectionTargetAgent,
   type StoredConnectionItem,
 } from "./detailConnectionResolution"
+import { buildModelProvidersRoute } from "@/services/remoteSettings"
 
 interface UploadQueueItem {
   id: string
@@ -1150,6 +1201,11 @@ type ComposerPanelMode = "" | "quick_reply" | "config"
 interface QuickReplyItem {
   label: string
   value: string
+}
+
+interface DetailBackgroundSnapshot {
+  url: string
+  updatedAt?: number
 }
 
 const auth = useAuthStore()
@@ -1172,6 +1228,7 @@ const ENABLE_STUCK_PROMPT_DETECTION = false
 const DEFAULT_DETAIL_TABS_BAR_HEIGHT = 54
 const DEFAULT_DETAIL_TOOLBAR_HEIGHT = 0
 const DEFAULT_DETAIL_COMPOSER_HEIGHT = 156
+const DETAIL_BACKGROUND_STORAGE_PREFIX = "mcode_conversation_detail_background"
 const quickReplyItems: QuickReplyItem[] = [
   { label: "yes", value: "yes" },
   { label: "继续", value: "继续" },
@@ -1197,6 +1254,7 @@ const routeConnectionContext = ref<StoredConnectionItem | null>(null)
 const bridgeHealth = ref<RealtimeBridgeHealth | null>(null)
 const bridgeRecoveredAt = ref(0)
 const conversationTitle = ref("未命名会话")
+const detailBackgroundImageUrl = ref("")
 const inputText = ref("")
 const pageScrollTop = ref(0)
 const messageScrollTop = ref(0)
@@ -1229,6 +1287,7 @@ const updatingSharedQueuePriorityItemIds = ref<Set<string>>(new Set())
 const clearingSharedPromptQueue = ref(false)
 const uploadingCount = ref(0)
 const showPlanDrawer = ref(false)
+const showDetailMoreMenu = ref(false)
 const composerPanelMode = ref<ComposerPanelMode>("")
 const toolRowExpanded = ref(false)
 const longWaitTick = ref(0)
@@ -1367,6 +1426,9 @@ const effectiveBottomComposerHeight = computed(() =>
 const messageListContentStyle = computed(() =>
   buildMessageListContentStyle(effectiveBottomComposerHeight.value)
 )
+const detailTabsBarThemeStyle = computed(() =>
+  hasDetailBackgroundImage.value ? {} : upThemeCardStyle.value
+)
 const detailTabsBarStyle = computed(() => ({
   ...buildTopOffsetStyle(getNavbarHeight()),
   borderRadius: "0",
@@ -1392,6 +1454,9 @@ const detailUploadTarget = computed(() => {
 const connectingOperationBlockerStyle = computed(() =>
   buildTopOffsetStyle(getNavbarHeight() + tabsBarHeight.value + toolbarHeight.value)
 )
+const detailDropdownMaskStyle = computed(() => ({
+  top: `${getNavbarHeight()}px`,
+}))
 const historyStatusStyle = computed(() =>
   buildHistoryStatusStyle({
     navbarHeight: getNavbarHeight(),
@@ -1418,6 +1483,12 @@ const detailConnectionKey = computed(() => {
   }
   return resolveDetailInstanceKey()
 })
+const detailMoreActions = computed(() => [
+  { name: "模型供应商", color: "#2979ff" },
+  { name: "文件夹管理", color: "#2979ff" },
+  { name: "背景图自定义", color: "#8b5cf6" },
+])
+const hasDetailBackgroundImage = computed(() => Boolean(detailBackgroundImageUrl.value))
 
 const historyStatusText = computed(() => {
   if (loadingOlder.value) return "历史加载中..."
@@ -1760,7 +1831,7 @@ const navbarBgColor = computed(() => navbarStatusBarBgColor.value)
 const detailTabsItemStyle = {
   paddingLeft: "0px",
   paddingRight: "0px",
-  height: "auto",
+  height: "72rpx",
   borderRadius: "999px",
 }
 const detailTabsActiveStyle = {
@@ -2426,6 +2497,7 @@ onLoad((options: any) => {
     findStoredConnectionById(connectionId) ||
     normalizeStoredConnectionLike(decodeConnectionContext(connectionKey))
   syncRouteAuthContext()
+  applyDetailBackgroundFromStorage(conversationId.value)
   if (conversationId.value) {
     void initializeDetailTabsShell().finally(() => {
       void loadDetailProjectEntries()
@@ -2484,6 +2556,67 @@ onUnload(() => {
 function handleBackNavigation() {
   uni.switchTab({
     url: "/pages/conversations/index",
+  })
+}
+
+function openDetailMoreMenu() {
+  showDetailMoreMenu.value = true
+}
+
+function closeDetailMoreMenu() {
+  showDetailMoreMenu.value = false
+}
+
+function handleDetailMoreMenuClick(action: string) {
+  if (action === "模型供应商") {
+    openDetailModelProvidersPage()
+  } else if (action === "文件夹管理") {
+    openDetailProjectsPage()
+  } else if (action === "背景图自定义") {
+    openDetailBackgroundPicker()
+  }
+  closeDetailMoreMenu()
+}
+
+function openDetailModelProvidersPage() {
+  const connectionId = resolveDetailConnectionRecordId()
+  if (!connectionId) {
+    uni.showToast({ title: "缺少连接信息，无法打开模型供应商", icon: "none" })
+    return
+  }
+  uni.navigateTo({
+    url: buildModelProvidersRoute({
+      connectionId,
+    }),
+  })
+}
+
+function openDetailProjectsPage() {
+  const connectionId = resolveDetailConnectionRecordId()
+  if (!connectionId) {
+    uni.showToast({ title: "缺少连接信息，无法打开项目列表", icon: "none" })
+    return
+  }
+  uni.navigateTo({
+    url: `/pages/projects/index?connectionId=${encodeURIComponent(connectionId)}`,
+  })
+}
+
+function openDetailBackgroundPicker() {
+  const actionItems = detailBackgroundImageUrl.value
+    ? ["选择背景图", "清除背景图"]
+    : ["选择背景图"]
+  uni.showActionSheet({
+    itemList: actionItems,
+    success: (result) => {
+      if (result.tapIndex === 0) {
+        chooseConversationDetailBackgroundImage()
+        return
+      }
+      if (result.tapIndex === 1) {
+        clearConversationDetailBackgroundImage(true)
+      }
+    },
   })
 }
 
@@ -2655,6 +2788,14 @@ watch(
     resetQuestionSelections()
     if (!hasInitialBottomScroll.value) return
     scheduleViewportSync()
+  }
+)
+
+watch(
+  () => conversationId.value,
+  (nextConversationId, prevConversationId) => {
+    if (Number(nextConversationId || 0) === Number(prevConversationId || 0)) return
+    applyDetailBackgroundFromStorage(nextConversationId)
   }
 )
 
@@ -3594,6 +3735,157 @@ function ensureHistoryCursorFromLoadedMessages() {
   const firstMessageId = messages.value[0]?.id || ""
   if (!sortKey || !firstMessageId) return
   oldestLoadedCursor.value = { sortKey, id: firstMessageId }
+}
+
+function buildDetailBackgroundStorageKey(targetConversationId = conversationId.value) {
+  const normalizedConversationId = Number(targetConversationId || 0)
+  if (!normalizedConversationId) return ""
+  const instanceKey = resolveDetailInstanceKey() || "anonymous"
+  return `${DETAIL_BACKGROUND_STORAGE_PREFIX}:${instanceKey}:${normalizedConversationId}`
+}
+
+function readDetailBackgroundSnapshot(targetConversationId = conversationId.value): DetailBackgroundSnapshot | null {
+  const key = buildDetailBackgroundStorageKey(targetConversationId)
+  if (!key) return null
+  try {
+    const raw = uni.getStorageSync(key)
+    if (!raw) return null
+    const parsed = typeof raw === "string" ? JSON.parse(raw) : raw
+    const url = firstString((parsed as any)?.url)
+    if (!url) return null
+    return {
+      url,
+      updatedAt: typeof (parsed as any)?.updatedAt === "number" ? (parsed as any).updatedAt : undefined,
+    }
+  } catch (error) {
+    console.warn("read detail background snapshot skipped", error)
+    return null
+  }
+}
+
+function applyDetailBackgroundFromStorage(targetConversationId = conversationId.value) {
+  const snapshot = readDetailBackgroundSnapshot(targetConversationId)
+  detailBackgroundImageUrl.value = snapshot?.url || ""
+}
+
+function persistDetailBackgroundSnapshot(url: string, targetConversationId = conversationId.value) {
+  const key = buildDetailBackgroundStorageKey(targetConversationId)
+  if (!key) return
+  if (!url) {
+    uni.removeStorageSync(key)
+    return
+  }
+  try {
+    uni.setStorageSync(key, JSON.stringify({
+      url,
+      updatedAt: Date.now(),
+    }))
+  } catch (error) {
+    console.warn("persist detail background snapshot skipped", error)
+  }
+}
+
+async function chooseConversationDetailBackgroundImage() {
+  uni.chooseImage({
+    count: 1,
+    sizeType: ["compressed"],
+    sourceType: ["album", "camera"],
+    success: async (res) => {
+      const picked = Array.isArray(res.tempFilePaths) ? String(res.tempFilePaths[0] || "").trim() : ""
+      if (!picked) {
+        uni.showToast({ title: "未选择可用图片", icon: "none" })
+        return
+      }
+      try {
+        const url = await persistConversationDetailBackgroundFile(picked)
+        detailBackgroundImageUrl.value = url
+        persistDetailBackgroundSnapshot(url)
+        uni.showToast({ title: "背景图已更新", icon: "success" })
+      } catch (error) {
+        uni.showToast({
+          title: toErrorMessage(error, "背景图保存失败"),
+          icon: "none",
+          duration: 3000,
+        })
+      }
+    },
+  })
+}
+
+async function persistConversationDetailBackgroundFile(tempFilePath: string) {
+  const normalizedPath = String(tempFilePath || "").trim()
+  if (!normalizedPath) {
+    throw new Error("背景图路径无效")
+  }
+  const savedPath = await saveLocalFileIfPossible(normalizedPath)
+  const previousUrl = detailBackgroundImageUrl.value
+  if (savedPath && previousUrl && savedPath !== previousUrl) {
+    void removeSavedFileIfPossible(previousUrl)
+  }
+  return savedPath || normalizedPath
+}
+
+async function saveLocalFileIfPossible(tempFilePath: string): Promise<string> {
+  if (typeof uni.saveFile !== "function") {
+    return tempFilePath
+  }
+  try {
+    return await new Promise<string>((resolve, reject) => {
+      uni.saveFile({
+        tempFilePath,
+        success: (res) => {
+          const savedFilePath = firstString((res as any)?.savedFilePath, (res as any)?.tempFilePath)
+          if (savedFilePath) {
+            resolve(savedFilePath)
+            return
+          }
+          reject(new Error("背景图保存结果为空"))
+        },
+        fail: (error) => {
+          reject(error)
+        },
+      })
+    })
+  } catch (error) {
+    console.warn("save detail background file skipped", error)
+    return tempFilePath
+  }
+}
+
+async function removeSavedFileIfPossible(filePath: string) {
+  const normalizedPath = String(filePath || "").trim()
+  if (!normalizedPath || typeof uni.removeSavedFile !== "function") return
+  if (/^https?:\/\//i.test(normalizedPath)) return
+  try {
+    await new Promise<void>((resolve) => {
+      uni.removeSavedFile({
+        filePath: normalizedPath,
+        complete: () => resolve(),
+      })
+    })
+  } catch {}
+}
+
+function clearConversationDetailBackgroundImage(showToast = false) {
+  const previousUrl = detailBackgroundImageUrl.value
+  detailBackgroundImageUrl.value = ""
+  persistDetailBackgroundSnapshot("")
+  if (previousUrl) {
+    void removeSavedFileIfPossible(previousUrl)
+  }
+  if (showToast) {
+    uni.showToast({ title: "背景图已清除", icon: "success" })
+  }
+}
+
+function handleDetailBackgroundLoadError() {
+  if (!detailBackgroundImageUrl.value) return
+  clearConversationDetailBackgroundImage(false)
+  uni.showToast({
+    title: "背景图已失效，已自动清除",
+    icon: "none",
+    duration: 2500,
+  })
 }
 
 function measureMessageListHeight() {
@@ -4787,6 +5079,11 @@ function resolveDetailStoredConnection(): StoredConnectionItem | null {
   return routeConnectionContext.value ||
     findStoredConnectionById(routeConnectionId.value) ||
     findStoredConnectionByKey(routeConnectionKey.value)
+}
+
+function resolveDetailConnectionRecordId() {
+  const stored = resolveDetailStoredConnection()
+  return firstString(stored?.id, routeConnectionId.value)
 }
 
 function resolveDetailTargetAgent() {

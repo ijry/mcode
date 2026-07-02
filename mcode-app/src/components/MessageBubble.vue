@@ -30,7 +30,13 @@
 
     <!-- 气泡内容 -->
     <view class="bubble-body">
-      <view :class="['bubble', `bubble--${message.role}`]">
+      <view
+        :class="[
+          'bubble',
+          `bubble--${message.role}`,
+          translucent && `bubble--${message.role}-translucent`,
+        ]"
+      >
         <!-- 内容渲染 -->
         <view v-for="(part, index) in displayParts" :key="index" class="part-wrap">
           <!-- 文本 -->
@@ -49,7 +55,10 @@
 
           <!-- P48 工具调用：分组调用使用紧凑中性 summary pill -->
           <view v-else-if="part.type === 'tool_call_group'" class="part-tool">
-            <ToolCallGroupBlock :toolCalls="part.tool_calls || []" />
+            <ToolCallGroupBlock
+              :toolCalls="part.tool_calls || []"
+              :translucent="translucent"
+            />
           </view>
           <view v-else-if="part.type === 'tool_call'" class="part-tool">
             <ToolCallBlock :toolCall="part.tool_call!" />
@@ -88,7 +97,13 @@
           </view>
 
           <!-- 计划 -->
-          <view v-else-if="part.type === 'plan'" class="part-plan">
+          <view
+            v-else-if="part.type === 'plan'"
+            :class="[
+              'part-plan',
+              translucent && 'part-plan--translucent',
+            ]"
+          >
             <view class="plan-hd">
               <up-icon name="list" size="15" :color="upThemeVar('--up-primary', '#2979ff')"></up-icon>
               <text class="plan-hd__label">执行计划</text>
@@ -149,6 +164,7 @@ const props = defineProps<{
   message: MessageTurn
   agentType?: string
   showRegenerate?: boolean
+  translucent?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -296,10 +312,24 @@ function normalizeAgentType(raw?: string) {
     color: #ffffff;
   }
 
+  &--user-translucent {
+    background-color: color-mix(in srgb, var(--up-primary, #2979ff) 72%, transparent 28%);
+    border: 1rpx solid color-mix(in srgb, var(--up-primary, #2979ff) 34%, transparent 66%);
+    backdrop-filter: blur(0.1625rem);
+    box-shadow: 0 10rpx 24rpx rgba(41, 121, 255, 0.08);
+  }
+
   &--assistant {
     background-color: var(--up-card-bg-color, #ffffff);
     border-top-left-radius: 6rpx;
     box-shadow: none;
+  }
+
+  &--assistant-translucent {
+    background-color: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 50%, transparent 50%);
+    border: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 42%, transparent 58%);
+    backdrop-filter: blur(18rpx);
+    box-shadow: 0 10rpx 24rpx rgba(15, 23, 42, 0.045);
   }
 }
 
@@ -417,6 +447,12 @@ function normalizeAgentType(raw?: string) {
   padding: 16rpx 20rpx;
   background-color: color-mix(in srgb, var(--up-primary, #2979ff) 10%, var(--up-card-bg-color, #ffffff) 90%);
   border-radius: 12rpx;
+  border-left: 4rpx solid var(--up-primary, #2979ff);
+}
+
+.part-plan--translucent {
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 10%, transparent 90%);
+  border: 1rpx solid color-mix(in srgb, var(--up-primary, #2979ff) 24%, transparent 76%);
   border-left: 4rpx solid var(--up-primary, #2979ff);
 }
 

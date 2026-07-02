@@ -1,6 +1,12 @@
 <template>
   <view class="tool-group">
-    <view class="tool-group__summary" @click="toggleExpanded">
+    <view
+      :class="[
+        'tool-group__summary',
+        translucent && 'tool-group__summary--translucent',
+      ]"
+      @click="toggleExpanded"
+    >
       <view class="tool-group__left">
         <up-icon
           :name="expanded ? 'arrow-down' : 'arrow-right'"
@@ -25,6 +31,7 @@ import ToolCallBlock from "./ToolCallBlock.vue"
 
 const props = defineProps<{
   toolCalls: ToolCall[]
+  translucent?: boolean
 }>()
 
 const expanded = ref(false)
@@ -126,6 +133,11 @@ function classifyToolCall(toolCall: ToolCall): "command" | "file_change" | "netw
   max-width: 100%;
   gap: 12rpx;
   box-sizing: border-box;
+}
+
+.tool-group__summary--translucent {
+  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 46%, transparent 54%);
+  border: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 40%, transparent 60%);
 }
 
 .tool-group__left {

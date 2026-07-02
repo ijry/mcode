@@ -4,6 +4,7 @@
     :message-list-page-style="messageListPageStyle"
     :message-list-content-style="messageListContentStyle"
     :input-wrap-style="inputWrapStyle"
+    :translucent-message-list="translucentMessageList"
     :message-scroll-top="messageScrollTop"
     :message-scroll-into-view="messageScrollIntoView"
     :message-scroll-with-animation="messageScrollWithAnimation"
@@ -25,7 +26,12 @@
 
     <template #content>
       <view v-if="showWaitingResponseState" class="empty-messages empty-messages--pending">
-        <view class="pending-response-card">
+        <view
+          :class="[
+            'pending-response-card',
+            translucentMessageList && 'pending-response-card--translucent',
+          ]"
+        >
           <view class="pending-response-card__pulse"></view>
           <view class="pending-response-card__badge">
             <view class="pending-response-card__badge-dot"></view>
@@ -53,6 +59,7 @@
           :message="item.message"
           :agent-type="normalizedAgentType"
           :showRegenerate="index === renderMessageItems.length - 1 && item.message.role === 'assistant'"
+          :translucent="translucentMessageList"
           @regenerate="regenerateLastMessage"
         />
       </view>
@@ -64,7 +71,13 @@
         </text>
       </view>
 
-      <view v-if="showBottomGeneratingIndicator" class="bottom-generating">
+      <view
+        v-if="showBottomGeneratingIndicator"
+        :class="[
+          'bottom-generating',
+          translucentMessageList && 'bottom-generating--translucent',
+        ]"
+      >
         <view class="bottom-generating__orb">
           <view class="bottom-generating__ring"></view>
           <view class="bottom-generating__dot"></view>
@@ -101,7 +114,13 @@
     </template>
 
     <template #composer>
-      <view v-if="pendingPermissionCard" class="permission-card">
+      <view
+        v-if="pendingPermissionCard"
+        :class="[
+          'permission-card',
+          translucentMessageList && 'permission-card--translucent',
+        ]"
+      >
         <view class="permission-card__header">
           <view class="permission-card__badge"></view>
           <text class="permission-card__title">需要授权</text>
@@ -155,7 +174,13 @@
         <text v-else class="permission-card__empty">当前授权请求没有可用选项</text>
       </view>
 
-      <view v-if="pendingQuestionCard" class="ask-question-card">
+      <view
+        v-if="pendingQuestionCard"
+        :class="[
+          'ask-question-card',
+          translucentMessageList && 'ask-question-card--translucent',
+        ]"
+      >
         <view class="ask-question-card__header">
           <view class="ask-question-card__badge">?</view>
           <view class="ask-question-card__heading">
@@ -266,7 +291,10 @@
 
       <view
         v-if="slashState.visible && filteredSlashCommands.length > 0"
-        class="slash-panel"
+        :class="[
+          'slash-panel',
+          translucentMessageList && 'slash-panel--translucent',
+        ]"
       >
         <view
           v-for="item in filteredSlashCommands"
@@ -281,7 +309,13 @@
         </view>
       </view>
 
-      <view v-if="uploadQueue.length > 0" class="upload-queue">
+      <view
+        v-if="uploadQueue.length > 0"
+        :class="[
+          'upload-queue',
+          translucentMessageList && 'upload-queue--translucent',
+        ]"
+      >
         <view
           v-for="item in uploadQueue"
           :key="item.id"
@@ -309,7 +343,13 @@
         </view>
       </view>
 
-      <view v-if="attachments.length > 0" class="attachments-preview">
+      <view
+        v-if="attachments.length > 0"
+        :class="[
+          'attachments-preview',
+          translucentMessageList && 'attachments-preview--translucent',
+        ]"
+      >
         <view v-for="(att, index) in attachments" :key="att.id" class="attachment-item">
           <image
             v-if="att.kind === 'image'"
@@ -329,8 +369,11 @@
 
       <view class="input-main-row">
         <view
-          class="tool-toggle-btn"
-          :class="{ 'tool-toggle-btn--active': showInputToolRow }"
+          :class="[
+            'tool-toggle-btn',
+            translucentMessageList && 'tool-toggle-btn--translucent',
+            showInputToolRow && 'tool-toggle-btn--active',
+          ]"
           @click="toggleInputToolRow"
         >
           <up-icon
@@ -340,7 +383,12 @@
           ></up-icon>
         </view>
 
-        <view class="input-box">
+        <view
+          :class="[
+            'input-box',
+            translucentMessageList && 'input-box--translucent',
+          ]"
+        >
           <up-textarea
             class="composer-textarea"
             v-model="inputText"
@@ -366,15 +414,25 @@
         </view>
       </view>
 
-      <view v-if="showInputToolRow" class="input-tool-row">
+        <view v-if="showInputToolRow" class="input-tool-row">
         <view class="input-tool-btn" @click="handleChooseImages">
-          <view class="input-tool-btn__icon">
+          <view
+            :class="[
+              'input-tool-btn__icon',
+              translucentMessageList && 'input-tool-btn__icon--translucent',
+            ]"
+          >
             <up-icon name="photo" size="20" :color="upThemeVar('--up-content-color', '#606266')"></up-icon>
           </view>
         </view>
 
         <view class="input-tool-btn" @click="handleChooseFiles">
-          <view class="input-tool-btn__icon">
+          <view
+            :class="[
+              'input-tool-btn__icon',
+              translucentMessageList && 'input-tool-btn__icon--translucent',
+            ]"
+          >
             <up-icon name="file-text" size="20" :color="upThemeVar('--up-content-color', '#606266')"></up-icon>
           </view>
         </view>
@@ -383,7 +441,12 @@
           :class="['input-tool-btn', composerPanelMode === 'quick_reply' && 'input-tool-btn--active']"
           @click="toggleComposerPanel('quick_reply')"
         >
-          <view class="input-tool-btn__icon">
+          <view
+            :class="[
+              'input-tool-btn__icon',
+              translucentMessageList && 'input-tool-btn__icon--translucent',
+            ]"
+          >
             <up-icon name="share" size="20" :color="upThemeVar('--up-content-color', '#606266')"></up-icon>
           </view>
         </view>
@@ -393,7 +456,12 @@
           :class="{ 'input-tool-btn--disabled': !canStopSession || stoppingSession }"
           @click.stop="confirmStopSession()"
         >
-          <view class="input-tool-btn__icon">
+          <view
+            :class="[
+              'input-tool-btn__icon',
+              translucentMessageList && 'input-tool-btn__icon--translucent',
+            ]"
+          >
             <up-loading-icon
               v-if="stoppingSession"
               mode="circle"
@@ -405,7 +473,13 @@
         </view>
       </view>
 
-      <view v-if="showComposerPanel" class="composer-panel">
+      <view
+        v-if="showComposerPanel"
+        :class="[
+          'composer-panel',
+          translucentMessageList && 'composer-panel--translucent',
+        ]"
+      >
         <view
           v-if="composerPanelMode === 'quick_reply'"
           class="composer-panel__body composer-panel__body--quick"
@@ -623,6 +697,7 @@ const props = defineProps<{
   messageListPageStyle?: StyleValue
   messageListContentStyle?: StyleValue
   inputWrapStyle?: StyleValue
+  translucentMessageList?: boolean
   slashCommands?: SlashCommandItem[]
   uploadTarget?: { url: string; header: Record<string, string> } | null
 }>()

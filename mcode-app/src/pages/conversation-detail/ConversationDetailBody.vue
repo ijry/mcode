@@ -18,10 +18,13 @@
     </scroll-view>
     <view class="composer-safe-area"></view>
     <view class="composer-stack">
-      <view class="input-status-wrap">
+      <view :class="['input-status-wrap', translucentMessageList && 'input-status-wrap--translucent']">
         <slot name="status"></slot>
       </view>
-      <view class="input-wrap" :style="inputWrapStyle">
+      <view
+        :class="['input-wrap', translucentMessageList && 'input-wrap--translucent']"
+        :style="resolvedInputWrapStyle"
+      >
         <slot name="composer"></slot>
       </view>
     </view>
@@ -29,17 +32,22 @@
 </template>
 
 <script setup lang="ts">
-import type { StyleValue } from "vue"
+import { computed, type StyleValue } from "vue"
 
-defineProps<{
+const props = defineProps<{
   messageListPageStyle?: StyleValue
   messageListContentStyle?: StyleValue
   inputWrapStyle?: StyleValue
+  translucentMessageList?: boolean
   messageScrollTop?: number
   messageScrollIntoView?: string
   messageScrollWithAnimation?: boolean
   upperThreshold?: number
 }>()
+
+const resolvedInputWrapStyle = computed(() =>
+  props.translucentMessageList ? undefined : props.inputWrapStyle
+)
 
 const emit = defineEmits<{
   (event: "message-scroll", payload: unknown): void
@@ -111,6 +119,12 @@ const emit = defineEmits<{
   box-sizing: border-box;
 }
 
+.input-status-wrap--translucent {
+  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 50%, transparent 50%);
+  border: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 42%, transparent 58%);
+  backdrop-filter: blur(18rpx);
+}
+
 .input-wrap {
   width: 100%;
   background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 76%, transparent 24%);
@@ -120,5 +134,11 @@ const emit = defineEmits<{
   box-shadow: 0 -2rpx 18rpx rgba(15, 23, 42, 0.025), 0 14rpx 36rpx rgba(15, 23, 42, 0.07);
   backdrop-filter: blur(20rpx);
   box-sizing: border-box;
+}
+
+.input-wrap--translucent {
+  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 50%, transparent 50%);
+  border: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 42%, transparent 58%);
+  backdrop-filter: blur(22rpx);
 }
 </style>
