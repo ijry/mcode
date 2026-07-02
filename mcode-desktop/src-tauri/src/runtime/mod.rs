@@ -325,19 +325,16 @@ pub async fn dispatch_desktop_proxy_with_event_sink(
         "acp_disconnect" => close_cli_session(state, payload, CliSessionStatus::Disconnected).await,
         "acp_cancel" => cancel_cli_session(state, payload, event_sink).await,
         "acp_cancel_queued_prompt" => cancel_queued_prompt(state, payload, event_sink),
-        "acp_cancel_all_queued_prompts" => {
-            cancel_all_queued_prompts(state, payload, event_sink)
-        }
+        "acp_cancel_all_queued_prompts" => cancel_all_queued_prompts(state, payload, event_sink),
         "acp_reorder_queued_prompt" => reorder_queued_prompt(state, payload, event_sink),
-        "acp_set_queued_prompt_priority" => {
-            set_queued_prompt_priority(state, payload, event_sink)
-        }
+        "acp_set_queued_prompt_priority" => set_queued_prompt_priority(state, payload, event_sink),
         "acp_get_session_snapshot" | "acp_get_sessions" => get_session_snapshot(state, payload),
         "acp_respond_permission" => respond_permission(state, payload),
         "acp_respond_question" => respond_question(state, payload),
         "acp_prompt" => dispatch_prompt_with_state(state, payload, event_sink).await,
         "get_home_directory"
         | "list_directory_entries"
+        | "create_folder_directory"
         | "open_folder"
         | "list_open_folder_details"
         | "list_opened_tabs"
@@ -1390,8 +1387,7 @@ fn reorder_queued_prompt(
             .position(|item| item.queue_item_id == queue_item_id)
             .ok_or_else(|| queue_state_error(&session_id, &queue_item_id))?;
         let snapshot = move_queued_prompt(queue, index, &action)
-            .ok_or_else(|| queue_state_error(&session_id, &queue_item_id))?
-            ;
+            .ok_or_else(|| queue_state_error(&session_id, &queue_item_id))?;
         let queue_snapshot = queued_prompt_snapshots_for_queue(queue);
         (snapshot, queue_snapshot)
     };
@@ -1545,10 +1541,7 @@ pub fn persistent_queued_prompts(state: &AppState) -> Vec<PersistentQueuedPrompt
         .unwrap_or_default()
 }
 
-pub fn restore_persistent_queued_prompts(
-    state: &AppState,
-    prompts: Vec<PersistentQueuedPrompt>,
-) {
+pub fn restore_persistent_queued_prompts(state: &AppState, prompts: Vec<PersistentQueuedPrompt>) {
     let mut grouped: HashMap<String, Vec<QueuedPromptItem>> = HashMap::new();
     for prompt in prompts {
         grouped

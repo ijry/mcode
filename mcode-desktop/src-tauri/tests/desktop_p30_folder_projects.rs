@@ -6,10 +6,8 @@ use mcode_desktop_lib::runtime::dispatch_desktop_proxy_with_state;
 use serde_json::json;
 
 fn temp_root(name: &str) -> std::path::PathBuf {
-    let root = std::env::temp_dir().join(format!(
-        "mcode-desktop-p30-{name}-{}",
-        std::process::id()
-    ));
+    let root =
+        std::env::temp_dir().join(format!("mcode-desktop-p30-{name}-{}", std::process::id()));
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).unwrap();
     root
@@ -43,6 +41,31 @@ async fn p30_lists_directory_entries_as_directories_only() {
 }
 
 #[tokio::test]
+async fn p30_creates_folder_directory_for_app_browser() {
+    let root = temp_root("create");
+    let child = root.join("new-project");
+    let state = AppState::new_for_test();
+
+    dispatch_desktop_proxy_with_state(&state, "create_folder_directory", json!({ "path": child }))
+        .await
+        .unwrap();
+    let response = dispatch_desktop_proxy_with_state(
+        &state,
+        "list_directory_entries",
+        json!({ "path": root }),
+    )
+    .await
+    .unwrap();
+    let entries = response.as_array().unwrap();
+
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0]["name"], "new-project");
+    assert_eq!(entries[0]["isDirectory"], true);
+
+    fs::remove_dir_all(root).ok();
+}
+
+#[tokio::test]
 async fn p30_opens_folders_with_stable_duplicate_ids() {
     let root = temp_root("open");
     let state = AppState::new_for_test();
@@ -71,18 +94,16 @@ async fn p30_opens_folders_with_stable_duplicate_ids() {
 async fn p30_restores_open_folders_from_recovery_snapshot() {
     let root = temp_root("restore");
     let state = AppState::new_for_test();
-    let opened =
-        dispatch_desktop_proxy_with_state(&state, "open_folder", json!({ "path": root }))
-            .await
-            .unwrap();
+    let opened = dispatch_desktop_proxy_with_state(&state, "open_folder", json!({ "path": root }))
+        .await
+        .unwrap();
 
     let snapshot = build_recovery_snapshot(&state).unwrap();
     let restored = AppState::new_for_test();
     apply_recovery_snapshot(&restored, snapshot).unwrap();
-    let list =
-        dispatch_desktop_proxy_with_state(&restored, "list_open_folder_details", json!({}))
-            .await
-            .unwrap();
+    let list = dispatch_desktop_proxy_with_state(&restored, "list_open_folder_details", json!({}))
+        .await
+        .unwrap();
 
     assert_eq!(list.as_array().unwrap().len(), 1);
     assert_eq!(list[0]["id"], opened["id"]);

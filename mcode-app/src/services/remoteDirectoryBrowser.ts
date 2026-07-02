@@ -21,7 +21,8 @@ export function normalizeDirectoryEntries(input: unknown): RemoteDirectoryEntry[
     if (!raw) return
     const name = pickString(raw.name)
     const path = pickString(raw.path)
-    const isDirectory = Boolean(raw.isDirectory ?? raw.is_dir)
+    const directoryFlag = raw.isDirectory ?? raw.is_dir
+    const isDirectory = typeof directoryFlag === "boolean" ? directoryFlag : directoryFlag == null
     if (!name || !path || !isDirectory) return
     entries.push({
       name,
@@ -68,6 +69,16 @@ export function parentDirectoryPath(input: string): string {
   return `${path.startsWith("/") ? "/" : ""}${parts.slice(0, -1).join("/")}`
 }
 
+export function childDirectoryPath(parent: string, name: string): string {
+  const base = String(parent || "").trim()
+  const child = String(name || "").trim()
+  if (!base) return child
+  if (!child) return base
+  if (/[\\/]$/.test(base)) return `${base}${child}`
+  const separator = /^[A-Za-z]:/.test(base) || base.includes("\\") ? "\\" : "/"
+  return `${base}${separator}${child}`
+}
+
 export async function getHomeDirectory(gateway: CodegGateway): Promise<string> {
   const raw = await gateway.call<unknown>("get_home_directory")
   return pickString(raw)
@@ -91,6 +102,10 @@ export async function openRemoteFolder(
     throw new Error("添加项目失败：返回数据异常")
   }
   return folder
+}
+
+export async function createRemoteDirectory(gateway: CodegGateway, path: string): Promise<void> {
+  await gateway.call<unknown>("create_folder_directory", { path })
 }
 
 function normalizeList(input: unknown): unknown[] {

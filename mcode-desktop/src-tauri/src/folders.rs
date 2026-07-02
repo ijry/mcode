@@ -27,6 +27,11 @@ pub async fn dispatch_folder_proxy(
             let path = extract_path(&payload)?;
             Ok(json!(list_directory_entries(&path)?))
         }
+        "create_folder_directory" => {
+            let path = extract_path(&payload)?;
+            create_folder_directory(&path)?;
+            Ok(json!(null))
+        }
         "open_folder" => {
             let path = extract_path(&payload)?;
             Ok(json!(open_folder(state, &path)?))
@@ -109,6 +114,10 @@ fn list_directory_entries(path: &str) -> Result<Vec<DesktopDirectoryEntry>> {
         .collect::<Vec<_>>();
     entries.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
     Ok(entries)
+}
+
+fn create_folder_directory(path: &str) -> Result<()> {
+    std::fs::create_dir_all(path).map_err(|error| anyhow!("failed to create directory: {error}"))
 }
 
 fn list_open_folder_details(state: &AppState) -> Vec<DesktopOpenFolder> {

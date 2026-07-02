@@ -1,4 +1,6 @@
 import {
+  childDirectoryPath,
+  createRemoteDirectory,
   normalizeDirectoryEntries,
   parentDirectoryPath,
 } from "@/services/remoteDirectoryBrowser"
@@ -28,6 +30,18 @@ describe("remoteDirectoryBrowser", () => {
     ])
   })
 
+  it("accepts codeg-main directory-only entries without an explicit directory flag", () => {
+    expect(
+      normalizeDirectoryEntries([
+        { name: "Repos", path: "D:/Repos", hasChildren: true },
+        { name: "Downloads", path: "D:/Downloads", hasChildren: false },
+      ])
+    ).toEqual([
+      { name: "Repos", path: "D:/Repos", isDirectory: true, hasChildren: true },
+      { name: "Downloads", path: "D:/Downloads", isDirectory: true, hasChildren: false },
+    ])
+  })
+
   it("resolves POSIX parent paths without crossing root", () => {
     expect(parentDirectoryPath("/Users/admin/project")).toBe("/Users/admin")
     expect(parentDirectoryPath("/Users")).toBe("/")
@@ -38,5 +52,22 @@ describe("remoteDirectoryBrowser", () => {
     expect(parentDirectoryPath("D:\\Repos\\xyito\\lingyun")).toBe("D:\\Repos\\xyito")
     expect(parentDirectoryPath("D:\\Repos")).toBe("D:\\")
     expect(parentDirectoryPath("D:\\")).toBe("")
+  })
+
+  it("builds child directory paths for POSIX and Windows parents", () => {
+    expect(childDirectoryPath("/Users/admin", "project")).toBe("/Users/admin/project")
+    expect(childDirectoryPath("/", "project")).toBe("/project")
+    expect(childDirectoryPath("D:\\Repos", "project")).toBe("D:\\Repos\\project")
+    expect(childDirectoryPath("D:\\", "project")).toBe("D:\\project")
+  })
+
+  it("creates remote directories through the gateway command", async () => {
+    const gateway = { call: jest.fn().mockResolvedValue(null) }
+
+    await createRemoteDirectory(gateway as any, "/repo/new-project")
+
+    expect(gateway.call).toHaveBeenCalledWith("create_folder_directory", {
+      path: "/repo/new-project",
+    })
   })
 })

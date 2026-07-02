@@ -18,6 +18,9 @@
         <view class="remote-dir__tool" @click="goParent">
           <up-icon name="arrow-upward" size="15" :color="upThemeVar('--up-primary', '#2979ff')"></up-icon>
         </view>
+        <view class="remote-dir__tool" @click="toggleCreatePanel">
+          <up-icon name="plus" size="15" :color="upThemeVar('--up-primary', '#2979ff')"></up-icon>
+        </view>
         <input
           class="remote-dir__input"
           :value="pathInput"
@@ -26,6 +29,30 @@
           @input="handleInput"
           @confirm="navigateInput"
         />
+      </view>
+      <view v-if="createPanelOpen" class="remote-dir__create">
+        <input
+          class="remote-dir__create-input"
+          :value="newFolderName"
+          placeholder="新建文件夹名称"
+          placeholder-class="remote-dir__placeholder"
+          :disabled="creatingDirectory"
+          @input="handleNewFolderInput"
+          @confirm="createDirectory"
+        />
+        <view
+          class="remote-dir__create-submit"
+          :class="{ 'remote-dir__create-submit--disabled': creatingDirectory }"
+          @click="createDirectory"
+        >
+          <up-loading-icon
+            v-if="creatingDirectory"
+            mode="circle"
+            size="15"
+            :color="upThemeVar('--up-primary', '#2979ff')"
+          ></up-loading-icon>
+          <text v-else class="remote-dir__create-submit-text">创建</text>
+        </view>
       </view>
 
       <view v-if="errorMessage" class="remote-dir__error">
@@ -46,9 +73,16 @@
             v-for="entry in entries"
             :key="entry.path"
             class="remote-dir__row"
-            :class="{ 'remote-dir__row--selected': normalizePath(entry.path) === normalizePath(selectedPath) }"
-            @click="selectEntry(entry.path)"
+            :class="{ 'remote-dir__row--selected': isSelectedPath(entry.path) }"
+            @click="navigateTo(entry.path)"
           >
+            <view
+              class="remote-dir__select"
+              :class="{ 'remote-dir__select--checked': isSelectedPath(entry.path) }"
+              @click.stop="selectEntry(entry.path)"
+            >
+              <view v-if="isSelectedPath(entry.path)" class="remote-dir__select-dot"></view>
+            </view>
             <view class="remote-dir__folder">
               <up-icon name="folder" size="18" :color="upThemeVar('--up-primary', '#2979ff')"></up-icon>
             </view>
@@ -81,6 +115,8 @@
 import { computed, getCurrentInstance, ref, watch } from "vue"
 import type { CodegGateway } from "@/services/gateway"
 import {
+  childDirectoryPath,
+  createRemoteDirectory,
   getHomeDirectory,
   listDirectoryEntries,
   parentDirectoryPath,
@@ -103,9 +139,12 @@ const upThemeCardStyle = computed(() => currentInstance?.proxy?.upThemeCardStyle
 
 const loading = ref(false)
 const confirming = ref(false)
+const creatingDirectory = ref(false)
 const errorMessage = ref("")
 const pathInput = ref("")
 const selectedPath = ref("")
+const newFolderName = ref("")
+const createPanelOpen = ref(false)
 const entries = ref<RemoteDirectoryEntry[]>([])
 let sessionSeq = 0
 let navSeq = 0
@@ -130,9 +169,12 @@ function upThemeVar(name: string, fallback: string) {
 function resetState() {
   loading.value = false
   confirming.value = false
+  creatingDirectory.value = false
   errorMessage.value = ""
   pathInput.value = ""
   selectedPath.value = ""
+  newFolderName.value = ""
+  createPanelOpen.value = false
   entries.value = []
 }
 
@@ -183,11 +225,10 @@ async function navigateTo(path: string) {
 
 function selectEntry(path: string) {
   selectedPath.value = path
-  pathInput.value = path
 }
 
 function handleInput(event: Event) {
-  pathInput.value = String((event.target as HTMLInputElement)?.value || "")
+  pathInput.value = readInputValue(event)
   selectedPath.value = pathInput.value
 }
 
@@ -212,6 +253,49 @@ function goParent() {
   void navigateTo(parent)
 }
 
+function toggleCreatePanel() {
+  createPanelOpen.value = !createPanelOpen.value
+  errorMessage.value = ""
+}
+
+function handleNewFolderInput(event: Event) {
+  newFolderName.value = readInputValue(event)
+}
+
+async function createDirectory() {
+  const parent = pathInput.value.trim()
+  const name = newFolderName.value.trim()
+  if (!props.gateway || creatingDirectory.value) return
+  if (!parent) {
+    errorMessage.value = "请先进入一个父目录"
+    return
+  }
+  if (!isValidFolderName(name)) {
+    errorMessage.value = "文件夹名称不能为空，且不能包含路径分隔符"
+    return
+  }
+
+  const target = childDirectoryPath(parent, name)
+  const seq = sessionSeq
+  const currentNav = ++navSeq
+  creatingDirectory.value = true
+  errorMessage.value = ""
+  try {
+    await createRemoteDirectory(props.gateway, target)
+    const nextEntries = await listDirectoryEntries(props.gateway, parent)
+    if (seq !== sessionSeq || currentNav !== navSeq) return
+    entries.value = nextEntries
+    selectedPath.value = target
+    newFolderName.value = ""
+    createPanelOpen.value = false
+  } catch (error) {
+    if (seq !== sessionSeq || currentNav !== navSeq) return
+    errorMessage.value = toErrorMessage(error, "新建文件夹失败")
+  } finally {
+    if (seq === sessionSeq) creatingDirectory.value = false
+  }
+}
+
 async function confirmSelection() {
   const target = selectedPath.value.trim()
   if (!target || !props.gateway || confirming.value) return
@@ -232,6 +316,19 @@ async function confirmSelection() {
 
 function normalizePath(path: string) {
   return String(path || "").replace(/[\\/]+$/, "") || path
+}
+
+function isSelectedPath(path: string) {
+  return normalizePath(path) === normalizePath(selectedPath.value)
+}
+
+function isValidFolderName(name: string) {
+  return Boolean(name) && name !== "." && name !== ".." && !/[\\/]/.test(name)
+}
+
+function readInputValue(event: unknown) {
+  const raw = event && typeof event === "object" ? (event as Record<string, any>) : null
+  return String(raw?.detail?.value ?? raw?.target?.value ?? raw?.currentTarget?.value ?? "")
 }
 
 function toErrorMessage(error: unknown, fallback: string) {
@@ -284,6 +381,7 @@ function toErrorMessage(error: unknown, fallback: string) {
 
 .remote-dir__close,
 .remote-dir__tool,
+.remote-dir__select,
 .remote-dir__folder,
 .remote-dir__row-action {
   flex-shrink: 0;
@@ -304,6 +402,15 @@ function toErrorMessage(error: unknown, fallback: string) {
   gap: 12rpx;
 }
 
+.remote-dir__create {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  padding: 12rpx;
+  border-radius: 22rpx;
+  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
+}
+
 .remote-dir__input {
   flex: 1;
   min-width: 0;
@@ -313,6 +420,39 @@ function toErrorMessage(error: unknown, fallback: string) {
   background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
   color: var(--up-main-color, #303133);
   font-size: 24rpx;
+}
+
+.remote-dir__create-input {
+  flex: 1;
+  min-width: 0;
+  height: 58rpx;
+  padding: 0 18rpx;
+  border-radius: 18rpx;
+  background: var(--up-card-bg-color, #ffffff);
+  color: var(--up-main-color, #303133);
+  font-size: 24rpx;
+}
+
+.remote-dir__create-submit {
+  flex-shrink: 0;
+  min-width: 92rpx;
+  height: 58rpx;
+  padding: 0 18rpx;
+  border-radius: 999rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 12%, var(--up-card-bg-color, #ffffff) 88%);
+}
+
+.remote-dir__create-submit--disabled {
+  opacity: 0.6;
+}
+
+.remote-dir__create-submit-text {
+  font-size: 24rpx;
+  font-weight: 700;
+  color: var(--up-primary, #2979ff);
 }
 
 .remote-dir__placeholder {
@@ -370,6 +510,26 @@ function toErrorMessage(error: unknown, fallback: string) {
 
 .remote-dir__row--selected {
   background: color-mix(in srgb, var(--up-primary, #2979ff) 8%, transparent);
+}
+
+.remote-dir__select {
+  width: 44rpx;
+  height: 44rpx;
+  border-radius: 999rpx;
+  border: 2rpx solid var(--up-border-color, #dadbde);
+  background: var(--up-card-bg-color, #ffffff);
+}
+
+.remote-dir__select--checked {
+  border-color: var(--up-primary, #2979ff);
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 12%, var(--up-card-bg-color, #ffffff) 88%);
+}
+
+.remote-dir__select-dot {
+  width: 18rpx;
+  height: 18rpx;
+  border-radius: 999rpx;
+  background: var(--up-primary, #2979ff);
 }
 
 .remote-dir__folder {
