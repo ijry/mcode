@@ -9,6 +9,7 @@ import {
   withSelectedDetailMode,
 } from "@/pages/conversation-detail/detailComposerPresentation"
 import {
+  createReadyDetailAgentConfigState,
   createEmptyDetailAgentConfigState,
   type DetailAgentConfigState,
 } from "@/services/conversation/composerTools"
@@ -148,6 +149,33 @@ describe("detailComposerPresentation", () => {
         { configId: "model", valueId: "gpt-5-mini" },
         { configId: "reasoning", valueId: "medium" },
       ],
+    })
+  })
+
+  it("P53 does not replay mode config mirrors when session modes are available", () => {
+    const state = createReadyDetailAgentConfigState({
+      modes: {
+        current_mode_id: "default",
+        available_modes: [
+          { id: "default", name: "默认授权" },
+          { id: "plan", name: "计划模式" },
+        ],
+      },
+      config_options: [
+        option("mode", "default", [
+          { value: "default", name: "默认授权" },
+          { value: "plan", name: "计划模式" },
+        ]),
+        option("model", "gpt-5", [
+          { value: "gpt-5", name: "GPT-5" },
+        ]),
+      ],
+    })
+
+    expect(state.configOptions.map((item) => item.id)).toEqual(["model"])
+    expect(pendingComposerConfigActions(state)).toEqual({
+      modeId: "default",
+      configValues: [{ configId: "model", valueId: "gpt-5" }],
     })
   })
 })

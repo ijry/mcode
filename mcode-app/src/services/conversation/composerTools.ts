@@ -275,6 +275,14 @@ function projectSelectedModeId(
   return modes.current_mode_id ?? null
 }
 
+export function removeSessionModeConfigMirror(
+  configOptions: SessionConfigOptionInfo[],
+  modes: SessionModeStateInfo | null
+) {
+  if (!modes?.available_modes?.length) return configOptions
+  return configOptions.filter((option) => normalizeLabel(option.id) !== "mode")
+}
+
 function projectSelectedValues(
   configOptions: SessionConfigOptionInfo[],
   previousSelectedValues?: Record<string, string>
@@ -297,8 +305,9 @@ export function createReadyDetailAgentConfigState(
   snapshot: AgentOptionsSnapshot,
   previousState?: Pick<DetailAgentConfigState, "selectedModeId" | "selectedValues">
 ): DetailAgentConfigState {
-  const configOptions = Array.isArray(snapshot?.config_options) ? snapshot.config_options : []
   const modes = snapshot?.modes ?? null
+  const rawConfigOptions = Array.isArray(snapshot?.config_options) ? snapshot.config_options : []
+  const configOptions = removeSessionModeConfigMirror(rawConfigOptions, modes)
   const persistedSelection = previousState ?? undefined
   return {
     status: "ready",
