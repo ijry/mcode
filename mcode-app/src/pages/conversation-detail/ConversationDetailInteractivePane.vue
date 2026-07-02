@@ -419,6 +419,15 @@
     </template>
   </ConversationDetailBody>
 
+    <view
+      v-if="showScrollToBottomFab"
+      class="scroll-bottom-fab"
+      @click="handleScrollToBottomFab"
+    >
+      <up-icon name="arrow-down" size="18" color="#ffffff"></up-icon>
+      <view v-if="hasUnreadBelow" class="scroll-bottom-fab__dot"></view>
+    </view>
+
     <up-popup v-model:show="showPlanDrawer" mode="bottom" :round="20">
       <view class="plan-drawer" :style="upThemeCardStyle">
         <view class="plan-drawer__hd">
@@ -754,10 +763,14 @@ const questionSubmitReady = computed(() => {
 })
 const historyStatusText = computed(() => {
   if (loadingOlder.value) return "历史加载中..."
-  if (messages.value.length > 0 && !hasMoreHistory.value) return ""
+  if (messages.value.length > 0 && hasMoreHistory.value) return "上滑加载更早消息"
+  if (messages.value.length > 0 && !hasMoreHistory.value) return "没有更多历史了"
   return ""
 })
-const bottomAnchorIdValue = computed(() => bottomAnchorId())
+const showScrollToBottomFab = computed(() =>
+  Boolean(props.active && renderMessageItems.value.length > 0 && !shouldAutoFollowBottom.value)
+)
+const bottomAnchorIdValue = computed(() => bottomAnchorId(props.conversationId))
 
 watch(
   () => pendingQuestionCard.value?.question_id || "",
@@ -817,7 +830,7 @@ function createLocalId(prefix: string): string {
 }
 
 function messageAnchorId(messageId: string) {
-  return buildMessageAnchorId(messageId)
+  return buildMessageAnchorId(messageId, props.conversationId)
 }
 
 function setProgrammaticAnchor(messageId: string) {
@@ -834,7 +847,16 @@ function scrollToBottom(force = false) {
   anchorMessageId.value = ""
   messageScrollWithAnimation.value = !force
   messageScrollTop.value = Number.MAX_SAFE_INTEGER
-  messageScrollIntoView.value = bottomAnchorId()
+  const targetId = bottomAnchorIdValue.value
+  if (messageScrollIntoView.value === targetId) {
+    messageScrollIntoView.value = ""
+    nextTick(() => {
+      messageScrollTop.value = Number.MAX_SAFE_INTEGER
+      messageScrollIntoView.value = targetId
+    })
+    return
+  }
+  messageScrollIntoView.value = targetId
 }
 
 function scheduleViewportSync(forceBottom = false) {
@@ -884,6 +906,13 @@ function handleMessageListScroll(event: any) {
 
 function handleMessageListScrollUpper() {
   void loadOlderTurns()
+}
+
+function handleScrollToBottomFab() {
+  shouldAutoFollowBottom.value = true
+  hasUnreadBelow.value = false
+  anchorMessageId.value = ""
+  scrollToBottom(true)
 }
 
 async function ensureHistoryCursorFromLoadedMessages(force = false) {

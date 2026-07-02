@@ -49,8 +49,15 @@ export function restoreHistoryCursorFromCache(input: {
   return { sortKey, id: firstMessageId }
 }
 
-export function messageAnchorId(messageId: string) {
-  return `msg-${String(messageId).replace(/[^a-zA-Z0-9_-]/g, "_")}`
+function normalizeAnchorPart(value?: string | number | null) {
+  const normalized = String(value ?? "").replace(/[^a-zA-Z0-9_-]/g, "_")
+  return normalized.replace(/^_+|_+$/g, "")
+}
+
+export function messageAnchorId(messageId: string, scope?: string | number | null) {
+  const normalizedMessageId = normalizeAnchorPart(messageId)
+  const normalizedScope = normalizeAnchorPart(scope)
+  return normalizedScope ? `msg-${normalizedScope}-${normalizedMessageId}` : `msg-${normalizedMessageId}`
 }
 
 export function resolveRenderAnchorId(input: {
@@ -63,8 +70,9 @@ export function resolveRenderAnchorId(input: {
   return matched?.anchorId || normalized
 }
 
-export function bottomAnchorId() {
-  return "message-list-bottom"
+export function bottomAnchorId(scope?: string | number | null) {
+  const normalizedScope = normalizeAnchorPart(scope)
+  return normalizedScope ? `message-list-bottom-${normalizedScope}` : "message-list-bottom"
 }
 
 export function resolveScrollRestoreAction(input: {

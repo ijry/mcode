@@ -66,7 +66,9 @@ describe("detailScrollState", () => {
 
   it("normalizes message anchors and render anchors", () => {
     expect(messageAnchorId("turn:1/a b")).toBe("msg-turn_1_a_b")
+    expect(messageAnchorId("turn:1/a b", 42)).toBe("msg-42-turn_1_a_b")
     expect(bottomAnchorId()).toBe("message-list-bottom")
+    expect(bottomAnchorId("conv:42")).toBe("message-list-bottom-conv_42")
     expect(resolveRenderAnchorId({
       messageId: "source-b",
       items: [{ anchorId: "merged", sourceIds: ["source-a", "source-b"] }],

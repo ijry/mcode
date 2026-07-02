@@ -806,15 +806,6 @@
       </swiper>
 
       <view
-        v-if="showScrollToBottomFab"
-        class="scroll-bottom-fab"
-        @click="handleScrollToBottomFab"
-      >
-        <up-icon name="arrow-down" size="18" color="#ffffff"></up-icon>
-        <view v-if="hasUnreadBelow" class="scroll-bottom-fab__dot"></view>
-      </view>
-
-      <view
         v-if="showConnectingOperationBlocker"
         class="connecting-operation-blocker"
         :style="connectingOperationBlockerStyle"
