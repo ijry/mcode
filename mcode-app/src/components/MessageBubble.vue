@@ -47,7 +47,7 @@
             <text class="thinking-hd__text">{{ part.thinking }}</text>
           </view>
 
-          <!-- 工具调用 -->
+          <!-- P48 工具调用：分组调用使用紧凑中性 summary pill -->
           <view v-else-if="part.type === 'tool_call_group'" class="part-tool">
             <ToolCallGroupBlock :toolCalls="part.tool_calls || []" />
           </view>
@@ -298,7 +298,6 @@ function normalizeAgentType(raw?: string) {
 
   &--assistant {
     background-color: var(--up-card-bg-color, #ffffff);
-    border: 1rpx solid var(--up-border-color, #dadbde);
     border-top-left-radius: 6rpx;
     box-shadow: none;
   }

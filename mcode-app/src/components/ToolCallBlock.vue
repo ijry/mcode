@@ -1,7 +1,7 @@
 <template>
   <AskQuestionResultBlock v-if="isAskQuestion" :toolCall="toolCall" />
 
-  <view v-else class="tool-block">
+  <view v-else :class="['tool-block', `tool-block--${toolCall.status || 'pending'}`]">
     <!-- 头部 -->
     <view class="tool-hd" @click="toggleExpanded">
       <view class="tool-hd__left">
@@ -42,7 +42,7 @@
       <!-- 输出结果 -->
       <view v-if="toolCall.output" class="tool-section">
         <view class="section-label">
-          <up-icon name="arrow-left-double" size="12" color="#19be6b"></up-icon>
+          <up-icon name="arrow-left-double" size="12" :color="upThemeVar('--up-success', '#19be6b')"></up-icon>
           <text class="section-label__text--success">输出结果</text>
         </view>
         <view class="code-block code-block--success">
@@ -53,7 +53,7 @@
       <!-- 错误 -->
       <view v-if="toolCall.error" class="tool-section">
         <view class="section-label">
-          <up-icon name="close-circle" size="12" color="#fa3534"></up-icon>
+          <up-icon name="close-circle" size="12" :color="upThemeVar('--up-error', '#fa3534')"></up-icon>
           <text class="section-label__text--error">错误信息</text>
         </view>
         <view class="code-block code-block--error">
@@ -80,11 +80,11 @@ const isAskQuestion = computed(() => isAskQuestionToolCall(props.toolCall))
 
 const iconColor = computed(() => {
   const map: Record<string, string> = {
-    running: "#2979ff",
-    completed: "#19be6b",
-    error: "#fa3534",
+    running: "var(--up-primary, #2979ff)",
+    completed: "var(--up-success, #19be6b)",
+    error: "var(--up-error, #fa3534)",
   }
-  return map[props.toolCall.status || ""] || "#909193"
+  return map[props.toolCall.status || ""] || "var(--up-tips-color, #909193)"
 })
 
 const statusText = computed(() => {
@@ -124,6 +124,18 @@ function formatJson(obj: any): string {
   overflow: hidden;
   background-color: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
   border: 1rpx solid var(--up-border-color, #dadbde);
+
+  &--running {
+    border-color: color-mix(in srgb, var(--up-primary, #2979ff) 26%, var(--up-border-color, #dadbde) 74%);
+  }
+
+  &--completed {
+    border-color: color-mix(in srgb, var(--up-success, #19be6b) 26%, var(--up-border-color, #dadbde) 74%);
+  }
+
+  &--error {
+    border-color: color-mix(in srgb, var(--up-error, #fa3534) 30%, var(--up-border-color, #dadbde) 70%);
+  }
 }
 
 /* ===== 头部 ===== */
@@ -163,9 +175,9 @@ function formatJson(obj: any): string {
   border-radius: 50%;
   flex-shrink: 0;
 
-  &--running  { background-color: #2979ff; animation: pulse 1s infinite; }
-  &--completed { background-color: #19be6b; }
-  &--error    { background-color: #fa3534; }
+  &--running  { background-color: var(--up-primary, #2979ff); animation: pulse 1s infinite; }
+  &--completed { background-color: var(--up-success, #19be6b); }
+  &--error    { background-color: var(--up-error, #fa3534); }
   &--pending  { background-color: var(--up-border-color, #dadbde); }
 }
 
@@ -206,8 +218,8 @@ function formatJson(obj: any): string {
   color: var(--up-tips-color, #909193);
   font-weight: 500;
 
-  &__text--success { color: #19be6b; }
-  &__text--error   { color: #fa3534; }
+  &__text--success { color: var(--up-success, #19be6b); }
+  &__text--error   { color: var(--up-error, #fa3534); }
 }
 
 /* ===== 代码块 ===== */

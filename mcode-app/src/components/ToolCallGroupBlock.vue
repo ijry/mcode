@@ -2,15 +2,14 @@
   <view class="tool-group">
     <view class="tool-group__summary" @click="toggleExpanded">
       <view class="tool-group__left">
-        <view :class="['tool-group__dot', `tool-group__dot--${groupStatus}`]"></view>
+        <up-icon
+          :name="expanded ? 'arrow-down' : 'arrow-right'"
+          size="12"
+          :color="upThemeVar('--up-light-color', '#c0c4cc')"
+        ></up-icon>
         <text class="tool-group__label">{{ summaryLabel }}</text>
-        <text v-if="failureCount > 0" class="tool-group__failure">· {{ failureCount }} 个失败</text>
+        <text v-if="failureCount > 0" class="tool-group__failure">{{ failureCount }} 个失败</text>
       </view>
-      <up-icon
-        :name="expanded ? 'arrow-up' : 'arrow-down'"
-        size="12"
-        :color="upThemeVar('--up-light-color', '#c0c4cc')"
-      ></up-icon>
     </view>
 
     <view v-if="expanded" class="tool-group__body">
@@ -50,13 +49,6 @@ const classifiedCounts = computed(() => {
 const failureCount = computed(() =>
   props.toolCalls.filter((toolCall) => toolCall.status === "error").length
 )
-
-const groupStatus = computed(() => {
-  if (props.toolCalls.some((toolCall) => toolCall.status === "running")) return "running"
-  if (failureCount.value > 0) return "error"
-  if (props.toolCalls.every((toolCall) => toolCall.status === "completed")) return "completed"
-  return "pending"
-})
 
 const summaryLabel = computed(() => {
   const { command, fileChange, network, other } = classifiedCounts.value
@@ -117,6 +109,7 @@ function classifyToolCall(toolCall: ToolCall): "command" | "file_change" | "netw
 .tool-group {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 10rpx;
 }
 
@@ -124,10 +117,13 @@ function classifyToolCall(toolCall: ToolCall): "command" | "file_change" | "netw
   min-height: 48rpx;
   padding: 10rpx 18rpx;
   border-radius: 999rpx;
-  background: color-mix(in srgb, var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6)) 88%, var(--up-card-bg-color, #ffffff) 12%);
+  /* P48: match codeg-main bg-muted/60 while staying on uview --up-* tokens. */
+  background: color-mix(in srgb, var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6)) 60%, var(--up-card-bg-color, #ffffff) 40%);
   display: flex;
   align-items: center;
   justify-content: space-between;
+  align-self: flex-start;
+  max-width: 100%;
   gap: 12rpx;
   box-sizing: border-box;
 }
@@ -140,18 +136,6 @@ function classifyToolCall(toolCall: ToolCall): "command" | "file_change" | "netw
   flex-wrap: wrap;
 }
 
-.tool-group__dot {
-  width: 10rpx;
-  height: 10rpx;
-  border-radius: 50%;
-  flex-shrink: 0;
-
-  &--running { background: #2979ff; animation: tool-group-pulse 1s infinite; }
-  &--completed { background: #8f9bb3; }
-  &--error { background: #fa3534; }
-  &--pending { background: var(--up-border-color, #dadbde); }
-}
-
 .tool-group__label {
   font-size: 22rpx;
   line-height: 1.2;
@@ -159,19 +143,19 @@ function classifyToolCall(toolCall: ToolCall): "command" | "file_change" | "netw
 }
 
 .tool-group__failure {
+  padding: 2rpx 8rpx;
+  border-radius: 999rpx;
+  background: color-mix(in srgb, var(--up-error, #fa3534) 12%, var(--up-card-bg-color, #ffffff) 88%);
   font-size: 22rpx;
   line-height: 1.2;
-  color: #fa3534;
+  color: var(--up-error, #fa3534);
 }
 
 .tool-group__body {
+  width: 100%;
   display: flex;
   flex-direction: column;
   gap: 10rpx;
 }
 
-@keyframes tool-group-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.45; }
-}
 </style>
