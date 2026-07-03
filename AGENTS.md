@@ -1,5 +1,11 @@
 # Agent Instructions
 
+## 默认输出语言
+
+- Agent 的普通回复默认使用中文，除非用户明确要求使用其他语言。
+- Agent 在向用户展示思考过程、推理摘要、方案说明、进度更新、测试结论和最终交付说明时默认使用中文。
+- 代码、命令、日志、协议字段、接口路径、错误原文、第三方库/API 名称保持原文，不强行翻译。
+
 ## mcode-app Theme Variables
 
 - Prefer `uview-plus` runtime theme variables with the `--up-*` prefix for dark-mode styling.
