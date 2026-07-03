@@ -93,6 +93,13 @@
       }
     },
     {
+      "path": "pages/connection-detail/index",
+      "style": {
+        "navigationBarTitleText": "连接详情",
+        "enablePullDownRefresh": false
+      }
+    },
+    {
       "path": "pages/sessions/index",
       "style": {
         "navigationBarTitleText": "项目会话",
