@@ -186,53 +186,6 @@ const emit = defineEmits<{
   regenerate: []
 }>()
 
-// 思考折叠状态
-const manuallyCollapsed = ref<Set<number>>(new Set())
-const manuallyExpanded = ref<Set<number>>(new Set())
-
-// 当消息正在流式输出时，思考部分展开；完成后自动折叠
-const isStreaming = computed(() => props.message.status === "streaming")
-
-function isThinkingCollapsed(index: number): boolean {
-  // 流式中：如果用户没手动折叠，则展开
-  if (isStreaming.value) {
-    return manuallyCollapsed.value.has(index)
-  }
-  // 非流式（含历史消息）：默认折叠，除非用户手动展开
-  return !manuallyExpanded.value.has(index)
-}
-
-function toggleThinkingCollapse(index: number) {
-  if (isStreaming.value) {
-    // 流式中：切换手动折叠
-    const next = new Set(manuallyCollapsed.value)
-    if (next.has(index)) {
-      next.delete(index)
-    } else {
-      next.add(index)
-    }
-    manuallyCollapsed.value = next
-  } else {
-    // 完成后：切换手动展开
-    const next = new Set(manuallyExpanded.value)
-    if (next.has(index)) {
-      next.delete(index)
-    } else {
-      next.add(index)
-    }
-    manuallyExpanded.value = next
-  }
-}
-
-// 当消息从 streaming 变为 completed 时，清除手动折叠状态并折叠所有 thinking
-watch(isStreaming, (streaming, prevStreaming) => {
-  if (prevStreaming && !streaming) {
-    // 流式结束 → 自动折叠
-    manuallyCollapsed.value = new Set()
-    manuallyExpanded.value = new Set()
-  }
-})
-
 type DisplayPart = ContentPart | {
   type: "tool_call_group"
   tool_calls?: ToolCall[]
@@ -263,6 +216,58 @@ const displayParts = computed<DisplayPart[]>(() => {
 
   flushPendingToolCalls()
   return grouped
+})
+
+// 思考折叠状态
+const manuallyCollapsed = ref<Set<number>>(new Set())
+const manuallyExpanded = ref<Set<number>>(new Set())
+
+const isStreaming = computed(() => props.message.status === "streaming")
+
+// 判断某个 thinking part 是否已经"思考结束"：后面还有其他内容 part
+function isThinkingDone(index: number): boolean {
+  const parts = displayParts.value
+  return index < parts.length - 1
+}
+
+function isThinkingCollapsed(index: number): boolean {
+  if (manuallyCollapsed.value.has(index)) return true
+  if (manuallyExpanded.value.has(index)) return false
+  // 流式中：最后一个 part 还在思考 → 展开；否则（已有后续内容）→ 折叠
+  if (isStreaming.value) {
+    return isThinkingDone(index)
+  }
+  // 非流式（含历史消息）：默认折叠
+  return true
+}
+
+function toggleThinkingCollapse(index: number) {
+  const collapsed = isThinkingCollapsed(index)
+  if (collapsed) {
+    // 当前折叠 → 展开
+    const nextCollapsed = new Set(manuallyCollapsed.value)
+    nextCollapsed.delete(index)
+    manuallyCollapsed.value = nextCollapsed
+    const nextExpanded = new Set(manuallyExpanded.value)
+    nextExpanded.add(index)
+    manuallyExpanded.value = nextExpanded
+  } else {
+    // 当前展开 → 折叠
+    const nextCollapsed = new Set(manuallyCollapsed.value)
+    nextCollapsed.add(index)
+    manuallyCollapsed.value = nextCollapsed
+    const nextExpanded = new Set(manuallyExpanded.value)
+    nextExpanded.delete(index)
+    manuallyExpanded.value = nextExpanded
+  }
+}
+
+// 流式结束 → 重置手动状态，全部折叠
+watch(isStreaming, (streaming, prevStreaming) => {
+  if (prevStreaming && !streaming) {
+    manuallyCollapsed.value = new Set()
+    manuallyExpanded.value = new Set()
+  }
 })
 
 const agentLogoPath = computed(() => {
