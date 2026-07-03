@@ -291,12 +291,6 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       snapshotSeq < currentSeq
 
     if (shouldIgnoreOlderSnapshot) {
-      session.pendingPermission = normalizePendingPermission(snapshot?.pending_permission)
-      session.pendingQuestion = normalizePendingQuestion(snapshot?.pending_question)
-      session.status = deriveRuntimeStatus(snapshot, session.liveMessage)
-      session.inputErrorMessage = deriveRuntimeError(snapshot)
-      session.apiRetry = null
-      maybeBackfillExternalUserTurn(session, "snapshot")
       return
     }
 

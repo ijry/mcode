@@ -525,6 +525,34 @@ describe('conversationRuntime ACP error handling', () => {
     expect(session.lastAppliedSeq).toBe(13)
   })
 
+  it('does not let an older snapshot clear a newer pending permission', () => {
+    const { store, session } = prepareSession()
+
+    store.handleEvent({
+      type: 'permission_request',
+      connectionId: 'conn-1',
+      seq: 22,
+      data: {
+        id: 'perm-latest',
+        description: 'Run command?',
+        options: [{ id: 'approve', label: 'Approve' }],
+      },
+    } as any)
+
+    expect(session.status).toBe('waiting_permission')
+    expect(session.pendingPermission?.id).toBe('perm-latest')
+
+    store.hydrateLiveSnapshot(1, {
+      event_seq: 21,
+      status: 'connected',
+      pending_permission: null,
+    })
+
+    expect(session.status).toBe('waiting_permission')
+    expect(session.pendingPermission?.id).toBe('perm-latest')
+    expect(session.lastAppliedSeq).toBe(22)
+  })
+
   it('ignores stale snapshot live replay when completed assistant history is newer', () => {
     const { store, session } = prepareSession()
     session.localTurns = [
