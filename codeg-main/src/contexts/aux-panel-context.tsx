@@ -32,6 +32,8 @@ interface AuxPanelContextValue {
   maxWidth: number
   activeTab: AuxPanelTab
   toggle: () => void
+  /** Imperatively set the panel open/closed (used by the chat-mode auto-hide). */
+  setOpen: (open: boolean) => void
   setWidth: (w: number) => void
   setActiveTab: (tab: AuxPanelTab) => void
   openTab: (tab: AuxPanelTab) => void
@@ -71,6 +73,8 @@ export function AuxPanelProvider({ children }: AuxPanelProviderProps) {
 
   const toggle = useCallback(() => setIsOpen((prev) => !prev), [])
 
+  const setOpen = useCallback((open: boolean) => setIsOpen(open), [])
+
   const setWidth = useCallback((w: number) => {
     setWidthState(clampWidth(w))
   }, [])
@@ -107,7 +111,7 @@ export function AuxPanelProvider({ children }: AuxPanelProviderProps) {
   }, [isOpen, restored, storageKey, width])
 
   // Reset pending reveal path when the active folder changes; file tree
-  // state is content-driven by `useWorkspaceContext` and will refetch
+  // state is content-driven by the workspace contexts and will refetch
   // naturally via its folder-path dependency.
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -123,6 +127,7 @@ export function AuxPanelProvider({ children }: AuxPanelProviderProps) {
       maxWidth: MAX_WIDTH,
       activeTab,
       toggle,
+      setOpen,
       setWidth,
       setActiveTab,
       openTab,
@@ -136,6 +141,7 @@ export function AuxPanelProvider({ children }: AuxPanelProviderProps) {
       width,
       activeTab,
       toggle,
+      setOpen,
       setWidth,
       openTab,
       pendingRevealPath,

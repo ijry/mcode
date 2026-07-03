@@ -9,9 +9,12 @@ use crate::db::service::conversation_service;
 use crate::models::{AgentType, ConversationSummary, ImportResult};
 use crate::parsers::claude::ClaudeParser;
 use crate::parsers::cline::ClineParser;
+use crate::parsers::codebuddy::CodeBuddyParser;
 use crate::parsers::codex::CodexParser;
 use crate::parsers::gemini::GeminiParser;
 use crate::parsers::hermes::HermesParser;
+use crate::parsers::kimi_code::KimiCodeParser;
+use crate::parsers::pi::PiParser;
 use crate::parsers::openclaw::OpenClawParser;
 use crate::parsers::opencode::OpenCodeParser;
 use crate::parsers::{path_eq_for_matching, AgentParser};
@@ -37,6 +40,9 @@ pub async fn import_local_conversations(
             (AgentType::OpenClaw, Box::new(OpenClawParser::new())),
             (AgentType::Cline, Box::new(ClineParser::new())),
             (AgentType::Hermes, Box::new(HermesParser::new())),
+            (AgentType::CodeBuddy, Box::new(CodeBuddyParser::new())),
+            (AgentType::KimiCode, Box::new(KimiCodeParser::new())),
+            (AgentType::Pi, Box::new(PiParser::new())),
         ];
 
         let mut matched = Vec::new();
@@ -54,7 +60,7 @@ pub async fn import_local_conversations(
                     }
                 }
                 Err(e) => {
-                    eprintln!("Error listing {} conversations: {}", at, e);
+                    tracing::error!("Error listing {} conversations: {}", at, e);
                 }
             }
         }
@@ -151,6 +157,9 @@ async fn import_one(
         title_locked: Set(false),
         agent_type: Set(at_str),
         status: Set(conversation::ConversationStatus::Completed),
+        // Imports scan regular folders' session files; chat scratch dirs and
+        // loop runs are never import targets, so every imported row is regular.
+        kind: Set(conversation::ConversationKind::Regular),
         model: Set(summary.model.clone()),
         git_branch: Set(summary.git_branch.clone()),
         external_id: Set(Some(summary.id.clone())),
@@ -161,6 +170,7 @@ async fn import_one(
         created_at: Set(created_at),
         updated_at: Set(updated_at),
         deleted_at: Set(None),
+        pinned_at: Set(None),
     };
     conv.insert(conn).await?;
     Ok(ImportOutcome::Imported)
@@ -361,6 +371,7 @@ mod tests {
             title_locked: Set(false),
             agent_type: Set(at_str),
             status: Set(conversation::ConversationStatus::Completed),
+            kind: Set(conversation::ConversationKind::Delegate),
             model: Set(None),
             git_branch: Set(None),
             external_id: Set(Some("child-ext".to_string())),
@@ -371,6 +382,7 @@ mod tests {
             created_at: Set(now),
             updated_at: Set(now),
             deleted_at: Set(None),
+            pinned_at: Set(None),
         }
         .insert(&db.conn)
         .await

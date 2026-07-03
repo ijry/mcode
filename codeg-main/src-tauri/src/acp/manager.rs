@@ -24,7 +24,7 @@ use crate::acp::types::{
     AcpEvent, AgentOptionsSnapshot, ConfigStaleKind, ConnectionInfo, ConnectionStatus,
     ForkResultInfo, PromptInputBlock,
 };
-use crate::db::entities::conversation::{self, ConversationStatus};
+use crate::db::entities::conversation::{self, ConversationKind, ConversationStatus};
 use crate::db::service::conversation_service;
 use crate::db::AppDatabase;
 use crate::models::agent::AgentType;
@@ -73,6 +73,34 @@ fn user_prompt_text_preview(blocks: &[PromptInputBlock]) -> Option<String> {
             trimmed,
             USER_PROMPT_PREVIEW_MAX_CHARS,
         ))
+    }
+}
+
+/// Seed title for a freshly-created delegation child row, derived from the
+/// delegating prompt's text blocks (the sub-agent's task). Uses the parser's own
+/// `title_from_user_text` (folds reference links, caps at 100 chars) so the value
+/// matches what `refresh_auto_title` would later compute from that same first
+/// turn — the conditional UPDATE then sees no change and doesn't churn. Returns
+/// `None` for a textless prompt, leaving the title unset to be backfilled on
+/// first detail load as before. Kept unlocked by the caller so an AI-generated
+/// title can still replace it later.
+fn delegation_child_title_seed(blocks: &[PromptInputBlock]) -> Option<String> {
+    let joined = blocks
+        .iter()
+        .filter_map(|b| match b {
+            PromptInputBlock::Text { text } => {
+                let t = text.trim();
+                (!t.is_empty()).then_some(t)
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let trimmed = joined.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(crate::parsers::title_from_user_text(trimmed))
     }
 }
 
@@ -386,7 +414,7 @@ impl ConnectionManager {
             .find_connection_for_reuse(agent_type, working_dir_path.as_ref(), session_id.as_deref())
             .await
         {
-            eprintln!(
+            tracing::info!(
                 "[ACP] reusing connection id={} for session_id={}",
                 existing,
                 session_id.as_deref().unwrap_or("")
@@ -395,7 +423,7 @@ impl ConnectionManager {
         }
 
         let connection_id = uuid::Uuid::new_v4().to_string();
-        eprintln!(
+        tracing::info!(
             "[ACP] spawning connection id={} owner_window={} agent={:?}",
             connection_id, owner_window_label, agent_type
         );
@@ -427,7 +455,7 @@ impl ConnectionManager {
         if dedup_lock.is_some() {
             let timeout = self.spawn_handshake_timeout;
             let (outcome, elapsed) = wait_for_session_started(session_started_rx, timeout).await;
-            eprintln!(
+            tracing::info!(
                 "[ACP] dedup_wait connection_id={} session_id={} outcome={} \
                  elapsed_ms={} timeout_ms={}",
                 connection_id,
@@ -508,7 +536,7 @@ impl ConnectionManager {
         };
         let mut disconnected = 0;
         for id in to_disconnect {
-            eprintln!("[ACP] idle sweep disconnecting connection={}", id);
+            tracing::info!("[ACP] idle sweep disconnecting connection={}", id);
             if self.disconnect(&id).await.is_ok() {
                 disconnected += 1;
             }
@@ -860,11 +888,21 @@ impl ConnectionManager {
                         delegation.as_ref().map(|d| d.parent_conversation_id);
                     let parent_tool_use_id_for_event =
                         delegation.as_ref().map(|d| d.parent_tool_use_id.clone());
+                    // Seed a delegation child's title from the task prompt so the
+                    // sidebar shows a meaningful label immediately. `list_children`
+                    // returns the raw DB title, so a child born with NULL reads
+                    // "Untitled" until the first detail load backfills it. Roots
+                    // (no delegation) keep `None` and follow the existing backfill.
+                    let seed_title = if delegation.is_some() {
+                        delegation_child_title_seed(&blocks)
+                    } else {
+                        None
+                    };
                     let row = conversation_service::create_with_delegation(
                         &db.conn,
                         folder_id,
                         agent_type,
-                        None,
+                        seed_title,
                         None,
                         delegation.clone(),
                     )
@@ -881,15 +919,28 @@ impl ConnectionManager {
                         },
                     )
                     .await;
-                    // Sidebar sync: a ROOT conversation born here (agent path —
-                    // a prompt sent without a pre-created row, not the create
-                    // button) must appear in every client's list immediately,
-                    // via the global `conversation://changed` channel. Delegation
-                    // children (parent set) are excluded — they aren't sidebar
-                    // rows.
-                    if delegation.is_none() {
+                    // Sidebar sync: a conversation born here (agent path — a
+                    // prompt sent without a pre-created row, not the create
+                    // button) must reach every client immediately via the global
+                    // `conversation://changed` channel. Roots land in the sidebar
+                    // list; delegation children (parent set) are routed into their
+                    // parent's expanded sub-session subtree and bump its chevron.
+                    // Both carry `external_id: null` here (no session yet) — the
+                    // external_id write below re-broadcasts the full summary.
+                    crate::commands::conversations::emit_conversation_upsert(
+                        &emitter, &db.conn, row.id,
+                    )
+                    .await;
+                    // A new delegation child changes its parent's child_count
+                    // (0 → >0 makes the parent's expand chevron appear). Re-emit
+                    // the parent so every client converges its count from the
+                    // authoritative DB aggregate rather than a drift-prone
+                    // per-client increment. The parent may itself be a root or a
+                    // nested child — the upsert routes correctly either way by its
+                    // own parent_id.
+                    if let Some(parent_id) = parent_conversation_id_for_event {
                         crate::commands::conversations::emit_conversation_upsert(
-                            &emitter, &db.conn, row.id,
+                            &emitter, &db.conn, parent_id,
                         )
                         .await;
                     }
@@ -926,7 +977,7 @@ impl ConnectionManager {
                 crate::commands::conversations::emit_conversation_upsert(&emitter, &db.conn, cid)
                     .await;
             } else if cid_opt.is_some() {
-                eprintln!(
+                tracing::info!(
                     "[manager] send_prompt_linked: conversation linked but \
                      external_id not yet on state (conn={conn_id}); lifecycle \
                      subscriber will catch up when SessionStarted arrives"
@@ -1053,7 +1104,7 @@ impl ConnectionManager {
                         Err(rollback_err) => {
                             // Best-effort: original send error is the load-bearing
                             // signal; rollback failure is logged but not surfaced.
-                            eprintln!(
+                            tracing::error!(
                                 "[ACP][ERROR] failed to mark conversation {cid} cancelled \
                                  after send failure (original={send_err}): {rollback_err}"
                             );
@@ -1148,7 +1199,7 @@ impl ConnectionManager {
                 }
                 Ok(false) => {}
                 Err(e) => {
-                    eprintln!(
+                    tracing::error!(
                         "[ACP][ERROR] failed to mark conversation {cid} cancelled \
                          on user cancel (conn={conn_id}): {e}"
                     );
@@ -1309,7 +1360,7 @@ impl ConnectionManager {
             // Surface failures even when the caller is gone (the detached task's
             // Result would otherwise be dropped silently).
             if let Err(ref e) = outcome {
-                eprintln!("[ACP][ERROR] fork persistence failed (conn={conn_id_for_task}): {e}");
+                tracing::error!("[ACP][ERROR] fork persistence failed (conn={conn_id_for_task}): {e}");
             }
             outcome
         });
@@ -1317,7 +1368,7 @@ impl ConnectionManager {
         match handle.await {
             Ok(result) => result,
             Err(join_err) => {
-                eprintln!(
+                tracing::error!(
                     "[ACP][ERROR] fork persistence task did not complete (conn={conn_id}): \
                      {join_err}"
                 );
@@ -1370,6 +1421,15 @@ impl ConnectionManager {
                     let folder_id = current.folder_id;
                     let agent_type_str = current.agent_type.clone();
                     let git_branch = current.git_branch.clone();
+                    // The sibling keeps the original's sidebar routing (a forked
+                    // chat conversation must stay in the Chat group). `Delegate`
+                    // is unreachable here — children are never forked from the
+                    // UI — but the invariant `delegate ⟺ parent_id set` wins
+                    // over inheritance, so it degrades to `Regular`.
+                    let sibling_kind = match current.kind {
+                        ConversationKind::Delegate => ConversationKind::Regular,
+                        ref kind => kind.clone(),
+                    };
                     let now = chrono::Utc::now();
 
                     // UPDATE current row → S2. Writing external_id explicitly
@@ -1393,6 +1453,7 @@ impl ConnectionManager {
                         title_locked: Set(false),
                         agent_type: Set(agent_type_str),
                         status: Set(ConversationStatus::PendingReview),
+                        kind: Set(sibling_kind),
                         model: Set(None),
                         git_branch: Set(git_branch),
                         external_id: Set(Some(original_session_id)),
@@ -1403,6 +1464,7 @@ impl ConnectionManager {
                         created_at: Set(now),
                         updated_at: Set(now),
                         deleted_at: Set(None),
+                        pinned_at: Set(None),
                     };
                     let inserted = sibling.insert(txn).await?;
                     Ok(inserted.id)
@@ -1418,7 +1480,7 @@ impl ConnectionManager {
             connections.remove(conn_id).map(|conn| conn.cmd_tx)
         };
         if let Some(cmd_tx) = cmd_tx {
-            eprintln!("[ACP] disconnect connection={}", conn_id);
+            tracing::info!("[ACP] disconnect connection={}", conn_id);
             let _ = cmd_tx.send(ConnectionCommand::Disconnect).await;
             Ok(())
         } else {
@@ -1560,20 +1622,28 @@ impl ConnectionManager {
         let grace_period = Duration::from_millis(500);
         let mut selectors_ready_at: Option<std::time::Instant> = None;
         loop {
-            let (config_options, modes, selectors_ready) = {
+            let (config_options, modes, available_commands, selectors_ready) = {
                 let conns = self.connections.lock().await;
                 let conn = conns
                     .get(conn_id)
                     .ok_or_else(|| AcpError::ConnectionNotFound(conn_id.into()))?;
                 let s = conn.state.read().await;
-                (s.config_options.clone(), s.modes.clone(), s.selectors_ready)
+                (
+                    s.config_options.clone(),
+                    s.modes.clone(),
+                    s.available_commands.clone(),
+                    s.selectors_ready,
+                )
             };
             if selectors_ready {
                 let ready_at = *selectors_ready_at.get_or_insert_with(std::time::Instant::now);
                 if ready_at.elapsed() >= grace_period {
+                    // Commands ride along from the same probe session (the grace
+                    // window lets a late `available_commands` land before we read).
                     return Ok(AgentOptionsSnapshot {
                         modes,
                         config_options: config_options.unwrap_or_default(),
+                        available_commands,
                     });
                 }
             }
@@ -1611,7 +1681,7 @@ impl ConnectionManager {
         for cmd_tx in cmd_txs {
             let _ = cmd_tx.send(ConnectionCommand::Disconnect).await;
         }
-        eprintln!(
+        tracing::info!(
             "[ACP] disconnect by owner window owner_window={} count={}",
             owner_window_label, disconnected
         );
@@ -1627,7 +1697,7 @@ impl ConnectionManager {
         for cmd_tx in cmd_txs {
             let _ = cmd_tx.send(ConnectionCommand::Disconnect).await;
         }
-        eprintln!("[ACP] disconnect_all count={}", disconnected);
+        tracing::info!("[ACP] disconnect_all count={}", disconnected);
         disconnected
     }
 
@@ -3241,6 +3311,46 @@ mod tests {
         // truncate_str keeps MAX chars then appends a 3-char "..." marker.
         assert_eq!(preview.chars().count(), USER_PROMPT_PREVIEW_MAX_CHARS + 3);
         assert!(preview.ends_with("..."));
+    }
+
+    #[test]
+    fn delegation_child_title_seed_uses_parser_title_from_first_prompt() {
+        // The delegating prompt is a single text block (the task) — the seed must
+        // equal what the parser's `title_from_user_text` produces from it, so a
+        // later `refresh_auto_title` over the same first turn is a no-op.
+        let task = "Review the auth module for race conditions";
+        let blocks = vec![PromptInputBlock::Text { text: task.into() }];
+        assert_eq!(
+            delegation_child_title_seed(&blocks),
+            Some(crate::parsers::title_from_user_text(task))
+        );
+    }
+
+    #[test]
+    fn delegation_child_title_seed_is_none_for_textless_prompt() {
+        // Empty / whitespace / image-only prompts seed no title (stays NULL,
+        // backfilled on first detail load as before).
+        assert!(delegation_child_title_seed(&[]).is_none());
+        assert!(
+            delegation_child_title_seed(&[PromptInputBlock::Text { text: "  \n ".into() }])
+                .is_none()
+        );
+        let img = vec![PromptInputBlock::Image {
+            data: "x".into(),
+            mime_type: "image/png".into(),
+            uri: None,
+        }];
+        assert!(delegation_child_title_seed(&img).is_none());
+    }
+
+    #[test]
+    fn delegation_child_title_seed_caps_long_task_text() {
+        // Mirrors the parser cap (100 chars) so an over-long task doesn't store a
+        // runaway title; `title_from_user_text` keeps 100 then appends "...".
+        let long = "x".repeat(250);
+        let seed = delegation_child_title_seed(&[PromptInputBlock::Text { text: long }]).unwrap();
+        assert_eq!(seed.chars().count(), 103);
+        assert!(seed.ends_with("..."));
     }
 
     /// A successful UI send (delegation = None, text present) emits

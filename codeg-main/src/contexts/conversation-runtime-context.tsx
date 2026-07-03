@@ -18,6 +18,7 @@ import type {
   AgentExecutionStats,
   DbConversationDetail,
   MessageTurn,
+  PlanEntryInfo,
   SessionStats,
   ToolCallStatus,
   TurnUsage,
@@ -26,6 +27,9 @@ import {
   inferLiveToolName,
   parseGoalUpdateTitle,
 } from "@/lib/tool-call-normalization"
+import { COLLAB_AGENT_TOOL_NAME, mergeCollabOp } from "@/lib/collab-tool"
+import { collapseLiveCollabBlocks } from "@/lib/collab-collapse"
+import { kimiTodoWriteEntries } from "@/lib/plan-parse"
 import { toErrorMessage } from "@/lib/app-error"
 
 export type ConversationSyncState = "idle" | "awaiting_persist"
@@ -424,12 +428,43 @@ function extractRevisedPrompt(content: string | null): string | null {
   return trimmed
 }
 
-function resolveGoalToolInputFromLiveTitle(
+/** First filesystem path from an ACP tool call's `locations` (`[{ path }]`), or null. */
+function firstLocationPath(locations: unknown): string | null {
+  if (!Array.isArray(locations)) return null
+  for (const loc of locations) {
+    if (loc && typeof loc === "object") {
+      const p = (loc as { path?: unknown }).path
+      if (typeof p === "string" && p.length > 0) return p
+    }
+  }
+  return null
+}
+
+function resolveLiveToolInput(
   toolName: string,
   info: ToolCallInfo
 ): string | null {
+  // codex collab tool calls drop the ACP `title` (the op: spawnAgent/wait/
+  // closeAgent/…) downstream — only `meta` is forwarded. Merge it back into the
+  // rawInput so the card can render an op-aware title. Live-only path; falls
+  // through to the raw input when there's no op or it isn't a JSON object.
+  if (toolName === COLLAB_AGENT_TOOL_NAME && info.raw_input) {
+    const merged = mergeCollabOp(info.raw_input, info.title)
+    if (merged) return merged
+  }
+
   if (info.raw_input && info.raw_input.trim().length > 0) {
     return info.raw_input
+  }
+
+  // codex classifies file-reading shell commands (sed/cat/head) as ACP `read`
+  // commandActions: kind="read", the path only in `locations`/`title`, and NO
+  // raw_input (codex-acp createCommandActionEvent). Synthesize a `file_path` from
+  // the location so the read card derives a "Read <path>" title + file view,
+  // matching a normal read instead of falling back to "read: <output>".
+  if (toolName === "read") {
+    const path = firstLocationPath(info.locations)
+    if (path) return JSON.stringify({ file_path: path })
   }
 
   const goal = parseGoalUpdateTitle(info.title)
@@ -448,10 +483,34 @@ function resolveGoalToolInputFromLiveTitle(
   return info.raw_input
 }
 
-function buildStreamingTurnsFromLiveMessage(
+export function buildStreamingTurnsFromLiveMessage(
   conversationId: number,
   liveMessage: LiveMessage
 ): BuiltStreamingTurns {
+  // Consolidate codex collab capsules first (spawn execution + per-wait result,
+  // close folded in) so live matches the history reconstruction. No-op when the
+  // message has no collab tool calls. See collab-collapse.ts.
+  const content = collapseLiveCollabBlocks(liveMessage.content)
+
+  // Kimi Code live TodoList handling. Kimi emits BOTH a `TodoList` tool_call AND
+  // a canonical `plan` update for each write; the reducer collapses all plan
+  // updates into a single latest `plan` block. `hasLivePlan` gates the one-frame
+  // pre-plan fallback in the tool_call case. `latestKimiTodoEntries` is the
+  // canonical plan content: the LAST Kimi write's todos, which are always as
+  // fresh as — and, in the one-event window before that write's own `plan`
+  // update lands, fresher than — the (collapsed) plan block. Rendering the plan
+  // block from these avoids showing the previous write's stale plan during that
+  // window. Null for non-Kimi sessions (e.g. Claude Code), where the synthetic
+  // plan block is the sole source and is used verbatim.
+  const hasLivePlan = content.some((block) => block.type === "plan")
+  let latestKimiTodoEntries: PlanEntryInfo[] | null = null
+  for (const block of content) {
+    if (block.type === "tool_call") {
+      const entries = kimiTodoWriteEntries(block.info.raw_input)
+      if (entries) latestKimiTodoEntries = entries
+    }
+  }
+
   // ── Phase 1: Identify agent → child relationships ──────────────────
   // Uses meta.claudeCode.parentToolUseId when available (precise), with
   // position-based fallback for agents that don't provide it.
@@ -479,7 +538,7 @@ function buildStreamingTurnsFromLiveMessage(
 
   // First pass: register all agent tool_call IDs
   const agentIds = new Set<string>()
-  for (const block of liveMessage.content) {
+  for (const block of content) {
     if (block.type !== "tool_call") continue
     if (getToolName(block.info) === "agent") {
       agentIds.add(block.info.tool_call_id)
@@ -492,7 +551,7 @@ function buildStreamingTurnsFromLiveMessage(
   // once it completes/fails, subsequent tool calls are treated as top-level.
   let positionalAgentId: string | null = null
 
-  for (const block of liveMessage.content) {
+  for (const block of content) {
     if (block.type === "tool_call") {
       const toolName = getToolName(block.info)
 
@@ -502,21 +561,35 @@ function buildStreamingTurnsFromLiveMessage(
         // Only capture children while the agent is still running
         positionalAgentId = isFinal ? null : block.info.tool_call_id
       } else {
-        // Extract parentToolUseId from ACP meta (Claude Code embeds this
-        // under meta.claudeCode.parentToolUseId). Guard each access level
+        // Extract the parent tool-call id from ACP meta. Both Claude Code and
+        // CodeBuddy link a native sub-agent's child tool calls to the parent
+        // Agent tool call this way — just under different keys:
+        //   - Claude Code: nested `meta.claudeCode.parentToolUseId`
+        //   - CodeBuddy:   flat  `meta["codebuddy.ai/parentToolCallId"]`
+        // Reading both makes CodeBuddy sub-agents nest precisely (like Claude
+        // Code) instead of falling back to the positional heuristic, which the
+        // sub-agent's interleaved thinking blocks break. Guard each access level
         // to avoid crashes on unexpected shapes from other agents.
         const meta = block.info.meta
         let parentId: string | undefined
-        if (meta && typeof meta === "object" && "claudeCode" in meta) {
-          const cc = (meta as Record<string, unknown>).claudeCode
-          if (cc && typeof cc === "object" && "parentToolUseId" in cc) {
-            const pid = (cc as Record<string, unknown>).parentToolUseId
-            if (typeof pid === "string") parentId = pid
+        if (meta && typeof meta === "object") {
+          if ("claudeCode" in meta) {
+            const cc = (meta as Record<string, unknown>).claudeCode
+            if (cc && typeof cc === "object" && "parentToolUseId" in cc) {
+              const pid = (cc as Record<string, unknown>).parentToolUseId
+              if (typeof pid === "string") parentId = pid
+            }
+          }
+          if (!parentId) {
+            const cbParent = (meta as Record<string, unknown>)[
+              "codebuddy.ai/parentToolCallId"
+            ]
+            if (typeof cbParent === "string") parentId = cbParent
           }
         }
 
-        // Use explicit parentToolUseId when available, positional fallback
-        // only for in-progress agents
+        // Use explicit parent id when available, positional fallback only for
+        // in-progress agents.
         const resolvedParent =
           parentId && agentIds.has(parentId) ? parentId : positionalAgentId
 
@@ -543,7 +616,7 @@ function buildStreamingTurnsFromLiveMessage(
   let currentGroupHasCompletedTool = false
   const inProgressToolCallIds = new Set<string>()
 
-  for (const block of liveMessage.content) {
+  for (const block of content) {
     const isContentBlock =
       block.type === "text" ||
       block.type === "thinking" ||
@@ -572,8 +645,14 @@ function buildStreamingTurnsFromLiveMessage(
       case "plan": {
         // Carry the live plan through as a first-class `plan` block so it
         // renders in a dedicated <PlanCard> instead of being down-converted
-        // into a `thinking`/reasoning block.
-        currentBlocks.push({ type: "plan", entries: block.entries })
+        // into a `thinking`/reasoning block. For a Kimi Code session, prefer the
+        // latest TodoList write's todos over this (possibly one-event-stale)
+        // collapsed plan, so a new write's content shows immediately rather than
+        // the previous write's until Kimi's own `plan` update catches up.
+        currentBlocks.push({
+          type: "plan",
+          entries: latestKimiTodoEntries ?? block.entries,
+        })
         break
       }
       case "tool_call": {
@@ -634,15 +713,34 @@ function buildStreamingTurnsFromLiveMessage(
           break
         }
 
+        // Kimi Code emits BOTH a `TodoList` tool_call AND a canonical `plan`
+        // update for the same write (claude-code-acp instead replaces the
+        // tool_call with the plan). Render exactly one <PlanCard> with no
+        // duplicate-card flash: once Kimi's own `plan` block is in this live
+        // message, drop the redundant tool card (the synthetic plan renders it);
+        // in the one-frame window before that plan block arrives (the tool_call
+        // is processed one event earlier), render the plan from the call's own
+        // todos so a PlanCard — never a generic tool card — shows immediately and
+        // continues seamlessly (identical entries) when the synthetic block takes
+        // over. Fail-safe: if Kimi never emitted the plan, the converted plan
+        // still shows (no data loss). Identity is the exact Kimi todo-write input
+        // shape because the real tool name "TodoList" is never on the live wire.
+        const kimiTodos = kimiTodoWriteEntries(block.info.raw_input)
+        if (kimiTodos) {
+          if (!hasLivePlan) {
+            currentBlocks.push({ type: "plan", entries: kimiTodos })
+          }
+          // `break` precedes the tool_use and tool_result pushes — no orphan
+          // tool-result and no generic tool card for the suppressed write.
+          break
+        }
+
         const toolName = getToolName(block.info)
         currentBlocks.push({
           type: "tool_use",
           tool_use_id: block.info.tool_call_id,
           tool_name: toolName,
-          input_preview: resolveGoalToolInputFromLiveTitle(
-            toolName,
-            block.info
-          ),
+          input_preview: resolveLiveToolInput(toolName, block.info),
           // Forward the ACP `meta` field downstream so the renderer can
           // read delegation state (`meta["codeg.delegation"]`) for
           // pre-binding / post-refresh fallback rendering of

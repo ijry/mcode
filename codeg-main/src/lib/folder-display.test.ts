@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  excludeChatFolders,
   filterTopLevelFolders,
   resolveFolderDisplayName,
   resolvePickerSelectedFolderId,
@@ -59,6 +60,25 @@ describe("filterTopLevelFolders", () => {
       { id: 2, parent_id: null },
     ]
     expect(filterTopLevelFolders(list)).toHaveLength(2)
+  })
+})
+
+describe("excludeChatFolders", () => {
+  it("drops hidden chat folders, keeping real ones", () => {
+    const list = [
+      { id: 1, kind: "regular" as const },
+      { id: 2, kind: "chat" as const },
+      { id: 3, kind: "regular" as const },
+    ]
+    expect(excludeChatFolders(list).map((f) => f.id)).toEqual([1, 3])
+  })
+
+  it("returns all folders when none are chat folders", () => {
+    const list = [
+      { id: 1, kind: "regular" as const },
+      { id: 2, kind: "regular" as const },
+    ]
+    expect(excludeChatFolders(list)).toHaveLength(2)
   })
 })
 

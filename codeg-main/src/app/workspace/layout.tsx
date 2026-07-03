@@ -10,6 +10,7 @@ import {
 } from "react"
 import type { ImperativePanelGroupHandle } from "react-resizable-panels"
 import { FolderTitleBar } from "@/components/layout/folder-title-bar"
+import { useIsActiveChatMode } from "@/hooks/use-is-active-chat-mode"
 import { Sidebar } from "@/components/layout/sidebar"
 import { StatusBar } from "@/components/layout/status-bar"
 import {
@@ -31,6 +32,13 @@ import { ConversationRuntimeProvider } from "@/contexts/conversation-runtime-con
 import { TabProvider, useTabContext } from "@/contexts/tab-context"
 import { SessionStatsProvider } from "@/contexts/session-stats-context"
 import { SidebarProvider, useSidebarContext } from "@/contexts/sidebar-context"
+import { SearchDialogProvider } from "@/contexts/search-dialog-context"
+import { AutomationsViewProvider } from "@/contexts/automations-view-context"
+import {
+  WorkbenchRouteProvider,
+  useWorkbenchRoute,
+} from "@/contexts/workbench-route-context"
+import { WorkbenchRoutePage } from "@/components/workbench/workbench-content"
 import {
   AuxPanelProvider,
   useAuxPanelContext,
@@ -42,7 +50,8 @@ import {
 import { GitCredentialProvider } from "@/contexts/git-credential-context"
 import {
   WorkspaceProvider,
-  useWorkspaceContext,
+  useWorkspaceActions,
+  useWorkspaceView,
 } from "@/contexts/workspace-context"
 import { RemoteConnectionGate } from "@/contexts/remote-connection-context"
 import { UpdateProvider } from "@/components/providers/update-provider"
@@ -51,6 +60,7 @@ import { TerminalPanel } from "@/components/terminal/terminal-panel"
 import { AuxPanel } from "@/components/layout/aux-panel"
 import { FileWorkspaceTabBar } from "@/components/files/file-workspace-tab-bar"
 import { FileWorkspacePanel } from "@/components/files/file-workspace-panel"
+import { ExternalConflictDialog } from "@/components/files/external-conflict-dialog"
 import { AppToaster } from "@/components/ui/app-toaster"
 import {
   DeepLinkBootstrap,
@@ -102,6 +112,23 @@ function TabKeysSync() {
   return null
 }
 
+/**
+ * Auto-hides the right (aux) panel whenever a folderless chat conversation
+ * becomes active. Effect fires only on the `isChatMode` rising edge (it does NOT
+ * depend on `isOpen`), so it won't fight a user who reopens the panel — though in
+ * practice the toggle button and shortcut are also hidden in chat mode, making
+ * the hide effectively sticky for the chat session. Leaving chat mode does not
+ * auto-restore (kept simple); the user reopens it on a normal folder.
+ */
+function ChatModeAuxAutoHide() {
+  const isChatMode = useIsActiveChatMode()
+  const { setOpen } = useAuxPanelContext()
+  useEffect(() => {
+    if (isChatMode) setOpen(false)
+  }, [isChatMode, setOpen])
+  return null
+}
+
 function isSameLayout(a: number[], b: number[]): boolean {
   if (a.length !== b.length) return false
   return a.every((value, index) => Math.abs(value - b[index]) <= LAYOUT_EPSILON)
@@ -128,7 +155,8 @@ function resolvePanelSizeRange(
 }
 
 function WorkspaceContent({ children }: { children: React.ReactNode }) {
-  const { mode, setActivePane, filesMaximized } = useWorkspaceContext()
+  const { mode, filesMaximized } = useWorkspaceView()
+  const { setActivePane } = useWorkspaceActions()
   const panelGroupRef = useRef<ImperativePanelGroupHandle | null>(null)
   const fusionLayoutRef = useRef<[number, number]>(DEFAULT_FUSION_LAYOUT)
   const desiredLayoutRef = useRef<[number, number]>(DEFAULT_FUSION_LAYOUT)
@@ -192,104 +220,125 @@ function WorkspaceContent({ children }: { children: React.ReactNode }) {
     [applyLayout, mode]
   )
 
+  const { isConversations } = useWorkbenchRoute()
+
   return (
     <div className="relative h-full min-h-0 overflow-hidden">
-      <ResizablePanelGroup
-        id={WORKSPACE_PANEL_GROUP_ID}
-        ref={panelGroupRef}
-        direction="horizontal"
-        onLayout={handleLayout}
-      >
-        <ResizablePanel
-          id={WORKSPACE_CONVERSATION_PANEL_ID}
-          order={1}
-          defaultSize={56}
-          minSize={mode === "fusion" ? 25 : 0}
+      {/* Kept mounted (and only hidden) when a workbench route takes over, so
+          background conversations keep streaming. `inert` drops it from the tab
+          order behind the opaque route overlay. */}
+      <div className="h-full min-h-0" inert={!isConversations || undefined}>
+        <ResizablePanelGroup
+          id={WORKSPACE_PANEL_GROUP_ID}
+          ref={panelGroupRef}
+          direction="horizontal"
+          onLayout={handleLayout}
         >
-          <section
-            className={cn(
-              "flex h-full min-h-0 flex-col overflow-hidden",
-              mode === "conversation" && "absolute inset-0 z-30 bg-background"
-            )}
-            onPointerDownCapture={markConversationActive}
-            onFocusCapture={markConversationActive}
-            inert={filesMaximized || undefined}
+          <ResizablePanel
+            id={WORKSPACE_CONVERSATION_PANEL_ID}
+            order={1}
+            defaultSize={56}
+            minSize={mode === "fusion" ? 25 : 0}
           >
-            <TabBar />
-            <div className="relative flex-1 min-h-0 overflow-hidden">
-              {children}
-            </div>
-          </section>
-        </ResizablePanel>
-        <ResizableHandle
-          withHandle
-          disabled={mode !== "fusion"}
-          className={
-            mode === "fusion"
-              ? ""
-              : "pointer-events-none w-0 opacity-0 after:w-0"
-          }
-        />
-        <ResizablePanel
-          id={WORKSPACE_FILES_PANEL_ID}
-          order={2}
-          defaultSize={44}
-          minSize={mode === "fusion" ? 20 : 0}
-        >
-          {/* When maximized, overlay the file section across the entire
-              workspace area instead of resizing the conversation panel — that
-              would fire ResizeObserver on the conversation's stick-to-bottom
-              scroll container and reset its position.
-              The `absolute inset-0` resolves to the outer `relative` wrapper,
-              not the Panel root. This depends on react-resizable-panels
-              keeping the Panel root at `position: static`; if a future
-              version sets `position: relative` there, this overlay (and the
-              mirrored `mode === "conversation"` overlay above) would clip to
-              the Panel's allocated slice and need to be lifted outside the
-              panel group. */}
-          <section
-            className={cn(
-              "flex h-full min-h-0 flex-col overflow-hidden",
-              filesMaximized && "absolute inset-0 z-30 bg-background"
-            )}
-            onPointerDownCapture={markFileActive}
-            onFocusCapture={markFileActive}
-            aria-hidden={mode === "conversation"}
+            <section
+              className={cn(
+                "flex h-full min-h-0 flex-col overflow-hidden",
+                mode === "conversation" && "absolute inset-0 z-30 bg-background"
+              )}
+              onPointerDownCapture={markConversationActive}
+              onFocusCapture={markConversationActive}
+              inert={filesMaximized || undefined}
+            >
+              <TabBar />
+              <div className="relative flex-1 min-h-0 overflow-hidden">
+                {children}
+              </div>
+            </section>
+          </ResizablePanel>
+          <ResizableHandle
+            withHandle
+            disabled={mode !== "fusion"}
+            className={
+              mode === "fusion"
+                ? ""
+                : "pointer-events-none w-0 opacity-0 after:w-0"
+            }
+          />
+          <ResizablePanel
+            id={WORKSPACE_FILES_PANEL_ID}
+            order={2}
+            defaultSize={44}
+            minSize={mode === "fusion" ? 20 : 0}
           >
-            <FileWorkspaceTabBar />
-            <div className="flex-1 min-h-0 overflow-hidden">
-              <FileWorkspacePanel />
-            </div>
-          </section>
-        </ResizablePanel>
-      </ResizablePanelGroup>
+            {/* When maximized, overlay the file section across the entire
+                workspace area instead of resizing the conversation panel — that
+                would fire ResizeObserver on the conversation's stick-to-bottom
+                scroll container and reset its position.
+                The `absolute inset-0` resolves to the outer `relative` wrapper
+                (the static `h-full` wrapper here is skipped), not the Panel
+                root. This depends on react-resizable-panels keeping the Panel
+                root at `position: static`; if a future version sets
+                `position: relative` there, this overlay (and the mirrored
+                `mode === "conversation"` overlay above) would clip to the
+                Panel's allocated slice and need to be lifted outside the panel
+                group. */}
+            <section
+              className={cn(
+                "flex h-full min-h-0 flex-col overflow-hidden",
+                filesMaximized && "absolute inset-0 z-30 bg-background"
+              )}
+              onPointerDownCapture={markFileActive}
+              onFocusCapture={markFileActive}
+              aria-hidden={mode === "conversation"}
+            >
+              <FileWorkspaceTabBar />
+              <div className="flex-1 min-h-0 overflow-hidden">
+                <FileWorkspacePanel />
+              </div>
+            </section>
+          </ResizablePanel>
+        </ResizablePanelGroup>
+      </div>
+      {!isConversations ? (
+        <div className="absolute inset-0 z-40 bg-background">
+          <WorkbenchRoutePage />
+        </div>
+      ) : null}
     </div>
   )
 }
 
 function MobileWorkspaceContent({ children }: { children: React.ReactNode }) {
-  const { mode, activePane } = useWorkspaceContext()
+  const { mode, activePane } = useWorkspaceView()
+  const { isConversations } = useWorkbenchRoute()
 
   const showConversation =
     mode === "conversation" || activePane === "conversation"
 
   return (
     <div className="relative h-full min-h-0 overflow-hidden">
-      {showConversation ? (
-        <section className="flex h-full min-h-0 flex-col overflow-hidden">
-          <TabBar />
-          <div className="relative flex-1 min-h-0 overflow-hidden">
-            {children}
-          </div>
-        </section>
-      ) : (
-        <section className="flex h-full min-h-0 flex-col overflow-hidden">
-          <FileWorkspaceTabBar />
-          <div className="flex-1 min-h-0 overflow-hidden">
-            <FileWorkspacePanel />
-          </div>
-        </section>
-      )}
+      <div className="h-full min-h-0" inert={!isConversations || undefined}>
+        {showConversation ? (
+          <section className="flex h-full min-h-0 flex-col overflow-hidden">
+            <TabBar />
+            <div className="relative flex-1 min-h-0 overflow-hidden">
+              {children}
+            </div>
+          </section>
+        ) : (
+          <section className="flex h-full min-h-0 flex-col overflow-hidden">
+            <FileWorkspaceTabBar />
+            <div className="flex-1 min-h-0 overflow-hidden">
+              <FileWorkspacePanel />
+            </div>
+          </section>
+        )}
+      </div>
+      {!isConversations ? (
+        <div className="absolute inset-0 z-40 bg-background">
+          <WorkbenchRoutePage />
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -776,6 +825,7 @@ function FolderLayoutShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="fixed inset-0 flex flex-col overflow-hidden bg-background text-foreground pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)]">
+      <ChatModeAuxAutoHide />
       <FolderTitleBar />
       {isMobile ? (
         <MobileFolderWorkspaceShell>{children}</MobileFolderWorkspaceShell>
@@ -790,6 +840,31 @@ function FolderLayoutShell({ children }: { children: React.ReactNode }) {
       />
     </div>
   )
+}
+
+// Single chokepoint that keeps the workbench route honest: opening or switching
+// to a conversation from ANY entry point (sidebar, ⌘T, search, deep links, pet
+// focus, branch switch, run history …) activates a tab, so leaving a non-default
+// route whenever activeTabId changes covers every opener — present and future —
+// without patching each call site. Re-selecting the ALREADY-active tab does not
+// change activeTabId, so the interactive conversation pickers (sidebar list,
+// search dialog, run history) also call openConversations() directly.
+function WorkbenchRouteConversationSync() {
+  const { activeTabId, consumeRemoteActivation } = useTabContext()
+  const { openConversations } = useWorkbenchRoute()
+  const prevRef = useRef(activeTabId)
+  useEffect(() => {
+    if (prevRef.current === activeTabId) return
+    prevRef.current = activeTabId
+    // A remote tab snapshot that mirrors another client's focus also changes
+    // activeTabId. That's not a local conversation activation, so don't hijack
+    // this window into the conversations route — doing so would unmount whatever
+    // non-conversation view it's on (e.g. the Automations editor + unsaved
+    // edits). Local activations leave the flag false and switch as before.
+    if (consumeRemoteActivation()) return
+    openConversations()
+  }, [activeTabId, openConversations, consumeRemoteActivation])
+  return null
 }
 
 function WorkspaceLayoutInner({ children }: { children: React.ReactNode }) {
@@ -809,14 +884,27 @@ function WorkspaceLayoutInner({ children }: { children: React.ReactNode }) {
                         <TabKeysSync />
                         <DeepLinkBootstrap />
                         <PetFocusBridge />
-                        <WorkspaceOpenFolderListener />
+                        {/* Always mounted: external-change conflicts must be
+                            resolvable even with the aux file tree closed. */}
+                        <ExternalConflictDialog />
                         <SessionStatsProvider>
                           <SidebarProvider>
                             <AuxPanelProvider>
                               <TerminalProvider>
-                                <FolderLayoutShell>
-                                  {children}
-                                </FolderLayoutShell>
+                                <SearchDialogProvider>
+                                  <AutomationsViewProvider>
+                                    <WorkbenchRouteProvider>
+                                      <WorkbenchRouteConversationSync />
+                                      {/* Inside WorkbenchRouteProvider: the
+                                          listener calls openConversations() to
+                                          surface a launcher-opened folder. */}
+                                      <WorkspaceOpenFolderListener />
+                                      <FolderLayoutShell>
+                                        {children}
+                                      </FolderLayoutShell>
+                                    </WorkbenchRouteProvider>
+                                  </AutomationsViewProvider>
+                                </SearchDialogProvider>
                               </TerminalProvider>
                             </AuxPanelProvider>
                           </SidebarProvider>

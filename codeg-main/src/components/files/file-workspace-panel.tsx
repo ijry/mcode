@@ -3,16 +3,35 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import dynamic from "next/dynamic"
 import { ChevronDown, ChevronRight, FileCode2, FileIcon } from "lucide-react"
-import type { editor as MonacoEditorNs } from "monaco-editor"
+import type {
+  editor as MonacoEditorNs,
+  IDisposable,
+  IPosition,
+} from "monaco-editor"
+import type { Monaco, OnMount } from "@monaco-editor/react"
+import { toast } from "sonner"
 import { useTranslations } from "next-intl"
-import { useActiveFolder } from "@/contexts/active-folder-context"
+import { useAppWorkspace } from "@/contexts/app-workspace-context"
+import { useTabContext } from "@/contexts/tab-context"
+import { emitAttachFileToSession } from "@/lib/session-attachment-events"
+import { formatFileRangeLabel } from "@/lib/reference-link"
 import {
-  useWorkspaceContext,
+  findOwningFolder,
+  isUncPath,
+  normalizeAbsPath,
+  splitAbsPath,
+} from "@/lib/file-open-target"
+import { buildMonacoModelPath } from "@/lib/monaco-model-path"
+import { parseFileTabId } from "@/lib/file-tab-id"
+import {
+  useWorkspaceActions,
+  useWorkspaceFileTabs,
   type FileWorkspaceTab,
 } from "@/contexts/workspace-context"
 import { ImagePreview } from "@/components/files/image-preview"
 import { HtmlPreview } from "@/components/files/html-preview"
-import { isHtmlPreviewable } from "@/lib/language-detect"
+import { OfficePreview } from "@/components/files/office-preview"
+import { isHtmlPreviewable, isOfficePreviewable } from "@/lib/language-detect"
 import { DiffViewer } from "@/components/diff/diff-viewer"
 import { UnifiedDiffPreview } from "@/components/diff/unified-diff-preview"
 import {
@@ -54,28 +73,34 @@ function resolveRelativePath(base: string, relative: string): string {
 }
 
 /**
- * Pre-resolve relative paths in markdown image/link syntax before Streamdown.
+ * Pre-resolve local paths in markdown image/link syntax before Streamdown.
  *
  * rehype-harden resolves "../foo" via `new URL("../foo", "http://example.com")`
  * which loses directory context (e.g. "../images/a.png" from "docs/readme/"
  * becomes "/images/a.png" instead of "/docs/images/a.png").
  *
- * This function resolves relative paths against the file's directory BEFORE
- * Streamdown processes them, using "./" prefix so rehype-harden preserves them.
+ * `fileDir` is the document's ABSOLUTE directory, so relative references
+ * resolve to absolute filesystem paths. Author-written root-relative
+ * references ("/assets/x.png") resolve against `previewRoot` (the owning
+ * workspace folder, or the document directory for files outside every
+ * folder) so they also come out absolute — downstream consumers (image
+ * loader, link opener) treat every local target as an absolute path.
+ * The "./" prefix survives rehype-harden, which re-roots it to "/…".
+ *
+ * Known limitation: documents living under a Windows UNC root
+ * ("//server/share/…") lose the double-slash prefix in this pipeline (the
+ * "./…" → rehype-harden → "/…" round trip cannot carry an authority), so
+ * their relative sub-resources fail to load — a clean broken-image /
+ * failed-open, never a read of a different local file. Editing, saving,
+ * and watching UNC files are unaffected.
  */
 function preprocessMarkdownPaths(
   content: string,
-  relativeFileDir: string
+  fileDir: string,
+  previewRoot: string | null
 ): string {
-  const resolveUrl = (url: string): string => {
-    // Skip absolute URLs, anchors, and already-root-relative paths
-    if (/^https?:\/\/|^data:|^blob:|^#|^\//.test(url)) return url
-    // Separate fragment/query from path
-    const fragIdx = url.search(/[#?]/)
-    const pathPart = fragIdx >= 0 ? url.slice(0, fragIdx) : url
-    const fragment = fragIdx >= 0 ? url.slice(fragIdx) : ""
-    // Resolve relative to file directory within project
-    const parts = relativeFileDir.split("/").filter(Boolean)
+  const resolveAgainst = (base: string, pathPart: string): string => {
+    const parts = base.split("/").filter(Boolean)
     for (const seg of pathPart.split("/")) {
       if (seg === "..") {
         if (parts.length > 0) parts.pop()
@@ -83,8 +108,23 @@ function preprocessMarkdownPaths(
         parts.push(seg)
       }
     }
-    // "./" prefix ensures rehype-harden recognizes it as relative
-    return "./" + parts.join("/") + fragment
+    return parts.join("/")
+  }
+
+  const resolveUrl = (url: string): string => {
+    // Skip remote URLs, protocol-relative URLs, and anchors
+    if (/^https?:\/\/|^data:|^blob:|^#|^\/\//.test(url)) return url
+    // Separate fragment/query from path
+    const fragIdx = url.search(/[#?]/)
+    const pathPart = fragIdx >= 0 ? url.slice(0, fragIdx) : url
+    const fragment = fragIdx >= 0 ? url.slice(fragIdx) : ""
+    if (pathPart.startsWith("/")) {
+      // Root-relative: the author means "from the project root".
+      if (!previewRoot) return url
+      return "./" + resolveAgainst(previewRoot, pathPart) + fragment
+    }
+    // Relative to the document's own (absolute) directory.
+    return "./" + resolveAgainst(fileDir, pathPart) + fragment
   }
 
   // Pre-resolve image paths: ![alt](url) or ![alt](url "title")
@@ -143,22 +183,27 @@ const MIME_BY_EXT: Record<string, string> = {
 
 function useLocalImageSrc(
   src: string | undefined,
-  fileDir: string | null,
-  folderPath: string | null
+  fileDir: string | null
 ): string | undefined {
   const [dataUrl, setDataUrl] = useState<string | undefined>(undefined)
 
-  const isLocal = src && fileDir && !/^https?:\/\/|^data:|^blob:/.test(src)
+  // Protocol-relative "//host/…" srcs are REMOTE (the browser resolves them
+  // against the page protocol) — never route them into local file IO, where
+  // "//Users/…" would otherwise read an unintended local path.
+  const isLocal =
+    src && fileDir && !/^https?:\/\/|^data:|^blob:|^\/\//.test(src)
 
   useEffect(() => {
     if (!isLocal || !src || !fileDir) return
     let cancelled = false
-    // rehype-harden resolves "../foo" to "/foo" via new URL(src, "http://example.com")
-    // Root-relative paths (starting with "/") should resolve against folderPath
-    const absPath =
-      src.startsWith("/") && folderPath
-        ? resolveRelativePath(folderPath, src)
-        : resolveRelativePath(fileDir, src)
+    // preprocessMarkdownPaths resolved every local reference against the
+    // document's ABSOLUTE directory (or the preview root), and
+    // rehype-harden re-roots "./x" to "/x" — so a "/"-prefixed src already
+    // IS the absolute filesystem path. Anything else (raw HTML that
+    // slipped past preprocessing) resolves against the document directory.
+    const absPath = src.startsWith("/")
+      ? normalizeAbsPath(src.replace(/[#?].*$/, ""))
+      : resolveRelativePath(fileDir, src)
     const ext = absPath.split(".").pop()?.toLowerCase() ?? ""
     const mime = MIME_BY_EXT[ext] ?? "image/png"
 
@@ -177,7 +222,7 @@ function useLocalImageSrc(
     return () => {
       cancelled = true
     }
-  }, [isLocal, src, fileDir, folderPath])
+  }, [isLocal, src, fileDir])
 
   if (!isLocal) return src
   return dataUrl
@@ -185,14 +230,12 @@ function useLocalImageSrc(
 
 function PreviewImage({
   fileDir,
-  folderPath,
   ...props
 }: React.ComponentProps<"img"> & {
   fileDir: string | null
-  folderPath: string | null
 }) {
   const src = typeof props.src === "string" ? props.src : undefined
-  const resolvedSrc = useLocalImageSrc(src, fileDir, folderPath)
+  const resolvedSrc = useLocalImageSrc(src, fileDir)
 
   // eslint-disable-next-line @next/next/no-img-element, jsx-a11y/alt-text
   return <img {...props} src={resolvedSrc} />
@@ -200,11 +243,84 @@ function PreviewImage({
 
 const AUTO_SAVE_DELAY_MS = 5000
 
-function buildMonacoModelPath(path: string | null, id: string): string {
-  if (!path) return `inmemory://model/${encodeURIComponent(id)}`
-  const normalized = path.replace(/\\/g, "/")
-  const encoded = normalized.split("/").map(encodeURIComponent).join("/")
-  return `file:///${encoded}`
+interface AddToChatPill {
+  widget: MonacoEditorNs.IContentWidget
+  setVisible: (visible: boolean, position: IPosition | null) => void
+  /** Re-read the label (e.g. after a locale change) even while already shown. */
+  refreshLabel: () => void
+}
+
+/**
+ * The floating "Add to Chat" pill shown next to a text selection, built as a
+ * Monaco content widget. Raw DOM (not React) so it lives in Monaco's own
+ * overflow layer; `allowEditorOverflow` keeps it un-clipped at the viewport edge
+ * and during horizontal scroll, and `suppressMouseDown` stops a click from
+ * collapsing the selection before `addSelectionToChat` reads it. `getPosition`
+ * returns null while hidden — Monaco unmounts the widget on a null position, so
+ * visibility is driven entirely through {@link AddToChatPill.setVisible} +
+ * `layoutContentWidget`.
+ */
+function createAddToChatPill(
+  monaco: Monaco,
+  onActivate: () => void,
+  getLabel: () => string
+): AddToChatPill {
+  const dom = document.createElement("button")
+  dom.type = "button"
+  // No `display` utility on the button: Monaco's content-widget renderer writes
+  // an inline `display: block` onto this node to show it (and `display: none` to
+  // hide it — contentWidgets.js wraps `getDomNode()` directly), which beats any
+  // `inline-flex` class and stacks the icon above the label. So the flex row
+  // lives on an inner <span> Monaco never touches; the button keeps only the
+  // pill chrome and shrink-wraps it (Monaco positions the button absolutely).
+  dom.className =
+    "codeg-add-to-chat-pill rounded-md border border-border bg-popover px-2 py-0.5 text-xs font-medium text-popover-foreground shadow-md cursor-pointer select-none hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+  // Hand-written SVG (lucide "message-square-plus"): raw DOM can't host a React
+  // lucide component. `currentColor` + the blue text class echoes the file badge.
+  dom.innerHTML =
+    '<span class="inline-flex items-center gap-1">' +
+    '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="text-blue-600 dark:text-blue-400"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M9 10h6"/><path d="M12 7v6"/></svg>' +
+    '<span class="codeg-add-to-chat-label"></span>' +
+    "</span>"
+  const labelSpan = dom.querySelector(".codeg-add-to-chat-label")
+  if (labelSpan) labelSpan.textContent = getLabel()
+  dom.addEventListener("click", (event) => {
+    event.preventDefault()
+    event.stopPropagation()
+    onActivate()
+  })
+
+  let visible = false
+  let position: IPosition | null = null
+
+  const widget: MonacoEditorNs.IContentWidget = {
+    getId: () => "codeg.addToChatPill",
+    getDomNode: () => dom,
+    getPosition: () =>
+      visible && position
+        ? {
+            position,
+            preference: [
+              monaco.editor.ContentWidgetPositionPreference.ABOVE,
+              monaco.editor.ContentWidgetPositionPreference.BELOW,
+            ],
+          }
+        : null,
+    allowEditorOverflow: true,
+    suppressMouseDown: true,
+  }
+
+  return {
+    widget,
+    setVisible: (next, pos) => {
+      visible = next
+      position = pos
+      if (next && labelSpan) labelSpan.textContent = getLabel()
+    },
+    refreshLabel: () => {
+      if (labelSpan) labelSpan.textContent = getLabel()
+    },
+  }
 }
 
 // True once a tab has *something* to render. Drives the rendering predicate
@@ -251,14 +367,6 @@ type DiffListContext =
   | { kind: "commit"; commitHash: string; commitMessage: string | null }
   | { kind: "working"; path: string }
   | { kind: "branch"; branch: string; path: string }
-
-function decodeDiffTabToken(token: string): string {
-  try {
-    return decodeURIComponent(token)
-  } catch {
-    return token
-  }
-}
 
 function normalizeDiffPath(rawPath: string): string | null {
   const trimmed = rawPath.trim().replace(/^"|"$/g, "")
@@ -772,24 +880,64 @@ function DiffFileList({
 
 export function FileWorkspacePanel() {
   const t = useTranslations("Folder.fileWorkspacePanel")
+  const { activeFileTab, pendingFileReveal, previewFileTabIds } =
+    useWorkspaceFileTabs()
   const {
-    activeFileTab,
     consumePendingFileReveal,
-    pendingFileReveal,
     openBranchDiff,
     openCommitDiff,
     openFilePreview,
     openWorkingTreeDiff,
-    previewFileTabIds,
     saveActiveFile,
     updateActiveFileContent,
-  } = useWorkspaceContext()
-  const { activeFolder: folder } = useActiveFolder()
-  const folderPath = folder?.path ?? null
+  } = useWorkspaceActions()
+  const { tabs, activeTabId } = useTabContext()
+  const { allFolders } = useAppWorkspace()
+  // The ACTIVE TAB's file location. File tabs are identified by their
+  // absolute path; the owning registered folder (when the file sits inside
+  // one) is derived here ONLY to pick the preview root — reads never need
+  // a folder.
+  const activeAbsPath =
+    activeFileTab?.kind === "file" ? (activeFileTab.path ?? null) : null
+  const activeIo = useMemo(
+    () => (activeAbsPath ? splitAbsPath(activeAbsPath) : null),
+    [activeAbsPath]
+  )
+  const owningFolder = useMemo(
+    () => (activeAbsPath ? findOwningFolder(activeAbsPath, allFolders) : null),
+    [activeAbsPath, allFolders]
+  )
+  // Root for HTML/markdown sub-resource resolution: the owning folder root
+  // keeps ../-style and root-relative references working for in-workspace
+  // files; files outside every folder are confined to their own directory.
+  const previewRoot = owningFolder?.rootPath ?? activeIo?.rootPath ?? null
   const activeScope = activeFileTab?.id ?? "__default__"
   const editorRef = useRef<MonacoEditorNs.IStandaloneCodeEditor | null>(null)
   const cursorListenerRef = useRef<{ dispose: () => void } | null>(null)
   const gitChangeDecorationsRef = useRef<string[]>([])
+  // "Add selection to chat" plumbing. The Monaco action + content widget are
+  // registered once at mount (the editor instance persists across file-tab
+  // switches), so everything they read at activation time lives in refs to dodge
+  // stale closures: the resolved target (folder/file/session), the attachable
+  // flag (also mirrored into a Monaco context key that gates the triggers),
+  // translations, and the disposables torn down on editor disposal.
+  const attachContextRef = useRef<{
+    absPath: string | null
+    fileName: string
+    sessionTabId: string | null
+  }>({ absPath: null, fileName: "", sessionTabId: null })
+  const attachableRef = useRef(false)
+  const attachableKeyRef = useRef<MonacoEditorNs.IContextKey<boolean> | null>(
+    null
+  )
+  const addToChatActionRef = useRef<IDisposable | null>(null)
+  const addFileToChatActionRef = useRef<IDisposable | null>(null)
+  const addToChatPillRef = useRef<AddToChatPill | null>(null)
+  const selectionListenerRef = useRef<IDisposable | null>(null)
+  const focusListenerRef = useRef<IDisposable | null>(null)
+  const blurListenerRef = useRef<IDisposable | null>(null)
+  const tRef = useRef(t)
+  const monacoRef = useRef<Monaco | null>(null)
   const editorTheme = useMonacoThemeSync()
   const { zoomLevel } = useZoomLevel()
   const { editorFontStack, editorFontSize, editorLigatures } = useEditorFont()
@@ -807,6 +955,177 @@ export function FileWorkspacePanel() {
   const fileSaveState = isFileTab ? (activeFileTab.saveState ?? "idle") : "idle"
   const fileIsDirty = isFileTab ? Boolean(activeFileTab.isDirty) : false
   const canEdit = isFileTab && !fileReadonly
+  // The conversation a selection attaches to: the active top-bar tab when it is
+  // a conversation (mirrors aux-panel-file-tree-tab's "Attach to Current
+  // Session"). Null when no conversation is focused.
+  const activeSessionTabId = useMemo(() => {
+    const activeTab = tabs.find((tab) => tab.id === activeTabId)
+    return activeTab && activeTab.kind === "conversation" ? activeTab.id : null
+  }, [tabs, activeTabId])
+  // Gate every trigger (menu item, ⌘L, pill) on a real file tab with a
+  // resolvable absolute path AND a conversation to receive it. The same Monaco
+  // instance also renders some diff tabs, so this guard is required.
+  const isAttachable =
+    isFileTab && Boolean(activeAbsPath) && Boolean(activeSessionTabId)
+
+  // Read the live selection and emit it to the composer as a ranged file badge.
+  // Reads only refs so it stays stable for the once-registered Monaco action.
+  const addSelectionToChat = useCallback(() => {
+    const editor = editorRef.current
+    const ctx = attachContextRef.current
+    const attachPath = ctx.absPath
+    const sessionTabId = ctx.sessionTabId
+    if (!editor || !sessionTabId || !attachPath) return
+    const selection = editor.getSelection()
+    if (!selection) return
+    // With nothing selected the caret is an empty selection whose start and end
+    // are both the cursor line, so the range below resolves to that single line
+    // (`foo.ts:5`) — i.e. "add the current line" instead of the old silent
+    // no-op. ⌘L shares this action (its precondition deliberately omits
+    // `editorHasSelection` to swallow the built-in expandLineSelection), so ⌘L
+    // with no selection now attaches the current line too. The pill is only ever
+    // shown for a non-empty selection, so it is unaffected.
+    const start = selection.startLineNumber
+    let end = selection.endLineNumber
+    // A full-line drag ends at column 1 of the line below the last selected
+    // line; trim that trailing boundary so selecting lines 10–25 yields 10-25.
+    if (end > start && selection.endColumn === 1) end -= 1
+    if (end < start) end = start
+    const range = { start, end }
+    emitAttachFileToSession({
+      tabId: sessionTabId,
+      path: attachPath,
+      range,
+    })
+    toast(
+      tRef.current("addSelectionToChatDone", {
+        label: formatFileRangeLabel(ctx.fileName, range),
+      })
+    )
+  }, [])
+
+  // Attach the whole active file (no line range) — the context-menu sibling of
+  // "add selection to chat". Reads only refs so it stays stable for the
+  // once-registered Monaco action. A missing range makes the composer append it
+  // as a plain whole-file resource (same path file-tree / git-changes take).
+  const addFileToChat = useCallback(() => {
+    const ctx = attachContextRef.current
+    const attachPath = ctx.absPath
+    const sessionTabId = ctx.sessionTabId
+    if (!sessionTabId || !attachPath) return
+    emitAttachFileToSession({
+      tabId: sessionTabId,
+      path: attachPath,
+    })
+    toast(tRef.current("addFileToChatDone", { label: ctx.fileName }))
+  }, [])
+
+  // Register (or re-register) the two context-menu actions (+ ⌘L for the
+  // selection one). Re-registerable so the labels can follow an in-app locale
+  // change — Monaco caches an action's label at registration time, and the
+  // editor instance outlives a tab switch.
+  const registerAddToChatActions = useCallback(
+    (
+      editor: MonacoEditorNs.IStandaloneCodeEditor,
+      monaco: Monaco,
+      selectionLabel: string,
+      fileLabel: string
+    ) => {
+      addToChatActionRef.current?.dispose()
+      addToChatActionRef.current = editor.addAction({
+        id: "codeg.addSelectionToChat",
+        label: selectionLabel,
+        contextMenuGroupId: "navigation",
+        contextMenuOrder: 1.5,
+        keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyL],
+        // Gate on attachability only — NOT `editorHasSelection`. Monaco's
+        // addAction drives the context menu, the F1 palette, AND the keybinding
+        // from this one precondition. Claiming ⌘L even without a selection is
+        // deliberate: it stops ⌘L from falling through to the built-in
+        // `expandLineSelection`, honoring the user's choice of ⌘L as "add to
+        // chat". The empty case is handled in `run` — `addSelectionToChat`
+        // attaches the current line — so menu / ⌘L always do something useful.
+        precondition: "codegSelectionAttachable",
+        run: () => addSelectionToChat(),
+      })
+      addFileToChatActionRef.current?.dispose()
+      addFileToChatActionRef.current = editor.addAction({
+        id: "codeg.addFileToChat",
+        label: fileLabel,
+        contextMenuGroupId: "navigation",
+        contextMenuOrder: 1.6,
+        // Whole-file attach is independent of any selection; share the same
+        // attachability gate (real file tab + folder + active conversation).
+        precondition: "codegSelectionAttachable",
+        run: () => addFileToChat(),
+      })
+    },
+    [addSelectionToChat, addFileToChat]
+  )
+
+  // Single teardown for the action, listeners, pill widget, and context key —
+  // called from both the editor's onDidDispose and the React unmount effect.
+  // `removeContentWidget` guards its view call internally, so it's a safe no-op
+  // once disposed; the optional editor arg lets onDidDispose target the exact
+  // disposing instance rather than a possibly-reassigned `editorRef`.
+  const teardownAddToChat = useCallback(
+    (editor?: MonacoEditorNs.IStandaloneCodeEditor | null) => {
+      const target = editor ?? editorRef.current
+      addToChatActionRef.current?.dispose()
+      addToChatActionRef.current = null
+      addFileToChatActionRef.current?.dispose()
+      addFileToChatActionRef.current = null
+      selectionListenerRef.current?.dispose()
+      selectionListenerRef.current = null
+      focusListenerRef.current?.dispose()
+      focusListenerRef.current = null
+      blurListenerRef.current?.dispose()
+      blurListenerRef.current = null
+      if (addToChatPillRef.current) {
+        target?.removeContentWidget(addToChatPillRef.current.widget)
+        addToChatPillRef.current = null
+      }
+      attachableKeyRef.current = null
+    },
+    []
+  )
+
+  // Keep the activation refs + Monaco context key in sync with React state, and
+  // hide the pill the moment the tab stops being attachable.
+  useEffect(() => {
+    tRef.current = t
+    attachContextRef.current = {
+      absPath: activeAbsPath,
+      fileName: activeFileTab?.title ?? "",
+      sessionTabId: activeSessionTabId,
+    }
+    attachableRef.current = isAttachable
+    attachableKeyRef.current?.set(isAttachable)
+    if (!isAttachable && editorRef.current && addToChatPillRef.current) {
+      addToChatPillRef.current.setVisible(false, null)
+      editorRef.current.layoutContentWidget(addToChatPillRef.current.widget)
+    }
+  }, [t, activeAbsPath, activeFileTab?.title, activeSessionTabId, isAttachable])
+
+  // Refresh the cached action label when the locale changes. The initial
+  // registration happens in handleEditorMount (the editor isn't mounted yet on
+  // first render); this only re-fires once the label string actually changes.
+  const addSelectionLabel = t("addSelectionToChat")
+  const addFileLabel = t("addFileToChat")
+  useEffect(() => {
+    // The sync effect above runs first, so tRef.current is the fresh locale here
+    // — refresh the (registration-cached) action labels and the live pill label.
+    if (editorRef.current && monacoRef.current) {
+      registerAddToChatActions(
+        editorRef.current,
+        monacoRef.current,
+        addSelectionLabel,
+        addFileLabel
+      )
+    }
+    addToChatPillRef.current?.refreshLabel()
+  }, [addSelectionLabel, addFileLabel, registerAddToChatActions])
+
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const autoSaveGuardRef = useRef({
     canEdit: false,
@@ -817,33 +1136,26 @@ export function FileWorkspacePanel() {
     if (!activeFileTab) return null
     if (activeFileTab.kind !== "diff") return null
 
-    const commitMatch = activeFileTab.id.match(/^diff:commit:([^:]+):all$/)
-    if (commitMatch) {
+    const parts = parseFileTabId(activeFileTab.id)
+    if (!parts) return null
+
+    if (parts.kind === "diff-commit" && parts.path === null) {
       return {
         kind: "commit",
-        commitHash: commitMatch[1],
+        commitHash: parts.commit,
         commitMessage: activeFileTab.description,
       }
     }
 
-    const workingOverviewMatch = activeFileTab.id.match(
-      /^diff:working-overview:(.+)$/
-    )
-    if (workingOverviewMatch) {
-      return {
-        kind: "working",
-        path: decodeDiffTabToken(workingOverviewMatch[1]),
-      }
+    if (parts.kind === "diff-working-overview") {
+      return { kind: "working", path: parts.path }
     }
 
-    const branchOverviewMatch = activeFileTab.id.match(
-      /^diff:branch-overview:([^:]+):(.+)$/
-    )
-    if (branchOverviewMatch) {
+    if (parts.kind === "diff-branch-overview") {
       return {
         kind: "branch",
-        branch: decodeDiffTabToken(branchOverviewMatch[1]),
-        path: decodeDiffTabToken(branchOverviewMatch[2]),
+        branch: parts.branch,
+        path: parts.path ?? "all",
       }
     }
 
@@ -1024,8 +1336,8 @@ export function FileWorkspacePanel() {
     diffOutline,
   ])
 
-  const handleEditorMount = useCallback(
-    (editorInstance: MonacoEditorNs.IStandaloneCodeEditor) => {
+  const handleEditorMount: OnMount = useCallback(
+    (editorInstance, monaco) => {
       editorRef.current = editorInstance
       cursorListenerRef.current?.dispose()
       cursorListenerRef.current = editorInstance.onDidChangeCursorPosition(
@@ -1037,6 +1349,59 @@ export function FileWorkspacePanel() {
       setCursorLine(editorInstance.getPosition()?.lineNumber ?? 1)
       applyHiddenAreas()
       applyGitChangeDecorations()
+
+      // --- "Add selection to chat": context-menu action, ⌘L shortcut, and the
+      // floating pill. All three are gated by the `codegSelectionAttachable`
+      // context key so they only appear for a real file tab with an active
+      // conversation to attach to.
+      const attachableKey = editorInstance.createContextKey<boolean>(
+        "codegSelectionAttachable",
+        false
+      )
+      attachableKeyRef.current = attachableKey
+      attachableKey.set(attachableRef.current)
+
+      monacoRef.current = monaco
+      registerAddToChatActions(
+        editorInstance,
+        monaco,
+        tRef.current("addSelectionToChat"),
+        tRef.current("addFileToChat")
+      )
+      const pill = createAddToChatPill(
+        monaco,
+        () => addSelectionToChat(),
+        () => tRef.current("addToChat")
+      )
+      addToChatPillRef.current = pill
+      editorInstance.addContentWidget(pill.widget)
+
+      const refreshPill = () => {
+        const selection = editorInstance.getSelection()
+        const show =
+          attachableRef.current &&
+          editorInstance.hasTextFocus() &&
+          Boolean(selection) &&
+          !selection?.isEmpty()
+        pill.setVisible(
+          show,
+          show && selection ? selection.getStartPosition() : null
+        )
+        editorInstance.layoutContentWidget(pill.widget)
+      }
+      selectionListenerRef.current?.dispose()
+      selectionListenerRef.current =
+        editorInstance.onDidChangeCursorSelection(refreshPill)
+      focusListenerRef.current?.dispose()
+      focusListenerRef.current =
+        editorInstance.onDidFocusEditorText(refreshPill)
+      blurListenerRef.current?.dispose()
+      blurListenerRef.current = editorInstance.onDidBlurEditorText(() => {
+        pill.setVisible(false, null)
+        editorInstance.layoutContentWidget(pill.widget)
+      })
+
+      editorInstance.onDidDispose(() => teardownAddToChat(editorInstance))
 
       // Set CSS custom properties so hover tooltips can use position:fixed
       // to escape overflow:hidden clipping on ancestor elements.
@@ -1053,7 +1418,13 @@ export function FileWorkspacePanel() {
         editorInstance.onDidDispose(() => ro.disconnect())
       }
     },
-    [applyGitChangeDecorations, applyHiddenAreas]
+    [
+      addSelectionToChat,
+      registerAddToChatActions,
+      teardownAddToChat,
+      applyGitChangeDecorations,
+      applyHiddenAreas,
+    ]
   )
 
   const jumpToLine = useCallback((lineNumber: number) => {
@@ -1130,6 +1501,8 @@ export function FileWorkspacePanel() {
     if (!pendingFileReveal) return
     if (!isFileTab || !activeFileTab || activeFileTab.loading) return
     if (!activeFileTab.path) return
+    // The absolute path IS the tab identity — only reveal in the tab the
+    // request actually targeted.
     if (
       normalizeWorkspacePath(activeFileTab.path) !==
       normalizeWorkspacePath(pendingFileReveal.path)
@@ -1244,8 +1617,11 @@ export function FileWorkspacePanel() {
       gitChangeDecorationsRef.current = []
       cursorListenerRef.current?.dispose()
       cursorListenerRef.current = null
+      // Full add-to-chat teardown (action, listeners, pill widget, context key)
+      // in case React unmounts the panel before the editor's own onDidDispose.
+      teardownAddToChat()
     },
-    []
+    [teardownAddToChat]
   )
 
   if (!activeFileTab) {
@@ -1258,13 +1634,14 @@ export function FileWorkspacePanel() {
   }
 
   if (activeFileTab.kind === "rich-diff") {
-    const isCommitDiff = activeFileTab.id.startsWith("diff:commit:")
-    const isExternalConflictDiff = activeFileTab.id.startsWith(
-      "diff:external-conflict:"
-    )
-    const commitHash = isCommitDiff
-      ? (activeFileTab.id.split(":")[2]?.slice(0, 7) ?? "")
-      : ""
+    const richDiffParts = parseFileTabId(activeFileTab.id)
+    const isCommitDiff = richDiffParts?.kind === "diff-commit"
+    const isExternalConflictDiff =
+      richDiffParts?.kind === "diff-external-conflict"
+    const commitHash =
+      richDiffParts?.kind === "diff-commit"
+        ? richDiffParts.commit.slice(0, 7)
+        : ""
     const origLabel = isCommitDiff
       ? `${commitHash}~1`
       : isExternalConflictDiff
@@ -1357,18 +1734,27 @@ export function FileWorkspacePanel() {
             })
           : (activeFileTab.description ?? diffListContext.path)
 
+    // Per-file diffs opened from an overview belong to the overview tab's
+    // folder — pass it explicitly so a background-folder overview never
+    // routes its rows through the active folder. (Diff tabs always carry a
+    // numeric folderId; the ?? undefined only satisfies the option type.)
+    const overviewFolderId = activeFileTab.folderId ?? undefined
     const handleOpenDiff = async (path: string) => {
       if (diffListContext.kind === "commit") {
-        await openCommitDiff(diffListContext.commitHash, path)
+        await openCommitDiff(diffListContext.commitHash, path, undefined, {
+          folderId: overviewFolderId,
+        })
         return
       }
 
       if (diffListContext.kind === "branch") {
-        await openBranchDiff(diffListContext.branch, path)
+        await openBranchDiff(diffListContext.branch, path, {
+          folderId: overviewFolderId,
+        })
         return
       }
 
-      await openWorkingTreeDiff(path)
+      await openWorkingTreeDiff(path, { folderId: overviewFolderId })
     }
 
     const diffListColdLoad =
@@ -1390,7 +1776,11 @@ export function FileWorkspacePanel() {
             badge={badge}
             description={description}
             onOpenDiff={handleOpenDiff}
-            openFilePreview={openFilePreview}
+            openFilePreview={(path) =>
+              // Rows belong to the overview tab's folder — never the
+              // active workspace folder.
+              openFilePreview(path, { folderId: overviewFolderId })
+            }
           />
         )}
       </div>
@@ -1400,6 +1790,19 @@ export function FileWorkspacePanel() {
   // Image preview
   if (isFileTab && activeFileTab && activeFileTab.language === "image") {
     return <ImagePreview key={activeFileTab.id} tab={activeFileTab} />
+  }
+
+  // Office preview (.docx/.xlsx/.pptx → OfficeCLI HTML → sandboxed iframe).
+  // Preview-only: these are binary OpenXML files with no text editor view, so
+  // it renders unconditionally (not gated on the editor/preview toggle).
+  if (isFileTab && activeFileTab && isOfficePreviewable(activeFileTab.path)) {
+    return (
+      <OfficePreview
+        key={activeFileTab.id}
+        rootPath={activeIo?.rootPath ?? null}
+        relPath={activeIo?.ioPath ?? null}
+      />
+    )
   }
 
   // HTML preview (sandboxed iframe)
@@ -1413,25 +1816,31 @@ export function FileWorkspacePanel() {
       <HtmlPreview
         key={activeFileTab.id}
         tab={activeFileTab}
-        folderPath={folderPath}
+        rootPath={previewRoot}
       />
     )
   }
 
   if (isPreviewMode && activeFileTab) {
-    const absFilePath =
-      activeFileTab.path && folderPath
-        ? `${folderPath}/${activeFileTab.path}`
-        : null
-    const fileDir = absFilePath
-      ? absFilePath.replace(/\/[^/]*$/, "")
-      : folderPath
-    // Pre-resolve relative paths before Streamdown/rehype-harden mangles them
-    const relativeFileDir = activeFileTab.path?.includes("/")
-      ? activeFileTab.path.replace(/\/[^/]*$/, "")
-      : ""
+    // The tab path is absolute, so the document directory is too — every
+    // local reference below resolves to an absolute filesystem path.
+    const fileDir = activeIo?.rootPath ?? null
+    // A UNC-hosted document (//server/share/…) cannot have its local
+    // sub-resources resolved: the "./x" → rehype-harden → "/x" round trip
+    // drops the //server/share authority, and a collapsed single-slash
+    // path like "/Windows/win.ini" would read a DIFFERENT local file. So
+    // for UNC docs we disable local resolution entirely — relative refs
+    // stay relative (harden externalizes them harmlessly) and the image
+    // loader / link opener treat nothing as a local path.
+    const localRefsEnabled = !fileDir || !isUncPath(fileDir)
+    // Pre-resolve relative AND root-relative paths before Streamdown /
+    // rehype-harden mangles them: relative ones against the document's own
+    // directory, root-relative ones ("/assets/x.png") against the preview
+    // root (owning folder when inside the workspace, else the directory).
     const preprocessedContent = normalizeMathDelimiters(
-      preprocessMarkdownPaths(renderedContent, relativeFileDir)
+      localRefsEnabled
+        ? preprocessMarkdownPaths(renderedContent, fileDir ?? "", previewRoot)
+        : renderedContent
     )
 
     const markdownColdLoad =
@@ -1456,28 +1865,33 @@ export function FileWorkspacePanel() {
                 img: ({ node, ...imgProps }) => (
                   <PreviewImage
                     {...imgProps}
-                    fileDir={fileDir}
-                    folderPath={folderPath}
+                    fileDir={localRefsEnabled ? fileDir : null}
                   />
                 ),
                 // eslint-disable-next-line @typescript-eslint/no-unused-vars
                 a: ({ node, href, children, ...aProps }) => {
+                  // Protocol-relative "//host/…" is a WEB url — exclude it
+                  // from the local branch (^\/\/) so it opens externally
+                  // instead of being collapsed into a local file path.
+                  // localRefsEnabled is false for UNC docs: never route a
+                  // (possibly wrongly-collapsed) local target to the opener.
                   const isRelative =
-                    href && !/^[a-z][a-z0-9+.-]*:|^#/i.test(href)
-                  if (isRelative && href) {
+                    href && !/^[a-z][a-z0-9+.-]*:|^#|^\/\//i.test(href)
+                  if (isRelative && href && localRefsEnabled) {
                     return (
                       <a
                         {...aProps}
                         href="#"
                         onClick={(e) => {
                           e.preventDefault()
-                          // After preprocessing + rehype-harden, paths are
-                          // root-relative like "/docs/images/foo.png"
-                          const clean = href.replace(/[#?].*$/, "")
-                          const target = clean
-                            .replace(/^\/+/, "")
+                          // After preprocessing (absolute document dir) +
+                          // rehype-harden, local hrefs ARE absolute
+                          // filesystem paths like "/repo/docs/foo.md" —
+                          // open directly; no folder involved.
+                          const target = href
+                            .replace(/[#?].*$/, "")
                             .replace(/\/\/+/g, "/")
-                          openFilePreview(target)
+                          void openFilePreview(target)
                         }}
                       >
                         {children}
@@ -1487,7 +1901,9 @@ export function FileWorkspacePanel() {
                   return (
                     <a
                       {...aProps}
-                      href={href}
+                      // Pin protocol-relative urls to https: the webview's
+                      // own scheme (tauri://) would otherwise hijack them.
+                      href={href?.startsWith("//") ? `https:${href}` : href}
                       target="_blank"
                       rel="noopener noreferrer"
                     >

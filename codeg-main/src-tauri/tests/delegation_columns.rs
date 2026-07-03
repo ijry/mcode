@@ -25,6 +25,7 @@ async fn delegation_columns_round_trip() {
         title_locked: Set(false),
         agent_type: Set(agent_type_str),
         status: Set(conversation::ConversationStatus::InProgress),
+        kind: Set(conversation::ConversationKind::Delegate),
         model: Set(None),
         git_branch: Set(None),
         external_id: Set(None),
@@ -35,6 +36,7 @@ async fn delegation_columns_round_trip() {
         created_at: Set(now),
         updated_at: Set(now),
         deleted_at: Set(None),
+        pinned_at: Set(None),
     };
     let inserted = active.insert(&db.conn).await.expect("insert");
     let id = inserted.id;

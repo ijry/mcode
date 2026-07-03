@@ -227,11 +227,15 @@ where
 
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
-        if should_use_dark_background() {
+        // Linux: drop the native GTK title bar so it doesn't stack on top of
+        // the app's own toolbar (the "double title bar"). The frontend then
+        // renders custom window controls + resize grips, mirroring Windows.
+        let builder = if should_use_dark_background() {
             builder.background_color(tauri::window::Color(9, 9, 11, 255))
         } else {
             builder
-        }
+        };
+        builder.decorations(false)
     }
 }
 
@@ -308,6 +312,8 @@ fn resolve_settings_route(section: Option<&str>) -> &'static str {
         Some("agents") => "settings/agents",
         Some("mcp") => "settings/mcp",
         Some("skills") => "settings/skills",
+        Some("experts") => "settings/experts",
+        Some("office-tools") => "settings/office-tools",
         Some("shortcuts") => "settings/shortcuts",
         Some("system") => "settings/system",
         _ => "settings/appearance",
@@ -680,9 +686,12 @@ pub async fn open_settings_window(
         .inner_size(1080.0, 700.0)
         .min_inner_size(1080.0, 600.0)
         .center();
-    let builder = builder.parent(&window).map_err(|e| {
-        AppCommandError::window("Failed to attach settings window to parent", e.to_string())
-    })?;
+    // Intentionally NOT a child of the caller window: on macOS `.parent()`
+    // attaches the window via `addChildWindow`, which makes settings move and
+    // minimize together with the main window. Keep it an independent top-level
+    // window; focus returns to the owner on close via
+    // `restore_windows_after_settings` (the SettingsWindowState owner tracking
+    // is independent of any parent/child relationship).
     let settings_window = apply_platform_window_style(builder)
         .build()
         .map_err(|e| AppCommandError::window("Failed to open settings window", e.to_string()))?;
@@ -1887,7 +1896,7 @@ pub fn install_tray_icon(
                 builder = builder.icon(icon).icon_as_template(true);
             }
             Err(err) => {
-                eprintln!("[Tray] failed to load template icon, falling back: {err}");
+                tracing::warn!("[Tray] failed to load template icon, falling back: {err}");
                 if let Some(icon) = app.default_window_icon() {
                     builder = builder.icon(icon.clone());
                 }

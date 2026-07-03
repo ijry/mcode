@@ -58,6 +58,7 @@ import {
   acpSaveAgentSkill,
 } from "@/lib/api"
 import { invalidateAgentSkillsCache } from "@/hooks/use-agent-skills"
+import { piUsesCustomAgentDir } from "@/lib/pi-config"
 import type {
   AcpAgentInfo,
   AgentSkillItem,
@@ -105,6 +106,7 @@ function defaultSkillLayoutForAgent(
   if (agentType === "open_claw") return "skill_directory"
   if (agentType === "cline") return "skill_directory"
   if (agentType === "hermes") return "skill_directory"
+  if (agentType === "code_buddy") return "skill_directory"
   return null
 }
 
@@ -441,7 +443,15 @@ export function SkillsSettings() {
         supported.add(check.value)
       }
 
-      setAgents(next.filter((agent) => supported.has(agent.agent_type)))
+      // A pi pointed at a custom PI_CODING_AGENT_DIR isn't managed by the
+      // default-dir skill store, so drop it even though the probe reports it
+      // supported (the probe resolves the default ~/.pi/agent dir).
+      setAgents(
+        next.filter(
+          (agent) =>
+            supported.has(agent.agent_type) && !piUsesCustomAgentDir(agent)
+        )
+      )
     } catch (err) {
       const message = toErrorMessage(err)
       setLoadingError(message)

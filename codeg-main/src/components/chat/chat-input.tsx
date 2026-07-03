@@ -7,13 +7,18 @@ import type {
   ConnectionStatus,
   PromptCapabilitiesInfo,
   PromptDraft,
+  PromptInputBlock,
   SessionConfigOptionInfo,
   SessionModeInfo,
   AvailableCommandInfo,
 } from "@/lib/types"
 import type { QueuedMessage } from "@/hooks/use-message-queue"
-import { MessageInput } from "@/components/chat/message-input"
+import {
+  MessageInput,
+  type ComposerInjectContent,
+} from "@/components/chat/message-input"
 import { MessageQueueDisplay } from "@/components/chat/message-queue-display"
+import { cn } from "@/lib/utils"
 
 interface ChatInputProps {
   status: ConnectionStatus | null
@@ -36,6 +41,9 @@ interface ChatInputProps {
   attachmentTabId?: string | null
   draftStorageKey?: string | null
   isActive?: boolean
+  /** Show the composer's flowing active-session border. Set only for the active
+   *  tab when tiled across multiple sessions; passed through to MessageInput. */
+  showActiveFlow?: boolean
   queue?: QueuedMessage[]
   onEnqueue?: (draft: PromptDraft, modeId: string | null) => void
   onQueueReorder?: (items: QueuedMessage[]) => void
@@ -43,12 +51,30 @@ interface ChatInputProps {
   onQueueDelete?: (id: string) => void
   editingItemId?: string | null
   editingDraftText?: string | null
+  editingDraftBlocks?: PromptInputBlock[] | null
   isEditingQueueItem?: boolean
   onSaveQueueEdit?: (draft: PromptDraft) => void
   onCancelQueueEdit?: () => void
   onForkSend?: (draft: PromptDraft, modeId?: string | null) => void
   onAddFeedback?: () => void
   feedbackAddDisabled?: boolean
+  /**
+   * Keep the composer usable even while disconnected. Set for a folderless chat
+   * draft: it has no working dir yet (so it never auto-connects), and the FIRST
+   * send is precisely what lazily creates its conversation + scratch dir and
+   * triggers the connection. Without this the composer would be permanently
+   * disabled and the chat could never be started.
+   */
+  allowOfflineCompose?: boolean
+  injectContent?: ComposerInjectContent | null
+  onInjectConsumed?: () => void
+  /** Drop the input's own horizontal padding when an ancestor already supplies
+   *  the gutter (the welcome column wraps this in its own `px-4`). */
+  flush?: boolean
+  /** Use a taller minimum height for the composer. Set for the welcome
+   *  (new-conversation) composer, which sits in a roomy empty state; active and
+   *  historical conversations keep the compact default. */
+  tall?: boolean
 }
 
 export const ChatInput = memo(function ChatInput({
@@ -72,6 +98,7 @@ export const ChatInput = memo(function ChatInput({
   attachmentTabId,
   draftStorageKey,
   isActive,
+  showActiveFlow,
   queue,
   onEnqueue,
   onQueueReorder,
@@ -79,12 +106,18 @@ export const ChatInput = memo(function ChatInput({
   onQueueDelete,
   editingItemId,
   editingDraftText,
+  editingDraftBlocks,
   isEditingQueueItem,
   onSaveQueueEdit,
   onCancelQueueEdit,
   onForkSend,
   onAddFeedback,
   feedbackAddDisabled,
+  allowOfflineCompose = false,
+  injectContent,
+  onInjectConsumed,
+  flush = false,
+  tall = false,
 }: ChatInputProps) {
   const t = useTranslations("Folder.chat.chatInput")
   const isConnected = status === "connected"
@@ -93,7 +126,7 @@ export const ChatInput = memo(function ChatInput({
 
   return (
     <div
-      className="px-4 pt-0 pb-1"
+      className={cn("pt-0 pb-1", !flush && "px-4")}
       onContextMenu={(event) => event.stopPropagation()}
     >
       {queue &&
@@ -114,7 +147,11 @@ export const ChatInput = memo(function ChatInput({
         promptCapabilities={promptCapabilities}
         onFocus={onFocus}
         defaultPath={defaultPath}
-        disabled={(!isConnected && !isPrompting) || selectorsLoading}
+        disabled={
+          allowOfflineCompose
+            ? false
+            : (!isConnected && !isPrompting) || selectorsLoading
+        }
         isPrompting={isPrompting}
         onCancel={onCancel}
         modes={modes}
@@ -129,14 +166,19 @@ export const ChatInput = memo(function ChatInput({
         attachmentTabId={attachmentTabId}
         draftStorageKey={draftStorageKey}
         isActive={isActive}
+        showActiveFlow={showActiveFlow}
         onEnqueue={onEnqueue}
+        editingItemId={editingItemId}
         editingDraftText={editingDraftText}
+        editingDraftBlocks={editingDraftBlocks}
         isEditingQueueItem={isEditingQueueItem}
         onSaveQueueEdit={onSaveQueueEdit}
         onCancelQueueEdit={onCancelQueueEdit}
         onForkSend={onForkSend}
         onAddFeedback={onAddFeedback}
         feedbackAddDisabled={feedbackAddDisabled}
+        injectContent={injectContent}
+        onInjectConsumed={onInjectConsumed}
         placeholder={
           isConnecting
             ? t("connecting")
@@ -144,7 +186,7 @@ export const ChatInput = memo(function ChatInput({
               ? t("agentResponding", { agent: agentName ?? "Agent" })
               : t("sendMessage")
         }
-        className="min-h-24 max-h-60"
+        className={cn(tall ? "min-h-30" : "min-h-24", "max-h-60")}
       />
     </div>
   )

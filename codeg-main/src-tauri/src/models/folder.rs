@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use super::agent::AgentType;
+use crate::db::entities::folder::FolderKind;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct FolderHistoryEntry {
@@ -24,6 +25,10 @@ pub struct FolderDetail {
     /// Root folder this one was created under (worktree folders only); NULL for
     /// top-level folders. Drives sidebar merge + worktree-branch detection.
     pub parent_id: Option<i32>,
+    /// Folder classification (mirrors `folder.kind`). `chat` folders are kept in
+    /// `allFolders` (so cwd / active-folder resolve) but hidden from folder
+    /// lists; their conversations route to the sidebar "Chat" group.
+    pub kind: FolderKind,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -164,6 +164,12 @@ pub const FEEDBACK_SETTINGS_CHANGED_EVENT: &str = "feedback-settings://changed";
 /// bool }`).
 pub const QUESTION_SETTINGS_CHANGED_EVENT: &str = "question-settings://changed";
 
+/// Global side-channel announcing a `get_session_info` enable/disable. Same
+/// cross-window rationale as [`QUESTION_SETTINGS_CHANGED_EVENT`]: the settings UI
+/// runs in a separate window, so other views learn the flag flipped only via this
+/// backend broadcast. Payload: `SessionInfoSettings` (`{ "enabled": bool }`).
+pub const SESSION_INFO_SETTINGS_CHANGED_EVENT: &str = "session-info-settings://changed";
+
 /// Payload for the global [`CONVERSATION_CHANGED_EVENT`] side-channel. Drives
 /// cross-client sidebar sync (membership + status) independent of the
 /// per-connection ACP attach protocol, so clients that are NOT attached to a
@@ -180,8 +186,12 @@ pub enum ConversationChange {
     /// Carries the full summary so the frontend renders without a re-fetch.
     /// Root conversations omit `parent_id` (serde skips `None`); delegation
     /// children carry it and the frontend filters them out of the sidebar.
+    ///
+    /// Boxed so this variant doesn't bloat the whole enum (the summary is by far
+    /// the largest payload); serde serializes `Box<T>` transparently, so the wire
+    /// shape — `{ "kind": "upsert", "summary": { … } }` — is unchanged.
     Upsert {
-        summary: crate::models::DbConversationSummary,
+        summary: Box<crate::models::DbConversationSummary>,
     },
     /// Remove by id (soft delete).
     Deleted { id: i32 },
@@ -190,6 +200,35 @@ pub enum ConversationChange {
     /// flows through, so the sidebar's status reaches every client (not just
     /// those attached to the connection).
     Status { id: i32, status: String },
+}
+
+/// Global side-channel for cross-client folder list sync. Mirrors
+/// [`CONVERSATION_CHANGED_EVENT`]: a single [`emit_event`] reaches the Tauri
+/// webview and every WebSocket client. A folder created headlessly (e.g. the
+/// automation engine minting a per-run worktree) is otherwise invisible to every
+/// client until the next full `fetchFolders` — so without this broadcast a
+/// conversation produced in that worktree can't be placed in the sidebar
+/// (grouping renders rows only under known/open folders).
+///
+/// Distinct from [`"folder://open-in-workspace"`] (the project launcher's
+/// hand-off, whose listener also opens + focuses a new conversation tab): this
+/// channel ONLY upserts the folder into the workspace list, so a background
+/// emitter never steals the user's focus.
+pub const FOLDER_CHANGED_EVENT: &str = "folder://changed";
+
+/// Payload for [`FOLDER_CHANGED_EVENT`]. The full [`FolderDetail`] rides on the
+/// event so clients apply it without a re-fetch (matching
+/// [`ConversationChange::Upsert`]). `folder` is boxed to keep the enum small and
+/// to leave room for a future `Deleted { id }` variant.
+///
+/// [`FolderDetail`]: crate::models::FolderDetail
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum FolderChange {
+    /// Insert-or-replace by id (create / reopen / field update).
+    Upsert {
+        folder: Box<crate::models::FolderDetail>,
+    },
 }
 
 /// Global side-channel for cross-client open-tab sync. Mirrors
@@ -213,6 +252,33 @@ pub struct TabsChanged {
     pub version: i64,
     pub origin: String,
     pub tabs: Vec<crate::models::OpenedTab>,
+}
+
+/// Global side-channel for cross-client automation list + run sync. Mirrors
+/// [`CONVERSATION_CHANGED_EVENT`]: a single [`emit_event`] reaches the Tauri
+/// webview and every WebSocket client. The scheduler runs headless (no window),
+/// so this broadcast is the only way an open automations view learns a run
+/// started or settled.
+pub const AUTOMATION_CHANGED_EVENT: &str = "automation://changed";
+
+/// Payload for [`AUTOMATION_CHANGED_EVENT`]. Carries only ids — clients refetch
+/// the affected automation / its runs. All variants are small, so no boxing is
+/// needed (unlike [`ConversationChange`]).
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AutomationChange {
+    /// Insert-or-replace by id (create, edit, enable/disable, last-run update).
+    Upsert { id: i32 },
+    /// Soft-deleted by id.
+    Deleted { id: i32 },
+    /// A run was claimed and launched.
+    RunStarted { automation_id: i32, run_id: i32 },
+    /// A run reached a terminal state (succeeded / failed / cancelled / skipped).
+    RunSettled {
+        automation_id: i32,
+        run_id: i32,
+        status: String,
+    },
 }
 
 /// Unified event emission: serializes the payload exactly once and dispatches
@@ -458,5 +524,46 @@ mod tests {
         assert_eq!(p["version"], 6);
         assert_eq!(p["origin"], "win-abc");
         assert!(p["tabs"].is_array(), "tabs must serialize as an array");
+    }
+
+    #[test]
+    fn emit_event_broadcasts_folder_change_upsert() {
+        // A headlessly-created folder (e.g. an automation worktree) reaches every
+        // client via `folder://changed`, carrying the full detail so clients apply
+        // it without a re-fetch. The boxed `folder` serializes transparently — the
+        // wire shape is `{ "kind": "upsert", "folder": { … } }`.
+        use crate::db::entities::folder::FolderKind;
+        use crate::models::FolderDetail;
+
+        let broadcaster = Arc::new(WebEventBroadcaster::new());
+        let mut rx = broadcaster.subscribe();
+        let emitter = EventEmitter::test_web_only(broadcaster.clone());
+
+        emit_event(
+            &emitter,
+            FOLDER_CHANGED_EVENT,
+            FolderChange::Upsert {
+                folder: Box::new(FolderDetail {
+                    id: 42,
+                    name: "repo".to_string(),
+                    path: "/home/me/repo".to_string(),
+                    git_branch: Some("main".to_string()),
+                    default_agent_type: None,
+                    last_opened_at: chrono::Utc::now(),
+                    sort_order: 0,
+                    color: "inherit".to_string(),
+                    parent_id: Some(7),
+                    kind: FolderKind::Regular,
+                }),
+            },
+        );
+
+        let evt = rx.try_recv().expect("folder change should broadcast");
+        let p = &*evt.payload;
+        assert_eq!(evt.channel, FOLDER_CHANGED_EVENT);
+        assert_eq!(p["kind"], "upsert");
+        assert_eq!(p["folder"]["id"], 42);
+        assert_eq!(p["folder"]["parent_id"], 7);
+        assert_eq!(p["folder"]["kind"], "regular");
     }
 }

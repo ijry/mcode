@@ -19,7 +19,7 @@
   <a href="./README.ar.md">العربية</a>
 </p>
 
-Codeg（Code Generation）是一个多智能体编码工作台，它将多个智能体（Claude Code、Codex CLI、OpenCode、Gemini CLI、OpenClaw、Cline、Hermes 等）统一到一个工作区中，支持会话聚合和多智能体协作，支持桌面安装，服务器/Docker 部署。
+Codeg（Code Generation）是一个多智能体编码工作台，它将多个智能体（Claude Code、Codex CLI、OpenCode、Gemini CLI、OpenClaw、Cline、Hermes Agent、CodeBuddy、Kimi Code、Pi 等）统一到一个工作区中，支持会话聚合和多智能体协作，支持桌面安装，服务器/Docker 部署。
 
 ![gallery](../images/gallery.svg)
 
@@ -39,6 +39,13 @@ Codeg（Code Generation）是一个多智能体编码工作台，它将多个智
     </td>
     <td>感谢优云智算赞助了本项目！优云智算是 UCloud 旗下 AI 云平台，主打包月、按次的高性价比国模 agent Plan 套餐，低至 49 元/月起。同时提供官转稳定海外模型。支持接入 Claude Code、Codex 及 API 调用。支持企业高并发、7*24 技术支持、自助开票。通过<a href="https://www.compshare.cn/?ytag=GPU_YY_git_codeg">此链接</a>注册的用户，可得免费 5 元平台体验金！</td>
   </tr>
+  <tr>
+    <td align="center" width="220">
+      <a href="https://sui-xiang.com/register?aff=JPFCRHHBE8HE" target="_blank"><img src="../images/sui-xiang.jpg" alt="随想AI网关" width="200" /></a><br/>
+      <strong><a href="https://sui-xiang.com/register?aff=JPFCRHHBE8HE">随想AI网关</a></strong>
+    </td>
+    <td>感谢随想AI网关对本项目的赞助！随想AI网关是一家可靠高效的 API 中继服务提供商，提供 Claude、Codex、Gemini 等的中继服务。新账户<a href="https://sui-xiang.com/register?aff=JPFCRHHBE8HE">注册</a>后每日签到就送 0.5 元测试额度，充值额度 1:1，无需订阅，按量付费。多线路冗余、跨区域容灾、自动故障切换，长链路 SSE 不中断。</td>
+  </tr>
 </table>
 
 > 想成为 Codeg 赞助商？[欢迎通过邮件与我们联系。](mailto:itpkcn@gmail.com)
@@ -48,10 +55,15 @@ Codeg（Code Generation）是一个多智能体编码工作台，它将多个智
 ![Codeg Light](../images/main-light.png#gh-light-mode-only)
 ![Codeg Dark](../images/main-dark.png#gh-dark-mode-only)
 
-## 设置
+## 多智能体协作
 
-![Codeg Light](../images/settings-light.png#gh-light-mode-only)
-![Codeg Dark](../images/settings-dark.png#gh-dark-mode-only)
+![Codeg Light](../images/collaboration-light.png#gh-light-mode-only)
+![Codeg Dark](../images/collaboration-dark.png#gh-dark-mode-only)
+
+## 日常办公
+
+![Codeg Light](../images/office-light.png#gh-light-mode-only)
+![Codeg Dark](../images/office-dark.png#gh-dark-mode-only)
 
 ## 核心亮点
 
@@ -59,6 +71,8 @@ Codeg（Code Generation）是一个多智能体编码工作台，它将多个智
 - **多智能体协作** — 在同一会话中，主智能体可调用不同类型的子智能体（如 Claude Code 调用 Codex、Gemini 等）协作完成任务，每个子智能体作为独立会话运行
 - 内置 `git worktree` 并行开发流程
 - **项目启动器** — 可视化创建新项目，实时预览效果
+- **Office 文档** — 通过内置的 officecli 工具集创建、分析、校对和编辑 .docx / .xlsx / .pptx 文件，支持在文件标签页内实时预览，随智能体编辑即时刷新
+- **自动化** — 将任意输入框配置保存为可复用的自动化任务，按 cron 计划或手动触发、无界面自动运行
 - **消息渠道** — 连接 Telegram、飞书、iLink（微信）等即时通讯应用到编码代理，实时接收通知、完整会话交互、远程任务控制
 - MCP 管理（本地扫描 + 市场搜索/安装）
 - Skills 管理（全局与项目级）
@@ -66,19 +80,23 @@ Codeg（Code Generation）是一个多智能体编码工作台，它将多个智
 - Web 服务模式 — 开启后可在浏览器中访问 Codeg，支持远程工作
 - **独立服务器部署** — 在任意 Linux/macOS 服务器上运行 `codeg-server`，通过浏览器访问
 - **Docker 支持** — `docker compose up` 或 `docker run`，可自定义令牌、端口，支持数据持久化及项目目录挂载
+- 运行时日志 — 内置实时日志查看器，支持筛选和按模块设置日志级别
 - 集成工程闭环（文件树、Diff、Git 变更、提交、终端）
 
 ## 支持的Agent
 
-| Agent       | 环境变量优先路径                      | macOS / Linux 默认路径                | Windows 默认路径                                      |
-| ----------- | ------------------------------------- | ------------------------------------- | ----------------------------------------------------- |
-| Claude Code | `$CLAUDE_CONFIG_DIR/projects`         | `~/.claude/projects`                  | `%USERPROFILE%\\.claude\\projects`                    |
-| Codex CLI   | `$CODEX_HOME/sessions`                | `~/.codex/sessions`                   | `%USERPROFILE%\\.codex\\sessions`                     |
-| OpenCode    | `$XDG_DATA_HOME/opencode/opencode.db` | `~/.local/share/opencode/opencode.db` | `%USERPROFILE%\\.local\\share\\opencode\\opencode.db` |
-| Gemini CLI  | `$GEMINI_CLI_HOME/.gemini`            | `~/.gemini`                           | `%USERPROFILE%\\.gemini`                              |
-| OpenClaw    | —                                     | `~/.openclaw/agents`                  | `%USERPROFILE%\\.openclaw\\agents`                    |
-| Cline       | `$CLINE_DIR`                          | `~/.cline/data/tasks`                 | `%USERPROFILE%\\.cline\\data\\tasks`                  |
-| Hermes      | `$HERMES_HOME/state.db`               | `~/.hermes/state.db`                  | `%USERPROFILE%\\.hermes\\state.db`                    |
+| Agent        | 环境变量优先路径                      | macOS / Linux 默认路径                | Windows 默认路径                                      |
+| ------------ | ------------------------------------- | ------------------------------------- | ----------------------------------------------------- |
+| Claude Code  | `$CLAUDE_CONFIG_DIR/projects`         | `~/.claude/projects`                  | `%USERPROFILE%\\.claude\\projects`                    |
+| Codex CLI    | `$CODEX_HOME/sessions`                | `~/.codex/sessions`                   | `%USERPROFILE%\\.codex\\sessions`                     |
+| OpenCode     | `$XDG_DATA_HOME/opencode/opencode.db` | `~/.local/share/opencode/opencode.db` | `%USERPROFILE%\\.local\\share\\opencode\\opencode.db` |
+| Gemini CLI   | `$GEMINI_CLI_HOME/.gemini`            | `~/.gemini`                           | `%USERPROFILE%\\.gemini`                              |
+| OpenClaw     | —                                     | `~/.openclaw/agents`                  | `%USERPROFILE%\\.openclaw\\agents`                    |
+| Cline        | `$CLINE_DIR`                          | `~/.cline/data/tasks`                 | `%USERPROFILE%\\.cline\\data\\tasks`                  |
+| Hermes Agent | `$HERMES_HOME/state.db`               | `~/.hermes/state.db`                  | `%USERPROFILE%\\.hermes\\state.db`                    |
+| CodeBuddy    | `$CODEBUDDY_CONFIG_DIR/projects`      | `~/.codebuddy/projects`               | `%USERPROFILE%\\.codebuddy\\projects`                 |
+| Kimi Code    | `$KIMI_CODE_HOME/sessions`            | `~/.kimi-code/sessions`               | `%USERPROFILE%\\.kimi-code\\sessions`                 |
+| Pi           | `$PI_CODING_AGENT_SESSION_DIR`        | `~/.pi/agent/sessions`                | `%USERPROFILE%\\.pi\\agent\\sessions`                 |
 
 > 注意：环境变量的优先级高于默认路径。
 
@@ -116,6 +134,34 @@ Codeg（Code Generation）是一个多智能体编码工作台，它将多个智
 | iLink（微信） | WebSocket + REST API   | 内置 |
 
 > 更多渠道（Discord、Slack、钉钉等）计划在未来版本中支持。
+
+</details>
+
+<details>
+<summary><h2>Office 文档</h2></summary>
+
+将 Word、Excel 和 PowerPoint 文件纳入一等工作流。内置的 **officecli** 工具集让你的智能体能够创建、分析、校对和编辑 .docx、.xlsx、.pptx 文档——并可直接在 Codeg 内预览结果。
+
+### 功能特性
+
+- **创建与编辑** — 生成新文档或修改现有 .docx / .xlsx / .pptx 文件，支持图表、表格和格式设置
+- **分析与校对** — 检查文档结构、发现格式问题、校对内容
+- **实时预览** — 在文件标签页中打开 .docx / .xlsx / .pptx，即可内联渲染，随智能体编辑自动刷新——底层由常驻的 `officecli watch` 服务支撑（在 Web 和独立服务器部署中经反向代理转发，按能力鉴权）
+- **快捷操作** — 欢迎页提供「编码」和「Office」两个标签，一键将对应技能调用和提示词模板填入输入框；未对所选智能体启用的技能会显示锁定标记，并引导你前往可开启的位置
+- **Office 工具设置** — 专属设置页可安装 `officecli` 并通过技能×智能体矩阵管理文档技能：切换任意（技能，智能体）组合，支持一键批量启停
+
+</details>
+
+<details>
+<summary><h2>自动化</h2></summary>
+
+将任意输入框配置——智能体、模型、提示词、工作目录和选项——保存为可复用的**自动化**任务，无需打开 UI 即可运行。
+
+### 功能特性
+
+- **一次配置，随时复用** — 将完整的输入框配置保存为命名自动化任务
+- **定时或按需触发** — 按 cron 计划运行，或随时手动触发
+- **无界面执行** — 自动化任务在后台运行，创建真实会话，可随时在工作台中打开，启动后自动返回工作台
 
 </details>
 
@@ -330,6 +376,7 @@ Next.js 16 (Static Export) + React 19
               |- Chat Channels
               |- Git / File Tree / Terminal
               |- MCP marketplace + config
+              |- Office Tools (officecli) + Automations
               |- SeaORM + SQLite
                       |
               ┌───────┼───────┐
@@ -356,9 +403,18 @@ Next.js 16 (Static Export) + React 19
 
 - 感谢 [LinuxDO](https://linux.do) 社区的支持
 
+## Coffee
+
+- 如果 Codeg 对你有帮助，不如请我喝杯咖啡吧
+
+<img src="../images/weixin-sponsor-light.jpg#gh-light-mode-only" alt="赞助 Codeg" width="240" />
+<img src="../images/weixin-sponsor-dark.jpg#gh-dark-mode-only" alt="赞助 Codeg" width="240" />
+
 ## 鸣谢
 
 - [ACP](https://agentclientprotocol.com)：智能体客户端协议 (ACP) 是 codeg 实现多智能体连接的基础
+- [Superpowers](https://github.com/obra/superpowers)：为 Codeg 的专家技能模块提供支持
+- [OfficeCLI](https://github.com/iOfficeAI/OfficeCLI)：为 Codeg 的 Office 文档工作流提供支持
 
 ## 许可证
 

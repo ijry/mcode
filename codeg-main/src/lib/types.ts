@@ -6,6 +6,9 @@ export type AgentType =
   | "open_claw"
   | "cline"
   | "hermes"
+  | "code_buddy"
+  | "kimi_code"
+  | "pi"
 
 export type AppErrorCode =
   | "invalid_input"
@@ -151,6 +154,16 @@ export type ContentBlock =
       output_preview: string | null
       is_error: boolean
       agent_stats?: AgentExecutionStats | null
+      /**
+       * Images returned in a tool result (e.g. Claude Code's `Read` of a
+       * PNG/JPEG, or a multi-page PDF read returning one image per page).
+       * Mirror of Rust `ContentBlock::ToolResult.images`. The adapter renders
+       * these in-position as `generated-image` cards so the historical (JSONL
+       * replay) path matches the live ACP stream — which surfaces the same
+       * bytes via `ToolCallInfo.images` and an `image_generation` block.
+       * Absent/empty for the common text-only tool result.
+       */
+      images?: ImageData[] | null
     }
   | { type: "thinking"; text: string }
   /**
@@ -250,6 +263,34 @@ export interface FolderDetail {
    * original root. Drives the sidebar merge and worktree-branch detection.
    */
   parent_id: number | null
+  /**
+   * Folder classification. `chat` folders back folderless chat-mode
+   * conversations: kept in `allFolders` so cwd / active-folder resolve, but
+   * hidden from user-facing folder lists; their conversations route to the
+   * sidebar "Chat" group and folder-bound chrome is hidden while one is active.
+   */
+  kind: FolderKind
+}
+
+/**
+ * Result of `createChatConversation`: the new conversation id plus the hidden
+ * chat folder backing it, so the caller can drop the folder straight into
+ * `allFolders` (resolving cwd / active-folder) without a refetch.
+ */
+export interface CreateChatConversationResult {
+  conversationId: number
+  folderId: number
+  folder: FolderDetail
+}
+
+/**
+ * Result of `createChatDir`: a freshly created chat-mode scratch directory
+ * (filesystem only — no DB rows). Used to connect ACP at a real cwd the instant
+ * "no-folder mode" is selected; the conversation is still created lazily on the
+ * first send, reusing this path.
+ */
+export interface CreateChatDirResult {
+  path: string
 }
 
 export interface OpenedTab {
@@ -271,12 +312,22 @@ export interface DbConversationSummary {
   title_locked: boolean
   agent_type: AgentType
   status: string
+  /** Mirrors `conversation.kind` — drives sidebar visibility and grouping. */
+  kind: ConversationKind
   model: string | null
   git_branch: string | null
   external_id: string | null
   message_count: number
+  /** Number of direct, non-deleted delegation children (computed by the backend
+   *  `fill_child_counts` aggregate). `child_count > 0` means this conversation is
+   *  expandable into its sub-session subtree — drives the sidebar chevron. */
+  child_count: number
   created_at: string
   updated_at: string
+  /** When the user pinned this conversation (ISO string), or null if not pinned.
+   *  Drives the sidebar's "Pinned" section (sorted by this descending); a pinned
+   *  conversation is shown there instead of in its folder group. */
+  pinned_at: string | null
   parent_id?: number | null
   parent_tool_use_id?: string | null
   delegation_call_id?: string | null
@@ -291,6 +342,16 @@ export type ConversationChange =
   | { kind: "status"; id: number; status: string }
 
 export const CONVERSATION_CHANGED_EVENT = "conversation://changed"
+
+/** Payload for the global `folder://changed` side-channel. A folder created or
+ *  updated headlessly — e.g. the automation engine minting a per-run worktree —
+ *  reaches every client's workspace list so a conversation produced inside it can
+ *  be grouped/rendered in the sidebar. Mirrors the Rust `FolderChange` enum
+ *  (serde `tag = "kind"`). Distinct from `folder://open-in-workspace`, whose
+ *  listener also opens + focuses a tab. */
+export type FolderChange = { kind: "upsert"; folder: FolderDetail }
+
+export const FOLDER_CHANGED_EVENT = "folder://changed"
 
 /** Global side-channel announcing a live-feedback enable/disable (payload is
  *  `FeedbackSettings`). The settings UI runs in a separate window, so the
@@ -355,6 +416,15 @@ export type ConversationStatus =
   | "completed"
   | "cancelled"
 
+/** Mirrors Rust `ConversationKind` (src-tauri/src/db/entities/conversation.rs).
+ *  `loop` rows belong to the Loop Engineering workbench and never appear in
+ *  the sidebar list; `delegate` rows nest under their parent's tool-call view. */
+export type ConversationKind = "regular" | "chat" | "loop" | "delegate"
+
+/** Mirrors Rust `FolderKind` (src-tauri/src/db/entities/folder.rs).
+ *  `loop_worktree` is reserved for M2+ — add it here when the variant lands. */
+export type FolderKind = "regular" | "chat"
+
 export const STATUS_ORDER: ConversationStatus[] = [
   "in_progress",
   "pending_review",
@@ -384,6 +454,9 @@ export const AGENT_DISPLAY_ORDER: AgentType[] = [
   "open_claw",
   "cline",
   "hermes",
+  "code_buddy",
+  "kimi_code",
+  "pi",
 ]
 
 const AGENT_DISPLAY_ORDER_INDEX = new Map(
@@ -404,6 +477,9 @@ export const ALL_AGENT_TYPES: AgentType[] = [
   "open_claw",
   "cline",
   "hermes",
+  "code_buddy",
+  "kimi_code",
+  "pi",
 ]
 
 export const MODEL_PROVIDER_AGENT_TYPES: AgentType[] = [
@@ -691,6 +767,9 @@ export const AGENT_LABELS: Record<AgentType, string> = {
   open_claw: "OpenClaw",
   cline: "Cline",
   hermes: "Hermes Agent",
+  code_buddy: "CodeBuddy",
+  kimi_code: "Kimi Code",
+  pi: "Pi",
 }
 
 export const AGENT_COLORS: Record<AgentType, string> = {
@@ -701,6 +780,9 @@ export const AGENT_COLORS: Record<AgentType, string> = {
   open_claw: "bg-emerald-600",
   cline: "bg-purple-500",
   hermes: "bg-amber-500",
+  code_buddy: "bg-[#0052D9]",
+  kimi_code: "bg-[#1783FF]",
+  pi: "bg-[#0D9488]",
 }
 
 // ACP connection status (matches Rust ConnectionStatus)
@@ -833,11 +915,103 @@ export interface SessionConfigOptionInfo {
 export interface AgentOptionsSnapshot {
   modes: SessionModeStateInfo | null
   config_options: SessionConfigOptionInfo[]
+  /** Slash commands captured during the same transient probe as modes/config
+   *  (empty when the agent advertises none in the probe window). */
+  available_commands: AvailableCommandInfo[]
 }
 
 export interface AgentDelegationDefaults {
   mode_id?: string | null
   config_values: Record<string, string>
+}
+
+// ─── Automations ───────────────────────────────────────────────────────────
+// Mirrors src-tauri/src/models/automation.rs. Wire form is snake_case (serde
+// default), matching AgentDelegationDefaults.
+
+export type AutomationTriggerKind = "schedule" | "manual"
+export type AutomationIsolation = "worktree_per_run" | "shared_in_root"
+export type AutomationRunStatus =
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "skipped"
+
+/** Display-only cache so the editor can render a value the live agent no longer
+ *  offers (marked unavailable) instead of silently dropping it. */
+export interface AutomationLabelSnapshot {
+  agent_label?: string
+  mode_label?: string
+  config_labels?: Record<string, string>
+  folder_label?: string
+  branch_label?: string
+}
+
+/** The captured composer snapshot stored in `automation.config`. `mode_id` +
+ *  `config_values` are exactly AgentDelegationDefaults; the model rides inside
+ *  `config_values["model"]`, never as its own field. */
+export interface AutomationConfig {
+  prompt_blocks: PromptInputBlock[]
+  display_text: string
+  mode_id?: string | null
+  config_values: Record<string, string>
+  label_snapshot?: AutomationLabelSnapshot | null
+}
+
+export interface Automation {
+  id: number
+  name: string
+  enabled: boolean
+  trigger_kind: AutomationTriggerKind
+  cron: string | null
+  timezone: string
+  next_run_at: string | null
+  agent_type: AgentType
+  root_folder_id: number | null
+  isolation: AutomationIsolation
+  branch: string | null
+  is_remote_branch: boolean
+  // Serialized from an opaque JSON column; the backend falls back to `null`
+  // when a stored blob fails to parse, so readers must guard against it.
+  config: AutomationConfig | null
+  last_run_at: string | null
+  last_run_status: string | null
+  last_run_conversation_id: number | null
+  unseen_failures: number
+  created_at: string
+  updated_at: string
+}
+
+export interface AutomationRun {
+  id: number
+  automation_id: number
+  status: AutomationRunStatus
+  trigger: string
+  scheduled_for: string | null
+  started_at: string | null
+  ended_at: string | null
+  conversation_id: number | null
+  worktree_folder_id: number | null
+  stop_reason: string | null
+  error: string | null
+  summary: string | null
+  created_at: string
+}
+
+/** Full create/update payload — the editor saves the whole automation wholesale. */
+export interface AutomationDraft {
+  name: string
+  enabled: boolean
+  trigger_kind: AutomationTriggerKind
+  cron: string | null
+  timezone: string
+  agent_type: AgentType
+  root_folder_id: number | null
+  isolation: AutomationIsolation
+  branch: string | null
+  is_remote_branch: boolean
+  config: AutomationConfig
 }
 
 export interface PlanEntryInfo {
@@ -1398,6 +1572,49 @@ export interface ExpertInstallStatus {
   copyMode: boolean
 }
 
+/** A single enable/disable request for one (skill, agent) pair. For office
+ *  tools, `expertId` carries the office skill id. */
+export interface LinkOp {
+  expertId: string
+  agentType: AgentType
+  enable: boolean
+}
+
+/** Per-op outcome of a batch apply. A failed op never aborts the rest. */
+export interface LinkOpResult {
+  expertId: string
+  agentType: AgentType
+  ok: boolean
+  /** Present on a successful enable; null for disables and failures. */
+  status: ExpertInstallStatus | null
+  error: string | null
+}
+
+export interface OfficecliInfo {
+  installed: boolean
+  version: string | null
+  path: string | null
+  // Set when the binary file is present (`installed = true`) but running it
+  // failed — e.g. a missing system library (libicu) on a slim Linux server.
+  // Carries an actionable diagnostic; null when officecli runs fine.
+  runtimeError: string | null
+}
+
+export interface OfficecliSkill {
+  id: string
+  category: string
+  icon: string
+  sortOrder: number
+  displayName: Record<string, string>
+  description: Record<string, string>
+  installedCentrally: boolean
+}
+
+export interface SkillSyncReport {
+  synced: number
+  errors: string[]
+}
+
 export interface SystemProxySettings {
   enabled: boolean
   proxy_url: string | null
@@ -1440,6 +1657,59 @@ export interface AvailableTerminalShells {
 
 export interface SystemRenderingSettings {
   disable_hardware_acceleration: boolean
+}
+
+// --- Logging ---
+
+export type LogLevel = "off" | "error" | "warn" | "info" | "debug" | "trace"
+
+/** A per-target level override, e.g. `codeg_lib::acp` at `debug` while the
+ * global level stays `info`. `target` is a tracing target (a Rust module path). */
+export interface TargetDirective {
+  target: string
+  level: LogLevel
+}
+
+export interface LogSettings {
+  level: LogLevel
+  /** Omitted by the backend when empty; treat `undefined` as `[]`. */
+  targets?: TargetDirective[]
+}
+
+/** What the Logs settings UI reads: the persisted level + per-target overrides,
+ * plus whether an env var (CODEG_LOG/RUST_LOG) currently locks the controls
+ * (env owns the live level). */
+export interface LogSettingsView {
+  level: LogLevel
+  targets: TargetDirective[]
+  env_locked: boolean
+}
+
+/** One enclosing span in an event's scope: its name + recorded fields. Ordered
+ * root→leaf in `LogRecord.spans`. */
+export interface SpanInfo {
+  name: string
+  fields: Record<string, string>
+}
+
+/** One captured log event. `level` is tracing's uppercase string
+ * ("ERROR".."TRACE"); `target` is the emitting module path. `fields` holds the
+ * event's own key-value fields and `spans` the enclosing span chain; both are
+ * empty for plain-message logs. */
+export interface LogRecord {
+  seq: number
+  timestamp_ms: number
+  level: string
+  target: string
+  message: string
+  fields: Record<string, string>
+  spans: SpanInfo[]
+}
+
+export interface LogFileInfo {
+  name: string
+  size_bytes: number
+  modified_ms: number
 }
 
 // --- Version Control ---
@@ -1501,6 +1771,8 @@ export type McpAppType =
   | "open_code"
   | "cline"
   | "hermes"
+  | "code_buddy"
+  | "kimi_code"
 
 export interface LocalMcpServer {
   id: string
@@ -1605,6 +1877,21 @@ export interface GitBranchList {
   local: string[]
   remote: string[]
   worktree_branches: string[]
+}
+
+/**
+ * State of a working tree's HEAD (mirrors Rust `GitHeadInfo`). Distinguishes a
+ * non-repo, a detached HEAD, and being on a branch — the branch-only
+ * `getGitBranch` contract collapsed the last two into `null`, hiding git
+ * operations for detached repos (issue #279).
+ */
+export interface GitHeadInfo {
+  is_repo: boolean
+  /** Branch name when on a branch (incl. unborn); null when detached or non-repo. */
+  branch: string | null
+  detached: boolean
+  /** Short commit hash, present when detached. */
+  short_sha: string | null
 }
 
 /**
@@ -1862,6 +2149,34 @@ export interface PluginCheckSummary {
   has_project_config_hint: boolean
 }
 
+// ─── OpenCode Provider Catalog (models.dev) ───
+
+/** A model entry under a catalog provider, normalized from models.dev. */
+export interface OpenCodeCatalogModel {
+  id: string
+  name: string
+  reasoning: boolean
+  tool_call: boolean
+  context: number | null
+  cost_in: number | null
+  cost_out: number | null
+}
+
+/**
+ * One provider from the models.dev catalog (the same registry OpenCode reads).
+ * `auth_kind` is `"oauth"` for providers OpenCode signs into via a browser flow
+ * (ChatGPT, GitHub Copilot, GitLab Duo), `"api"` otherwise.
+ */
+export interface OpenCodeCatalogProvider {
+  id: string
+  name: string
+  npm: string | null
+  env: string[]
+  doc: string | null
+  auth_kind: "api" | "oauth"
+  models: OpenCodeCatalogModel[]
+}
+
 export type PluginInstallEventKind = "started" | "log" | "completed" | "failed"
 
 export interface PluginInstallEvent {
@@ -1875,6 +2190,18 @@ export type AgentInstallEventKind = "started" | "log" | "completed" | "failed"
 export interface AgentInstallEvent {
   task_id: string
   kind: AgentInstallEventKind
+  payload: string
+}
+
+export type OfficecliInstallEventKind =
+  | "started"
+  | "log"
+  | "completed"
+  | "failed"
+
+export interface OfficecliInstallEvent {
+  task_id: string
+  kind: OfficecliInstallEventKind
   payload: string
 }
 
@@ -1957,6 +2284,13 @@ export interface ClaudeProviderModel {
   haiku?: string
   sonnet?: string
   opus?: string
+  /** ANTHROPIC_CUSTOM_MODEL_OPTION — id of a custom entry appended to the
+   *  in-session /model picker (e.g. a model the gateway serves). */
+  customOption?: string
+  /** ANTHROPIC_CUSTOM_MODEL_OPTION_NAME — display name for that entry. */
+  customOptionName?: string
+  /** ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION — description for that entry. */
+  customOptionDescription?: string
 }
 
 export function parseClaudeProviderModel(
@@ -1973,6 +2307,9 @@ export function parseClaudeProviderModel(
       "haiku",
       "sonnet",
       "opus",
+      "customOption",
+      "customOptionName",
+      "customOptionDescription",
     ]
     for (const k of keys) {
       const v = (parsed as Record<string, unknown>)[k]
@@ -1993,5 +2330,10 @@ export function serializeClaudeProviderModel(
   if (obj.haiku?.trim()) cleaned.haiku = obj.haiku.trim()
   if (obj.sonnet?.trim()) cleaned.sonnet = obj.sonnet.trim()
   if (obj.opus?.trim()) cleaned.opus = obj.opus.trim()
+  if (obj.customOption?.trim()) cleaned.customOption = obj.customOption.trim()
+  if (obj.customOptionName?.trim())
+    cleaned.customOptionName = obj.customOptionName.trim()
+  if (obj.customOptionDescription?.trim())
+    cleaned.customOptionDescription = obj.customOptionDescription.trim()
   return Object.keys(cleaned).length === 0 ? null : JSON.stringify(cleaned)
 }

@@ -8,6 +8,7 @@ import {
   groupGoalRuns,
   mergeAdjacentToolGroups,
   mergeAdjacentDelegationStatusGroups,
+  mergeAdjacentBackgroundTaskGroups,
   type AdaptedContentPart,
   type AdaptedMessage,
   type MessageTurnAdapter,
@@ -16,6 +17,7 @@ import {
 } from "@/lib/adapters/ai-elements-adapter"
 import { TurnStats } from "./turn-stats"
 import { LiveTurnStats } from "./live-turn-stats"
+import { ReplyArtifacts } from "./reply-artifacts"
 import { UserResourceLinks } from "./user-resource-links"
 import { UserImageAttachments } from "./user-image-attachments"
 import { useSessionStats } from "@/contexts/session-stats-context"
@@ -50,7 +52,12 @@ import {
   buildPlanKey,
   extractLatestPlanEntriesFromMessages,
 } from "@/lib/agent-plan"
-import type { AgentType, ConnectionStatus, SessionStats } from "@/lib/types"
+import type {
+  AgentType,
+  ConnectionStatus,
+  MessageTurn,
+  SessionStats,
+} from "@/lib/types"
 import { copyTextToClipboard } from "@/lib/utils"
 import { VirtualizedMessageThread } from "@/components/message/virtualized-message-thread"
 import {
@@ -58,12 +65,8 @@ import {
   type MessageNavEntry,
 } from "@/components/message/conversation-message-nav"
 import type { MessageScrollContextValue } from "@/components/message/message-scroll-context"
-import {
-  pickActiveThreadIndex,
-  reconcileActive,
-  type ActiveClickGuard,
-} from "@/lib/message-nav-active"
 import { extractSessionFilesGrouped } from "@/lib/session-files"
+import { unescapeComposerText } from "@/lib/composer-copy-text"
 import { useStickToBottomContext } from "use-stick-to-bottom"
 
 interface MessageListViewProps {
@@ -121,6 +124,9 @@ type ThreadRenderItem =
       showStats: boolean
       isRoleTransition: boolean
       previousUserIndex: number | null
+      /** Raw assistant sub-turn(s) that compose this reply — fed to the
+       *  per-reply artifacts card so it can list files changed this reply. */
+      sourceTurns: MessageTurn[]
     }
   | {
       key: string
@@ -138,11 +144,6 @@ const EMPTY_DELEGATIONS: DelegationCardSource[] = []
 // Stable empty reference so the navigator memo / equality checks don't churn
 // when a conversation has no user messages.
 const EMPTY_NAV_ENTRIES: MessageNavEntry[] = []
-
-// How long a marker click keeps its tick active while the smooth scroll
-// settles. Released early once the scroll arrives (see reconcileActive); this
-// is only the safety net for bottom-clamped targets that never reach the top.
-const ACTIVE_CLICK_GUARD_MS = 1000
 
 // Collect the `delegate_to_agent` tool calls within a turn's adapted parts,
 // recursing through tool-groups and goal-runs (a delegate call is normally a
@@ -266,11 +267,19 @@ function mergeConsecutiveAssistantTurns(
       result.push(buffer[0])
     } else {
       const allParts = buffer.flatMap((it) => it.group.parts)
+      // A goal run straddling these merged sub-turns is still live only if the
+      // final sub-turn is streaming; once it settles (stop / turn end / reload)
+      // the unfinished-run shimmer must stop. Mirror groupGoalRuns' per-turn
+      // isStreaming gate at the merge layer.
+      const mergedStreaming = buffer.some((it) => it.phase === "streaming")
       // Fold tool-groups straddling the turn boundary, then collapse runs of
-      // single-poll delegation-status groups (each polling round is its own
-      // turn) into one merged status card.
+      // single-poll delegation-status and background-task groups (each polling
+      // round is its own turn) into one merged card.
       const mergedParts = groupGoalRuns(
-        mergeAdjacentDelegationStatusGroups(mergeAdjacentToolGroups(allParts))
+        mergeAdjacentBackgroundTaskGroups(
+          mergeAdjacentDelegationStatusGroups(mergeAdjacentToolGroups(allParts))
+        ),
+        mergedStreaming
       )
       const last = buffer[buffer.length - 1]
       const first = buffer[0]
@@ -313,6 +322,9 @@ function mergeConsecutiveAssistantTurns(
       result.push({
         ...last,
         key: `merged-${first.key}`,
+        // Concatenate every sub-turn's raw turns so the artifacts card sees all
+        // file edits across the merged reply, not just the last sub-turn.
+        sourceTurns: buffer.flatMap((b) => b.sourceTurns),
         group: {
           ...last.group,
           id: first.group.id,
@@ -369,7 +381,11 @@ const UserMessageCopyButton = memo(function UserMessageCopyButton({
 
   const handleCopy = useCallback(async () => {
     if (isCopied) return
-    const text = extractTextFromParts(parts)
+    // User text was Markdown-escaped by the composer on send (e.g. a Windows
+    // path `C:\…` became `C:\\…`); the transcript renders it back through a
+    // Markdown renderer, so the copy must reverse that escaping to match what
+    // the user sees. Assistant copies (TurnStats below) keep the raw Markdown.
+    const text = unescapeComposerText(extractTextFromParts(parts))
     if (!text) return
     const ok = await copyTextToClipboard(text)
     if (!ok) return
@@ -402,12 +418,14 @@ const HistoricalMessageGroup = memo(function HistoricalMessageGroup({
   showStats = true,
   previousUserIndex = null,
   isResponseComplete = true,
+  sourceTurns,
 }: {
   group: ResolvedMessageGroup
   dimmed?: boolean
   showStats?: boolean
   previousUserIndex?: number | null
   isResponseComplete?: boolean
+  sourceTurns?: MessageTurn[]
 }) {
   if (group.role === "system") {
     return <CollapsibleSystemMessage group={group} />
@@ -435,6 +453,12 @@ const HistoricalMessageGroup = memo(function HistoricalMessageGroup({
           <UserResourceLinks resources={group.resources} className="self-end" />
         ) : null}
       </Message>
+      {showStats && group.role === "assistant" && sourceTurns && (
+        <ReplyArtifacts
+          sourceTurns={sourceTurns}
+          isResponseComplete={isResponseComplete}
+        />
+      )}
       {showStats && group.role === "assistant" && (
         <TurnStats
           usage={group.usage}
@@ -606,6 +630,7 @@ export function MessageListView({
         showStats: false,
         isRoleTransition: false,
         previousUserIndex: null,
+        sourceTurns: [allTurns[i]],
       }
     })
 
@@ -682,6 +707,7 @@ export function MessageListView({
               showStats={item.showStats}
               previousUserIndex={item.previousUserIndex}
               isResponseComplete={item.phase === "persisted"}
+              sourceTurns={item.sourceTurns}
             />
           </div>
         )
@@ -743,22 +769,31 @@ export function MessageListView({
     ? `subagents-${lastAssistantGroup.id}`
     : `subagents-history-${conversationId}`
 
-  // --- Message navigator rail -------------------------------------------------
-  // Lifted scroll handle so the rail (a sibling outside the MessageScrollProvider
-  // subtree) can drive scrollToIndex.
+  // --- Message navigator panel ------------------------------------------------
+  // Lifted scroll handle so the panel (which lives in the overlay stack, outside
+  // the MessageScrollProvider subtree) can drive scrollToIndex.
   const scrollApiRef = useRef<MessageScrollContextValue | null>(null)
-  const [activeThreadIndex, setActiveThreadIndex] = useState<number | null>(
-    null
-  )
-  // A marker click optimistically activates its tick; this guard stops the
-  // ensuing smooth-scroll readings from regressing it before the scroll lands.
-  const activeClickGuardRef = useRef<ActiveClickGuard | null>(null)
+  // Collapse state is owned here (not in the panel) so the expensive per-file
+  // `navEntries` is computed only while the panel is open.
+  const [navExpanded, setNavExpanded] = useState(false)
+
+  // Cheap user-message tally for the collapsed chip — counts user turns without
+  // parsing any file diffs.
+  const userMessageCount = useMemo(() => {
+    if (!showMessageNav) return 0
+    let count = 0
+    for (const item of threadItems) {
+      if (item.kind === "turn" && item.group.role === "user") count += 1
+    }
+    return count
+  }, [showMessageNav, threadItems])
 
   // One entry per user message — including ones with no edits (placeholders).
-  // `extractSessionFilesGrouped(..., {includeEmpty})` yields a group per user
-  // turn in order; we join the rendered threadItems index for scrolling.
+  // Computed lazily: only while the panel is expanded, since
+  // `extractSessionFilesGrouped` parses every turn's diffs. Collapsed (the
+  // default) it stays EMPTY, keeping the streaming hot path free of diff parsing.
   const navEntries = useMemo<MessageNavEntry[]>(() => {
-    if (!showMessageNav) return EMPTY_NAV_ENTRIES
+    if (!showMessageNav || !navExpanded) return EMPTY_NAV_ENTRIES
     const turns = timelineTurns.map((item) => item.turn)
     const groups = extractSessionFilesGrouped(turns, { includeEmpty: true })
     if (groups.length === 0) return EMPTY_NAV_ENTRIES
@@ -793,39 +828,7 @@ export function MessageListView({
       })
     }
     return entries.length > 0 ? entries : EMPTY_NAV_ENTRIES
-  }, [showMessageNav, timelineTurns, threadItems])
-
-  // Optimistically activate the clicked tick and arm a guard so the smooth
-  // scroll that follows can't regress the highlight to the previous tick
-  // before it lands (and so bottom-clamped targets, which never reach the top,
-  // still light up — see reconcileActive).
-  const handleMarkerActivate = useCallback((threadIndex: number) => {
-    activeClickGuardRef.current = {
-      target: threadIndex,
-      releaseAfter: performance.now() + ACTIVE_CLICK_GUARD_MS,
-    }
-    setActiveThreadIndex(threadIndex)
-  }, [])
-
-  // navEntries is ascending by threadIndex; pick the last one at or above the
-  // viewport top, reconcile it with any pending click guard, and only setState
-  // when it changes (avoids a storm on every scroll frame). Depending on
-  // navEntries keeps this referentially stable while turns are unchanged, so
-  // the VirtualizedMessageThread memo still bails out on cross-tab broadcast
-  // re-renders.
-  const handleVisibleStartIndexChange = useCallback(
-    (startIndex: number) => {
-      const computed = pickActiveThreadIndex(navEntries, startIndex)
-      const { active, guard } = reconcileActive(
-        computed,
-        activeClickGuardRef.current,
-        performance.now()
-      )
-      activeClickGuardRef.current = guard
-      setActiveThreadIndex((prev) => (prev === active ? prev : active))
-    },
-    [navEntries]
-  )
+  }, [showMessageNav, navExpanded, timelineTurns, threadItems])
 
   const hasRenderableContent = threadItems.length > 0 || Boolean(liveMessage)
 
@@ -898,60 +901,61 @@ export function MessageListView({
   }
 
   return (
-    <div className="relative flex h-full min-h-0 flex-row">
-      <div className="relative flex h-full min-h-0 flex-1 flex-col">
-        <MessageThread
-          className="flex-1 min-h-0"
-          resize={shouldUseSmoothResize ? "smooth" : undefined}
-        >
-          <AutoScrollOnSend signal={sendSignal} />
-          <VirtualizedMessageThread
-            items={threadItems}
-            getItemKey={getThreadItemKey}
-            renderItem={renderThreadItem}
-            emptyState={emptyState}
-            scrollApiRef={scrollApiRef}
-            onVisibleStartIndexChange={
-              showMessageNav ? handleVisibleStartIndexChange : undefined
-            }
-          />
-          <MessageThreadScrollButton />
-        </MessageThread>
-        {liveMessage && connStatus === "prompting" && (
-          <LiveTurnStats
-            message={liveMessage}
-            agentType={agentType}
-            isStreaming={connStatus === "prompting"}
-          />
-        )}
-        {/* Shared overlay stack: the plan panel on top, the sub-agent panel
-            below it. A flex column keeps the order stable regardless of each
-            panel's expand/collapse height; empty panels render null and collapse
-            out. Positioning lives here (not in the child overlays). */}
-        <div className="pointer-events-none absolute right-8 top-4 z-20 flex max-w-[min(22rem,calc(100%-2rem))] flex-col items-end gap-2">
-          <AgentPlanOverlay
-            key={agentPlanOverlayKey}
-            message={liveMessage ?? null}
-            entries={historicalPlanEntries}
-            planKey={historicalPlanKey}
-            defaultExpanded={false}
-            isStreaming={connStatus === "prompting"}
-          />
-          <SubAgentOverlay
-            key={subAgentOverlayKey}
-            delegations={lastAssistantDelegations}
-            overlayKey={subAgentOverlayKey}
-          />
-        </div>
-      </div>
-      {showMessageNav && navEntries.length > 0 && (
-        <ConversationMessageNav
-          entries={navEntries}
+    <div className="relative flex h-full min-h-0 flex-col">
+      <MessageThread
+        className="flex-1 min-h-0"
+        resize={shouldUseSmoothResize ? "smooth" : undefined}
+      >
+        <AutoScrollOnSend signal={sendSignal} />
+        <VirtualizedMessageThread
+          items={threadItems}
+          getItemKey={getThreadItemKey}
+          renderItem={renderThreadItem}
+          emptyState={emptyState}
           scrollApiRef={scrollApiRef}
-          activeThreadIndex={activeThreadIndex}
-          onActivate={handleMarkerActivate}
+        />
+        <MessageThreadScrollButton />
+      </MessageThread>
+      {liveMessage && connStatus === "prompting" && (
+        <LiveTurnStats
+          message={liveMessage}
+          agentType={agentType}
+          isStreaming={connStatus === "prompting"}
         />
       )}
+      {/* Shared overlay stack pinned to the inline-start edge (top-left in LTR,
+          top-right in RTL). A flex column keeps the order stable regardless of
+          each panel's expand/collapse height: the message navigator first, then
+          the plan panel, then the sub-agent panel. Empty panels render null and
+          collapse out. Positioning lives here (not in the child overlays); the
+          chips are "bullets" — flat on the start side (flush to the pinned
+          edge), rounded on the end side — that expand toward the inline-end on
+          hover. Logical `start-0` + `items-start` keep the anchor and the bullet
+          on the same side, so the whole stack mirrors cleanly in RTL. */}
+      <div className="pointer-events-none absolute start-0 top-4 z-20 flex max-w-[min(22rem,calc(100%-2rem))] flex-col items-start gap-2">
+        {showMessageNav && userMessageCount > 0 && (
+          <ConversationMessageNav
+            count={userMessageCount}
+            expanded={navExpanded}
+            onToggle={setNavExpanded}
+            entries={navEntries}
+            scrollApiRef={scrollApiRef}
+          />
+        )}
+        <AgentPlanOverlay
+          key={agentPlanOverlayKey}
+          message={liveMessage ?? null}
+          entries={historicalPlanEntries}
+          planKey={historicalPlanKey}
+          defaultExpanded={false}
+          isStreaming={connStatus === "prompting"}
+        />
+        <SubAgentOverlay
+          key={subAgentOverlayKey}
+          delegations={lastAssistantDelegations}
+          overlayKey={subAgentOverlayKey}
+        />
+      </div>
     </div>
   )
 }

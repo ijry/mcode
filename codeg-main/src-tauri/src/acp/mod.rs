@@ -1,4 +1,5 @@
 pub mod binary_cache;
+pub mod codex_goal;
 pub mod connection;
 pub mod delegation;
 pub mod error;
@@ -10,10 +11,12 @@ pub mod idle_sweep;
 pub mod internal_bus;
 pub mod lifecycle;
 pub mod manager;
+pub mod opencode_catalog;
 pub mod opencode_plugins;
 pub mod preflight;
 pub mod question;
 pub mod registry;
+pub mod session_info;
 pub mod session_state;
 pub mod terminal_runtime;
 pub mod types;

@@ -170,6 +170,24 @@ const BASENAME_MAP: Record<string, string> = {
   ".inputrc": "shell",
 }
 
+const IMAGE_EXTENSIONS = new Set([
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "svg",
+  "webp",
+  "bmp",
+  "ico",
+])
+
+// Images render via base64 preview and carry no etag — callers branch on
+// this before any etag-based disk reconciliation.
+export function isImageFile(path: string): boolean {
+  const ext = path.split(".").pop()?.toLowerCase() ?? ""
+  return IMAGE_EXTENSIONS.has(ext)
+}
+
 // HTML documents we can render in the in-app sandboxed preview. Scoped to real
 // .html/.htm files — .vue/.svelte also map to the "html" language but are not
 // standalone, renderable documents.
@@ -180,6 +198,18 @@ export function isHtmlPreviewable(path: string | null | undefined): boolean {
   if (dot === -1) return false
   const ext = basename.slice(dot + 1)
   return ext === "html" || ext === "htm"
+}
+
+// Office documents (.docx/.xlsx/.pptx) we can render in the in-app preview via
+// the OfficeCLI backend. These are binary OpenXML files — there is no text
+// editor view, so a matching tab is always preview-only.
+export function isOfficePreviewable(path: string | null | undefined): boolean {
+  if (!path) return false
+  const basename = path.toLowerCase().split(/[\\/]/).pop() ?? ""
+  const dot = basename.lastIndexOf(".")
+  if (dot === -1) return false
+  const ext = basename.slice(dot + 1)
+  return ext === "docx" || ext === "xlsx" || ext === "pptx"
 }
 
 export function languageFromPath(path: string): string {

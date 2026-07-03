@@ -639,6 +639,130 @@ pub async fn acp_update_hermes_config(
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AcpUpdateKimiCodeConfigParams {
+    pub mode: String,
+    #[serde(default)]
+    pub interface_type: Option<String>,
+    #[serde(default)]
+    pub auth_type: Option<String>,
+    #[serde(default)]
+    pub base_url: Option<String>,
+    #[serde(default)]
+    pub api_key: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub max_context_size: Option<i64>,
+    #[serde(default)]
+    pub vertex_project: Option<String>,
+    #[serde(default)]
+    pub vertex_location: Option<String>,
+    #[serde(default)]
+    pub raw_config_toml: Option<String>,
+}
+
+pub async fn acp_update_kimi_code_config(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<AcpUpdateKimiCodeConfigParams>,
+) -> Result<Json<usize>, AppCommandError> {
+    let emitter = state.emitter.clone();
+    let affected = acp_commands::acp_update_kimi_code_config_and_refresh(
+        acp_commands::KimiCodeConfigUpdate {
+            mode: params.mode,
+            interface_type: params.interface_type,
+            auth_type: params.auth_type,
+            base_url: params.base_url,
+            api_key: params.api_key,
+            model: params.model,
+            max_context_size: params.max_context_size,
+            vertex_project: params.vertex_project,
+            vertex_location: params.vertex_location,
+            raw_config_toml: params.raw_config_toml,
+        },
+        &state.db,
+        &state.connection_manager,
+        &state.data_dir,
+        &emitter,
+    )
+    .await
+    .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
+    Ok(Json(affected))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpFetchKimiModelsParams {
+    pub base_url: String,
+    pub api_key: String,
+}
+
+pub async fn acp_fetch_kimi_models(
+    Json(params): Json<AcpFetchKimiModelsParams>,
+) -> Result<Json<Vec<String>>, AppCommandError> {
+    let models = acp_commands::acp_fetch_kimi_models_core(&params.base_url, &params.api_key)
+        .await
+        .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
+    Ok(Json(models))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpUpdatePiConfigParams {
+    pub provider: String,
+    pub model: String,
+    #[serde(default)]
+    pub thinking_level: Option<String>,
+    #[serde(default)]
+    pub api_key: Option<String>,
+    #[serde(default)]
+    pub custom_base_url: Option<String>,
+    #[serde(default)]
+    pub custom_api: Option<String>,
+}
+
+pub async fn acp_update_pi_config(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<AcpUpdatePiConfigParams>,
+) -> Result<Json<()>, AppCommandError> {
+    let emitter = state.emitter.clone();
+    acp_commands::acp_update_pi_config_core(
+        acp_commands::PiConfigUpdate {
+            provider: params.provider,
+            model: params.model,
+            thinking_level: params.thinking_level,
+            api_key: params.api_key,
+            custom_base_url: params.custom_base_url,
+            custom_api: params.custom_api,
+        },
+        &state.db,
+        &emitter,
+    )
+    .await
+    .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
+    Ok(Json(()))
+}
+
+pub async fn acp_load_pi_config(
+) -> Result<Json<acp_commands::PiConfigProjection>, AppCommandError> {
+    Ok(Json(acp_commands::load_pi_config_core()))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpValidatePiCommandParams {
+    pub command: String,
+}
+
+pub async fn acp_validate_pi_command(
+    Json(params): Json<AcpValidatePiCommandParams>,
+) -> Result<Json<acp_commands::PiCommandValidation>, AppCommandError> {
+    Ok(Json(acp_commands::acp_validate_pi_command_core(
+        params.command,
+    )))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AcpDownloadAgentBinaryParams {
     pub agent_type: AgentType,
     #[serde(default)]
@@ -743,6 +867,34 @@ pub async fn acp_uninstall_agent(
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AcpPiBinaryParams {
+    pub task_id: String,
+}
+
+pub async fn acp_install_pi_binary(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<AcpPiBinaryParams>,
+) -> Result<Json<()>, AppCommandError> {
+    let emitter = state.emitter.clone();
+    acp_commands::acp_install_pi_binary_core(params.task_id, &emitter)
+        .await
+        .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
+    Ok(Json(()))
+}
+
+pub async fn acp_uninstall_pi_binary(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<AcpPiBinaryParams>,
+) -> Result<Json<()>, AppCommandError> {
+    let emitter = state.emitter.clone();
+    acp_commands::acp_uninstall_pi_binary_core(params.task_id, &emitter)
+        .await
+        .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
+    Ok(Json(()))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AcpReorderAgentsParams {
     pub agent_types: Vec<AgentType>,
 }
@@ -764,6 +916,25 @@ pub async fn opencode_list_plugins() -> Result<Json<PluginCheckSummary>, AppComm
         .await
         .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
     Ok(Json(result))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpencodeProviderCatalogParams {
+    #[serde(default)]
+    pub force_refresh: Option<bool>,
+}
+
+pub async fn opencode_provider_catalog(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<OpencodeProviderCatalogParams>,
+) -> Result<Json<Vec<crate::acp::opencode_catalog::CatalogProvider>>, AppCommandError> {
+    let catalog = acp_commands::opencode_provider_catalog_core(
+        &state.data_dir,
+        params.force_refresh.unwrap_or(false),
+    )
+    .await;
+    Ok(Json(catalog))
 }
 
 #[derive(Deserialize)]

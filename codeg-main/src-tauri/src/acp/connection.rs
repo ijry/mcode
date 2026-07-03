@@ -10,7 +10,8 @@ use sacp::schema::{
     PermissionOptionKind, Plan, PlanEntryPriority, PlanEntryStatus, PromptRequest, ProtocolVersion,
     ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
     RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse, ResourceLink,
-    SelectedPermissionOutcome, SessionConfigKind, SessionConfigOption, SessionConfigOptionCategory,
+    ResumeSessionRequest, ResumeSessionResponse, SelectedPermissionOutcome, SessionConfigKind,
+    SessionConfigOption, SessionConfigOptionCategory,
     SessionConfigSelectGroup, SessionConfigSelectOption, SessionConfigSelectOptions, SessionId,
     SessionModeState, SessionNotification, SessionUpdate, SetSessionConfigOptionRequest,
     SetSessionConfigOptionResponse, SetSessionModeRequest, StopReason, TerminalExitStatus,
@@ -69,7 +70,76 @@ fn merge_agent_env(
         merged.insert(key, value);
     }
 
+    // Ensure agent-invoked `officecli …` (from an enabled office skill) resolves
+    // even when codeg installed the binary outside the user's shell PATH — the
+    // Windows self-managed dir, or `~/.local/bin` under a GUI launch.
+    prepend_officecli_path(&mut merged);
+
     merged.into_iter().collect()
+}
+
+/// Prepend `dir` to the PATH entry of `env`, seeding from `fallback_path` when
+/// `env` has no PATH key of its own. Removes any pre-existing PATH key first
+/// (case-insensitively when `windows`, since Windows env keys are
+/// case-insensitive) so the result has exactly one PATH entry — otherwise a
+/// differently-cased duplicate (e.g. an inherited `Path` plus an inserted
+/// `PATH`) could clobber the injected value when the child `Command` applies
+/// them. Pure (no env/fs access) so it is unit-tested for both platforms.
+fn prepend_dir_to_path_env(
+    env: &mut BTreeMap<String, String>,
+    dir: &str,
+    fallback_path: &str,
+    windows: bool,
+) {
+    let sep = if windows { ';' } else { ':' };
+    // Collect every PATH-ish key. `BTreeMap` iterates sorted, so when several
+    // differently-cased keys exist (e.g. both `Path` and `PATH`), the last is
+    // the one the child `Command` applies last — i.e. the effective value under
+    // Windows' case-insensitive env. Remove all of them so exactly one PATH
+    // entry remains; a stale duplicate could otherwise overwrite the injected
+    // value when the child applies them in order.
+    let matching: Vec<String> = env
+        .keys()
+        .filter(|k| {
+            if windows {
+                k.eq_ignore_ascii_case("PATH")
+            } else {
+                k.as_str() == "PATH"
+            }
+        })
+        .cloned()
+        .collect();
+    let mut existing_val: Option<String> = None;
+    for k in &matching {
+        existing_val = env.remove(k);
+    }
+    let existing_val = existing_val.unwrap_or_else(|| fallback_path.to_string());
+    let new_path = if existing_val.is_empty() {
+        dir.to_string()
+    } else {
+        format!("{dir}{sep}{existing_val}")
+    };
+    // Reuse the effective (last-sorted) key's casing when present; otherwise
+    // default to the platform-conventional name (`Path` on Windows, `PATH` on Unix).
+    let key = matching
+        .into_iter()
+        .next_back()
+        .unwrap_or_else(|| if windows { "Path" } else { "PATH" }.to_string());
+    env.insert(key, new_path);
+}
+
+/// Prepend codeg's known OfficeCLI install dir to `env`'s PATH when officecli is
+/// installed there but not yet on the live PATH (see
+/// `office_tools::officecli_agent_path_dir`). Applied to both the agent process
+/// env (`merge_agent_env`) and the ACP terminal runtime's base env, so an
+/// agent-invoked `officecli` resolves whether the agent execs it directly or
+/// runs it through the client `terminal/create` tool. PATH-only: never forwards
+/// model/API secrets.
+fn prepend_officecli_path(env: &mut BTreeMap<String, String>) {
+    if let Some(dir) = crate::commands::office_tools::officecli_agent_path_dir() {
+        let fallback = std::env::var("PATH").unwrap_or_default();
+        prepend_dir_to_path_env(env, &dir.to_string_lossy(), &fallback, cfg!(windows));
+    }
 }
 
 /// Commands sent from Tauri command handlers to the ACP connection loop.
@@ -185,16 +255,92 @@ impl AgentConnection {
 }
 
 /// Build an AcpAgent from registry metadata.
+/// Directory handed to codex-acp via `APP_SERVER_LOGS` so its adapter-side
+/// (ACP ↔ Codex app-server translation) logs land on disk for support.
+///
+/// Roots under the same `<cache>/app.codeg` tree as
+/// [`binary_cache::cache_dir`] for consistency. Returns `None` — and the
+/// caller injects nothing — when the system cache dir is unknown or the
+/// directory can't be created: diagnostics must never block a connection.
+fn codex_app_server_log_dir() -> Option<String> {
+    let dir = dirs::cache_dir()?
+        .join("app.codeg")
+        .join("acp-logs")
+        .join("codex-acp");
+    std::fs::create_dir_all(&dir).ok()?;
+    Some(dir.to_string_lossy().into_owned())
+}
+
+/// Pi runs through pi-acp, which spawns the actual `pi` binary at runtime. If
+/// `pi` (or the BYO-pi `PI_ACP_PI_COMMAND` override) isn't resolvable, pi-acp
+/// dies mid-connection with a raw ENOENT. This preflight resolves the effective
+/// command up front against the same `PATH` the child inherits and returns a
+/// clear message when it can't be found; `None` means launch may proceed.
+///
+/// The message contains the literal substring "is not installed", which the
+/// frontend matches to show the localized SDK-missing prompt with an "Open Agent
+/// Settings" action (see `src/contexts/acp-connections-context.tsx`). Do not
+/// change that substring.
+fn pi_launch_preflight(runtime_env: &BTreeMap<String, String>) -> Option<String> {
+    let custom = runtime_env
+        .get("PI_ACP_PI_COMMAND")
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty());
+    let command = custom.unwrap_or("pi");
+    if crate::commands::acp::resolve_pi_command_path(command).is_some() {
+        return None;
+    }
+    Some(match custom {
+        Some(cmd) => format!(
+            "Pi is not installed: the custom pi command \"{cmd}\" was not found. \
+             Update it in Agent Settings → Pi → Runtime."
+        ),
+        None => "Pi is not installed. Install it with: \
+                 npm install -g @earendil-works/pi-coding-agent \
+                 (or set a custom pi command in Agent Settings → Pi → Runtime)."
+            .to_string(),
+    })
+}
+
 async fn build_agent(
     agent_type: AgentType,
     runtime_env: &BTreeMap<String, String>,
+    cwd: &Path,
 ) -> Result<AcpAgent, AcpError> {
     let meta = registry::get_agent_meta(agent_type);
     debug_assert_eq!(meta.agent_type, agent_type);
 
-    match meta.distribution {
+    let agent = match meta.distribution {
         AgentDistribution::Npx { cmd, args, env, .. } => {
-            let merged_env = merge_agent_env(env, runtime_env);
+            // pi-acp spawns the real `pi` binary; fail fast with a clear,
+            // install-prompt-routable error if it (or a BYO-pi override) isn't
+            // resolvable, rather than letting pi-acp die mid-connection on a raw
+            // ENOENT that surfaces as an opaque protocol error.
+            if agent_type == AgentType::Pi {
+                if let Some(message) = pi_launch_preflight(runtime_env) {
+                    return Err(AcpError::SdkNotInstalled(message));
+                }
+                // Trust the workspace codeg is launching pi into (default on, via
+                // the PI_ACP_TRUST_WORKSPACE env_json key) so pi loads the
+                // project's local config/skills without a redundant prompt. Gates
+                // config loading only, never execution; scoped, additive, and
+                // best-effort (never blocks the connect).
+                crate::commands::acp::seed_pi_workspace_trust(cwd, runtime_env);
+            }
+            let mut merged_env = merge_agent_env(env, runtime_env);
+            // codex-acp 1.0.0 honors APP_SERVER_LOGS as a directory for its
+            // adapter-side logs. Surface it only under CODEG_ACP_DEBUG so
+            // default runs are unchanged; a directory-creation failure silently
+            // skips injection (diagnostics must never block a connect).
+            let want_codex_logs = agent_type == AgentType::Codex
+                && std::env::var("CODEG_ACP_DEBUG")
+                    .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                    .unwrap_or(false);
+            if want_codex_logs {
+                if let Some(dir) = codex_app_server_log_dir() {
+                    merged_env.push(("APP_SERVER_LOGS".to_string(), dir));
+                }
+            }
             let mut parts: Vec<String> = Vec::new();
             for (k, v) in &merged_env {
                 parts.push(format!("{k}={v}"));
@@ -244,7 +390,7 @@ async fn build_agent(
                 .map(|a| {
                     a.with_debug(move |line, dir| {
                         if dir == sacp_tokio::LineDirection::Stderr {
-                            eprintln!("[ACP][{agent_name}][stderr] {line}");
+                            tracing::debug!("[ACP][{agent_name}][stderr] {line}");
                         }
                     })
                 })
@@ -287,9 +433,9 @@ async fn build_agent(
                         ))
                     })?;
             if cached_version == registry_version {
-                eprintln!("[ACP][{}] Using cached binary {cached_version}", meta.name);
+                tracing::info!("[ACP][{}] Using cached binary {cached_version}", meta.name);
             } else {
-                eprintln!(
+                tracing::info!(
                     "[ACP][{}] Using cached binary {cached_version} (registry recommends {registry_version})",
                     meta.name
                 );
@@ -318,7 +464,7 @@ async fn build_agent(
             // key list (values omitted — they may contain API keys). If
             // the connection hangs later, these lines pin down exactly
             // which binary was invoked and how.
-            eprintln!(
+            tracing::info!(
                 "[ACP][{}] binary_path={} size={} platform={} args={:?} env_keys={:?}",
                 meta.name,
                 binary_str,
@@ -365,13 +511,13 @@ async fn build_agent(
                                 .last()
                                 .map(|(i, c)| i + c.len_utf8())
                                 .unwrap_or(MAX);
-                            eprintln!(
+                            tracing::debug!(
                                 "[ACP][{agent_name}][{tag}] {}... <truncated {} bytes>",
                                 &line[..head],
                                 line.len() - head
                             );
                         } else {
-                            eprintln!("[ACP][{agent_name}][{tag}] {line}");
+                            tracing::debug!("[ACP][{agent_name}][{tag}] {line}");
                         }
                     },
                 ),
@@ -410,7 +556,7 @@ async fn build_agent(
                 // Fallback: the agent's own CLI is already on PATH (e.g.
                 // `hermes acp`), installed via its official installer rather
                 // than provisioned through uvx.
-                eprintln!(
+                tracing::warn!(
                     "[ACP][{}] uvx unavailable; falling back to system command {:?}",
                     meta.name, sys_path
                 );
@@ -437,13 +583,30 @@ async fn build_agent(
                 .map(|a| {
                     a.with_debug(move |line, dir| {
                         if dir == sacp_tokio::LineDirection::Stderr {
-                            eprintln!("[ACP][{agent_name}][stderr] {line}");
+                            tracing::debug!("[ACP][{agent_name}][stderr] {line}");
                         }
                     })
                 })
                 .map_err(|e| AcpError::SpawnFailed(e.to_string()))
         }
-    }
+    }?;
+
+    // Run the agent subprocess in the session's working directory rather than
+    // codeg's own process cwd (a desktop app launched from the Dock often
+    // inherits "/"). A coding agent belongs in its project root. This is
+    // required for Hermes, whose local terminal backend force-exports
+    // TERMINAL_CWD = os.getcwd() at import (clobbering any inherited value)
+    // and reports that as the agent's "Current working directory" in its
+    // system prompt — without pinning it would believe it lives in "/". For
+    // agents that already use the ACP session/new cwd this is a harmless
+    // alignment (process cwd == session cwd). Guard on an existing directory
+    // so a not-yet-created working_dir (e.g. a worktree path) can't make the
+    // spawn fail.
+    Ok(if cwd.is_dir() {
+        agent.with_current_dir(cwd)
+    } else {
+        agent
+    })
 }
 
 /// Spawn an ACP agent process and run the connection loop in a background task.
@@ -502,7 +665,13 @@ pub async fn spawn_agent_connection(
         crate::commands::acp::reconcile_hermes_runtime_env(&runtime_env);
     }
 
-    let agent = build_agent(agent_type, &runtime_env).await?;
+    // Resolve the launch cwd from the same `working_dir` (via the same helper)
+    // that run_connection uses for the session/new request, so the process
+    // cwd, the ACP session cwd, and any os.getcwd()-derived agent state all
+    // agree. Computed here because `working_dir` is moved into run_connection
+    // below.
+    let launch_cwd = resolve_working_dir(working_dir.as_deref());
+    let agent = build_agent(agent_type, &runtime_env, &launch_cwd).await?;
 
     // Forward only the codeg git credential helper keys into the terminal
     // runtime — not the agent's API tokens or model provider credentials.
@@ -510,11 +679,16 @@ pub async fn spawn_agent_connection(
     // `terminal/create` tool authenticate via the same helper path the
     // agent process uses, while keeping unrelated secrets scoped to the
     // agent and out of arbitrary shell commands it runs.
-    let terminal_base_env: BTreeMap<String, String> = runtime_env
+    let mut terminal_base_env: BTreeMap<String, String> = runtime_env
         .iter()
         .filter(|(k, _)| k.starts_with("GIT_CONFIG_"))
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
+    // Also surface a codeg-installed OfficeCLI on the terminal's PATH: agents run
+    // office skills' `officecli …` through this `terminal/create` tool, not as a
+    // child of the agent process, so the agent-env injection alone wouldn't reach
+    // them right after install (before install.ps1's User-PATH change lands).
+    prepend_officecli_path(&mut terminal_base_env);
 
     let (cmd_tx, cmd_rx) = mpsc::channel::<ConnectionCommand>(32);
     let conn_id = connection_id.clone();
@@ -761,12 +935,23 @@ fn map_session_config_options(
         .collect()
 }
 
-/// Codex-acp sometimes omits the "mode" (approval preset) config option when
-/// the loaded sandbox policy does not exactly match one of the three built-in
-/// presets (commonly because `writable_roots` was injected during config
-/// loading).  When that happens, synthesize the option so the user can still
-/// pick a preset.  codex-acp's `set_config_option` handler always accepts
-/// `config_id = "mode"` regardless of whether it was advertised.
+/// Defensive fallback for Codex's approval-preset selector.
+///
+/// codex-acp 1.0.0 advertises its modes through *both* standard ACP
+/// `SessionModes` and an `id = "mode"` config option (see `AgentMode.ts`'s
+/// `toSessionModeState()` + `toConfigOption()`), so this synthesizer is
+/// normally a no-op — the early return fires because the agent already
+/// surfaced "mode". We keep it only as a safety net: if a future build ever
+/// omits the "mode" config option (older 0.16.0 did this when the sandbox
+/// policy didn't match a preset, e.g. after `writable_roots` injection), the
+/// user would otherwise lose the preset picker entirely, because the composer
+/// hides the standard mode selector whenever any config option exists. Codex's
+/// `set_config_option` handler accepts `config_id = "mode"` regardless of
+/// whether it was advertised.
+///
+/// The preset ids/names/descriptions below MUST match the live adapter
+/// vocabulary (`read-only` / `agent` / `agent-full-access`, default `agent`);
+/// the legacy 0.16.0 ids (`auto` / `full-access`) are no longer accepted.
 fn ensure_codex_mode_option(options: &mut Vec<SessionConfigOptionInfo>) {
     if options.iter().any(|o| o.id == "mode") {
         return;
@@ -781,24 +966,28 @@ fn ensure_codex_mode_option(options: &mut Vec<SessionConfigOptionInfo>) {
             ),
             category: Some("mode".to_string()),
             kind: SessionConfigKindInfo::Select(SessionConfigSelectInfo {
-                current_value: "auto".to_string(),
+                current_value: "agent".to_string(),
                 options: vec![
                     SessionConfigSelectOptionInfo {
                         value: "read-only".to_string(),
-                        name: "Read Only".to_string(),
-                        description: Some("Codex can only read files".to_string()),
-                    },
-                    SessionConfigSelectOptionInfo {
-                        value: "auto".to_string(),
-                        name: "Default".to_string(),
+                        name: "Read-only".to_string(),
                         description: Some(
-                            "Codex can edit files, but asks before running commands".to_string(),
+                            "Requires approval to edit files and run commands.".to_string(),
                         ),
                     },
                     SessionConfigSelectOptionInfo {
-                        value: "full-access".to_string(),
-                        name: "Full Access".to_string(),
-                        description: Some("Codex runs without asking for approval".to_string()),
+                        value: "agent".to_string(),
+                        name: "Agent".to_string(),
+                        description: Some("Read and edit files, and run commands.".to_string()),
+                    },
+                    SessionConfigSelectOptionInfo {
+                        value: "agent-full-access".to_string(),
+                        name: "Agent (full access)".to_string(),
+                        description: Some(
+                            "Codex can edit files outside this workspace and run commands with \
+                             network access."
+                                .to_string(),
+                        ),
                     },
                 ],
                 groups: vec![],
@@ -917,22 +1106,82 @@ fn build_load_session_request(
     req
 }
 
+/// Build a `session/resume` request. Mirrors `build_load_session_request`
+/// (same fields + ClaudeCode raw-SDK meta + non-empty mcp_servers); the only
+/// wire difference is that `ResumeSessionRequest.mcp_servers` is
+/// `skip_serializing_if = Vec::is_empty`, so an empty list is omitted from the
+/// payload rather than emitted as `[]`.
+fn build_resume_session_request(
+    agent_type: AgentType,
+    session_id: SessionId,
+    cwd: &Path,
+    mcp_servers: Vec<McpServer>,
+) -> ResumeSessionRequest {
+    let mut req = ResumeSessionRequest::new(session_id, cwd.to_path_buf());
+    if let Some(meta) = claude_raw_sdk_session_meta(agent_type) {
+        req = req.meta(meta);
+    }
+    if !mcp_servers.is_empty() {
+        req = req.mcp_servers(mcp_servers);
+    }
+    req
+}
+
+/// Wire-level half of `session/resume`: send the request and deserialize the
+/// reply into `ResumeSessionResponse`.
+///
+/// `sacp` 11.0.0 ships no `JsonRpcRequest` impl for `ResumeSessionRequest`, and
+/// the orphan rule blocks codeg from adding one, so we send via `UntypedMessage`
+/// — the same in-tree pattern `set_session_config_option_inner` already uses for
+/// `session/set_config_option`. On a JSON-RPC error the agent returns,
+/// `block_task()` yields `Err(sacp::Error)` with `.code` / `.to_string()`
+/// intact, so the caller's error ladder reads identically to the
+/// `session/load` arm.
+async fn send_resume_session(
+    cx: &ConnectionTo<Agent>,
+    req: ResumeSessionRequest,
+) -> Result<ResumeSessionResponse, sacp::Error> {
+    let untyped_req = UntypedMessage::new("session/resume", req).map_err(|e| {
+        sacp::util::internal_error(format!("Failed to build resume request: {e}"))
+    })?;
+
+    let raw_response = cx.send_request_to(Agent, untyped_req).block_task().await?;
+    serde_json::from_value(raw_response).map_err(|e| {
+        sacp::util::internal_error(format!("Failed to parse resume response: {e}"))
+    })
+}
+
+/// Whether MCP servers forwarded over the ACP wire (`session/new.mcpServers`)
+/// actually reach the agent's model. Almost all adapters deliver them; pi-acp
+/// (0.0.31) accepts the `mcpServers` field but DROPS it — it never forwards MCP
+/// to the inner `pi --mode rpc` process, and pi has no native MCP. So forwarding
+/// either user servers or the built-in codeg-mcp companion to pi is futile, and
+/// injecting codeg-mcp would falsely mark delegation/feedback/ask as available
+/// (`feedback_tool_available`, a registered delegation token pi can never use).
+/// `supports_mcp` stays `true` for pi (session/new tolerates the field), so this
+/// is a separate, narrower gate. Gate codeg-mcp injection on it.
+fn agent_delivers_wire_mcp(agent_type: AgentType) -> bool {
+    !matches!(agent_type, AgentType::Pi)
+}
+
 /// Load MCP servers configured for `agent_type` and convert them into the
 /// ACP wire format. Errors and unsupported entries are logged and skipped so
 /// a single malformed entry never blocks a session from starting.
 fn load_mcp_servers_for_agent(agent_type: AgentType) -> Vec<McpServer> {
-    // Hermes reads its own `~/.hermes/config.yaml` `mcp_servers` natively at
-    // launch (registering each as an `mcp-<name>` toolset). codeg manages that
-    // section directly via the MCP settings UI, so forwarding the same servers
-    // over the ACP wire here would double-register them — skip it. (The built-in
-    // `codeg-mcp` companion is injected separately by `inject_codeg_mcp`.)
-    if agent_type == AgentType::Hermes {
+    // Hermes and Kimi Code each read their own native MCP config at launch —
+    // Hermes from `~/.hermes/config.yaml` (`mcp_servers`, registered as
+    // `mcp-<name>` toolsets), Kimi Code from `~/.kimi-code/mcp.json`
+    // (`mcpServers`). codeg manages those files directly via the MCP settings
+    // UI, so forwarding the same servers over the ACP wire here would
+    // double-register them — skip it. (The built-in `codeg-mcp` companion is
+    // injected separately by `inject_codeg_mcp`, so it still reaches them.)
+    if matches!(agent_type, AgentType::Hermes | AgentType::KimiCode) {
         return Vec::new();
     }
     let entries = match crate::commands::mcp::read_servers_for_agent_type(agent_type) {
         Ok(map) => map,
         Err(err) => {
-            eprintln!(
+            tracing::error!(
                 "[ACP][{}] failed to read MCP servers from local config: {err}",
                 agent_type
             );
@@ -945,7 +1194,7 @@ fn load_mcp_servers_for_agent(agent_type: AgentType) -> Vec<McpServer> {
         match canonical_spec_to_mcp_server(&name, &spec) {
             Ok(server) => out.push(server),
             Err(err) => {
-                eprintln!(
+                tracing::warn!(
                     "[ACP][{}] skip MCP server '{name}' (cannot map to ACP schema): {err}",
                     agent_type
                 );
@@ -976,6 +1225,11 @@ pub struct DelegationInjection {
     /// of the three is on, and the companion's `--features` lists `ask` to expose
     /// the `ask_user_question` tool.
     pub ask: crate::acp::question::QuestionRuntimeConfig,
+    /// Hot-swappable "is get-session-info enabled?" flag. Read at injection time
+    /// alongside the other three so `codeg-mcp` is injected when ANY of the four
+    /// is on, and the companion's `--features` lists `sessions` to expose the
+    /// `get_session_info` tool. No teardown handle (the lookup is stateless).
+    pub sessions: crate::acp::session_info::SessionInfoRuntimeConfig,
     /// Question registry handle for the teardown cascade. The `run_connection`
     /// cleanup guard calls `cancel_questions_by_parent` through this so a pending
     /// `ask_user_question` is reclaimed synchronously on disconnect, mirroring
@@ -1064,7 +1318,7 @@ fn is_executable_file(path: &Path) -> bool {
 /// delegate tool silently. Skipping leaves the agent fully functional minus
 /// `delegate_to_agent`, which is the right degradation when codeg-mcp didn't
 /// make it into the install.
-/// The `--features` value for a companion launch given the three feature flags,
+/// The `--features` value for a companion launch given the four feature flags,
 /// or `None` when none is enabled (the companion isn't injected at all).
 /// Pulled out as a pure function so the inject/skip decision is unit-testable
 /// without a real binary on disk or a live broker.
@@ -1072,8 +1326,9 @@ fn companion_features_arg(
     delegation_enabled: bool,
     feedback_enabled: bool,
     ask_enabled: bool,
+    sessions_enabled: bool,
 ) -> Option<String> {
-    if !delegation_enabled && !feedback_enabled && !ask_enabled {
+    if !delegation_enabled && !feedback_enabled && !ask_enabled && !sessions_enabled {
         return None;
     }
     let mut features: Vec<&str> = Vec::new();
@@ -1085,6 +1340,9 @@ fn companion_features_arg(
     }
     if ask_enabled {
         features.push("ask");
+    }
+    if sessions_enabled {
+        features.push("sessions");
     }
     Some(features.join(","))
 }
@@ -1110,15 +1368,20 @@ async fn inject_codeg_mcp(
     let delegation_enabled = injection.broker.config_snapshot().await.enabled;
     let feedback_enabled = injection.feedback.is_enabled().await;
     let ask_enabled = injection.ask.is_enabled().await;
+    let sessions_enabled = injection.sessions.is_enabled().await;
     // `None` (no feature enabled) short-circuits the whole injection.
-    let features_arg =
-        companion_features_arg(delegation_enabled, feedback_enabled, ask_enabled)?;
+    let features_arg = companion_features_arg(
+        delegation_enabled,
+        feedback_enabled,
+        ask_enabled,
+        sessions_enabled,
+    )?;
     let Some(binary_path) = locate_codeg_mcp_binary() else {
-        eprintln!(
+        tracing::warn!(
             "[delegation][WARN] codeg-mcp companion binary not found (checked CODEG_MCP_BIN, \
              exe sibling, and PATH); skipping delegate_to_agent / check_user_feedback / \
-             ask_user_question tool injection for connection {parent_connection_id}. Reinstall \
-             codeg or set CODEG_MCP_BIN to fix."
+             ask_user_question / get_session_info tool injection for connection \
+             {parent_connection_id}. Reinstall codeg or set CODEG_MCP_BIN to fix."
         );
         return None;
     };
@@ -1147,7 +1410,7 @@ async fn inject_codeg_mcp(
         // (any platform).
         "--parent-pid".to_string(),
         std::process::id().to_string(),
-        // Tool groups to expose this launch (delegation and/or feedback).
+        // Tool groups to expose this launch (delegation / feedback / ask / sessions).
         "--features".to_string(),
         features_arg,
     ]);
@@ -1256,6 +1519,16 @@ fn canonical_spec_to_mcp_server(name: &str, spec: &serde_json::Value) -> Result<
 
 /// The main ACP connection loop.
 #[allow(clippy::too_many_arguments)]
+#[tracing::instrument(
+    name = "connection",
+    skip_all,
+    fields(
+        connection_id = %connection_id,
+        agent_type = ?agent_type,
+        working_dir = ?working_dir,
+        session_id = ?session_id,
+    )
+)]
 async fn run_connection(
     agent: AcpAgent,
     connection_id: String,
@@ -1274,8 +1547,13 @@ async fn run_connection(
     // `terminal_base_env` already filtered to just the credential helper
     // keys upstream — see `spawn_agent_connection` for the rationale and
     // why we don't forward the full agent runtime_env here.
-    let terminal_runtime = Arc::new(TerminalRuntime::with_base_env(terminal_base_env));
     let cwd = resolve_working_dir(working_dir.as_deref());
+    // Default terminals to the session working directory so an agent that calls
+    // `terminal/create` without a `cwd` (e.g. CodeBuddy) runs in the folder the
+    // conversation runs in rather than codeg's own process cwd.
+    let terminal_runtime = Arc::new(
+        TerminalRuntime::with_base_env(terminal_base_env).with_default_cwd(Some(cwd.clone())),
+    );
     let cwd_string = cwd.to_string_lossy().to_string();
     let file_system_runtime = Arc::new(FileSystemRuntime::new(cwd.clone()));
 
@@ -1416,7 +1694,7 @@ async fn run_connection(
             // convert it back to `AcpError::InitializeTimeout` in the
             // outer `.map_err(...)` below. The outer layer attaches a
             // stable `code` to the frontend event so it can be localized.
-            eprintln!(
+            tracing::info!(
                 "[ACP][{agent_name_for_log}] Sending Initialize (protocol={}, timeout=60s)",
                 ProtocolVersion::LATEST
             );
@@ -1428,21 +1706,21 @@ async fn run_connection(
             .await
             {
                 Ok(Ok(resp)) => {
-                    eprintln!(
+                    tracing::info!(
                         "[ACP][{agent_name_for_log}] Initialize responded in {:?}",
                         init_started.elapsed()
                     );
                     resp
                 }
                 Ok(Err(e)) => {
-                    eprintln!(
+                    tracing::error!(
                         "[ACP][{agent_name_for_log}] Initialize failed in {:?}: {e}",
                         init_started.elapsed()
                     );
                     return Err(e);
                 }
                 Err(_) => {
-                    eprintln!(
+                    tracing::error!(
                         "[ACP][{agent_name_for_log}] Initialize TIMED OUT after {:?} \
                          — the agent never answered the handshake. Check the \
                          [stderr] lines above for agent-side errors. For a full \
@@ -1464,51 +1742,81 @@ async fn run_connection(
                 .session_capabilities
                 .fork
                 .is_some();
-            eprintln!(
-                "[ACP] Agent capabilities: load_session={}, fork={}",
-                init_resp.agent_capabilities.load_session, supports_fork
+            let supports_resume = init_resp
+                .agent_capabilities
+                .session_capabilities
+                .resume
+                .is_some();
+            tracing::info!(
+                "[ACP] Agent capabilities: load_session={}, fork={}, resume={}",
+                init_resp.agent_capabilities.load_session, supports_fork, supports_resume
             );
+
+            // Whether this agent accepts MCP server entries over the ACP wire
+            // (`session/new`'s `mcpServers`). Almost all do; OpenClaw rejects
+            // any server entry and fails session creation, so it must receive
+            // NONE — neither user-configured servers nor the built-in codeg-mcp
+            // companion. (The `mcpServers` key itself is always serialized as
+            // `[]` by the ACP schema and OpenClaw tolerates the empty list; the
+            // gate only guarantees the list stays empty for it.) This is the
+            // single chokepoint feeding session/new, session/load, and the
+            // load→new fallback, so gating here keeps server entries off the
+            // wire on every path. See `AcpAgentMeta::supports_mcp`.
+            let agent_supports_mcp = registry::get_agent_meta(agent_type).supports_mcp;
 
             // Load MCP servers configured for this agent and filter by the
             // capabilities the agent just declared. Stdio is mandatory per
             // ACP spec; HTTP/SSE are gated on `mcp_capabilities.{http,sse}`.
-            let mcp_caps = &init_resp.agent_capabilities.mcp_capabilities;
-            let mut mcp_servers: Vec<McpServer> = load_mcp_servers_for_agent(agent_type)
-                .into_iter()
-                .filter(|s| match s {
-                    McpServer::Stdio(_) => true,
-                    McpServer::Http(server) => {
-                        if mcp_caps.http {
-                            true
-                        } else {
-                            eprintln!(
-                                "[ACP][{}] skip HTTP MCP server '{}': agent does not advertise mcpCapabilities.http",
-                                agent_type, server.name
-                            );
-                            false
+            let mut mcp_servers: Vec<McpServer> = if agent_supports_mcp {
+                let mcp_caps = &init_resp.agent_capabilities.mcp_capabilities;
+                load_mcp_servers_for_agent(agent_type)
+                    .into_iter()
+                    .filter(|s| match s {
+                        McpServer::Stdio(_) => true,
+                        McpServer::Http(server) => {
+                            if mcp_caps.http {
+                                true
+                            } else {
+                                tracing::warn!(
+                                    "[ACP][{}] skip HTTP MCP server '{}': agent does not advertise mcpCapabilities.http",
+                                    agent_type, server.name
+                                );
+                                false
+                            }
                         }
-                    }
-                    McpServer::Sse(server) => {
-                        if mcp_caps.sse {
-                            true
-                        } else {
-                            eprintln!(
-                                "[ACP][{}] skip SSE MCP server '{}': agent does not advertise mcpCapabilities.sse",
-                                agent_type, server.name
-                            );
-                            false
+                        McpServer::Sse(server) => {
+                            if mcp_caps.sse {
+                                true
+                            } else {
+                                tracing::warn!(
+                                    "[ACP][{}] skip SSE MCP server '{}': agent does not advertise mcpCapabilities.sse",
+                                    agent_type, server.name
+                                );
+                                false
+                            }
                         }
-                    }
-                    _ => false,
-                })
-                .collect();
+                        _ => false,
+                    })
+                    .collect()
+            } else {
+                tracing::info!(
+                    "[ACP][{}] supports_mcp=false: skipping all MCP wire forwarding (user servers + codeg-mcp companion)",
+                    agent_type
+                );
+                Vec::new()
+            };
 
             // Inject the built-in `codeg-mcp` MCP server. Stdio is
             // unconditionally supported by the ACP wire — no `mcp_caps`
             // filter needed. The returned token is stashed on the session
-            // state so connection teardown can revoke it.
-            let delegate_injection = if let Some(inj) = delegation_injection.as_ref() {
-                inject_codeg_mcp(&mut mcp_servers, inj, &conn_id, &cwd).await
+            // state so connection teardown can revoke it. Skipped entirely
+            // for agents that don't accept MCP over the wire (above).
+            let delegate_injection = if agent_supports_mcp && agent_delivers_wire_mcp(agent_type) {
+                if let Some(inj) = delegation_injection.as_ref() {
+                    inject_codeg_mcp(&mut mcp_servers, inj, &conn_id, &cwd).await
+                } else {
+                    None
+                }
             } else {
                 None
             };
@@ -1544,6 +1852,119 @@ async fn run_connection(
             .await;
 
             if let Some(sid) = session_id {
+                // Prefer session/resume when the agent advertises the
+                // capability: it restores session context WITHOUT replaying
+                // history (which session/load does only for us to drain and
+                // discard — the transcript the user sees comes from the disk
+                // parser, not the ACP wire). On any non-terminal resume failure
+                // we fall through to the session/load block below, so the
+                // effective chain is resume → load → new.
+                if supports_resume {
+                    let resume_req = build_resume_session_request(
+                        agent_type,
+                        SessionId::new(sid.clone()),
+                        &cwd,
+                        mcp_servers.clone(),
+                    );
+                    match send_resume_session(&cx, resume_req).await {
+                        Ok(resume_resp) => {
+                            let initial_config_options = resume_resp.config_options.clone();
+                            let new_resp = NewSessionResponse::new(SessionId::new(sid.clone()))
+                                .modes(resume_resp.modes)
+                                .config_options(resume_resp.config_options)
+                                .meta(resume_resp.meta);
+                            let mut session = cx.attach_session(new_resp, Default::default())?;
+
+                            // No drain: session/resume does not replay history,
+                            // so there is nothing to discard. Any buffered
+                            // notification (e.g. an early AvailableCommandsUpdate)
+                            // is consumed and forwarded by run_conversation_loop.
+
+                            emit_with_state(
+                                &state,
+                                &emitter_clone,
+                                AcpEvent::SessionStarted {
+                                    session_id: sid.clone(),
+                                },
+                            )
+                            .await;
+                            emit_session_modes(&state, &emitter_clone, session.modes()).await;
+                            let updated_config_options = apply_preferred_session_options(
+                                &cx,
+                                &mut session,
+                                &state,
+                                &emitter_clone,
+                                preferred_mode_id.as_deref(),
+                                &preferred_config_values,
+                                initial_config_options.unwrap_or_default(),
+                            )
+                            .await;
+                            emit_session_config_options_values(
+                                &state,
+                                &emitter_clone,
+                                agent_type,
+                                updated_config_options,
+                            )
+                            .await;
+                            emit_selectors_ready(&state, &emitter_clone).await;
+
+                            let loop_result = run_conversation_loop(
+                                &mut session,
+                                &conn_id,
+                                &emitter_clone,
+                                &state,
+                                agent_type,
+                                &perms,
+                                &mut cmd_rx,
+                                terminal_runtime.clone(),
+                                &cwd_string,
+                                supports_fork,
+                                delegation_injection.as_ref(),
+                            )
+                            .await;
+                            terminal_runtime.release_all_for_session(&sid).await;
+                            drop(session);
+                            // Explicit return: this arm is NOT in tail position
+                            // (the session/load block follows it), so without
+                            // `return` a successful resume would fall into
+                            // session/load.
+                            return handle_fork_or_exit(
+                                loop_result,
+                                &conn_id,
+                                &emitter_clone,
+                                &state,
+                                agent_type,
+                                &perms,
+                                &mut cmd_rx,
+                                terminal_runtime.clone(),
+                                &cwd,
+                                &cwd_string,
+                                delegation_injection.as_ref(),
+                            )
+                            .await;
+                        }
+                        Err(e) => {
+                            // resume is unstable and NOT guaranteed equivalent to
+                            // session/load, so a resume-specific failure must
+                            // never deny a load that might still succeed. EVERY
+                            // resume error — ResourceNotFound, "Authentication
+                            // required", "Method not found", or anything else —
+                            // falls through to the session/load block below,
+                            // which already owns all terminal decisions
+                            // (SessionLoadFailed for not-found, silent stop for
+                            // auth, fallback to session/new otherwise). No
+                            // user-facing event is emitted here: load re-derives
+                            // the same outcome a moment later, so emitting now
+                            // would double up (not-found) or flash a transient
+                            // error that self-heals when load succeeds.
+                            tracing::warn!(
+                                "[ACP] session/resume failed ({e}); falling back to session/load"
+                            );
+                            // fall through to the session/load block below
+                        }
+                    }
+                }
+
                 // Load existing session via session/load
                 let load_req = build_load_session_request(
                     agent_type,
@@ -1584,10 +2005,13 @@ async fn run_connection(
                                         ) {
                                             // Historical-replay path only
                                             // forwards AvailableCommandsUpdate,
-                                            // which never carries tool output
-                                            // — a throwaway cache is fine.
+                                            // which never carries tool output or
+                                            // tool-call titles — throwaway state
+                                            // is fine.
                                             let mut replay_cache =
                                                 ToolCallOutputCache::default();
+                                            let mut replay_cb_state =
+                                                CodeBuddyLiveState::default();
                                             emit_conversation_update(
                                                 &st,
                                                 &h,
@@ -1595,6 +2019,7 @@ async fn run_connection(
                                                 notif.update,
                                                 None,
                                                 &mut replay_cache,
+                                                &mut replay_cb_state,
                                             )
                                             .await;
                                         }
@@ -1609,7 +2034,7 @@ async fn run_connection(
                             }
                         }
                         if drained > 0 {
-                            eprintln!("[ACP] Drained {drained} historical replay notifications");
+                            tracing::info!("[ACP] Drained {drained} historical replay notifications");
                         }
 
                         emit_with_state(
@@ -1680,7 +2105,7 @@ async fn run_connection(
                             e.code,
                             sacp::schema::ErrorCode::ResourceNotFound
                         );
-                        eprintln!(
+                        tracing::warn!(
                             "[ACP] session/load failed ({}){}",
                             err_str,
                             if is_resource_not_found {
@@ -2087,7 +2512,7 @@ async fn apply_preferred_session_options(
             .unwrap_or(false);
         if needs_apply {
             if let Err(e) = set_session_mode(session, state, emitter, pref_mode.to_string()).await {
-                eprintln!("[ACP] failed to apply preferred mode '{pref_mode}' on connect: {e}");
+                tracing::error!("[ACP] failed to apply preferred mode '{pref_mode}' on connect: {e}");
             }
         }
     }
@@ -2100,9 +2525,11 @@ async fn apply_preferred_session_options(
     let mut options = initial_config_options;
     for (config_id, value_id) in preferred_config_values {
         // Skip the round-trip when the agent's current value already matches.
-        // Note: Codex omits "mode" from its advertised options but accepts
-        // `set_config_option` for it (see `ensure_codex_mode_option`), so we
-        // do NOT skip on "config_id not in options" — let the agent decide.
+        // Note: codex-acp 1.0.0 advertises "mode" as a config option (so the
+        // match check below normally fires), but we still do NOT skip when a
+        // requested config_id is absent from the advertised options — older or
+        // edge-case builds accept `set_config_option` for an unadvertised "mode"
+        // (see `ensure_codex_mode_option`), so let the agent decide.
         let already_matches = options.iter().any(|o| {
             o.id.to_string() == *config_id
                 && matches!(
@@ -2117,7 +2544,7 @@ async fn apply_preferred_session_options(
             .await
         {
             Ok(updated) => options = updated,
-            Err(e) => eprintln!(
+            Err(e) => tracing::error!(
                 "[ACP] failed to apply preferred config '{config_id}'='{value_id}' \
                  on connect: {e}"
             ),
@@ -2618,7 +3045,7 @@ async fn poll_tracked_terminal_tool_calls(
             match poll_terminal_tool_call_output(terminal_runtime, session_id, entry).await {
                 Ok(result) => result,
                 Err(err) => {
-                    eprintln!(
+                    tracing::error!(
                         "[ACP] Failed to poll terminal output for tool call {}: {:?}",
                         tool_call_id, err
                     );
@@ -2741,7 +3168,7 @@ async fn handle_fork_or_exit(
     let fork_resp = fork_info.fork_response;
     let new_sid = fork_resp.session_id.0.to_string();
 
-    eprintln!(
+    tracing::info!(
         "[ACP] Fork transition: attaching to forked session {} (original: {})",
         new_sid, fork_info.original_session_id
     );
@@ -2927,6 +3354,13 @@ async fn run_conversation_loop<'a>(
     // into incremental deltas. Shared across the idle loop and the active
     // turn loop so tool calls that span turns stay consistent.
     let mut raw_output_cache = ToolCallOutputCache::default();
+    // Session-scoped CodeBuddy live state: authoritative title rewrites
+    // (tool_call_id → "agent" / inner `mcp__…` name) so a later status-only
+    // update can't downgrade an Agent / delegation card mid-stream, plus the
+    // open-sub-agent window used to suppress a sub-agent's interleaved
+    // thought/message chunks. See `emit_conversation_update`. Shared across the
+    // idle and turn loops.
+    let mut cb_state = CodeBuddyLiveState::default();
     loop {
         // Wait for either a user command or a session update (e.g. available_commands_update)
         let cmd = loop {
@@ -2943,7 +3377,7 @@ async fn run_conversation_loop<'a>(
                             let _ = MatchDispatch::new(dispatch)
                                 .if_notification(
                                     async |notif: SessionNotification| {
-                                        emit_conversation_update(&st, &h, agent_type, notif.update, cwd_opt, &mut raw_output_cache).await;
+                                        emit_conversation_update(&st, &h, agent_type, notif.update, cwd_opt, &mut raw_output_cache, &mut cb_state).await;
                                         Ok(())
                                     },
                                 )
@@ -2956,7 +3390,7 @@ async fn run_conversation_loop<'a>(
                         }
                         Ok(_) => {}
                         Err(e) => {
-                            eprintln!("[ACP] Ignoring unrecognized session update in idle loop: {e}");
+                            tracing::warn!("[ACP] Ignoring unrecognized session update in idle loop: {e}");
                         }
                     }
                 }
@@ -3042,6 +3476,15 @@ async fn run_conversation_loop<'a>(
                 // reason so the user gets an error toast instead of a
                 // confusing `PendingReview` on a blank conversation.
                 let mut turn_had_agent_output = false;
+                // A CodeBuddy native sub-agent's full lifecycle (Agent tool call
+                // open → completed) happens within one turn, so reset the
+                // suppression window at each turn start. This bounds the tracking
+                // sets and guarantees a sub-agent that ended without a terminal
+                // frame (cancel/abort) can never suppress the NEXT turn's
+                // main-agent thinking. `title_overrides` intentionally persists
+                // (a card's identity is session-stable).
+                cb_state.open_subagents.clear();
+                cb_state.closed_subagents.clear();
 
                 // Read updates until turn completes.
                 // We must also listen for commands (e.g. RespondPermission)
@@ -3052,7 +3495,7 @@ async fn run_conversation_loop<'a>(
                             let update = match update {
                                 Ok(u) => u,
                                 Err(e) => {
-                                    eprintln!("[ACP] Ignoring unrecognized session update: {e}");
+                                    tracing::warn!("[ACP] Ignoring unrecognized session update: {e}");
                                     continue;
                                 }
                             };
@@ -3074,7 +3517,7 @@ async fn run_conversation_loop<'a>(
                                                 if is_agent_output_update(&notif.update) {
                                                     turn_had_agent_output = true;
                                                 }
-                                                emit_conversation_update(&st, &h, agent_type, notif.update, cwd_opt, &mut raw_output_cache).await;
+                                                emit_conversation_update(&st, &h, agent_type, notif.update, cwd_opt, &mut raw_output_cache, &mut cb_state).await;
                                                 if should_poll_now {
                                                     poll_tracked_terminal_tool_calls(
                                                         runtime.as_ref(),
@@ -3095,7 +3538,7 @@ async fn run_conversation_loop<'a>(
                                         })
                                         .await
                                     {
-                                        eprintln!("[ACP] Ignoring dispatch parse error: {e}");
+                                        tracing::warn!("[ACP] Ignoring dispatch parse error: {e}");
                                     }
                                 }
                                 SessionMessage::StopReason(reason) => {
@@ -3379,7 +3822,7 @@ async fn run_conversation_loop<'a>(
                                     break;
                                 }
                                 Some(ConnectionCommand::Disconnect) | None => {
-                                    eprintln!(
+                                    tracing::info!(
                                         "[ACP] disconnect requested during prompting; connection_id={conn_id}"
                                     );
                                     let _ = cx.send_notification_to(
@@ -3406,7 +3849,7 @@ async fn run_conversation_loop<'a>(
                 }
 
                 if disconnect_requested {
-                    eprintln!(
+                    tracing::info!(
                         "[ACP] closing connection loop after disconnect; connection_id={conn_id}"
                     );
                     break;
@@ -3518,14 +3961,14 @@ async fn run_conversation_loop<'a>(
                 }
                 let cx = session.connection();
                 let sid = session.session_id().clone();
-                eprintln!(
+                tracing::info!(
                     "[ACP] Sending session/fork for session_id={} cwd={}",
                     sid.0, cwd
                 );
                 let result = crate::acp::fork::fork_session(&cx, &sid, cwd).await;
                 match result {
                     Ok(fork_response) => {
-                        eprintln!(
+                        tracing::info!(
                             "[ACP] Fork succeeded: new_session_id={}",
                             fork_response.session_id.0
                         );
@@ -3537,7 +3980,7 @@ async fn run_conversation_loop<'a>(
                         }));
                     }
                     Err(e) => {
-                        eprintln!("[ACP] Fork failed: {e}");
+                        tracing::error!("[ACP] Fork failed: {e}");
                         let _ = reply.send(Err(e));
                     }
                 }
@@ -3550,8 +3993,18 @@ async fn run_conversation_loop<'a>(
     Ok(None)
 }
 
-/// Serialize a Vec<ToolCallContent> into a human-readable text string.
-fn serialize_tool_call_content(content: &[ToolCallContent]) -> Option<String> {
+/// Serialize tool-call `content` blocks into a single human-readable string.
+///
+/// `include_diffs = false` skips `Diff` blocks. Used when the edit has been
+/// hoisted into a synthesized canonical `raw_input` (see
+/// `synthesize_edit_input_from_diffs`): without this the same edit ships twice
+/// (doubling the event) and the hunkless full-file `--- /+++` blob stays in the
+/// tool `output`, where `extractEditLineChangeStats` mis-counts it as full-file
+/// +/- totals in the card header even though the body shows the compact diff.
+fn serialize_tool_call_content(
+    content: &[ToolCallContent],
+    include_diffs: bool,
+) -> Option<String> {
     let mut parts: Vec<String> = Vec::new();
     for item in content {
         match item {
@@ -3560,7 +4013,7 @@ fn serialize_tool_call_content(content: &[ToolCallContent]) -> Option<String> {
                     parts.push(text.text.clone());
                 }
             }
-            ToolCallContent::Diff(diff) => {
+            ToolCallContent::Diff(diff) if include_diffs => {
                 let path = diff.path.display();
                 let mut diff_text = format!("--- {path}\n+++ {path}\n");
                 if let Some(old) = &diff.old_text {
@@ -3584,6 +4037,111 @@ fn serialize_tool_call_content(content: &[ToolCallContent]) -> Option<String> {
     } else {
         Some(parts.join("\n"))
     }
+}
+
+/// Synthesize a canonical edit `raw_input` from `ToolCallContent::Diff` block(s).
+///
+/// codex-acp reports file edits as ACP `Diff` content blocks and leaves
+/// `raw_input` empty — the edit lives only in `content`, and the ACP `title` is
+/// the diff header `--- <path>`. With no `raw_input` the frontend classifier
+/// (`inferLiveToolName`) falls back to `normalizeToolName(title)`, which returns
+/// unrecognized strings verbatim, so the tool call renders as a generic tool
+/// literally *named* `--- <path>` (wrench icon, raw header as the title) instead
+/// of an edit card. The historical path is unaffected because the JSONL parser
+/// stores codex's native `*** Begin Patch` text.
+///
+/// Reconstructing from the already-serialized `--- /+++` string would be lossy
+/// (content lines beginning with `-`/`+`/`---`/`+++`, the old/new boundary,
+/// CRLF). Here the structured `Diff` is still intact, so map it losslessly:
+/// - exactly one Diff  -> `{"file_path","old_string","new_string"}`
+/// - multiple Diffs    -> `{"changes":{"<path>":{"old_text","new_text"},…}}`
+///
+/// Both shapes classify as `"edit"` (`inferFromInput`) and render through the
+/// existing `EditToolInput` / `EditChangesToolInput` → `generateUnifiedDiff`
+/// pipeline (a real hunk diff, minimal even for full-file old/new). Returns
+/// `None` when `content` carries no `Diff`, so callers only fall back to it when
+/// the agent supplied no `raw_input` of its own.
+fn synthesize_edit_input_from_diffs(content: &[ToolCallContent]) -> Option<String> {
+    // Keep `old_text` as `Option`: ACP reports `None` for a newly created file
+    // (`Diff.old_text` semantics). That distinction is the whole point of this
+    // function's fix — collapsing `None` to `""` and emitting an edit shape
+    // makes the frontend build a `--- a/<path>` diff, which `isAddedFileDiff`
+    // does NOT match, so a freshly created file mis-renders as a modification
+    // (the historical apply_patch `*** Add File:` path classifies it correctly).
+    let diffs: Vec<(String, Option<String>, String)> = content
+        .iter()
+        .filter_map(|item| match item {
+            ToolCallContent::Diff(diff) => Some((
+                diff.path.display().to_string(),
+                diff.old_text.clone(),
+                diff.new_text.clone(),
+            )),
+            _ => None,
+        })
+        .collect();
+
+    match diffs.as_slice() {
+        [] => None,
+        // New file (old_text absent) → write shape. `inferFromInput` classifies
+        // `{file_path, content}` as `write`, whose diff builder emits the
+        // `--- /dev/null` header `isAddedFileDiff` keys on → renders as a new
+        // file, matching the reloaded-from-DB path.
+        [(path, None, new)] => Some(
+            serde_json::json!({
+                "file_path": path,
+                "content": new,
+            })
+            .to_string(),
+        ),
+        // Edit → canonical `{old_string,new_string}` for the frontend's
+        // `generateUnifiedDiff` (a real hunk diff, minimal even for full-file
+        // old/new).
+        [(path, Some(old), new)] => Some(
+            serde_json::json!({
+                "file_path": path,
+                "old_string": old,
+                "new_string": new,
+            })
+            .to_string(),
+        ),
+        many => {
+            let mut changes = serde_json::Map::new();
+            for (path, old, new) in many {
+                // Per-entry, mirror the single-diff split: a new file gets a
+                // ready-made creation diff (`buildChunkFromEditChange` returns
+                // it verbatim → `--- /dev/null` → new file); an edit hands
+                // old/new text to the frontend to diff.
+                let entry = match old {
+                    None => serde_json::json!({ "diff": build_new_file_diff(path, new) }),
+                    Some(old) => serde_json::json!({ "old_text": old, "new_text": new }),
+                };
+                changes.insert(path.clone(), entry);
+            }
+            Some(serde_json::json!({ "changes": changes }).to_string())
+        }
+    }
+}
+
+/// Build a minimal unified diff for a newly created file: the `--- /dev/null`
+/// header the frontend's `isAddedFileDiff` keys on, then every line of
+/// `new_text` as an addition. Byte-for-byte identical to the frontend `write`
+/// op's diff builder (`session-files.ts`), so a multi-file batch's new-file
+/// entries render exactly like a single-file creation.
+fn build_new_file_diff(path: &str, new_text: &str) -> String {
+    // `split('\n')` (not `lines()`) mirrors the frontend `content.split("\n")`:
+    // it keeps the trailing empty segment from a final newline, so the `+N`
+    // count and the trailing `+` addition line match exactly.
+    let lines: Vec<&str> = new_text.split('\n').collect();
+    let mut out = format!(
+        "--- /dev/null\n+++ b/{path}\n@@ -0,0 +1,{} @@",
+        lines.len()
+    );
+    for line in lines {
+        out.push('\n');
+        out.push('+');
+        out.push_str(line);
+    }
+    out
 }
 
 /// Extract `ContentBlock::Image` payloads from a `ToolCallContent` slice.
@@ -3684,19 +4242,21 @@ fn json_value_to_text(val: &Option<serde_json::Value>) -> Option<String> {
     }
 }
 
-/// Mirrors `parsers/opencode.rs:425-429` so streaming and reload-from-DB
-/// render the same Agent card. The SQLite-side condition is
-/// `tool == "task" && state.input.subagent_type IS NOT NULL`, where
-/// `tool` is the OpenCode **internal** tool name. ACP only exposes a
-/// user-facing `title` (e.g. "Explore project structure") rather than
-/// the internal tool name, so we cannot replicate the `tool == "task"`
-/// half of the AND here. We instead anchor on
-/// `agent_type == OpenCode` (avoiding any cross-agent collision a generic
-/// `subagent_type` field could cause) plus the non-empty
-/// `subagent_type` string in `raw_input` — together these uniquely
-/// identify an OpenCode sub-agent invocation in practice.
-fn is_opencode_subagent_invocation(agent_type: AgentType, raw_input: &Option<String>) -> bool {
-    if agent_type != AgentType::OpenCode {
+/// Mirrors `parsers/opencode.rs:425-429` (and `parsers/codebuddy.rs`'s
+/// `subagent_type → "Agent"` rewrite) so streaming and reload-from-DB render the
+/// same Agent card. The SQLite-side condition is
+/// `tool == "task" && state.input.subagent_type IS NOT NULL`, where `tool` is the
+/// agent's **internal** tool name. ACP only exposes a user-facing `title` (e.g.
+/// "Explore project structure") rather than the internal tool name, so we cannot
+/// replicate the `tool == "task"` half of the AND here. We instead anchor on a
+/// known sub-agent-capable `agent_type` (OpenCode and CodeBuddy — both surface a
+/// description-style title and the standard `{…, subagent_type}` input, and never
+/// emit a bare top-level `subagent_type` for anything but a sub-agent) plus the
+/// non-empty `subagent_type` string in `raw_input` — together these uniquely
+/// identify a sub-agent invocation in practice. Other agents stay excluded to
+/// avoid any cross-agent collision a generic `subagent_type` field could cause.
+fn is_subagent_invocation(agent_type: AgentType, raw_input: &Option<String>) -> bool {
+    if !matches!(agent_type, AgentType::OpenCode | AgentType::CodeBuddy) {
         return false;
     }
     let Some(text) = raw_input.as_deref() else {
@@ -3715,6 +4275,282 @@ fn is_opencode_subagent_invocation(agent_type: AgentType, raw_input: &Option<Str
         .and_then(|v| v.as_str())
         .map(|s| !s.is_empty())
         .unwrap_or(false)
+}
+
+/// CodeBuddy routes MCP tools through its `DeferExecuteTool` virtualization
+/// layer, which surfaces over ACP as a tool call whose `raw_input` wraps the real
+/// call as `{ "toolName": "mcp__…", "params": { … } }`. Return that inner
+/// `toolName` so the caller can rewrite the live `title` to it — making the
+/// frontend resolve the dedicated card (delegation / question / …), mirroring the
+/// historical unwrap in `parsers/codebuddy.rs`. `raw_input` is left untouched
+/// (the cards peel `params` themselves, and that keeps `inferFromInput` from
+/// misclassifying `cancel_delegation`'s `{task_id}` as a generic task).
+fn codebuddy_deferred_tool_name(agent_type: AgentType, raw_input: &Option<String>) -> Option<String> {
+    if agent_type != AgentType::CodeBuddy {
+        return None;
+    }
+    let text = raw_input.as_deref()?;
+    // Cheap substring guard before parsing a potentially large payload.
+    if !text.contains("toolName") {
+        return None;
+    }
+    let value = serde_json::from_str::<serde_json::Value>(text).ok()?;
+    crate::parsers::codebuddy::deferred_tool_name(&value).map(|s| s.to_string())
+}
+
+/// CodeBuddy ships a deferred MCP tool's RESULT as a single re-serialized
+/// `{ "type": "text", "text": <inner> }` content part (the OpenAI-Agents content
+/// shape), where `<inner>` is the MCP `CallToolResult` content text — for the
+/// delegation companion, the compact report / `{ "tasks": [...] }` JSON. The
+/// dedicated cards (`parseStatusReport` / `parseToolOutput`) expect that bare
+/// inner payload (the content-only host shape they already handle for Claude
+/// Code), NOT this wrapper, so a live `get_delegation_status` / `cancel_delegation`
+/// poll otherwise renders as raw JSON text. Peel the wrapper to its inner `text`,
+/// mirroring the historical `deferred_result_envelope` normalization in
+/// `parsers/codebuddy.rs`.
+///
+/// Gated on CodeBuddy + the exact wrapper shape (`type == "text"` with a string
+/// `text`): a non-deferred result (Bash/Read/ToolSearch/…) is never a lone
+/// `{type,text}` object, and no delegation report carries a top-level `type`, so
+/// those pass through untouched. Unlike the title rewrite, this needs no
+/// `raw_input`, so it also normalizes a result-only `ToolCallUpdate` that omits it.
+fn unwrap_codebuddy_deferred_output(agent_type: AgentType, text: &str) -> Option<String> {
+    if agent_type != AgentType::CodeBuddy {
+        return None;
+    }
+    // Cheap substring guard before parsing a potentially large payload.
+    if !text.contains("\"type\"") {
+        return None;
+    }
+    let value = serde_json::from_str::<serde_json::Value>(text).ok()?;
+    let obj = value.as_object()?;
+    if obj.get("type").and_then(|t| t.as_str()) != Some("text") {
+        return None;
+    }
+    obj.get("text").and_then(|t| t.as_str()).map(str::to_string)
+}
+
+/// True when a CodeBuddy tool call's ACP `_meta` identifies it as a native
+/// sub-agent (`Agent`) invocation. CodeBuddy tags this in `_meta` from the FIRST
+/// frame (`codebuddy.ai/toolName == "Agent"`) and later adds
+/// `codebuddy.ai/isSubagent` / `subagentType` — whereas the `subagent_type`
+/// field in `raw_input` (see `is_subagent_invocation`) only streams in dozens of
+/// frames later. Reading the meta lets the title rewrite fire on frame 1, so the
+/// Agent pill never spends an opening window classified as a generic tool (and
+/// its child tool calls, which carry `codebuddy.ai/parentToolCallId` every frame,
+/// nest from the start). Gated on CodeBuddy so the generic `codebuddy.ai/*` keys
+/// can never affect another agent.
+fn codebuddy_meta_marks_subagent(
+    agent_type: AgentType,
+    meta: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> bool {
+    if agent_type != AgentType::CodeBuddy {
+        return false;
+    }
+    let Some(meta) = meta else {
+        return false;
+    };
+    if meta.get("codebuddy.ai/toolName").and_then(|v| v.as_str()) == Some("Agent") {
+        return true;
+    }
+    if meta.get("codebuddy.ai/isSubagent").and_then(|v| v.as_bool()) == Some(true) {
+        return true;
+    }
+    meta.get("codebuddy.ai/subagentType")
+        .and_then(|v| v.as_str())
+        .is_some_and(|s| !s.is_empty())
+}
+
+/// True when a CodeBuddy sub-agent tool call's `_meta` marks it as a BACKGROUND
+/// sub-agent (`codebuddy.ai/isBackground == true`). A background sub-agent runs
+/// concurrently with the main agent, so the suppression-window invariant (parent
+/// blocked → only sub-agent chunks in the window) does NOT hold for it — see
+/// `track_subagent_window`, which excludes it from the window. Gated on CodeBuddy.
+fn codebuddy_meta_marks_background(
+    agent_type: AgentType,
+    meta: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> bool {
+    if agent_type != AgentType::CodeBuddy {
+        return false;
+    }
+    meta.and_then(|m| m.get("codebuddy.ai/isBackground"))
+        .and_then(|v| v.as_bool())
+        == Some(true)
+}
+
+/// True when a CodeBuddy thought/message `ContentChunk`'s own `_meta` marks the
+/// chunk as sub-agent output (`codebuddy.ai/isSubagent`, or a
+/// `codebuddy.ai/parentToolCallId` link to the Agent call). This is a precision
+/// supplement to the open-sub-agent window — CodeBuddy is not confirmed to
+/// populate chunk `_meta`, so suppression never relies on it alone. Gated on
+/// CodeBuddy.
+fn codebuddy_chunk_marks_subagent(
+    agent_type: AgentType,
+    meta: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> bool {
+    if agent_type != AgentType::CodeBuddy {
+        return false;
+    }
+    let Some(meta) = meta else {
+        return false;
+    };
+    if meta.get("codebuddy.ai/isSubagent").and_then(|v| v.as_bool()) == Some(true) {
+        return true;
+    }
+    meta.get("codebuddy.ai/parentToolCallId")
+        .and_then(|v| v.as_str())
+        .is_some_and(|s| !s.is_empty())
+}
+
+/// Whether a live thought/message chunk should be dropped from the top-level
+/// stream because it belongs to a CodeBuddy sub-agent (whose work is already
+/// represented by the Agent pill + its nested tool calls). Matches Claude Code,
+/// which never streams a sub-agent's internal reasoning onto the main session.
+///
+/// Suppress while we're inside an open sub-agent window OR when the chunk's own
+/// meta marks it. The window safety rests on a structural invariant: the window
+/// only ever holds FOREGROUND (blocking) sub-agents — a synchronous `Agent` tool
+/// call suspends the parent model until the tool returns its result, so between
+/// that call's open frame and its terminal frame the main session carries ONLY
+/// the sub-agent's chunks, never main-agent output. BACKGROUND sub-agents (which
+/// run concurrently and could interleave main-agent output) are deliberately
+/// excluded from the window by `track_subagent_window`, so `window_open` can
+/// never cause a main-agent chunk to be dropped. Gated on CodeBuddy; every other
+/// agent always emits.
+fn should_suppress_subagent_chunk(
+    agent_type: AgentType,
+    window_open: bool,
+    chunk_meta: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> bool {
+    if agent_type != AgentType::CodeBuddy {
+        return false;
+    }
+    window_open || codebuddy_chunk_marks_subagent(agent_type, chunk_meta)
+}
+
+/// Maintain the set of OPEN CodeBuddy sub-agent tool calls (`open`). `is_agent`
+/// is true once `resolve_rewritten_title` classified this `tool_call_id` as a
+/// native sub-agent (`"agent"`). A non-final status opens the window; a final
+/// status (`completed` / `failed`) closes it and records the id in `closed`, so a
+/// stray late non-final frame can't re-open an already-finished sub-agent.
+///
+/// `is_background` (from `codebuddy_meta_marks_background`) EXCLUDES a sub-agent
+/// from the window: a background sub-agent runs concurrently with the main agent,
+/// so the "window holds only sub-agent chunks" invariant that makes
+/// `should_suppress_subagent_chunk` safe would not hold. We treat a background
+/// marker exactly like a terminal frame (remove + record closed) so it can never
+/// suppress interleaved main-agent output. (`isBackground` can stream in a frame
+/// or two after the call opens, so a background sub-agent's earliest chunks may be
+/// briefly suppressed before the marker arrives — an accepted, rare imperfection;
+/// the user-reported case is foreground, where the marker is `false`.)
+///
+/// Gated on CodeBuddy so a single-agent-type connection of any other agent stays
+/// inert.
+fn track_subagent_window(
+    agent_type: AgentType,
+    is_agent: bool,
+    is_background: bool,
+    status: Option<&str>,
+    tool_call_id: &str,
+    open: &mut HashSet<String>,
+    closed: &mut HashSet<String>,
+) {
+    if agent_type != AgentType::CodeBuddy || !is_agent {
+        return;
+    }
+    let is_final = matches!(status, Some("completed") | Some("failed"));
+    if is_final || is_background {
+        open.remove(tool_call_id);
+        closed.insert(tool_call_id.to_string());
+    } else if !closed.contains(tool_call_id) {
+        open.insert(tool_call_id.to_string());
+    }
+}
+
+/// Per-session CodeBuddy live-stream state threaded through
+/// `emit_conversation_update`. Consolidates the authoritative title rewrites and
+/// the open-sub-agent suppression window so CodeBuddy's sparse, multi-frame
+/// sub-agent stream resolves to a stable Agent pill (whose children nest) with
+/// its interleaved thought/message chunks suppressed. Created per connection,
+/// shared across the idle and active-turn loops; the historical-replay path uses
+/// a throwaway instance. Mirrors `ToolCallOutputCache`'s lifetime.
+#[derive(Default)]
+struct CodeBuddyLiveState {
+    /// tool_call_id → authoritative title: `"agent"` for a native sub-agent, or
+    /// the inner `mcp__…` name for a `DeferExecuteTool` MCP call. Re-asserted on
+    /// every later frame so a status-only update can't downgrade the card.
+    title_overrides: HashMap<String, String>,
+    /// Sub-agent tool calls currently OPEN (classified, not yet completed/failed).
+    /// While non-empty, interleaved thought/message chunks belong to a sub-agent
+    /// and are suppressed from the top-level stream (matching Claude Code).
+    open_subagents: HashSet<String>,
+    /// Sub-agent tool calls that already reached a final status — guards against a
+    /// stray late non-final frame re-opening a finished sub-agent.
+    closed_subagents: HashSet<String>,
+    /// Objective of the Codex `/goal` run currently open on this connection (set
+    /// by the latest `active` `session_info_update` goal, cleared on any terminal
+    /// status). Lets a later `goal:null` close the run by objective — and be a
+    /// no-op when no run is open. See `crate::acp::codex_goal::next_goal_marker`.
+    ///
+    /// This lives here (not in `SessionState`) because `CodeBuddyLiveState` and
+    /// `SessionState` share one lifetime: a browser refresh / reconnect re-attaches
+    /// to the *running* connection (`find_connection_for_reuse`), keeping both; a
+    /// brand-new connection resets both together (empty live blocks + fresh state).
+    /// So this state never resets while goal blocks it would close still exist.
+    codex_open_goal: Option<String>,
+    /// Monotonic per-connection counter for synthetic goal tool-call ids. Occurrence
+    /// (not content) addressing keeps two runs that share an objective from
+    /// colliding in the reducer's id-keyed live block list.
+    codex_goal_seq: u64,
+}
+
+/// Resolve a tool call's title, honoring an authoritative rewrite recorded for
+/// the session in `overrides` (tool_call_id → resolved title).
+///
+/// Returns `Some(name)` when this event identifies a CodeBuddy `DeferExecuteTool`
+/// (the inner `mcp__…` name, from `raw_input`) or a sub-agent invocation
+/// (`"agent"`) — recording it — OR when a PRIOR event already classified this
+/// `tool_call_id` and this event lost the marker (the override is re-asserted).
+/// Returns `None` only when the call was never classified, so the caller falls
+/// back to the event's own title.
+///
+/// Sub-agent detection fires on EITHER `raw_input.subagent_type`
+/// (`is_subagent_invocation`) OR `meta_marks_subagent` — the precomputed
+/// `codebuddy_meta_marks_subagent` result. The meta signal is what makes the pill
+/// stable: CodeBuddy carries `codebuddy.ai/toolName == "Agent"` from the very
+/// first frame, whereas `subagent_type` only reaches `raw_input` dozens of frames
+/// later, so meta-first detection records the override immediately and every
+/// later (sparse) frame re-asserts it.
+///
+/// The re-assertion is the fix for CodeBuddy's status-only `ToolCallUpdate`s:
+/// they arrive without the original `subagent_type`/`toolName` payload but WITH
+/// the agent's raw (non-agent) title. Without it the frontend
+/// (`inferLiveToolName` → `getToolName`) downgrades the Agent / delegation card
+/// back to a generic tool call mid-stream — which also un-nests its children.
+/// `on_update` only tunes the (PII-safe, id-only) trace wording.
+fn resolve_rewritten_title(
+    agent_type: AgentType,
+    raw_input: &Option<String>,
+    tool_call_id: &str,
+    on_update: bool,
+    meta_marks_subagent: bool,
+    overrides: &mut HashMap<String, String>,
+) -> Option<String> {
+    if let Some(inner) = codebuddy_deferred_tool_name(agent_type, raw_input) {
+        tracing::info!(
+            "[ACP][{agent_type}] unwrapped DeferExecuteTool to its real MCP tool (tool_call_id={tool_call_id}, on_update={on_update})"
+        );
+        overrides.insert(tool_call_id.to_string(), inner.clone());
+        return Some(inner);
+    }
+    if is_subagent_invocation(agent_type, raw_input) || meta_marks_subagent {
+        tracing::info!(
+            "[ACP][{agent_type}] subagent detected, rewrote tool title to 'agent' (tool_call_id={tool_call_id}, on_update={on_update})"
+        );
+        overrides.insert(tool_call_id.to_string(), "agent".to_string());
+        return Some("agent".to_string());
+    }
+    overrides.get(tool_call_id).cloned()
 }
 
 fn map_plan_priority(priority: &PlanEntryPriority) -> String {
@@ -3822,6 +4658,12 @@ fn fix_usage_update_nulls(mut dispatch: Dispatch) -> Dispatch {
 /// `raw_output_cache` is a per-session cache used to detect cumulative
 /// snapshots from agents and convert them into incremental deltas so the
 /// event pipeline never carries a full N-MB tool output more than once.
+///
+/// `cb_state` is the per-session `CodeBuddyLiveState`: the authoritative
+/// title-rewrite map (so a status-only update can't downgrade an Agent /
+/// delegation card and un-nest its children) plus the open-sub-agent window used
+/// to suppress a CodeBuddy sub-agent's interleaved thought/message chunks.
+/// Mirrors `raw_output_cache`'s lifetime.
 async fn emit_conversation_update(
     state: &Arc<RwLock<SessionState>>,
     emitter: &EventEmitter,
@@ -3829,6 +4671,7 @@ async fn emit_conversation_update(
     update: SessionUpdate,
     cwd: Option<&str>,
     raw_output_cache: &mut ToolCallOutputCache,
+    cb_state: &mut CodeBuddyLiveState,
 ) {
     match update {
         SessionUpdate::UserMessageChunk(_) => {
@@ -3837,32 +4680,71 @@ async fn emit_conversation_update(
         }
         SessionUpdate::AgentMessageChunk(ContentChunk {
             content: ContentBlock::Text(text),
+            meta,
             ..
         }) => {
-            emit_with_state(state, emitter, AcpEvent::ContentDelta { text: text.text }).await;
+            // Drop a CodeBuddy sub-agent's interleaved message text — it belongs
+            // to the Agent pill, not the main thread (see
+            // `should_suppress_subagent_chunk`). No-op for every other agent.
+            if !should_suppress_subagent_chunk(
+                agent_type,
+                !cb_state.open_subagents.is_empty(),
+                meta.as_ref(),
+            ) {
+                emit_with_state(state, emitter, AcpEvent::ContentDelta { text: text.text }).await;
+            }
         }
         SessionUpdate::AgentMessageChunk(_) => {
             // Non-text chunks are currently not surfaced in live streaming UI.
         }
         SessionUpdate::AgentThoughtChunk(ContentChunk {
             content: ContentBlock::Text(text),
+            meta,
             ..
         }) => {
-            emit_with_state(state, emitter, AcpEvent::Thinking { text: text.text }).await;
+            // Same suppression for a sub-agent's interleaved reasoning.
+            if !should_suppress_subagent_chunk(
+                agent_type,
+                !cb_state.open_subagents.is_empty(),
+                meta.as_ref(),
+            ) {
+                emit_with_state(state, emitter, AcpEvent::Thinking { text: text.text }).await;
+            }
         }
         SessionUpdate::AgentThoughtChunk(_) => {
             // Non-text thought chunks are currently ignored.
         }
         SessionUpdate::ToolCall(tc) => {
             let tool_call_id = tc.tool_call_id.to_string();
-            let content = serialize_tool_call_content(&tc.content);
+            // CodeBuddy double-wraps a deferred MCP result as a `{type,text}`
+            // content part; peel it (in both the content and raw_output channels)
+            // so the dedicated delegation cards parse it instead of showing raw JSON.
+            // codex-acp reports file edits as a `Diff` content block with no
+            // `raw_input`; synthesize a canonical edit so the call classifies/
+            // renders as an edit instead of a tool named after the raw diff
+            // header (see synthesize_edit_input_from_diffs). When we do, drop the
+            // `Diff` from `content` — it's the same edit re-serialized hunklessly,
+            // which would otherwise double the event and skew the header +/- stats.
+            // Blank raw_input is treated as absent (matches the frontend guard).
+            let own_raw_input =
+                json_value_to_text(&tc.raw_input).filter(|t| !t.trim().is_empty());
+            let synthesized_edit = if own_raw_input.is_none() {
+                synthesize_edit_input_from_diffs(&tc.content)
+            } else {
+                None
+            };
+            let content =
+                serialize_tool_call_content(&tc.content, synthesized_edit.is_none())
+                    .map(|c| unwrap_codebuddy_deferred_output(agent_type, &c).unwrap_or(c));
             let images = extract_tool_call_images(&tc.content);
-            let raw_input =
-                json_value_to_text(&tc.raw_input).map(|text| resolve_live_tool_input(&text, cwd));
+            let raw_input = synthesized_edit
+                .or(own_raw_input)
+                .map(|text| resolve_live_tool_input(&text, cwd));
             // Initial tool_call notification — the frontend reducer
             // treats `raw_output` as a full replacement, so we bypass
             // the diff path and seed the cache with the current snapshot.
             let raw_output = json_value_to_text(&tc.raw_output)
+                .map(|text| unwrap_codebuddy_deferred_output(agent_type, &text).unwrap_or(text))
                 .map(|text| structurize_live_output(&text))
                 .and_then(|text| raw_output_cache.seed(&tool_call_id, &text));
             let locations = if tc.locations.is_empty() {
@@ -3870,21 +4752,43 @@ async fn emit_conversation_update(
             } else {
                 serde_json::to_value(&tc.locations).ok()
             };
+            // Read the CodeBuddy sub-agent markers from `_meta` BEFORE it's moved
+            // into the emitted `Value` below — `meta_marks_subagent` is the early,
+            // reliable signal (frame 1) that keeps the Agent pill from flickering;
+            // `meta_marks_background` keeps a concurrent sub-agent out of the
+            // suppression window (see fn docs).
+            let meta_marks_subagent = codebuddy_meta_marks_subagent(agent_type, tc.meta.as_ref());
+            let meta_marks_background = codebuddy_meta_marks_background(agent_type, tc.meta.as_ref());
             let meta = tc.meta.map(serde_json::Value::Object);
             let status = format!("{:?}", tc.status).to_lowercase();
             raw_output_cache.remove_if_final(&tool_call_id, Some(status.as_str()));
-            let title = if is_opencode_subagent_invocation(agent_type, &raw_input) {
-                // Avoid logging `tc.title` — it can be a model-generated user
-                // task description (PII-adjacent) and would create noise in
-                // server-mode log sinks. The opaque tool_call_id is enough
-                // to correlate this event with downstream traces.
-                eprintln!(
-                    "[ACP][{agent_type}] subagent detected, rewrote tool title to 'agent' (tool_call_id={tool_call_id})"
-                );
-                "agent".to_string()
-            } else {
-                tc.title
-            };
+            // Avoid logging titles/payloads below — they can be model-generated
+            // user task descriptions (PII-adjacent) and would create noise in
+            // server-mode log sinks. The opaque tool_call_id is enough to
+            // correlate these events with downstream traces.
+            // Resolve (and record) any authoritative title rewrite so a later
+            // status-only update can't downgrade this card (see fn doc).
+            let title = resolve_rewritten_title(
+                agent_type,
+                &raw_input,
+                &tool_call_id,
+                false,
+                meta_marks_subagent,
+                &mut cb_state.title_overrides,
+            )
+            .unwrap_or(tc.title);
+            // Open/close the sub-agent suppression window for this call. `title ==
+            // "agent"` iff this is a classified native sub-agent (DeferExecuteTool
+            // rewrites to an `mcp__…` name, never "agent").
+            track_subagent_window(
+                agent_type,
+                title == "agent",
+                meta_marks_background,
+                Some(status.as_str()),
+                &tool_call_id,
+                &mut cb_state.open_subagents,
+                &mut cb_state.closed_subagents,
+            );
             emit_with_state(
                 state,
                 emitter,
@@ -3905,17 +4809,35 @@ async fn emit_conversation_update(
         }
         SessionUpdate::ToolCallUpdate(tcu) => {
             let tool_call_id = tcu.tool_call_id.to_string();
+            // Peel CodeBuddy's `{type,text}` deferred-MCP wrapper here too — the
+            // result often arrives on an update (see raw_output below).
+            // Same Diff→canonical-edit hoist as the initial ToolCall path: the
+            // edit may first arrive on an update. Drop the redundant Diff from
+            // `content` when hoisted. The reducer preserves a prior raw_input on
+            // status-only updates (`action.raw_input ?? block.info.raw_input`).
+            let own_raw_input =
+                json_value_to_text(&tcu.fields.raw_input).filter(|t| !t.trim().is_empty());
+            let synthesized_edit = if own_raw_input.is_none() {
+                tcu.fields
+                    .content
+                    .as_deref()
+                    .and_then(synthesize_edit_input_from_diffs)
+            } else {
+                None
+            };
             let content = tcu
                 .fields
                 .content
                 .as_deref()
-                .and_then(serialize_tool_call_content);
+                .and_then(|c| serialize_tool_call_content(c, synthesized_edit.is_none()))
+                .map(|c| unwrap_codebuddy_deferred_output(agent_type, &c).unwrap_or(c));
             let images = tcu
                 .fields
                 .content
                 .as_deref()
                 .and_then(extract_tool_call_images);
-            let raw_input = json_value_to_text(&tcu.fields.raw_input)
+            let raw_input = synthesized_edit
+                .or(own_raw_input)
                 .map(|text| resolve_live_tool_input(&text, cwd));
             // Diff the incoming raw_output against the last snapshot we
             // emitted for this tool call. This turns cumulative snapshots
@@ -3924,6 +4846,7 @@ async fn emit_conversation_update(
             // problem to O(N) while capping any single emitted chunk to
             // MAX_SINGLE_EMIT_BYTES.
             let raw_output_text = json_value_to_text(&tcu.fields.raw_output)
+                .map(|text| unwrap_codebuddy_deferred_output(agent_type, &text).unwrap_or(text))
                 .map(|text| structurize_live_output(&text));
             let (raw_output, raw_output_append) = match raw_output_text {
                 Some(text) => match raw_output_cache.consume(&tool_call_id, &text) {
@@ -3938,23 +4861,39 @@ async fn emit_conversation_update(
                 .as_ref()
                 .filter(|l| !l.is_empty())
                 .and_then(|l| serde_json::to_value(l).ok());
+            let meta_marks_subagent = codebuddy_meta_marks_subagent(agent_type, tcu.meta.as_ref());
+            let meta_marks_background = codebuddy_meta_marks_background(agent_type, tcu.meta.as_ref());
             let meta = tcu.meta.clone().map(serde_json::Value::Object);
             let status = tcu.fields.status.map(|s| format!("{:?}", s).to_lowercase());
             raw_output_cache.remove_if_final(&tool_call_id, status.as_deref());
-            // When this update carries the subagent payload, force-override the
-            // title — regardless of whether the update itself provides a title —
-            // so the frontend reducer replaces any earlier non-agent title set
-            // by the initial ToolCall (whose raw_input may have been empty).
-            // Logging mirrors the ToolCall arm: we deliberately omit the
-            // incoming title (user-generated content) to keep server logs clean.
-            let title = if is_opencode_subagent_invocation(agent_type, &raw_input) {
-                eprintln!(
-                    "[ACP][{agent_type}] subagent detected, rewrote tool title to 'agent' (tool_call_id={tool_call_id}, on update)"
-                );
-                Some("agent".to_string())
-            } else {
-                tcu.fields.title
-            };
+            // Re-assert any authoritative title rewrite (see fn doc): an update
+            // that carries the subagent/deferred marker classifies (and records)
+            // the card, and — the key fix — a later status-only update that LOST
+            // the marker but carries the agent's raw (non-agent) title still
+            // resolves to the recorded override, so the Agent/delegation card and
+            // its child nesting (`getToolName === "agent"`) don't revert to a
+            // generic tool call mid-stream. Falls back to the event's own title
+            // for never-classified tool calls.
+            let title = resolve_rewritten_title(
+                agent_type,
+                &raw_input,
+                &tool_call_id,
+                true,
+                meta_marks_subagent,
+                &mut cb_state.title_overrides,
+            )
+            .or(tcu.fields.title);
+            // Keep/close the sub-agent suppression window by status (an update
+            // resolving to "agent" is a classified native sub-agent).
+            track_subagent_window(
+                agent_type,
+                title.as_deref() == Some("agent"),
+                meta_marks_background,
+                status.as_deref(),
+                &tool_call_id,
+                &mut cb_state.open_subagents,
+                &mut cb_state.closed_subagents,
+            );
             emit_with_state(
                 state,
                 emitter,
@@ -4032,9 +4971,52 @@ async fn emit_conversation_update(
             )
             .await;
         }
+        SessionUpdate::SessionInfoUpdate(info) => {
+            // codex-acp v1.1.0 (#263) reports `/goal` transitions as structured
+            // session metadata instead of live "Goal updated (…)" agent text:
+            // the goal object rides under `_meta.codex.goal`. Map it onto codeg's
+            // canonical create_goal/update_goal synthetic tool call so the
+            // existing goal-card pipeline (groupGoalRuns/GoalCard) renders it —
+            // byte-identical to the history path (parsers/codex.rs). Non-Codex
+            // agents don't populate the `codex` key, so this is a no-op for them.
+            // (`info.title` is Codex's native thread name; it is adopted via the
+            // parser auto-title path on the next conversation fetch, not here, to
+            // keep this DB-agnostic emit path unchanged — see parsers/codex.rs.)
+            if let Some(goal) = info
+                .meta
+                .as_ref()
+                .and_then(|m| m.get("codex"))
+                .and_then(|codex| codex.get("goal"))
+            {
+                if let Some(marker) =
+                    crate::acp::codex_goal::next_goal_marker(&mut cb_state.codex_open_goal, goal)
+                {
+                    cb_state.codex_goal_seq += 1;
+                    let tool_call_id =
+                        crate::acp::codex_goal::goal_tool_call_id(cb_state.codex_goal_seq);
+                    emit_with_state(
+                        state,
+                        emitter,
+                        AcpEvent::ToolCall {
+                            tool_call_id,
+                            title: marker.title,
+                            kind: "other".to_string(),
+                            status: "completed".to_string(),
+                            content: None,
+                            raw_input: Some(marker.input_json),
+                            raw_output: Some(marker.output_json),
+                            locations: None,
+                            meta: None,
+                            images: None,
+                        },
+                    )
+                    .await;
+                }
+            }
+        }
         other => {
             // Log unhandled update types for debugging
-            eprintln!("[ACP] Unhandled SessionUpdate: {:?}", other);
+            tracing::info!("[ACP] Unhandled SessionUpdate: {:?}", other);
         }
     }
 }
@@ -4042,6 +5024,189 @@ async fn emit_conversation_update(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sacp::schema::Diff;
+
+    fn diff_content(path: &str, old: Option<&str>, new: &str) -> ToolCallContent {
+        let mut d = Diff::new(path, new);
+        if let Some(o) = old {
+            d = d.old_text(o.to_string());
+        }
+        ToolCallContent::Diff(d)
+    }
+
+    #[test]
+    fn synthesize_edit_single_diff_makes_canonical_edit() {
+        let content = vec![diff_content("/a.rs", Some("old line\n"), "new line\n")];
+        let json = synthesize_edit_input_from_diffs(&content).expect("one diff -> canonical edit");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["file_path"], "/a.rs");
+        assert_eq!(v["old_string"], "old line\n");
+        assert_eq!(v["new_string"], "new line\n");
+        // Classifies as "edit" on the frontend via old_string/new_string.
+        assert!(v.get("changes").is_none());
+    }
+
+    #[test]
+    fn synthesize_edit_new_file_uses_write_shape() {
+        // codex-acp sends old_text=None for new files. Encode that as a write-
+        // shaped input (`{file_path, content}`) so the frontend classifies it as
+        // a creation (`inferFromInput` → "write" → `--- /dev/null` diff), not a
+        // modification. Edit-shaped keys must be absent, or `inferFromInput`
+        // would route it back to "edit".
+        let content = vec![diff_content("/new.rs", None, "fn main() {}\n")];
+        let json = synthesize_edit_input_from_diffs(&content).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["file_path"], "/new.rs");
+        assert_eq!(v["content"], "fn main() {}\n");
+        assert!(v.get("old_string").is_none());
+        assert!(v.get("new_string").is_none());
+    }
+
+    #[test]
+    fn build_new_file_diff_matches_frontend_write_builder() {
+        // Format parity with session-files.ts's `write` diff builder: a
+        // `--- /dev/null` header (so `isAddedFileDiff` fires) then every
+        // `split("\n")` segment — including the trailing empty one — as a `+`
+        // line, with `+1,N` counting those segments.
+        assert_eq!(
+            build_new_file_diff("src/x.rs", "a\nb\n"),
+            "--- /dev/null\n+++ b/src/x.rs\n@@ -0,0 +1,3 @@\n+a\n+b\n+"
+        );
+    }
+
+    #[test]
+    fn synthesize_edit_multi_diff_makes_changes_map() {
+        let content = vec![
+            diff_content("/a.rs", Some("a-old"), "a-new"),
+            diff_content("/b.rs", None, "b-new"),
+        ];
+        let json = synthesize_edit_input_from_diffs(&content).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        // Object map keyed by path — the shape extractEditChangesPayload reads.
+        // /a.rs is an edit → old/new text for the frontend's generateUnifiedDiff.
+        assert_eq!(v["changes"]["/a.rs"]["old_text"], "a-old");
+        assert_eq!(v["changes"]["/a.rs"]["new_text"], "a-new");
+        // /b.rs is a new file (old_text=None) → a ready-made creation diff whose
+        // `--- /dev/null` header makes `isAddedFileDiff` classify it as new;
+        // it must NOT carry old_text/new_text (that path builds a `--- a/…`
+        // modification diff instead).
+        let b_diff = v["changes"]["/b.rs"]["diff"]
+            .as_str()
+            .expect("new-file entry carries a prebuilt diff");
+        assert!(b_diff.contains("--- /dev/null"));
+        assert!(b_diff.contains("+b-new"));
+        assert!(v["changes"]["/b.rs"].get("old_text").is_none());
+        assert!(v["changes"]["/b.rs"].get("new_text").is_none());
+    }
+
+    #[test]
+    fn synthesize_edit_returns_none_without_diff() {
+        // No Diff block -> None, so callers keep the agent's own raw_input.
+        assert!(synthesize_edit_input_from_diffs(&[]).is_none());
+    }
+
+    #[test]
+    fn serialize_excludes_diffs_when_hoisted_to_raw_input() {
+        let content = vec![diff_content("/a.rs", Some("old"), "new")];
+        // Default keeps the diff (unchanged behavior for non-hoisted content).
+        assert!(serialize_tool_call_content(&content, true)
+            .unwrap()
+            .contains("--- /a.rs"));
+        // When the edit is hoisted into raw_input, the diff is dropped so it
+        // isn't shipped twice and the header stats don't read the full-file blob.
+        assert!(serialize_tool_call_content(&content, false).is_none());
+    }
+
+    #[test]
+    fn pi_preflight_flags_missing_custom_command() {
+        let mut env = BTreeMap::new();
+        env.insert(
+            "PI_ACP_PI_COMMAND".to_string(),
+            "/nonexistent/definitely-not-pi-xyz".to_string(),
+        );
+        let msg =
+            pi_launch_preflight(&env).expect("an unresolvable custom pi command must be flagged");
+        // Frontend invariant: routes to the localized SDK-missing install prompt.
+        assert!(msg.contains("is not installed"), "got: {msg}");
+        assert!(msg.contains("definitely-not-pi-xyz"), "got: {msg}");
+    }
+
+    #[test]
+    fn pi_preflight_accepts_resolvable_custom_command() {
+        // A binary we know exists and is executable on this platform — proves the
+        // preflight clears (returns None) for a resolvable PI_ACP_PI_COMMAND.
+        let existing = if cfg!(windows) {
+            "C:\\Windows\\System32\\cmd.exe"
+        } else {
+            "/bin/sh"
+        };
+        let mut env = BTreeMap::new();
+        env.insert("PI_ACP_PI_COMMAND".to_string(), existing.to_string());
+        assert!(pi_launch_preflight(&env).is_none());
+    }
+
+    #[test]
+    fn prepend_path_unix_prepends_and_keeps_single_key() {
+        let mut env = BTreeMap::new();
+        env.insert("PATH".to_string(), "/usr/bin:/bin".to_string());
+        prepend_dir_to_path_env(&mut env, "/home/u/.local/bin", "/fallback", false);
+        assert_eq!(env.get("PATH").unwrap(), "/home/u/.local/bin:/usr/bin:/bin");
+        assert_eq!(env.keys().filter(|k| k.as_str() == "PATH").count(), 1);
+    }
+
+    #[test]
+    fn prepend_path_unix_seeds_from_fallback_when_absent() {
+        let mut env = BTreeMap::new();
+        prepend_dir_to_path_env(&mut env, "/x/bin", "/usr/bin:/bin", false);
+        assert_eq!(env.get("PATH").unwrap(), "/x/bin:/usr/bin:/bin");
+    }
+
+    #[test]
+    fn prepend_path_windows_is_case_insensitive_and_no_clobber() {
+        // Regression for the `Path` vs `PATH` clobber: a pre-existing `Path`
+        // must be reused (not joined by a second `PATH` key that a later
+        // case-insensitive `Command::env` could overwrite).
+        let mut env = BTreeMap::new();
+        env.insert("Path".to_string(), r"C:\Windows".to_string());
+        prepend_dir_to_path_env(
+            &mut env,
+            r"C:\Users\u\AppData\Local\OfficeCLI",
+            "ignored-fallback",
+            true,
+        );
+        // Exactly one PATH-ish key, the original casing preserved, value prepended.
+        let path_keys: Vec<&String> =
+            env.keys().filter(|k| k.eq_ignore_ascii_case("PATH")).collect();
+        assert_eq!(path_keys.len(), 1, "{env:?}");
+        assert_eq!(
+            env.get("Path").unwrap(),
+            r"C:\Users\u\AppData\Local\OfficeCLI;C:\Windows"
+        );
+    }
+
+    #[test]
+    fn prepend_path_windows_seeds_from_fallback_with_semicolon() {
+        let mut env = BTreeMap::new();
+        prepend_dir_to_path_env(&mut env, r"C:\OfficeCLI", r"C:\Windows;C:\Windows\System32", true);
+        // No prior key → default `Path` casing on Windows.
+        assert_eq!(env.get("Path").unwrap(), r"C:\OfficeCLI;C:\Windows;C:\Windows\System32");
+    }
+
+    #[test]
+    fn prepend_path_windows_collapses_duplicate_casings() {
+        // Pathological but possible: both `PATH` and `Path` present. All
+        // PATH-ish keys must collapse to exactly one, prepended onto the
+        // effective (last-applied → `Path`) value, so no stale duplicate can
+        // overwrite the injected dir when the child Command applies env.
+        let mut env = BTreeMap::new();
+        env.insert("PATH".to_string(), r"C:\a".to_string());
+        env.insert("Path".to_string(), r"C:\b".to_string());
+        prepend_dir_to_path_env(&mut env, r"C:\OfficeCLI", "ignored-fallback", true);
+        let path_keys: Vec<&String> =
+            env.keys().filter(|k| k.eq_ignore_ascii_case("PATH")).collect();
+        assert_eq!(path_keys.len(), 1, "exactly one PATH-ish key must remain: {env:?}");
+        assert_eq!(env.get("Path").unwrap(), r"C:\OfficeCLI;C:\b");
+    }
 
     #[test]
     fn claude_raw_sdk_meta_enabled_only_for_claude() {
@@ -4142,6 +5307,118 @@ mod tests {
         );
 
         assert!(req.meta.is_none());
+    }
+
+    // OpenClaw rejects MCP server *entries* over the ACP wire, not the
+    // `mcpServers` field itself. The ACP schema does not `skip_serializing_if`
+    // that field on NewSessionRequest/LoadSessionRequest, so it always
+    // serializes as `[]`; every agent (OpenClaw included) already receives
+    // `mcpServers: []` on a fresh install with no servers configured and
+    // codeg-mcp off — the known-good payload. The connection-layer gate
+    // (`supports_mcp == false`) forces OpenClaw onto that empty payload
+    // unconditionally. This pins the wire contract: both builders emit an
+    // empty list, so no server entry can ever reach OpenClaw.
+    #[test]
+    fn openclaw_session_requests_carry_no_mcp_servers() {
+        let cwd = std::path::PathBuf::from("/tmp/codeg");
+
+        let new_req = build_new_session_request(AgentType::OpenClaw, &cwd, Vec::new());
+        assert!(
+            new_req.mcp_servers.is_empty(),
+            "OpenClaw session/new must carry no MCP servers"
+        );
+        let new_json = serde_json::to_value(&new_req).unwrap();
+        assert_eq!(
+            new_json.get("mcpServers"),
+            Some(&serde_json::json!([])),
+            "OpenClaw session/new mcpServers must serialize as an empty list"
+        );
+
+        let load_req = build_load_session_request(
+            AgentType::OpenClaw,
+            SessionId::new("openclaw-session".to_string()),
+            &cwd,
+            Vec::new(),
+        );
+        assert!(
+            load_req.mcp_servers.is_empty(),
+            "OpenClaw session/load must carry no MCP servers"
+        );
+        let load_json = serde_json::to_value(&load_req).unwrap();
+        assert_eq!(
+            load_json.get("mcpServers"),
+            Some(&serde_json::json!([])),
+            "OpenClaw session/load mcpServers must serialize as an empty list"
+        );
+    }
+
+    #[test]
+    fn build_resume_session_request_sets_claude_raw_meta() {
+        let cwd = std::path::PathBuf::from("/tmp/codeg");
+        let req = build_resume_session_request(
+            AgentType::ClaudeCode,
+            SessionId::new("abc".to_string()),
+            &cwd,
+            Vec::new(),
+        );
+
+        assert_eq!(
+            req.meta
+                .as_ref()
+                .and_then(|m| m.get("claudeCode"))
+                .and_then(|v| v.get("emitRawSDKMessages"))
+                .and_then(|v| v.as_bool()),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn build_resume_session_request_skips_meta_for_non_claude() {
+        let cwd = std::path::PathBuf::from("/tmp/codeg");
+        let req = build_resume_session_request(
+            AgentType::Codex,
+            SessionId::new("abc".to_string()),
+            &cwd,
+            Vec::new(),
+        );
+
+        assert!(req.meta.is_none());
+    }
+
+    // Unlike NewSessionRequest/LoadSessionRequest (whose `mcp_servers` has no
+    // `skip_serializing_if`, so it always serializes as `[]`),
+    // ResumeSessionRequest marks `mcp_servers` `skip_serializing_if =
+    // Vec::is_empty` — an empty list is OMITTED from the wire entirely. OpenClaw
+    // (which supports session/resume) tolerates both an absent key and `[]`, and
+    // the connection-layer gate keeps the list empty regardless, so no server
+    // entry can ever reach it. Pin both the empty-list invariant and the
+    // documented wire-shape divergence here.
+    #[test]
+    fn openclaw_resume_request_carries_no_mcp_servers() {
+        let cwd = std::path::PathBuf::from("/tmp/codeg");
+        let req = build_resume_session_request(
+            AgentType::OpenClaw,
+            SessionId::new("openclaw-session".to_string()),
+            &cwd,
+            Vec::new(),
+        );
+        assert!(
+            req.mcp_servers.is_empty(),
+            "OpenClaw session/resume must carry no MCP servers"
+        );
+
+        let json = serde_json::to_value(&req).unwrap();
+        assert!(
+            json.get("mcpServers").is_none(),
+            "empty mcp_servers must be omitted from the resume wire payload"
+        );
+        // camelCase round-trip: sanity that the UntypedMessage send produces the
+        // ACP-correct shape.
+        assert!(
+            json.get("sessionId").is_some(),
+            "sessionId must serialize in camelCase"
+        );
+        assert!(json.get("cwd").is_some());
     }
 
     #[test]
@@ -4438,7 +5715,7 @@ mod tests {
         assert!(out.len() <= 6); // at most 2 chars (6 bytes)
     }
 
-    // ─── is_opencode_subagent_invocation ─────────────────────────────────
+    // ─── is_subagent_invocation ─────────────────────────────────
 
     #[test]
     fn subagent_detects_opencode_with_subagent_type_regardless_of_title() {
@@ -4450,19 +5727,19 @@ mod tests {
         // solely on agent_type + subagent_type. Verify the detection
         // triggers regardless of the title shape.
         let input = Some(r#"{"subagent_type":"researcher","prompt":"x"}"#.to_string());
-        assert!(is_opencode_subagent_invocation(AgentType::OpenCode, &input));
+        assert!(is_subagent_invocation(AgentType::OpenCode, &input));
     }
 
     #[test]
-    fn subagent_rejects_when_agent_is_not_opencode() {
-        // Cross-agent isolation: even if a Claude/Codex tool happens to
-        // embed `subagent_type` in its input, we never rewrite the title.
+    fn subagent_gates_on_supported_agent_types() {
+        // OpenCode and CodeBuddy both rewrite a `subagent_type`-bearing call to
+        // the Agent card; other agents stay excluded so a generic `subagent_type`
+        // field never triggers a cross-agent collision.
         let input = Some(r#"{"subagent_type":"x"}"#.to_string());
-        assert!(!is_opencode_subagent_invocation(
-            AgentType::ClaudeCode,
-            &input
-        ));
-        assert!(!is_opencode_subagent_invocation(AgentType::Codex, &input));
+        assert!(is_subagent_invocation(AgentType::OpenCode, &input));
+        assert!(is_subagent_invocation(AgentType::CodeBuddy, &input));
+        assert!(!is_subagent_invocation(AgentType::ClaudeCode, &input));
+        assert!(!is_subagent_invocation(AgentType::Codex, &input));
     }
 
     #[test]
@@ -4474,7 +5751,7 @@ mod tests {
             r#"{"subagent_type":["a"]}"#,
         ] {
             assert!(
-                !is_opencode_subagent_invocation(AgentType::OpenCode, &Some(raw.to_string())),
+                !is_subagent_invocation(AgentType::OpenCode, &Some(raw.to_string())),
                 "expected false for raw_input={raw}"
             );
         }
@@ -4482,7 +5759,7 @@ mod tests {
 
     #[test]
     fn subagent_rejects_none_malformed_or_non_object_root() {
-        assert!(!is_opencode_subagent_invocation(AgentType::OpenCode, &None));
+        assert!(!is_subagent_invocation(AgentType::OpenCode, &None));
         for raw in [
             "not json",
             "{}",
@@ -4497,7 +5774,7 @@ mod tests {
             r#"{"note":"contains the word subagent_type as text"}"#,
         ] {
             assert!(
-                !is_opencode_subagent_invocation(AgentType::OpenCode, &Some(raw.to_string())),
+                !is_subagent_invocation(AgentType::OpenCode, &Some(raw.to_string())),
                 "expected false for raw_input={raw}"
             );
         }
@@ -4511,7 +5788,7 @@ mod tests {
         // returns false. Regression guard against any future "optimisation"
         // that conflates the substring check with the field check.
         let input = Some(r#"{"description":"use subagent_type=foo"}"#.to_string());
-        assert!(!is_opencode_subagent_invocation(
+        assert!(!is_subagent_invocation(
             AgentType::OpenCode,
             &input
         ));
@@ -4526,7 +5803,366 @@ mod tests {
             r#"{"description":"Explore project structure","prompt":"Look at the repo layout and summarise the stack.","subagent_type":"general-purpose"}"#
                 .to_string(),
         );
-        assert!(is_opencode_subagent_invocation(AgentType::OpenCode, &input));
+        assert!(is_subagent_invocation(AgentType::OpenCode, &input));
+    }
+
+    // ─── codebuddy_deferred_tool_name ────────────────────────────────────
+
+    #[test]
+    fn deferred_unwraps_codebuddy_mcp_tool_name() {
+        // CodeBuddy wraps MCP calls as `{toolName, params}` via DeferExecuteTool.
+        let input = Some(
+            r#"{"params":{"agent_type":"codex","task":"build"},"toolName":"mcp__codeg-mcp__delegate_to_agent"}"#
+                .to_string(),
+        );
+        assert_eq!(
+            codebuddy_deferred_tool_name(AgentType::CodeBuddy, &input).as_deref(),
+            Some("mcp__codeg-mcp__delegate_to_agent")
+        );
+    }
+
+    #[test]
+    fn deferred_gates_on_codebuddy_and_shape() {
+        let wrapped = Some(
+            r#"{"params":{"task_id":"a"},"toolName":"mcp__codeg-mcp__cancel_delegation"}"#
+                .to_string(),
+        );
+        // Only CodeBuddy is unwrapped.
+        assert!(codebuddy_deferred_tool_name(AgentType::OpenCode, &wrapped).is_none());
+        // Missing `params`, missing/blank `toolName`, or non-wrapper shapes → None.
+        for raw in [
+            r#"{"toolName":"mcp__codeg-mcp__delegate_to_agent"}"#, // no params
+            r#"{"params":{"x":1},"toolName":""}"#,                 // blank toolName
+            r#"{"params":{"x":1}}"#,                               // no toolName
+            r#"{"command":"ls"}"#,                                 // plain tool
+            "not json",
+        ] {
+            assert!(
+                codebuddy_deferred_tool_name(AgentType::CodeBuddy, &Some(raw.to_string())).is_none(),
+                "expected None for raw_input={raw}"
+            );
+        }
+        assert!(codebuddy_deferred_tool_name(AgentType::CodeBuddy, &None).is_none());
+    }
+
+    // ─── unwrap_codebuddy_deferred_output ────────────────────────────────
+
+    #[test]
+    fn deferred_output_peels_codebuddy_content_wrapper() {
+        // The exact live shape from the bug report: a `get_delegation_status`
+        // batch result double-wrapped as a `{text,type}` content part, whose
+        // inner `text` is the compact `{tasks:[...]}` JSON. Peeling it yields the
+        // bare report JSON the frontend `parseStatusReports` already understands.
+        let inner = r#"{"tasks":[{"status":"completed","task_id":"666da381","child_conversation_id":18,"text":"ok"}]}"#;
+        let wrapped = serde_json::json!({ "text": inner, "type": "text" }).to_string();
+        assert_eq!(
+            unwrap_codebuddy_deferred_output(AgentType::CodeBuddy, &wrapped).as_deref(),
+            Some(inner)
+        );
+    }
+
+    #[test]
+    fn deferred_output_gates_on_codebuddy_and_wrapper_shape() {
+        let wrapped =
+            serde_json::json!({ "text": "{\"status\":\"running\"}", "type": "text" }).to_string();
+        // Only CodeBuddy is unwrapped — the wrapper is a CodeBuddy quirk.
+        assert!(unwrap_codebuddy_deferred_output(AgentType::OpenCode, &wrapped).is_none());
+        assert!(unwrap_codebuddy_deferred_output(AgentType::ClaudeCode, &wrapped).is_none());
+        for raw in [
+            // Plain (non-deferred) tool output passes through untouched.
+            "build succeeded",
+            // A delegation report has no top-level `type` discriminator.
+            r#"{"status":"completed","task_id":"x","text":"done"}"#,
+            // A batch envelope is already in the bare shape — no `type` either.
+            r#"{"tasks":[{"status":"completed","task_id":"x"}]}"#,
+            // Wrong discriminator value.
+            r#"{"type":"image","text":"x"}"#,
+            // Missing inner `text`.
+            r#"{"type":"text"}"#,
+            "not json",
+        ] {
+            assert!(
+                unwrap_codebuddy_deferred_output(AgentType::CodeBuddy, raw).is_none(),
+                "expected pass-through (None) for output={raw}"
+            );
+        }
+    }
+
+    // ─── resolve_rewritten_title (title state across updates) ────────────
+
+    #[test]
+    fn rewritten_title_persists_across_status_only_updates() {
+        let mut overrides: HashMap<String, String> = HashMap::new();
+        let subagent = Some(
+            r#"{"description":"Run pnpm build","subagent_type":"general-purpose"}"#.to_string(),
+        );
+        // Initial event carrying the subagent marker → "agent", recorded.
+        assert_eq!(
+            resolve_rewritten_title(AgentType::CodeBuddy, &subagent, "tc1", false, false, &mut overrides)
+                .as_deref(),
+            Some("agent")
+        );
+        // The bug: a later status-only update lost the marker (raw_input None).
+        // The override must be RE-ASSERTED, not downgraded to the event's title.
+        assert_eq!(
+            resolve_rewritten_title(AgentType::CodeBuddy, &None, "tc1", true, false, &mut overrides)
+                .as_deref(),
+            Some("agent"),
+            "a status-only update must not downgrade the Agent card mid-stream"
+        );
+        // Even an update whose raw_input looks like a different tool keeps it.
+        let bash = Some(r#"{"command":"ls"}"#.to_string());
+        assert_eq!(
+            resolve_rewritten_title(AgentType::CodeBuddy, &bash, "tc1", true, false, &mut overrides)
+                .as_deref(),
+            Some("agent")
+        );
+        // A never-classified tool call returns None → caller uses its own title.
+        assert_eq!(
+            resolve_rewritten_title(AgentType::CodeBuddy, &None, "tc2", true, false, &mut overrides),
+            None
+        );
+        // Deferred MCP tool: inner name recorded, then re-asserted on a bare update.
+        let deferred = Some(
+            r#"{"params":{"agent_type":"codex","task":"x"},"toolName":"mcp__codeg-mcp__delegate_to_agent"}"#
+                .to_string(),
+        );
+        assert_eq!(
+            resolve_rewritten_title(AgentType::CodeBuddy, &deferred, "tc3", false, false, &mut overrides)
+                .as_deref(),
+            Some("mcp__codeg-mcp__delegate_to_agent")
+        );
+        assert_eq!(
+            resolve_rewritten_title(AgentType::CodeBuddy, &None, "tc3", true, false, &mut overrides)
+                .as_deref(),
+            Some("mcp__codeg-mcp__delegate_to_agent")
+        );
+        // Non-CodeBuddy agent with no prior classification: never rewritten.
+        assert_eq!(
+            resolve_rewritten_title(AgentType::OpenCode, &None, "tc9", true, false, &mut overrides),
+            None
+        );
+    }
+
+    // ─── codebuddy_meta_marks_subagent ───────────────────────────────────
+
+    #[test]
+    fn meta_marks_subagent_reads_codebuddy_keys() {
+        // Any one of the three CodeBuddy sub-agent markers is sufficient.
+        let tool_name = serde_json::json!({ "codebuddy.ai/toolName": "Agent" });
+        let is_sub = serde_json::json!({ "codebuddy.ai/isSubagent": true });
+        let sub_type = serde_json::json!({ "codebuddy.ai/subagentType": "general-purpose" });
+        for meta in [&tool_name, &is_sub, &sub_type] {
+            assert!(codebuddy_meta_marks_subagent(
+                AgentType::CodeBuddy,
+                meta.as_object()
+            ));
+        }
+        // Gated on CodeBuddy: the generic `codebuddy.ai/*` keys can't classify
+        // another agent.
+        assert!(!codebuddy_meta_marks_subagent(
+            AgentType::OpenCode,
+            tool_name.as_object()
+        ));
+        // Negative shapes: non-Agent toolName, empty subagentType, absent meta.
+        let other = serde_json::json!({
+            "codebuddy.ai/toolName": "Bash",
+            "codebuddy.ai/subagentType": "",
+            "codebuddy.ai/isSubagent": false,
+        });
+        assert!(!codebuddy_meta_marks_subagent(
+            AgentType::CodeBuddy,
+            other.as_object()
+        ));
+        assert!(!codebuddy_meta_marks_subagent(AgentType::CodeBuddy, None));
+    }
+
+    #[test]
+    fn rewritten_title_fires_on_meta_before_raw_input() {
+        let mut overrides: HashMap<String, String> = HashMap::new();
+        // Frame 1: `raw_input` has NO `subagent_type` yet, but `_meta` already
+        // marks it (the early, reliable signal). Title must already be "agent".
+        assert_eq!(
+            resolve_rewritten_title(AgentType::CodeBuddy, &None, "tc1", false, true, &mut overrides)
+                .as_deref(),
+            Some("agent")
+        );
+        // Later sparse frames carry NEITHER signal — the override is re-asserted,
+        // so the pill never flickers back to a generic tool mid-stream.
+        assert_eq!(
+            resolve_rewritten_title(AgentType::CodeBuddy, &None, "tc1", true, false, &mut overrides)
+                .as_deref(),
+            Some("agent"),
+            "meta-classified Agent pill must stay 'agent' across signal-less frames"
+        );
+        // DeferExecuteTool still wins over the meta path (distinct mechanism).
+        let deferred = Some(
+            r#"{"params":{"agent_type":"codex","task":"x"},"toolName":"mcp__codeg-mcp__delegate_to_agent"}"#
+                .to_string(),
+        );
+        assert_eq!(
+            resolve_rewritten_title(
+                AgentType::CodeBuddy,
+                &deferred,
+                "tc2",
+                false,
+                false,
+                &mut overrides
+            )
+            .as_deref(),
+            Some("mcp__codeg-mcp__delegate_to_agent")
+        );
+    }
+
+    // ─── track_subagent_window / should_suppress_subagent_chunk ──────────
+
+    #[test]
+    fn subagent_window_opens_and_closes_by_status() {
+        let mut open: HashSet<String> = HashSet::new();
+        let mut closed: HashSet<String> = HashSet::new();
+        let fg = false; // foreground (not background)
+        // A non-final foreground agent frame opens the window.
+        track_subagent_window(
+            AgentType::CodeBuddy,
+            true,
+            fg,
+            Some("in_progress"),
+            "a",
+            &mut open,
+            &mut closed,
+        );
+        assert!(open.contains("a"));
+        // A final frame closes it.
+        track_subagent_window(
+            AgentType::CodeBuddy,
+            true,
+            fg,
+            Some("completed"),
+            "a",
+            &mut open,
+            &mut closed,
+        );
+        assert!(!open.contains("a"));
+        // A stray late non-final frame must NOT re-open a finished sub-agent.
+        track_subagent_window(
+            AgentType::CodeBuddy,
+            true,
+            fg,
+            Some("in_progress"),
+            "a",
+            &mut open,
+            &mut closed,
+        );
+        assert!(!open.contains("a"), "completed sub-agent must not re-open");
+        // Non-agent tool calls never enter the window.
+        track_subagent_window(
+            AgentType::CodeBuddy,
+            false,
+            fg,
+            Some("in_progress"),
+            "b",
+            &mut open,
+            &mut closed,
+        );
+        assert!(!open.contains("b"));
+        // Other agents are inert.
+        track_subagent_window(
+            AgentType::OpenCode,
+            true,
+            fg,
+            Some("in_progress"),
+            "c",
+            &mut open,
+            &mut closed,
+        );
+        assert!(!open.contains("c"));
+    }
+
+    #[test]
+    fn subagent_window_excludes_background_subagents() {
+        // A BACKGROUND sub-agent runs concurrently with the main agent, so it must
+        // never open the suppression window — otherwise interleaved MAIN-agent
+        // chunks would be wrongly dropped (the case the reviewer flagged).
+        let mut open: HashSet<String> = HashSet::new();
+        let mut closed: HashSet<String> = HashSet::new();
+        track_subagent_window(
+            AgentType::CodeBuddy,
+            true,
+            true, // is_background
+            Some("in_progress"),
+            "bg",
+            &mut open,
+            &mut closed,
+        );
+        assert!(
+            !open.contains("bg"),
+            "a background sub-agent must not open the window"
+        );
+        // And once known-background, a later (still non-final, no-longer-marked)
+        // frame must not re-open it either.
+        track_subagent_window(
+            AgentType::CodeBuddy,
+            true,
+            false,
+            Some("in_progress"),
+            "bg",
+            &mut open,
+            &mut closed,
+        );
+        assert!(
+            !open.contains("bg"),
+            "a sub-agent seen as background must stay excluded"
+        );
+    }
+
+    #[test]
+    fn suppress_subagent_chunk_by_window_or_chunk_meta() {
+        // Inside an open FOREGROUND window → suppress. This is safe because the
+        // window only ever holds foreground (blocking) sub-agents, during which
+        // the parent model is suspended — so every chunk in the window is the
+        // sub-agent's, never main-agent output (background sub-agents, which could
+        // interleave main output, are excluded from the window upstream).
+        assert!(should_suppress_subagent_chunk(AgentType::CodeBuddy, true, None));
+        // Window closed and no chunk meta → emit (e.g. main-agent text before the
+        // sub-agent opens or after it closes).
+        assert!(!should_suppress_subagent_chunk(
+            AgentType::CodeBuddy,
+            false,
+            None
+        ));
+        // Window closed but the chunk's own meta marks it → suppress (precision
+        // supplement; never relied on alone).
+        let sub = serde_json::json!({ "codebuddy.ai/isSubagent": true });
+        let parented = serde_json::json!({ "codebuddy.ai/parentToolCallId": "call_x" });
+        for meta in [&sub, &parented] {
+            assert!(should_suppress_subagent_chunk(
+                AgentType::CodeBuddy,
+                false,
+                meta.as_object()
+            ));
+        }
+        // Other agents never suppress, even inside a (spurious) open window.
+        assert!(!should_suppress_subagent_chunk(AgentType::OpenCode, true, None));
+    }
+
+    #[test]
+    fn meta_marks_background_reads_codebuddy_flag() {
+        let bg = serde_json::json!({ "codebuddy.ai/isBackground": true });
+        let fg = serde_json::json!({ "codebuddy.ai/isBackground": false });
+        assert!(codebuddy_meta_marks_background(
+            AgentType::CodeBuddy,
+            bg.as_object()
+        ));
+        // Foreground (the user-reported case), absent flag, and other agents → false.
+        assert!(!codebuddy_meta_marks_background(
+            AgentType::CodeBuddy,
+            fg.as_object()
+        ));
+        assert!(!codebuddy_meta_marks_background(AgentType::CodeBuddy, None));
+        assert!(!codebuddy_meta_marks_background(
+            AgentType::OpenCode,
+            bg.as_object()
+        ));
     }
 
     // ─── inject_codeg_mcp: enabled=false short-circuit ──────────
@@ -4581,6 +6217,7 @@ mod tests {
             socket_path: std::path::PathBuf::from("/tmp/codeg-mcp.sock"),
             feedback: crate::acp::feedback::FeedbackRuntimeConfig::new(),
             ask: crate::acp::question::QuestionRuntimeConfig::new(),
+            sessions: crate::acp::session_info::SessionInfoRuntimeConfig::new(),
             questions: Arc::new(NoQuestions)
                 as Arc<dyn crate::acp::question::SessionQuestionAccess>,
         };
@@ -4617,27 +6254,32 @@ mod tests {
     #[test]
     fn companion_features_arg_inject_skip_decision() {
         // All off → no companion at all.
-        assert_eq!(companion_features_arg(false, false, false), None);
+        assert_eq!(companion_features_arg(false, false, false, false), None);
         // Delegation only.
         assert_eq!(
-            companion_features_arg(true, false, false),
+            companion_features_arg(true, false, false, false),
             Some("delegation".to_string())
         );
         // Feedback only — the decoupling: companion injected for feedback even
         // when delegation is off.
         assert_eq!(
-            companion_features_arg(false, true, false),
+            companion_features_arg(false, true, false, false),
             Some("feedback".to_string())
         );
         // Ask only — likewise injects the companion on its own.
         assert_eq!(
-            companion_features_arg(false, false, true),
+            companion_features_arg(false, false, true, false),
             Some("ask".to_string())
+        );
+        // Sessions only — likewise injects the companion on its own.
+        assert_eq!(
+            companion_features_arg(false, false, false, true),
+            Some("sessions".to_string())
         );
         // All on → comma-joined, in declaration order.
         assert_eq!(
-            companion_features_arg(true, true, true),
-            Some("delegation,feedback,ask".to_string())
+            companion_features_arg(true, true, true, true),
+            Some("delegation,feedback,ask,sessions".to_string())
         );
     }
 }

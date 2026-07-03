@@ -2,15 +2,19 @@ use std::collections::{HashMap, HashSet};
 
 use crate::app_error::AppCommandError;
 use crate::db::entities::conversation;
+use crate::db::entities::folder::FolderKind;
 use crate::db::service::{conversation_service, folder_service, import_service, tab_service};
 #[cfg(feature = "tauri-runtime")]
 use crate::db::AppDatabase;
 use crate::models::*;
 use crate::parsers::claude::ClaudeParser;
 use crate::parsers::cline::ClineParser;
+use crate::parsers::codebuddy::CodeBuddyParser;
 use crate::parsers::codex::CodexParser;
 use crate::parsers::gemini::GeminiParser;
 use crate::parsers::hermes::HermesParser;
+use crate::parsers::kimi_code::KimiCodeParser;
+use crate::parsers::pi::PiParser;
 use crate::parsers::openclaw::OpenClawParser;
 use crate::parsers::opencode::OpenCodeParser;
 use crate::parsers::{path_eq_for_matching, AgentParser, ParseError};
@@ -165,6 +169,9 @@ fn list_conversations_sync(
         (AgentType::OpenClaw, Box::new(OpenClawParser::new())),
         (AgentType::Cline, Box::new(ClineParser::new())),
         (AgentType::Hermes, Box::new(HermesParser::new())),
+        (AgentType::CodeBuddy, Box::new(CodeBuddyParser::new())),
+        (AgentType::KimiCode, Box::new(KimiCodeParser::new())),
+        (AgentType::Pi, Box::new(PiParser::new())),
     ];
 
     for (at, parser) in &parsers {
@@ -184,7 +191,7 @@ fn list_conversations_sync(
                 }
             }
             Err(e) => {
-                eprintln!("Error listing {} conversations: {}", at, e);
+                tracing::error!("Error listing {} conversations: {}", at, e);
             }
         }
     }
@@ -269,6 +276,9 @@ pub async fn get_conversation(
             AgentType::OpenClaw => Box::new(OpenClawParser::new()),
             AgentType::Cline => Box::new(ClineParser::new()),
             AgentType::Hermes => Box::new(HermesParser::new()),
+            AgentType::CodeBuddy => Box::new(CodeBuddyParser::new()),
+            AgentType::KimiCode => Box::new(KimiCodeParser::new()),
+            AgentType::Pi => Box::new(PiParser::new()),
         };
 
         parser
@@ -508,6 +518,9 @@ pub async fn get_folder_conversation_core(
                 AgentType::OpenClaw => Box::new(OpenClawParser::new()),
                 AgentType::Cline => Box::new(ClineParser::new()),
                 AgentType::Hermes => Box::new(HermesParser::new()),
+                AgentType::CodeBuddy => Box::new(CodeBuddyParser::new()),
+                AgentType::KimiCode => Box::new(KimiCodeParser::new()),
+                AgentType::Pi => Box::new(PiParser::new()),
             };
             match parser.get_conversation(&eid) {
                 Ok(d) => Ok((d.turns, d.session_stats, None, d.summary.title)),
@@ -786,7 +799,7 @@ pub async fn get_folder_conversation_with_live_core(
                         emit_conversation_upsert(emitter, conn, conversation_id).await;
                     }
                     Ok(false) => {}
-                    Err(e) => eprintln!(
+                    Err(e) => tracing::error!(
                         "[conversations] auto-title refresh failed for {conversation_id}: {e}"
                     ),
                 }
@@ -838,21 +851,22 @@ pub(crate) async fn emit_conversation_upsert(
 ) {
     match conversation_service::get_by_id(conn, conversation_id).await {
         Ok(summary) => {
-            // Sidebar shows ROOT conversations only — never broadcast a
-            // delegation child. The frontend also filters `parent_id != null`;
-            // this is the backend half of that invariant, so callers on agent
-            // paths (e.g. SessionStarted) can hand us any id without leaking
-            // child rows into every client's list.
-            if summary.parent_id.is_some() {
-                return;
-            }
+            // Broadcast EVERY conversation, root or delegation child. The
+            // sidebar's root list still drops children (the frontend keeps
+            // `parent_id != null` out of its root array via `applyConversationUpsert`);
+            // a separate subscriber routes child upserts into the expanded
+            // sub-session subtree by `parent_id`. The summary carries `parent_id`
+            // (serialized for children only) and a fresh `child_count`, so a
+            // newly-spawned child can appear live and bump its parent's chevron.
             emit_event(
                 emitter,
                 CONVERSATION_CHANGED_EVENT,
-                ConversationChange::Upsert { summary },
+                ConversationChange::Upsert {
+                    summary: Box::new(summary),
+                },
             )
         }
-        Err(e) => eprintln!(
+        Err(e) => tracing::warn!(
             "[conversations] upsert emit skipped (get_by_id {conversation_id} failed): {e}"
         ),
     }
@@ -910,7 +924,7 @@ pub(crate) async fn cleanup_tabs_for_deleted_conversation(
                 emit_tabs_changed(emitter, inv.version, tabs, "server".to_string());
             }
         }
-        Err(e) => eprintln!(
+        Err(e) => tracing::error!(
             "[conversations] tab cleanup failed (delete tabs for conversation {conversation_id}): {e}"
         ),
     }
@@ -951,6 +965,288 @@ pub async fn create_conversation(
     let id = create_conversation_core(&db.conn, folder_id, agent_type, title).await?;
     emit_conversation_upsert(&EventEmitter::Tauri(app), &db.conn, id).await;
     Ok(id)
+}
+
+/// Result of [`create_chat_conversation_core`]: the new conversation id plus the
+/// hidden chat folder backing it, so the frontend can drop the folder straight
+/// into `allFolders` (resolving cwd / active-folder) without a refetch.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateChatConversationResult {
+    pub conversation_id: i32,
+    pub folder_id: i32,
+    pub folder: FolderDetail,
+}
+
+/// Result of [`create_chat_dir`]: the freshly created scratch directory path.
+/// Handed to the frontend so a chat draft can point its ACP connection at a real
+/// cwd *before* any conversation row exists.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateChatDirResult {
+    pub path: String,
+}
+
+/// Create a fresh dated scratch directory for a chat-mode conversation and
+/// return its absolute path. Mirrors Codex's date-grouped session dirs:
+/// `<data_dir>/chat-sessions/<YYYY-MM-DD>/<uuid>/`.
+///
+/// This is a pure filesystem operation — it writes NO database rows — so it can
+/// run eagerly the moment the user picks "no-folder mode" (giving the ACP
+/// connection a cwd to spawn in) without breaching the lazy-conversation
+/// invariant. The row-creating [`create_chat_conversation_core`] later reuses
+/// this directory via its `existing_dir` parameter, so the connection's cwd
+/// never moves across the first send.
+pub fn create_chat_dir_core(data_dir: &std::path::Path) -> Result<String, AppCommandError> {
+    let date = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let unique = uuid::Uuid::new_v4().simple().to_string();
+    let dir = data_dir.join("chat-sessions").join(date).join(unique);
+    std::fs::create_dir_all(&dir).map_err(AppCommandError::io)?;
+    Ok(dir.to_string_lossy().to_string())
+}
+
+/// How long a scratch dir must have sat untouched before the GC may reclaim it.
+/// Spares a directory that an in-flight chat draft in another window just minted
+/// (it has no conversation row yet, so it would otherwise look orphaned).
+const CHAT_SCRATCH_STALE: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+
+/// Layout-invariant key for a chat scratch dir: its trailing `(<date>, <uuid>)`
+/// path components. The GC matches live dirs by this tail rather than the full
+/// path string, so a different *spelling* of the same data_dir (e.g. a symlinked
+/// vs canonical `CODEG_DATA_DIR` naming the same storage) still matches — a live
+/// dir must never be misclassified as an orphan and deleted. `<uuid>` is a v4
+/// UUID (globally unique), so the tail is collision-free in practice. Returns
+/// `None` if the path lacks a leaf or parent component.
+fn chat_dir_key(path: &std::path::Path) -> Option<(String, String)> {
+    let uuid = path.file_name()?.to_string_lossy().to_string();
+    let date = path.parent()?.file_name()?.to_string_lossy().to_string();
+    Some((date, uuid))
+}
+
+/// Reclaim orphaned chat scratch directories under
+/// `<data_dir>/chat-sessions/<date>/<uuid>/`. A chat draft eagerly mints a
+/// scratch dir (see [`create_chat_dir_core`]) the moment "no-folder mode" is
+/// picked, *before* any DB row exists; quitting before the first send — or
+/// deleting a chat conversation, which intentionally leaves the dir on disk —
+/// orphans it forever. This startup sweep removes the leak.
+///
+/// A `<uuid>` dir is reclaimed iff it is NOT bound to a live chat folder AND it
+/// is older than [`CHAT_SCRATCH_STALE`]. "Live" excludes both pre-send drafts
+/// (no row) and post-delete dirs (soft-deleted row), so both are reclaimed while
+/// bound chats are spared. Returns the number of `<uuid>` dirs removed. Never
+/// fatal: every filesystem error is logged and skipped.
+pub async fn gc_orphan_chat_dirs_core(
+    conn: &sea_orm::DatabaseConnection,
+    data_dir: &std::path::Path,
+) -> Result<usize, AppCommandError> {
+    gc_orphan_chat_dirs_core_with_threshold(conn, data_dir, CHAT_SCRATCH_STALE).await
+}
+
+/// [`gc_orphan_chat_dirs_core`] with the staleness threshold injected, for tests.
+/// A zero `stale` forces every dir to count as stale (deterministic, independent
+/// of clock/mtime resolution); the production entry point always passes
+/// [`CHAT_SCRATCH_STALE`].
+pub(crate) async fn gc_orphan_chat_dirs_core_with_threshold(
+    conn: &sea_orm::DatabaseConnection,
+    data_dir: &std::path::Path,
+    stale: std::time::Duration,
+) -> Result<usize, AppCommandError> {
+    let root = data_dir.join("chat-sessions");
+    if !root.is_dir() {
+        return Ok(0);
+    }
+
+    // Dirs bound to a live chat conversation, keyed by their layout-invariant
+    // `(<date>, <uuid>)` tail (see `chat_dir_key`) rather than the full path
+    // string. This survives a data_dir spelled differently across runs (e.g. a
+    // symlinked vs canonical `CODEG_DATA_DIR` pointing at the same storage),
+    // which a full-string compare would miss — misclassifying the live dir as an
+    // orphan and deleting it. We deliberately do NOT canonicalize (it fails on
+    // missing paths and could itself alias two distinct dirs); keying by the tail
+    // makes the worst case a missed deletion (a leak), never data loss.
+    let live: HashSet<(String, String)> = folder_service::list_live_chat_folder_paths(conn)
+        .await
+        .map_err(AppCommandError::from)?
+        .iter()
+        .filter_map(|p| chat_dir_key(std::path::Path::new(p)))
+        .collect();
+
+    let now = std::time::SystemTime::now();
+    let mut removed = 0usize;
+
+    let date_dirs = match std::fs::read_dir(&root) {
+        Ok(rd) => rd,
+        Err(err) => {
+            tracing::error!(
+                "[conversations] chat-dir GC: read {} failed: {err}",
+                root.display()
+            );
+            return Ok(0);
+        }
+    };
+
+    for date_entry in date_dirs.filter_map(Result::ok) {
+        let date_path = date_entry.path();
+        if !date_path.is_dir() {
+            continue;
+        }
+        let date_key = match date_path.file_name() {
+            Some(name) => name.to_string_lossy().to_string(),
+            None => continue,
+        };
+        let uuid_dirs = match std::fs::read_dir(&date_path) {
+            Ok(rd) => rd,
+            Err(err) => {
+                tracing::error!(
+                    "[conversations] chat-dir GC: read {} failed: {err}",
+                    date_path.display()
+                );
+                continue;
+            }
+        };
+        for uuid_entry in uuid_dirs.filter_map(Result::ok) {
+            let uuid_path = uuid_entry.path();
+            if !uuid_path.is_dir() {
+                continue;
+            }
+            // Match by the layout-invariant `(<date>, <uuid>)` tail, not the full
+            // path — see the `live` set above.
+            let uuid_key = uuid_entry.file_name().to_string_lossy().to_string();
+            if live.contains(&(date_key.clone(), uuid_key)) {
+                continue;
+            }
+            // Old enough to reclaim? Unknown age (mtime unreadable / in the
+            // future) → treat as fresh and spare it (a GC should leak before it
+            // deletes something possibly in use). A zero threshold short-circuits
+            // to "always stale" so tests don't race the filesystem clock.
+            let stale_enough = stale.is_zero()
+                || uuid_path
+                    .metadata()
+                    .and_then(|m| m.modified())
+                    .ok()
+                    .and_then(|m| now.duration_since(m).ok())
+                    .is_some_and(|age| age >= stale);
+            if !stale_enough {
+                continue;
+            }
+            match std::fs::remove_dir_all(&uuid_path) {
+                Ok(()) => removed += 1,
+                Err(err) => tracing::error!(
+                    "[conversations] chat-dir GC: remove {} failed: {err}",
+                    uuid_path.display()
+                ),
+            }
+        }
+        // Best-effort: drop the date bucket if it is now empty (`remove_dir` only
+        // succeeds on an empty dir, so this never touches a bucket with survivors).
+        let _ = std::fs::remove_dir(&date_path);
+    }
+
+    Ok(removed)
+}
+
+/// Core logic for creating a folderless "chat mode" conversation. Mirrors
+/// Codex's date-grouped session dirs: each chat conversation gets its own
+/// scratch directory under `<data_dir>/chat-sessions/<YYYY-MM-DD>/<uuid>/` plus a
+/// dedicated hidden chat folder (`folder.kind = 'chat'`) pointing at it, so the
+/// NOT-NULL `folder_id` FK stays satisfied. Called lazily on first prompt send — never before — so
+/// merely selecting "no-folder mode" writes nothing to the DB. Shared by the
+/// Tauri command and the web handler.
+///
+/// `existing_dir`: when the frontend already eagerly created a scratch dir (to
+/// connect ACP before sending), pass it here so this reuses it instead of
+/// minting a second one — keeping the connection's cwd put across the lazy
+/// create. `None` mints a fresh dir (the send-before-dir-ready fallback).
+/// `create_dir_all` is idempotent, so re-ensuring an existing dir is harmless.
+pub async fn create_chat_conversation_core(
+    conn: &sea_orm::DatabaseConnection,
+    data_dir: &std::path::Path,
+    agent_type: AgentType,
+    title: Option<String>,
+    existing_dir: Option<&str>,
+) -> Result<CreateChatConversationResult, AppCommandError> {
+    let path = match existing_dir {
+        Some(dir) => {
+            std::fs::create_dir_all(dir).map_err(AppCommandError::io)?;
+            dir.to_string()
+        }
+        None => create_chat_dir_core(data_dir)?,
+    };
+
+    let folder = folder_service::add_chat_folder(conn, &path)
+        .await
+        .map_err(AppCommandError::from)?;
+
+    // A fresh empty scratch dir has no git repo, so skip branch detection — this
+    // also keeps the composer/top-bar branch pickers hidden in chat mode. No
+    // transaction spans the folder + conversation inserts (the service calls take
+    // a plain connection), so if the conversation insert fails, compensate by
+    // soft-deleting the just-created hidden folder — otherwise it would linger as
+    // an orphan (active, conversation-less, never reached by the delete path) and
+    // pollute the active-folder scope.
+    let model =
+        match conversation_service::create_chat(conn, folder.id, agent_type, title, None).await {
+            Ok(model) => model,
+            Err(create_err) => {
+                if let Err(cleanup_err) = folder_service::remove_folder(conn, &folder.path).await {
+                    tracing::error!(
+                        "[conversations] failed to clean up orphan chat folder {} after conversation create error: {cleanup_err}",
+                        folder.id
+                    );
+                }
+                return Err(AppCommandError::from(create_err));
+            }
+        };
+
+    Ok(CreateChatConversationResult {
+        conversation_id: model.id,
+        folder_id: folder.id,
+        folder,
+    })
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn create_chat_conversation(
+    app: tauri::AppHandle,
+    db: tauri::State<'_, AppDatabase>,
+    agent_type: AgentType,
+    title: Option<String>,
+    existing_dir: Option<String>,
+) -> Result<CreateChatConversationResult, AppCommandError> {
+    use tauri::Manager;
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map(|p| crate::paths::resolve_effective_data_dir(&p))
+        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let result = create_chat_conversation_core(
+        &db.conn,
+        &data_dir,
+        agent_type,
+        title,
+        existing_dir.as_deref(),
+    )
+    .await?;
+    emit_conversation_upsert(&EventEmitter::Tauri(app), &db.conn, result.conversation_id).await;
+    Ok(result)
+}
+
+/// Eagerly create a chat-mode scratch directory (no DB rows) and return its
+/// path, so the frontend can connect ACP at a real cwd the instant the user
+/// selects "no-folder mode" — before any first prompt. The hidden folder +
+/// conversation are still created lazily on first send (reusing this dir).
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn create_chat_dir(app: tauri::AppHandle) -> Result<CreateChatDirResult, AppCommandError> {
+    use tauri::Manager;
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map(|p| crate::paths::resolve_effective_data_dir(&p))
+        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let path = create_chat_dir_core(&data_dir)?;
+    Ok(CreateChatDirResult { path })
 }
 
 async fn detect_git_branch(path: &str) -> Option<String> {
@@ -1022,6 +1318,29 @@ pub async fn update_conversation_title(
     Ok(())
 }
 
+pub async fn update_conversation_pinned_core(
+    conn: &sea_orm::DatabaseConnection,
+    conversation_id: i32,
+    pinned: bool,
+) -> Result<(), AppCommandError> {
+    conversation_service::update_pin(conn, conversation_id, pinned)
+        .await
+        .map_err(AppCommandError::from)
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn update_conversation_pinned(
+    app: tauri::AppHandle,
+    db: tauri::State<'_, AppDatabase>,
+    conversation_id: i32,
+    pinned: bool,
+) -> Result<(), AppCommandError> {
+    update_conversation_pinned_core(&db.conn, conversation_id, pinned).await?;
+    emit_conversation_upsert(&EventEmitter::Tauri(app), &db.conn, conversation_id).await;
+    Ok(())
+}
+
 pub async fn delete_conversation_core(
     conn: &sea_orm::DatabaseConnection,
     conversation_id: i32,
@@ -1031,6 +1350,80 @@ pub async fn delete_conversation_core(
         .map_err(AppCommandError::from)
 }
 
+/// When the deleted conversation was backed by a dedicated hidden chat folder,
+/// soft-delete that folder too so it stops counting toward `list_all`'s active
+/// folder scope. The per-conversation scratch dir on disk is intentionally left
+/// in place (symmetric with conversation soft-delete keeping session files; a
+/// future GC can prune dirs whose folder is soft-deleted). Best effort —
+/// failures are logged, never propagated. `folder_id` must be captured BEFORE
+/// the conversation soft-delete.
+pub async fn cleanup_chat_folder_for_deleted_conversation(
+    conn: &sea_orm::DatabaseConnection,
+    folder_id: i32,
+) {
+    match folder_service::get_folder_by_id(conn, folder_id).await {
+        Ok(Some(folder)) if folder.kind == FolderKind::Chat => {
+            // Only retire the hidden folder once it backs no remaining
+            // (non-deleted) conversations, so deleting one chat conversation can
+            // never hide another that happens to share the folder. (Normally a
+            // chat folder backs exactly one conversation, but this keeps the
+            // delete path safe regardless.)
+            match conversation_service::list_by_folder(conn, folder_id, None, None, None, None).await
+            {
+                Ok(remaining) if remaining.is_empty() => {
+                    if let Err(e) = folder_service::remove_folder(conn, &folder.path).await {
+                        tracing::error!(
+                            "[conversations] chat folder cleanup failed (folder {folder_id}): {e}"
+                        );
+                    }
+                }
+                Ok(_) => {}
+                Err(e) => tracing::error!(
+                    "[conversations] chat folder conversation check failed (folder {folder_id}): {e}"
+                ),
+            }
+        }
+        Ok(_) => {}
+        Err(e) => {
+            tracing::error!("[conversations] chat folder lookup failed (folder {folder_id}): {e}")
+        }
+    }
+}
+
+/// Full conversation-delete orchestration shared by the Tauri command and the web
+/// handler: capture the backing folder BEFORE the soft-delete (so a hidden chat
+/// folder can be retired afterward), soft-delete, broadcast the deletion, then run
+/// the tab + chat-folder cleanups. The thin `delete_conversation_core` primitive
+/// stays event-free for internal/test callers, so the orchestration lives here.
+pub async fn delete_conversation_with_cleanup_core(
+    emitter: &EventEmitter,
+    conn: &sea_orm::DatabaseConnection,
+    conversation_id: i32,
+) -> Result<(), AppCommandError> {
+    // Capture the backing folder AND parent before the soft-delete: a hidden
+    // chat folder is retired afterward, and a deleted delegation child must
+    // re-broadcast its parent so the parent's child_count (hence its chevron)
+    // converges from the DB aggregate.
+    let pre = conversation_service::get_by_id(conn, conversation_id)
+        .await
+        .ok();
+    let folder_id = pre.as_ref().map(|c| c.folder_id);
+    let parent_id = pre.as_ref().and_then(|c| c.parent_id);
+    delete_conversation_core(conn, conversation_id).await?;
+    emit_conversation_deleted(emitter, conversation_id);
+    // A removed delegation child drops its parent's child_count (→ 0 hides the
+    // chevron). Re-emit the parent from the authoritative aggregate so every
+    // client converges — symmetric with the create-time parent re-emit.
+    if let Some(parent_id) = parent_id {
+        emit_conversation_upsert(emitter, conn, parent_id).await;
+    }
+    cleanup_tabs_for_deleted_conversation(emitter, conn, conversation_id).await;
+    if let Some(folder_id) = folder_id {
+        cleanup_chat_folder_for_deleted_conversation(conn, folder_id).await;
+    }
+    Ok(())
+}
+
 #[cfg(feature = "tauri-runtime")]
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
 pub async fn delete_conversation(
@@ -1038,11 +1431,8 @@ pub async fn delete_conversation(
     db: tauri::State<'_, AppDatabase>,
     conversation_id: i32,
 ) -> Result<(), AppCommandError> {
-    delete_conversation_core(&db.conn, conversation_id).await?;
     let emitter = EventEmitter::Tauri(app);
-    emit_conversation_deleted(&emitter, conversation_id);
-    cleanup_tabs_for_deleted_conversation(&emitter, &db.conn, conversation_id).await;
-    Ok(())
+    delete_conversation_with_cleanup_core(&emitter, &db.conn, conversation_id).await
 }
 
 fn compute_stats(all_conversations: &[ConversationSummary]) -> AgentStats {
@@ -1109,12 +1499,15 @@ mod tests {
             title_locked: false,
             agent_type: AgentType::Codex,
             status: status.into(),
+            kind: conversation::ConversationKind::Delegate,
             model: None,
             git_branch: None,
             external_id: None,
             message_count: 0,
+            child_count: 0,
             created_at: now,
             updated_at: now,
+            pinned_at: None,
             parent_id: Some(1),
             parent_tool_use_id: Some(parent_tool_use_id.into()),
             delegation_call_id: Some("call-1".into()),
@@ -1655,6 +2048,419 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[tokio::test]
+    async fn create_chat_conversation_core_creates_dir_folder_and_conversation() {
+        let db = fresh_in_memory_db().await;
+        let data_dir = tempfile::tempdir().expect("tempdir");
+        let result = create_chat_conversation_core(
+            &db.conn,
+            data_dir.path(),
+            AgentType::ClaudeCode,
+            Some("hello chat".into()),
+            None,
+        )
+        .await
+        .expect("create chat conversation");
+
+        // The backing folder is a hidden, top-level chat folder.
+        assert_eq!(
+            result.folder.kind,
+            FolderKind::Chat,
+            "folder must be a chat folder"
+        );
+        assert_eq!(result.folder.parent_id, None);
+        assert_eq!(result.folder_id, result.folder.id);
+        assert!(
+            result
+                .folder
+                .path
+                .starts_with(&*data_dir.path().to_string_lossy()),
+            "scratch path under data dir: {}",
+            result.folder.path
+        );
+        // The dated scratch dir exists on disk.
+        assert!(
+            std::path::Path::new(&result.folder.path).is_dir(),
+            "scratch dir created"
+        );
+
+        // The conversation points at the hidden folder, with no git branch.
+        let summary = conversation_service::get_by_id(&db.conn, result.conversation_id)
+            .await
+            .expect("read back");
+        assert_eq!(summary.folder_id, result.folder_id);
+        assert_eq!(summary.agent_type, AgentType::ClaudeCode);
+        assert!(summary.git_branch.is_none());
+
+        // It surfaces in the default sidebar query (active-folder scope).
+        let rows =
+            list_all_conversations_core(&db.conn, None, None, None, None, None, false)
+                .await
+                .expect("list");
+        assert!(rows.iter().any(|c| c.id == result.conversation_id));
+    }
+
+    #[tokio::test]
+    async fn create_chat_dir_core_creates_dated_dir_without_db_rows() {
+        let data_dir = tempfile::tempdir().expect("tempdir");
+        let path = create_chat_dir_core(data_dir.path()).expect("create chat dir");
+
+        assert!(std::path::Path::new(&path).is_dir(), "scratch dir exists");
+        assert!(
+            path.starts_with(&*data_dir.path().to_string_lossy()),
+            "under data dir: {path}"
+        );
+        assert!(
+            path.contains("chat-sessions"),
+            "date-grouped under chat-sessions: {path}"
+        );
+        // Two calls mint distinct directories (uuid segment).
+        let other = create_chat_dir_core(data_dir.path()).expect("second chat dir");
+        assert_ne!(path, other, "each prepare gets its own dir");
+    }
+
+    #[tokio::test]
+    async fn create_chat_conversation_core_reuses_existing_dir() {
+        let db = fresh_in_memory_db().await;
+        let data_dir = tempfile::tempdir().expect("tempdir");
+        // Eager step: mint the scratch dir first (as the frontend does on select).
+        let prepared = create_chat_dir_core(data_dir.path()).expect("prepare dir");
+
+        let result = create_chat_conversation_core(
+            &db.conn,
+            data_dir.path(),
+            AgentType::ClaudeCode,
+            None,
+            Some(prepared.as_str()),
+        )
+        .await
+        .expect("create chat conversation reusing dir");
+
+        // The conversation's hidden folder points at the SAME pre-created dir —
+        // no second directory was minted, so the ACP cwd never moved.
+        assert_eq!(
+            result.folder.path, prepared,
+            "reuses the eagerly-created scratch dir"
+        );
+
+        // Exactly one uuid dir exists under that date bucket.
+        let date_dir = std::path::Path::new(&prepared)
+            .parent()
+            .expect("date dir")
+            .to_path_buf();
+        let count = std::fs::read_dir(&date_dir)
+            .expect("read date dir")
+            .filter_map(Result::ok)
+            .filter(|e| e.path().is_dir())
+            .count();
+        assert_eq!(count, 1, "no duplicate scratch dir created");
+    }
+
+    #[tokio::test]
+    async fn cleanup_chat_folder_soft_deletes_hidden_folder() {
+        let db = fresh_in_memory_db().await;
+        let data_dir = tempfile::tempdir().expect("tempdir");
+        let res =
+            create_chat_conversation_core(&db.conn, data_dir.path(), AgentType::Codex, None, None)
+                .await
+                .expect("create");
+
+        // Before cleanup the hidden folder is active.
+        assert!(folder_service::get_folder_by_id(&db.conn, res.folder_id)
+            .await
+            .unwrap()
+            .is_some());
+
+        delete_conversation_core(&db.conn, res.conversation_id)
+            .await
+            .expect("delete conversation");
+        cleanup_chat_folder_for_deleted_conversation(&db.conn, res.folder_id).await;
+
+        // After cleanup the hidden folder is soft-deleted (no longer returned),
+        // so it stops counting toward the active-folder scope. The on-disk dir is
+        // intentionally left in place.
+        assert!(folder_service::get_folder_by_id(&db.conn, res.folder_id)
+            .await
+            .unwrap()
+            .is_none());
+        assert!(
+            std::path::Path::new(&res.folder.path).is_dir(),
+            "scratch dir is intentionally retained on delete"
+        );
+    }
+
+    // ── Orphan chat scratch-dir GC ────────────────────────────────────────────
+    // The GC walks the real `chat-sessions` tree under a tempdir; the in-memory
+    // DB only supplies the live-chat-folder path set (matching the chat tests
+    // above). `Duration::ZERO` forces "always stale" so removal is deterministic.
+
+    #[tokio::test]
+    async fn gc_removes_pre_send_orphan_scratch_dir() {
+        let db = fresh_in_memory_db().await;
+        let data_dir = tempfile::tempdir().expect("tempdir");
+        // Eager pre-send dir: minted, but never bound to a conversation/folder.
+        let orphan = create_chat_dir_core(data_dir.path()).expect("prepare dir");
+        assert!(std::path::Path::new(&orphan).is_dir());
+
+        let removed = gc_orphan_chat_dirs_core_with_threshold(
+            &db.conn,
+            data_dir.path(),
+            std::time::Duration::ZERO,
+        )
+        .await
+        .expect("gc");
+
+        assert_eq!(removed, 1, "the unbound pre-send dir is reclaimed");
+        assert!(
+            !std::path::Path::new(&orphan).exists(),
+            "orphan scratch dir removed"
+        );
+        // Emptied date bucket is cleaned up too.
+        let date_dir = std::path::Path::new(&orphan).parent().expect("date dir");
+        assert!(!date_dir.exists(), "emptied date bucket removed");
+    }
+
+    #[tokio::test]
+    async fn gc_spares_live_chat_dir() {
+        let db = fresh_in_memory_db().await;
+        let data_dir = tempfile::tempdir().expect("tempdir");
+        let res =
+            create_chat_conversation_core(&db.conn, data_dir.path(), AgentType::Codex, None, None)
+                .await
+                .expect("create");
+
+        let removed = gc_orphan_chat_dirs_core_with_threshold(
+            &db.conn,
+            data_dir.path(),
+            std::time::Duration::ZERO,
+        )
+        .await
+        .expect("gc");
+
+        assert_eq!(removed, 0, "a dir bound to a live chat folder is spared");
+        assert!(
+            std::path::Path::new(&res.folder.path).is_dir(),
+            "live chat dir retained"
+        );
+    }
+
+    #[tokio::test]
+    async fn gc_reclaims_soft_deleted_chat_dir() {
+        let db = fresh_in_memory_db().await;
+        let data_dir = tempfile::tempdir().expect("tempdir");
+        let res =
+            create_chat_conversation_core(&db.conn, data_dir.path(), AgentType::Codex, None, None)
+                .await
+                .expect("create");
+        delete_conversation_core(&db.conn, res.conversation_id)
+            .await
+            .expect("delete conversation");
+        cleanup_chat_folder_for_deleted_conversation(&db.conn, res.folder_id).await;
+        // Cleanup soft-deletes the folder row but intentionally leaves the dir.
+        assert!(std::path::Path::new(&res.folder.path).is_dir());
+
+        let removed = gc_orphan_chat_dirs_core_with_threshold(
+            &db.conn,
+            data_dir.path(),
+            std::time::Duration::ZERO,
+        )
+        .await
+        .expect("gc");
+
+        assert_eq!(removed, 1, "the soft-deleted (not live) dir is reclaimed");
+        assert!(
+            !std::path::Path::new(&res.folder.path).exists(),
+            "post-delete scratch dir removed"
+        );
+    }
+
+    #[tokio::test]
+    async fn gc_spares_fresh_dir_below_threshold() {
+        let db = fresh_in_memory_db().await;
+        let data_dir = tempfile::tempdir().expect("tempdir");
+        let fresh = create_chat_dir_core(data_dir.path()).expect("prepare dir");
+
+        // A 10-minute threshold spares a dir an in-flight draft just minted.
+        let removed = gc_orphan_chat_dirs_core_with_threshold(
+            &db.conn,
+            data_dir.path(),
+            std::time::Duration::from_secs(600),
+        )
+        .await
+        .expect("gc");
+
+        assert_eq!(removed, 0, "a fresh dir below the staleness threshold is spared");
+        assert!(
+            std::path::Path::new(&fresh).is_dir(),
+            "fresh dir retained (anti-race)"
+        );
+    }
+
+    #[tokio::test]
+    async fn gc_missing_root_is_noop() {
+        let db = fresh_in_memory_db().await;
+        let data_dir = tempfile::tempdir().expect("tempdir");
+        // No `chat-sessions` dir exists at all.
+        let removed = gc_orphan_chat_dirs_core_with_threshold(
+            &db.conn,
+            data_dir.path(),
+            std::time::Duration::ZERO,
+        )
+        .await
+        .expect("gc");
+
+        assert_eq!(removed, 0, "absent chat-sessions root is a no-op");
+    }
+
+    #[tokio::test]
+    async fn gc_removes_orphan_but_spares_live_dir_in_same_bucket() {
+        let db = fresh_in_memory_db().await;
+        let data_dir = tempfile::tempdir().expect("tempdir");
+        // A live chat conversation — its scratch path is recorded in the DB via
+        // the real create path (`add_chat_folder`), the exact string the GC
+        // compares against ...
+        let live =
+            create_chat_conversation_core(&db.conn, data_dir.path(), AgentType::Codex, None, None)
+                .await
+                .expect("create live");
+        // ... alongside an unbound orphan dir in the same `chat-sessions` tree
+        // (same day → same date bucket).
+        let orphan = create_chat_dir_core(data_dir.path()).expect("orphan dir");
+        assert_ne!(live.folder.path, orphan);
+
+        let removed = gc_orphan_chat_dirs_core_with_threshold(
+            &db.conn,
+            data_dir.path(),
+            std::time::Duration::ZERO,
+        )
+        .await
+        .expect("gc");
+
+        // The predicate discriminates by exact stored path: only the orphan goes.
+        assert_eq!(removed, 1, "only the orphan is reclaimed");
+        assert!(
+            std::path::Path::new(&live.folder.path).is_dir(),
+            "the live chat dir is spared even with an orphan beside it"
+        );
+        assert!(
+            !std::path::Path::new(&orphan).exists(),
+            "the orphan is removed"
+        );
+    }
+
+    // A live dir must survive even when this GC run's data_dir is a different
+    // *spelling* (here a symlink) of the storage that created it — full-path
+    // matching would misclassify it as an orphan and delete it (data loss). The
+    // layout-invariant `(<date>, <uuid>)` keying is what prevents that.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn gc_spares_live_dir_under_aliased_data_dir() {
+        use std::os::unix::fs::symlink;
+        let db = fresh_in_memory_db().await;
+        let real = tempfile::tempdir().expect("tempdir");
+        // DB records the live path under the REAL data_dir spelling.
+        let live =
+            create_chat_conversation_core(&db.conn, real.path(), AgentType::Codex, None, None)
+                .await
+                .expect("create live");
+        // A second spelling of the same storage: a symlink pointing at it.
+        let link_parent = tempfile::tempdir().expect("link parent");
+        let link = link_parent.path().join("data-link");
+        symlink(real.path(), &link).expect("symlink");
+
+        // GC runs under the symlinked spelling; the live dir must still be spared.
+        let removed = gc_orphan_chat_dirs_core_with_threshold(
+            &db.conn,
+            &link,
+            std::time::Duration::ZERO,
+        )
+        .await
+        .expect("gc");
+
+        assert_eq!(
+            removed, 0,
+            "live dir spared despite an aliased data_dir spelling"
+        );
+        assert!(
+            std::path::Path::new(&live.folder.path).is_dir(),
+            "live chat dir retained under data_dir aliasing"
+        );
+    }
+
+    #[tokio::test]
+    async fn cleanup_chat_folder_keeps_folder_with_remaining_conversations() {
+        let db = fresh_in_memory_db().await;
+        let data_dir = tempfile::tempdir().expect("tempdir");
+        let res =
+            create_chat_conversation_core(&db.conn, data_dir.path(), AgentType::Codex, None, None)
+                .await
+                .expect("create");
+        // Simulate a second conversation that happens to share the hidden folder.
+        let second =
+            conversation_service::create(&db.conn, res.folder_id, AgentType::Codex, None, None)
+                .await
+                .expect("second conversation");
+
+        // Deleting the first must NOT retire the folder — the second remains.
+        delete_conversation_core(&db.conn, res.conversation_id)
+            .await
+            .expect("delete first");
+        cleanup_chat_folder_for_deleted_conversation(&db.conn, res.folder_id).await;
+        assert!(
+            folder_service::get_folder_by_id(&db.conn, res.folder_id)
+                .await
+                .unwrap()
+                .is_some(),
+            "folder retained while a sibling conversation remains"
+        );
+
+        // Deleting the last one retires the now-empty folder.
+        delete_conversation_core(&db.conn, second.id)
+            .await
+            .expect("delete second");
+        cleanup_chat_folder_for_deleted_conversation(&db.conn, res.folder_id).await;
+        assert!(
+            folder_service::get_folder_by_id(&db.conn, res.folder_id)
+                .await
+                .unwrap()
+                .is_none(),
+            "folder retired once empty"
+        );
+    }
+
+    #[tokio::test]
+    async fn chat_folders_excluded_from_user_facing_lists_but_in_all_details() {
+        let db = fresh_in_memory_db().await;
+        let data_dir = tempfile::tempdir().expect("tempdir");
+        let normal_id = seed_folder(&db, "/tmp/codeg-chat-list-test").await;
+        let chat_id =
+            create_chat_conversation_core(&db.conn, data_dir.path(), AgentType::Codex, None, None)
+                .await
+                .expect("chat")
+                .folder_id;
+
+        // Folder history excludes the hidden chat folder, keeps the normal one.
+        let history = folder_service::list_folders(&db.conn).await.unwrap();
+        assert!(history.iter().any(|f| f.id == normal_id));
+        assert!(!history.iter().any(|f| f.id == chat_id));
+
+        // Open-folder surfaces exclude it too.
+        let open_details = folder_service::list_open_folder_details(&db.conn)
+            .await
+            .unwrap();
+        assert!(!open_details.iter().any(|f| f.id == chat_id));
+        let open_entries = folder_service::list_open_folders(&db.conn).await.unwrap();
+        assert!(!open_entries.iter().any(|f| f.id == chat_id));
+
+        // But the full set keeps it (internal cwd / active-folder resolution).
+        let all = folder_service::list_all_folder_details(&db.conn)
+            .await
+            .unwrap();
+        assert!(all
+            .iter()
+            .any(|f| f.id == chat_id && f.kind == FolderKind::Chat));
     }
 
     #[tokio::test]
@@ -2265,13 +3071,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn emit_conversation_upsert_skips_delegation_child() {
-        // The sidebar shows root conversations only. A delegation child id
-        // handed to the helper (e.g. from the SessionStarted path) must not
-        // broadcast a sidebar upsert.
+    async fn emit_conversation_upsert_broadcasts_delegation_child_with_parent() {
+        // Delegation children now broadcast too: a dedicated frontend subscriber
+        // routes them into their parent's expanded sub-session subtree by
+        // `parent_id`. The payload must therefore carry `parent_id` (the routing
+        // key) and a fresh `child_count` (so a grandchild bumps the nested
+        // chevron), unlike a root whose `parent_id` is omitted.
         use crate::acp::delegation::spawner::DelegationLink;
         let db = fresh_in_memory_db().await;
-        let folder_id = seed_folder(&db, "/tmp/codeg-sync-child-skip").await;
+        let folder_id = seed_folder(&db, "/tmp/codeg-sync-child-broadcast").await;
         let parent_id = create_conversation_core(&db.conn, folder_id, AgentType::ClaudeCode, None)
             .await
             .expect("parent");
@@ -2292,9 +3100,74 @@ mod tests {
         let (broadcaster, emitter) = sync_test_emitter();
         let mut rx = broadcaster.subscribe();
         emit_conversation_upsert(&emitter, &db.conn, child.id).await;
+        let evt = rx
+            .try_recv()
+            .expect("delegation child should broadcast an upsert");
+        let p = &*evt.payload;
+        assert_eq!(p["kind"], "upsert");
+        assert_eq!(p["summary"]["id"], child.id);
+        assert_eq!(
+            p["summary"]["parent_id"], parent_id,
+            "child summary must carry parent_id so the frontend can route it"
+        );
+        assert_eq!(
+            p["summary"]["child_count"], 0,
+            "leaf child carries child_count 0"
+        );
+    }
+
+    #[tokio::test]
+    async fn delete_child_re_emits_parent_for_child_count_convergence() {
+        // Deleting a delegation child must re-broadcast its parent so every
+        // client's child_count (and chevron) converges from the DB aggregate —
+        // symmetric with the create-time parent re-emit.
+        use crate::acp::delegation::spawner::DelegationLink;
+        let db = fresh_in_memory_db().await;
+        let folder_id = seed_folder(&db, "/tmp/codeg-delete-child-reemit").await;
+        let parent_id = create_conversation_core(&db.conn, folder_id, AgentType::ClaudeCode, None)
+            .await
+            .expect("parent");
+        let child = conversation_service::create_with_delegation(
+            &db.conn,
+            folder_id,
+            AgentType::Codex,
+            Some("child".into()),
+            None,
+            Some(DelegationLink {
+                parent_conversation_id: parent_id,
+                parent_tool_use_id: "tu-1".into(),
+                delegation_call_id: "call-1".into(),
+            }),
+        )
+        .await
+        .expect("child");
+        let (broadcaster, emitter) = sync_test_emitter();
+        let mut rx = broadcaster.subscribe();
+        delete_conversation_with_cleanup_core(&emitter, &db.conn, child.id)
+            .await
+            .expect("delete child");
+        let mut saw_deleted = false;
+        let mut saw_parent_upsert = false;
+        while let Ok(evt) = rx.try_recv() {
+            if evt.channel != CONVERSATION_CHANGED_EVENT {
+                continue;
+            }
+            let p = &*evt.payload;
+            if p["kind"] == "deleted" && p["id"] == child.id {
+                saw_deleted = true;
+            }
+            if p["kind"] == "upsert" && p["summary"]["id"] == parent_id {
+                saw_parent_upsert = true;
+                assert_eq!(
+                    p["summary"]["child_count"], 0,
+                    "parent count drops to 0 once its only child is gone"
+                );
+            }
+        }
+        assert!(saw_deleted, "child deletion must broadcast a Deleted");
         assert!(
-            rx.try_recv().is_err(),
-            "delegation child must not broadcast a sidebar upsert"
+            saw_parent_upsert,
+            "parent must re-broadcast an Upsert for child_count convergence"
         );
     }
 }

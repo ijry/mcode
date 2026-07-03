@@ -15,6 +15,9 @@ import type {
   AgentType,
   AgentDelegationDefaults,
   AgentOptionsSnapshot,
+  Automation,
+  AutomationRun,
+  AutomationDraft,
   ConversationSummary,
   ConversationDetail,
   DbConversationDetail,
@@ -35,8 +38,12 @@ import type {
   AgentSkillContent,
   ExpertListItem,
   ExpertInstallStatus,
+  LinkOp,
+  LinkOpResult,
   FolderHistoryEntry,
   FolderDetail,
+  CreateChatConversationResult,
+  CreateChatDirResult,
   WorktreeResolution,
   DbConversationSummary,
   ImportResult,
@@ -45,6 +52,7 @@ import type {
   SaveTabsOutcome,
   GitStatusEntry,
   GitBranchList,
+  GitHeadInfo,
   GitPullResult,
   GitPushResult,
   GitPushInfo,
@@ -73,6 +81,10 @@ import type {
   SystemProxySettings,
   SystemRenderingSettings,
   SystemTerminalSettings,
+  LogSettings,
+  LogSettingsView,
+  LogRecord,
+  LogFileInfo,
   GitCredentials,
   GitDetectResult,
   PackageManagerInfo,
@@ -92,7 +104,11 @@ import type {
   ModelProviderInfo,
   UpdateModelProviderResult,
   PluginCheckSummary,
+  OpenCodeCatalogProvider,
   QuickMessage,
+  OfficecliInfo,
+  OfficecliSkill,
+  SkillSyncReport,
 } from "./types"
 
 export async function listConversations(params?: {
@@ -427,6 +443,133 @@ export async function acpUpdateHermesConfig(params: {
 }
 
 /**
+ * Persist a Kimi Code config update, keeping exactly one source authoritative.
+ * `mode` "apikey" writes the codeg-managed ~/.kimi-code/config.toml provider/model
+ * block AND seeds a synthetic gate token so the API key authenticates `kimi acp`
+ * (its session gate only checks for a stored token); "login" clears the managed
+ * block + removes our synthetic token so a real OAuth login governs; "raw" writes
+ * a verbatim config.toml then seeds the gate token. Returns the number of running
+ * Kimi sessions left on stale config.
+ */
+export async function acpUpdateKimiCodeConfig(params: {
+  mode: "apikey" | "login" | "raw"
+  interfaceType?: string | null
+  authType?: string | null
+  baseUrl?: string | null
+  apiKey?: string | null
+  model?: string | null
+  maxContextSize?: number | null
+  vertexProject?: string | null
+  vertexLocation?: string | null
+  rawConfigToml?: string | null
+}): Promise<number> {
+  return getTransport().call("acp_update_kimi_code_config", {
+    mode: params.mode,
+    interfaceType: params.interfaceType ?? null,
+    authType: params.authType ?? null,
+    baseUrl: params.baseUrl ?? null,
+    apiKey: params.apiKey ?? null,
+    model: params.model ?? null,
+    maxContextSize: params.maxContextSize ?? null,
+    vertexProject: params.vertexProject ?? null,
+    vertexLocation: params.vertexLocation ?? null,
+    rawConfigToml: params.rawConfigToml ?? null,
+  })
+}
+
+/**
+ * List the models an API key + endpoint can access (GET `<baseUrl>/models`).
+ * Validates the key and powers the Kimi settings model picker; throws with the
+ * provider's error message on failure.
+ */
+export async function acpFetchKimiModels(params: {
+  baseUrl: string
+  apiKey: string
+}): Promise<string[]> {
+  return getTransport().call("acp_fetch_kimi_models", {
+    baseUrl: params.baseUrl,
+    apiKey: params.apiKey,
+  })
+}
+
+/**
+ * Apply a structured Pi config update. Merge-writes pi's native
+ * `~/.pi/agent/settings.json` (`defaultProvider` / `defaultModel` /
+ * `defaultThinkingLevel`) and, when an API key is supplied,
+ * `~/.pi/agent/auth.json` (`{ "<provider>": { "type": "api_key", "key": ... } }`),
+ * preserving every other key in both files.
+ */
+export async function acpUpdatePiConfig(params: {
+  provider: string
+  model: string
+  thinkingLevel?: string
+  apiKey?: string
+  /** Custom/self-hosted provider endpoint. When set, `provider` is written to
+   * `models.json` (with `customApi` as the wire protocol). Omit for built-ins. */
+  customBaseUrl?: string
+  customApi?: string
+}): Promise<void> {
+  return getTransport().call("acp_update_pi_config", {
+    provider: params.provider,
+    model: params.model,
+    thinkingLevel: params.thinkingLevel ?? null,
+    apiKey: params.apiKey ?? null,
+    customBaseUrl: params.customBaseUrl ?? null,
+    customApi: params.customApi ?? null,
+  })
+}
+
+/**
+ * Read pi's current native config for the settings panel: the three
+ * `settings.json` model keys plus the provider names present in `auth.json`
+ * (sorted). Missing files surface as `null` / an empty list.
+ */
+export async function loadPiConfig(): Promise<{
+  defaultProvider: string | null
+  defaultModel: string | null
+  defaultThinkingLevel: string | null
+  authProviders: string[]
+  /** Custom/self-hosted providers defined in `models.json`, sorted by id. Used
+   * to rehydrate the custom-provider form and detect a custom `defaultProvider`. */
+  customProviders: { id: string; baseUrl: string; api: string }[]
+}> {
+  return getTransport().call("acp_load_pi_config", {})
+}
+
+/**
+ * Validate a user-supplied custom pi binary (BYO-pi): resolve it (path or
+ * `PATH`) and best-effort read its `--version`. A not-found binary returns
+ * `{ found: false, resolvedPath: null, version: null }` (not an error).
+ */
+export async function acpValidatePiCommand(command: string): Promise<{
+  found: boolean
+  resolvedPath: string | null
+  version: string | null
+}> {
+  return getTransport().call("acp_validate_pi_command", { command })
+}
+
+/**
+ * Install the `pi` binary (`@earendil-works/pi-coding-agent`) globally via npm.
+ * This is the prerequisite pi-acp spawns as `pi --mode rpc` — distinct from the
+ * `pi-acp` adapter that `acpPrepareNpxAgent` installs. Progress streams on the
+ * shared `app://agent-install` topic; pass `taskId` to `useAgentInstallStream`
+ * (or `acpInstallStream`) to receive the log lines.
+ */
+export async function acpInstallPiBinary(taskId: string): Promise<void> {
+  return getTransport().call(
+    "acp_install_pi_binary",
+    { taskId },
+    { timeoutMs: 600_000 }
+  )
+}
+
+/** Uninstall the global `pi` binary. Streams on `app://agent-install` too. */
+export async function acpUninstallPiBinary(taskId: string): Promise<void> {
+  return getTransport().call("acp_uninstall_pi_binary", { taskId })
+}
+
+/**
  * Launch Hermes's interactive setup in the OS terminal (desktop only). `kind`
  * picks the flow; the backend constructs the exact command from the registry
  * recipe (no arbitrary shell text crosses the boundary).
@@ -484,6 +627,14 @@ export async function acpPreflight(
 
 export async function opencodeListPlugins(): Promise<PluginCheckSummary> {
   return getTransport().call("opencode_list_plugins", {})
+}
+
+export async function opencodeProviderCatalog(
+  forceRefresh?: boolean
+): Promise<OpenCodeCatalogProvider[]> {
+  return getTransport().call("opencode_provider_catalog", {
+    forceRefresh: forceRefresh ?? null,
+  })
 }
 
 export async function opencodeInstallPlugins(
@@ -564,16 +715,24 @@ export async function expertsList(): Promise<ExpertListItem[]> {
   return getTransport().call("experts_list")
 }
 
-export async function expertsListForAgent(
-  agentType: AgentType
-): Promise<ExpertListItem[]> {
-  return getTransport().call("experts_list_for_agent", { agentType })
-}
-
 export async function expertsGetInstallStatus(
   expertId: string
 ): Promise<ExpertInstallStatus[]> {
   return getTransport().call("experts_get_install_status", { expertId })
+}
+
+/** One round-trip snapshot of every (expert, agent) link state for the matrix. */
+export async function expertsListAllInstallStatuses(): Promise<
+  ExpertInstallStatus[]
+> {
+  return getTransport().call("experts_list_all_install_statuses")
+}
+
+/** Apply a batch of enable/disable ops; returns one result per op. */
+export async function expertsApplyLinks(
+  ops: LinkOp[]
+): Promise<LinkOpResult[]> {
+  return getTransport().call("experts_apply_links", { ops })
 }
 
 export async function expertsLinkToAgent(params: {
@@ -602,6 +761,115 @@ export async function expertsReadContent(expertId: string): Promise<string> {
 
 export async function expertsOpenCentralDir(): Promise<string> {
   return getTransport().call("experts_open_central_dir")
+}
+
+// ─── Office tools ───
+
+export async function officecliDetect(): Promise<OfficecliInfo> {
+  return getTransport().call("officecli_detect")
+}
+
+export async function officecliInstall(taskId: string): Promise<OfficecliInfo> {
+  // The vendor installer downloads + extracts a multi-MB binary; allow well
+  // beyond the default 60s web-call timeout so slow networks don't surface a
+  // spurious timeout while progress is still streaming. Sits 30s ABOVE the
+  // backend's own 600s deadline so the backend's structured timeout error wins
+  // the race instead of a generic transport abort. `taskId` correlates the
+  // `app://officecli-install` stream the settings page subscribes to.
+  return getTransport().call(
+    "officecli_install",
+    { taskId },
+    { timeoutMs: 630_000 }
+  )
+}
+
+export async function officecliUninstall(): Promise<OfficecliInfo> {
+  return getTransport().call("officecli_uninstall")
+}
+
+export async function officecliListSkills(): Promise<OfficecliSkill[]> {
+  return getTransport().call("officecli_list_skills")
+}
+
+export async function officecliSyncSkills(): Promise<SkillSyncReport> {
+  return getTransport().call("officecli_sync_skills")
+}
+
+export async function officecliSkillLinkToAgent(params: {
+  skillId: string
+  agentType: AgentType
+}): Promise<ExpertInstallStatus> {
+  return getTransport().call("officecli_skill_link_to_agent", params)
+}
+
+export async function officecliSkillUnlinkFromAgent(params: {
+  skillId: string
+  agentType: AgentType
+}): Promise<void> {
+  return getTransport().call("officecli_skill_unlink_from_agent", params)
+}
+
+export async function officecliSkillGetInstallStatus(
+  skillId: string
+): Promise<ExpertInstallStatus[]> {
+  return getTransport().call("officecli_skill_get_install_status", { skillId })
+}
+
+/** One round-trip snapshot of every (skill, agent) link state for the matrix. */
+export async function officecliSkillListAllInstallStatuses(): Promise<
+  ExpertInstallStatus[]
+> {
+  return getTransport().call("officecli_skill_list_all_install_statuses")
+}
+
+/** Apply a batch of enable/disable ops; returns one result per op. */
+export async function officecliSkillApplyLinks(
+  ops: LinkOp[]
+): Promise<LinkOpResult[]> {
+  return getTransport().call("officecli_skill_apply_links", { ops })
+}
+
+export async function officecliSkillReadContent(
+  skillId: string
+): Promise<string> {
+  return getTransport().call("officecli_skill_read_content", { skillId })
+}
+
+/**
+ * Render an office file (.docx/.xlsx/.pptx) to self-contained HTML via the
+ * OfficeCLI backend, for the in-app preview. `path` is relative to `rootPath`.
+ */
+export async function officecliRenderHtml(
+  rootPath: string,
+  path: string
+): Promise<string> {
+  return getTransport().call("officecli_render_html", { rootPath, path })
+}
+
+/**
+ * Start (or share, by ref-count) a long-lived `officecli watch` preview server
+ * for an office file and return its loopback `port` plus a per-watch `cap`
+ * capability. `path` is relative to `rootPath`. Live refresh is driven by
+ * officecli's own SSE channel, so the preview no longer re-reads (and locks)
+ * the file the way the one-shot {@link officecliRenderHtml} did.
+ *
+ * `cap` is only used by web/server mode, where the iframe loads the preview
+ * through the `/api/office-watch-proxy/{port}` reverse proxy and authenticates
+ * with `?cap=` (the master token never enters the iframe). Desktop ignores it.
+ */
+export async function startOfficeWatch(
+  rootPath: string,
+  path: string
+): Promise<{ port: number; cap: string }> {
+  return getTransport().call("start_office_watch", { rootPath, path })
+}
+
+/** Release one reference to an office file's watch preview server. */
+export async function stopOfficeWatch(
+  rootPath: string,
+  path: string
+): Promise<void> {
+  return getTransport().call("stop_office_watch", { rootPath, path })
 }
 
 export async function getSystemProxySettings(): Promise<SystemProxySettings> {
@@ -650,6 +918,68 @@ export async function updateSystemRenderingSettings(
   settings: SystemRenderingSettings
 ): Promise<SystemRenderingSettings> {
   return getTransport().call("update_system_rendering_settings", { settings })
+}
+
+// --- Logging ---
+
+/** Live-tail channel: one event per appended log record. */
+export const LOG_APPENDED_EVENT = "logs://appended"
+/** Cross-window broadcast announcing a log-level change. */
+export const LOG_SETTINGS_CHANGED_EVENT = "log-settings://changed"
+
+export async function getLogSettings(): Promise<LogSettingsView> {
+  return getTransport().call("get_log_settings")
+}
+
+export async function setLogSettings(
+  settings: LogSettings
+): Promise<LogSettings> {
+  return getTransport().call("set_log_settings", { settings })
+}
+
+export async function getRecentLogs(params: {
+  limit: number
+  minLevel?: string
+  search?: string
+}): Promise<LogRecord[]> {
+  return getTransport().call("get_recent_logs", {
+    limit: params.limit,
+    minLevel: params.minLevel,
+    search: params.search,
+  })
+}
+
+export async function listLogFiles(): Promise<LogFileInfo[]> {
+  return getTransport().call("list_log_files")
+}
+
+/** Ensure the logs dir exists and return its absolute path (desktop only). */
+export async function openLogsDir(): Promise<string> {
+  return getTransport().call("open_logs_dir")
+}
+
+/** Read a single on-disk log file (web download / paginate). Returns the
+ * newest `maxBytes` when capped. */
+export async function readLogFile(
+  name: string,
+  maxBytes?: number
+): Promise<string> {
+  return getTransport().call("read_log_file", { name, maxBytes })
+}
+
+export async function subscribeLogAppended(
+  handler: (record: LogRecord) => void
+): Promise<() => void> {
+  return getTransport().subscribe<LogRecord>(LOG_APPENDED_EVENT, handler)
+}
+
+export async function subscribeLogSettingsChanged(
+  handler: (settings: LogSettings) => void
+): Promise<() => void> {
+  return getTransport().subscribe<LogSettings>(
+    LOG_SETTINGS_CHANGED_EVENT,
+    handler
+  )
 }
 
 // --- Version Control ---
@@ -910,6 +1240,10 @@ export async function cloneRepository(
 
 export async function getGitBranch(path: string): Promise<string | null> {
   return getTransport().call("get_git_branch", { path })
+}
+
+export async function getGitHead(path: string): Promise<GitHeadInfo> {
+  return getTransport().call("get_git_head", { path })
 }
 
 export async function gitInit(path: string): Promise<void> {
@@ -1365,6 +1699,8 @@ export type SettingsSection =
   | "agents"
   | "mcp"
   | "skills"
+  | "experts"
+  | "office-tools"
   | "shortcuts"
   | "system"
 
@@ -1511,6 +1847,35 @@ export async function createConversation(
   })
 }
 
+/**
+ * Create a folderless "chat mode" conversation. The backend lazily creates a
+ * dated per-conversation scratch dir and a dedicated hidden chat folder
+ * backing it, then the conversation. Returns the new conversation id plus that
+ * folder so the caller can seed `allFolders` (cwd / active-folder) immediately.
+ */
+export async function createChatConversation(
+  agentType: AgentType,
+  title?: string,
+  // Reuse a scratch dir already minted by `createChatDir` (eager connect) so the
+  // ACP cwd never moves across the first send; omit to let the backend mint one.
+  existingDir?: string
+): Promise<CreateChatConversationResult> {
+  return getTransport().call("create_chat_conversation", {
+    agentType,
+    title: title ?? null,
+    existingDir: existingDir ?? null,
+  })
+}
+
+/**
+ * Eagerly create a chat-mode scratch directory (filesystem only — no DB rows)
+ * and return its path, so a chat draft can connect ACP at a real cwd the instant
+ * "no-folder mode" is selected, before any first prompt.
+ */
+export async function createChatDir(): Promise<CreateChatDirResult> {
+  return getTransport().call("create_chat_dir", {})
+}
+
 export async function updateConversationStatus(
   conversationId: number,
   status: string
@@ -1528,6 +1893,16 @@ export async function updateConversationTitle(
   return getTransport().call("update_conversation_title", {
     conversationId,
     title,
+  })
+}
+
+export async function updateConversationPinned(
+  conversationId: number,
+  pinned: boolean
+): Promise<void> {
+  return getTransport().call("update_conversation_pinned", {
+    conversationId,
+    pinned,
   })
 }
 
@@ -1626,6 +2001,70 @@ export async function quickMessagesDelete(id: number): Promise<void> {
 
 export async function quickMessagesReorder(ids: number[]): Promise<void> {
   return getTransport().call("quick_messages_reorder", { ids })
+}
+
+// Automations
+
+export async function automationList(): Promise<Automation[]> {
+  return getTransport().call("automation_list")
+}
+
+export async function automationGet(id: number): Promise<Automation> {
+  return getTransport().call("automation_get", { id })
+}
+
+export async function automationRuns(
+  automationId: number,
+  limit = 100
+): Promise<AutomationRun[]> {
+  return getTransport().call("automation_runs", { automationId, limit })
+}
+
+export async function automationCreate(
+  draft: AutomationDraft
+): Promise<Automation> {
+  return getTransport().call("automation_create", { draft })
+}
+
+export async function automationUpdate(
+  id: number,
+  draft: AutomationDraft
+): Promise<Automation> {
+  return getTransport().call("automation_update", { id, draft })
+}
+
+export async function automationSetEnabled(
+  id: number,
+  enabled: boolean
+): Promise<Automation> {
+  return getTransport().call("automation_set_enabled", { id, enabled })
+}
+
+export async function automationDelete(id: number): Promise<void> {
+  return getTransport().call("automation_delete", { id })
+}
+
+export async function automationMarkSeen(): Promise<void> {
+  return getTransport().call("automation_mark_seen")
+}
+
+/** Authoritative "next run" preview — same evaluator as the scheduler. Returns
+ *  an ISO timestamp, or null if the cron has no future occurrence. */
+export async function automationComputeNextRun(
+  cron: string,
+  timezone: string
+): Promise<string | null> {
+  return getTransport().call("automation_compute_next_run", { cron, timezone })
+}
+
+/** Fire an automation immediately, bypassing its schedule. Returns the run id. */
+export async function automationRunNow(automationId: number): Promise<number> {
+  return getTransport().call("automation_run_now", { automationId })
+}
+
+/** Cancel an in-flight (or clear a wedged) run. */
+export async function automationCancelRun(runId: number): Promise<void> {
+  return getTransport().call("automation_cancel_run", { runId })
 }
 
 // Directory browser (for web/server mode)
@@ -2224,15 +2663,23 @@ export async function getFileTree(
 }
 
 export async function startWorkspaceStateStream(
-  rootPath: string
+  rootPath: string,
+  wantsTreeGit = true
 ): Promise<WorkspaceSnapshotResponse> {
-  return getTransport().call("start_workspace_state_stream", { rootPath })
+  return getTransport().call("start_workspace_state_stream", {
+    rootPath,
+    wantsTreeGit,
+  })
 }
 
 export async function stopWorkspaceStateStream(
-  rootPath: string
+  rootPath: string,
+  wantsTreeGit = true
 ): Promise<void> {
-  return getTransport().call("stop_workspace_state_stream", { rootPath })
+  return getTransport().call("stop_workspace_state_stream", {
+    rootPath,
+    wantsTreeGit,
+  })
 }
 
 export async function getWorkspaceSnapshot(
@@ -2734,6 +3181,23 @@ export async function setQuestionSettings(
   settings: QuestionSettings
 ): Promise<QuestionSettings> {
   return getTransport().call("set_question_settings", { settings })
+}
+
+// ─── Get-session-info settings ─────────────────────────────────────────────
+
+/** Mirror of Rust `SessionInfoSettings` (default ON). */
+export interface SessionInfoSettings {
+  enabled: boolean
+}
+
+export async function getSessionInfoSettings(): Promise<SessionInfoSettings> {
+  return getTransport().call("get_session_info_settings")
+}
+
+export async function setSessionInfoSettings(
+  settings: SessionInfoSettings
+): Promise<SessionInfoSettings> {
+  return getTransport().call("set_session_info_settings", { settings })
 }
 
 /** Live probe — opens a transient ACP connection to `agent_type`, reads what

@@ -5,7 +5,7 @@ use axum::{
     http::{StatusCode, Uri},
     middleware::{self, Next},
     response::IntoResponse,
-    routing::{get, post},
+    routing::{any, get, post},
     Json, Router,
 };
 
@@ -16,6 +16,7 @@ use tower_http::services::{ServeDir, ServeFile};
 use super::shutdown::ShutdownSignal;
 use super::{auth, handlers, ws};
 use crate::app_state::AppState;
+use tracing::Instrument;
 
 pub fn build_router(
     state: Arc<AppState>,
@@ -85,6 +86,14 @@ pub fn build_router(
             post(handlers::question::set_question_settings),
         )
         .route(
+            "/get_session_info_settings",
+            post(handlers::session_info::get_session_info_settings),
+        )
+        .route(
+            "/set_session_info_settings",
+            post(handlers::session_info::set_session_info_settings),
+        )
+        .route(
             "/get_folder_conversation",
             post(handlers::conversations::get_folder_conversation),
         )
@@ -111,12 +120,24 @@ pub fn build_router(
             post(handlers::conversations::create_conversation),
         )
         .route(
+            "/create_chat_conversation",
+            post(handlers::conversations::create_chat_conversation),
+        )
+        .route(
+            "/create_chat_dir",
+            post(handlers::conversations::create_chat_dir),
+        )
+        .route(
             "/update_conversation_status",
             post(handlers::conversations::update_conversation_status),
         )
         .route(
             "/update_conversation_title",
             post(handlers::conversations::update_conversation_title),
+        )
+        .route(
+            "/update_conversation_pinned",
+            post(handlers::conversations::update_conversation_pinned),
         )
         .route(
             "/delete_conversation",
@@ -183,6 +204,7 @@ pub fn build_router(
             post(handlers::folders::create_folder_directory),
         )
         .route("/get_git_branch", post(handlers::folders::get_git_branch))
+        .route("/get_git_head", post(handlers::folders::get_git_head))
         .route(
             "/get_home_directory",
             post(handlers::folders::get_home_directory),
@@ -527,6 +549,18 @@ pub fn build_router(
             "/update_system_terminal_settings",
             post(handlers::system_settings::update_system_terminal_settings),
         )
+        // ─── Logging ───
+        .route(
+            "/get_log_settings",
+            post(handlers::logging::get_log_settings),
+        )
+        .route(
+            "/set_log_settings",
+            post(handlers::logging::set_log_settings),
+        )
+        .route("/get_recent_logs", post(handlers::logging::get_recent_logs))
+        .route("/list_log_files", post(handlers::logging::list_log_files))
+        .route("/read_log_file", post(handlers::logging::read_log_file))
         // ─── ACP ───
         .route(
             "/acp_get_agent_status",
@@ -597,6 +631,34 @@ pub fn build_router(
             post(handlers::acp::acp_update_hermes_config),
         )
         .route(
+            "/acp_update_kimi_code_config",
+            post(handlers::acp::acp_update_kimi_code_config),
+        )
+        .route(
+            "/acp_fetch_kimi_models",
+            post(handlers::acp::acp_fetch_kimi_models),
+        )
+        .route(
+            "/acp_update_pi_config",
+            post(handlers::acp::acp_update_pi_config),
+        )
+        .route(
+            "/acp_load_pi_config",
+            post(handlers::acp::acp_load_pi_config),
+        )
+        .route(
+            "/acp_validate_pi_command",
+            post(handlers::acp::acp_validate_pi_command),
+        )
+        .route(
+            "/acp_install_pi_binary",
+            post(handlers::acp::acp_install_pi_binary),
+        )
+        .route(
+            "/acp_uninstall_pi_binary",
+            post(handlers::acp::acp_uninstall_pi_binary),
+        )
+        .route(
             "/acp_download_agent_binary",
             post(handlers::acp::acp_download_agent_binary),
         )
@@ -641,6 +703,10 @@ pub fn build_router(
             post(handlers::acp::opencode_list_plugins),
         )
         .route(
+            "/opencode_provider_catalog",
+            post(handlers::acp::opencode_provider_catalog),
+        )
+        .route(
             "/opencode_install_plugins",
             post(handlers::acp::opencode_install_plugins),
         )
@@ -659,16 +725,20 @@ pub fn build_router(
         // ─── Experts ───
         .route("/experts_list", post(handlers::experts::experts_list))
         .route(
-            "/experts_list_for_agent",
-            post(handlers::experts::experts_list_for_agent),
-        )
-        .route(
             "/experts_get_install_status",
             post(handlers::experts::experts_get_install_status),
         )
         .route(
+            "/experts_list_all_install_statuses",
+            post(handlers::experts::experts_list_all_install_statuses),
+        )
+        .route(
             "/experts_link_to_agent",
             post(handlers::experts::experts_link_to_agent),
+        )
+        .route(
+            "/experts_apply_links",
+            post(handlers::experts::experts_apply_links),
         )
         .route(
             "/experts_unlink_from_agent",
@@ -681,6 +751,63 @@ pub fn build_router(
         .route(
             "/experts_open_central_dir",
             post(handlers::experts::experts_open_central_dir),
+        )
+        // ─── Office tools ───
+        .route(
+            "/officecli_detect",
+            post(handlers::office_tools::officecli_detect),
+        )
+        .route(
+            "/officecli_install",
+            post(handlers::office_tools::officecli_install),
+        )
+        .route(
+            "/officecli_uninstall",
+            post(handlers::office_tools::officecli_uninstall),
+        )
+        .route(
+            "/officecli_list_skills",
+            post(handlers::office_tools::officecli_list_skills),
+        )
+        .route(
+            "/officecli_sync_skills",
+            post(handlers::office_tools::officecli_sync_skills),
+        )
+        .route(
+            "/officecli_skill_link_to_agent",
+            post(handlers::office_tools::officecli_skill_link_to_agent),
+        )
+        .route(
+            "/officecli_skill_unlink_from_agent",
+            post(handlers::office_tools::officecli_skill_unlink_from_agent),
+        )
+        .route(
+            "/officecli_skill_get_install_status",
+            post(handlers::office_tools::officecli_skill_get_install_status),
+        )
+        .route(
+            "/officecli_skill_list_all_install_statuses",
+            post(handlers::office_tools::officecli_skill_list_all_install_statuses),
+        )
+        .route(
+            "/officecli_skill_apply_links",
+            post(handlers::office_tools::officecli_skill_apply_links),
+        )
+        .route(
+            "/officecli_skill_read_content",
+            post(handlers::office_tools::officecli_skill_read_content),
+        )
+        .route(
+            "/officecli_render_html",
+            post(handlers::office_tools::officecli_render_html),
+        )
+        .route(
+            "/start_office_watch",
+            post(handlers::office_tools::start_office_watch),
+        )
+        .route(
+            "/stop_office_watch",
+            post(handlers::office_tools::stop_office_watch),
         )
         // ─── Project boot ───
         .route(
@@ -873,6 +1000,48 @@ pub fn build_router(
             "/quick_messages_reorder",
             post(handlers::quick_messages::quick_messages_reorder),
         )
+        // ─── Automations ───
+        .route(
+            "/automation_list",
+            post(handlers::automation::automation_list),
+        )
+        .route("/automation_get", post(handlers::automation::automation_get))
+        .route(
+            "/automation_runs",
+            post(handlers::automation::automation_runs),
+        )
+        .route(
+            "/automation_create",
+            post(handlers::automation::automation_create),
+        )
+        .route(
+            "/automation_update",
+            post(handlers::automation::automation_update),
+        )
+        .route(
+            "/automation_set_enabled",
+            post(handlers::automation::automation_set_enabled),
+        )
+        .route(
+            "/automation_delete",
+            post(handlers::automation::automation_delete),
+        )
+        .route(
+            "/automation_mark_seen",
+            post(handlers::automation::automation_mark_seen),
+        )
+        .route(
+            "/automation_compute_next_run",
+            post(handlers::automation::automation_compute_next_run),
+        )
+        .route(
+            "/automation_run_now",
+            post(handlers::automation::automation_run_now),
+        )
+        .route(
+            "/automation_cancel_run",
+            post(handlers::automation::automation_cancel_run),
+        )
         // ─── Pet ───
         .route("/pet_list", post(handlers::pet::pet_list))
         .route("/pet_get", post(handlers::pet::pet_get))
@@ -949,9 +1118,44 @@ pub fn build_router(
         .route(
             "/backup_download/{ticket}",
             get(handlers::backup::backup_download),
+        )
+        // Office watch preview proxy (server mode): the iframe can't carry a
+        // Bearer header, so these self-authenticate via a per-watch `?cap=`
+        // capability + an SSRF port whitelist. `any` so OPTIONS (CORS preflight)
+        // and POST (officecli's /api/edit, /api/selection) reach the handler,
+        // not just GET. See `handlers::office_watch_proxy`.
+        .route(
+            "/office-watch-proxy/{port}",
+            any(handlers::office_watch_proxy::proxy_root),
+        )
+        .route(
+            "/office-watch-proxy/{port}/",
+            any(handlers::office_watch_proxy::proxy_root),
+        )
+        .route(
+            "/office-watch-proxy/{port}/{*rest}",
+            any(handlers::office_watch_proxy::proxy),
         );
 
-    let api = public_api.merge(api);
+    // Wrap every API request in an `http` span (method, path, request id) so a
+    // single request's logs — including auth rejections — are correlatable in
+    // the viewer. `.instrument()` the downstream future; never `.enter()` across
+    // an await, which corrupts the span stack.
+    //
+    // Layer order: the protected router's `auth::require_token` layer was added
+    // (above) BEFORE this `.layer()`, and this layer is applied to the MERGED
+    // router, so it is the OUTERMOST layer. The instrumented `next.run(req)`
+    // future therefore wraps routing + auth + handler — auth-reject logs land
+    // inside the `http` span.
+    let api = public_api.merge(api).layer(middleware::from_fn(
+        |req: axum::extract::Request, next: Next| async move {
+            let method = req.method().clone();
+            let path = req.uri().path().to_string();
+            let request_id = uuid::Uuid::new_v4();
+            let span = tracing::info_span!("http", %method, %path, %request_id);
+            next.run(req).instrument(span).await
+        },
+    ));
 
     // WebSocket route (auth via Sec-WebSocket-Protocol)
     let ws_route = Router::new()
@@ -1021,7 +1225,7 @@ async fn health_check() -> impl IntoResponse {
 
 async fn api_not_found(uri: axum::http::Uri) -> impl IntoResponse {
     let command = uri.path().trim_start_matches('/');
-    eprintln!("[WEB] Unimplemented API endpoint: {}", command);
+    tracing::info!("[WEB] Unimplemented API endpoint: {}", command);
     (
         StatusCode::NOT_IMPLEMENTED,
         Json(serde_json::json!({

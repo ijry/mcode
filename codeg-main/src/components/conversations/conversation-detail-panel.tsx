@@ -15,9 +15,9 @@ import {
   FileCode,
   FileImage,
   FileText,
-  Focus,
-  Plus,
+  Info,
   RefreshCw,
+  SquarePen,
   X,
 } from "lucide-react"
 import { useTranslations } from "next-intl"
@@ -41,19 +41,28 @@ import { useSessionFeedback } from "@/hooks/use-session-feedback"
 import { AgentSelector } from "@/components/chat/agent-selector"
 import { ChatInput } from "@/components/chat/chat-input"
 import { WelcomeHero, WelcomeTip } from "@/components/chat/welcome-hero"
+import { QuickActions } from "@/components/chat/quick-actions"
+import type { ComposerInjectContent } from "@/components/chat/message-input"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { acpFork, createConversation, openSettingsWindow } from "@/lib/api"
+import {
+  acpFork,
+  createChatConversation,
+  createChatDir,
+  createConversation,
+  openSettingsWindow,
+} from "@/lib/api"
 import {
   flushRetryDelayMs,
   forkSendBlockedByQueue,
+  isConnectionReady,
   shouldQueueDirectSend,
+  shouldRejectDuplicateCreate,
 } from "@/lib/queue-flush"
 import { TurnBusyError } from "@/lib/turn-busy"
 import { useConversationRuntime } from "@/contexts/conversation-runtime-context"
 import { useConversationDetail } from "@/hooks/use-conversation-detail"
 import {
   extractUserImagesFromDraft,
-  extractUserResourcesFromDraft,
   getPromptDraftDisplayText,
 } from "@/lib/prompt-draft"
 import {
@@ -74,6 +83,7 @@ import {
   buildConversationDraftStorageKey,
   buildNewConversationDraftStorageKey,
   clearMessageInputDraft,
+  saveMessageInputDraft,
 } from "@/lib/message-input-draft"
 import {
   ContextMenu,
@@ -92,6 +102,8 @@ import {
   ExportTooLongError,
   type ExportLabels,
 } from "@/lib/export-conversation"
+import { resolveActiveSessionDetails } from "./active-session-details"
+import { SessionDetailsDialog } from "./session-details-dialog"
 
 interface ConversationTabViewProps {
   tabId: string
@@ -99,6 +111,11 @@ interface ConversationTabViewProps {
   agentType: AgentType
   workingDir?: string
   isActive: boolean
+  /** Drive the composer's flowing active-session border. True only for the
+   *  active tab while tiled across multiple sessions — the one place the flow
+   *  serves as the "which tile is active" cue. Distinct from `isActive`, which
+   *  also governs auto-focus/connect and is true even for a lone session. */
+  showActiveFlow: boolean
   reloadSignal: number
 }
 
@@ -106,18 +123,12 @@ function buildOptimisticUserTurnFromDraft(
   draft: PromptDraft,
   attachedResourcesFallback: string
 ): MessageTurn {
-  const displayText = getPromptDraftDisplayText(
-    draft,
-    attachedResourcesFallback
-  )
-  const resources = extractUserResourcesFromDraft(draft)
-  const resourceLines = resources.map((resource) => {
-    const label = resource.uri.toLowerCase().startsWith("file://")
-      ? resource.name
-      : `@${resource.name}`
-    return `[${label}](${resource.uri})`
-  })
-  const text = [displayText, ...resourceLines].join("\n").trim()
+  // `draft.displayText` is the composer's full Markdown, which already renders
+  // every inline file/resource badge as a `[label](uri)` link (see
+  // `referenceToMarkdown`). Re-appending the resource blocks here would duplicate
+  // each attached file in the optimistic bubble, so the display text is used
+  // as-is — images are the only out-of-band content left to add as blocks.
+  const text = getPromptDraftDisplayText(draft, attachedResourcesFallback)
 
   const blocks: ContentBlock[] = []
   for (const image of extractUserImagesFromDraft(draft)) {
@@ -174,17 +185,19 @@ const ConversationTabView = memo(function ConversationTabView({
   agentType,
   workingDir,
   isActive,
+  showActiveFlow,
   reloadSignal,
 }: ConversationTabViewProps) {
   const t = useTranslations("Folder.conversation")
   const tWelcome = useTranslations("Folder.chat.welcomeInputPanel")
   const sharedT = useTranslations("Folder.chat.shared")
   const { activeFolder: folder, activeFolderId } = useActiveFolder()
-  const { refreshConversations } = useAppWorkspace()
+  const { refreshConversations, upsertFolder } = useAppWorkspace()
   const folderId = activeFolderId ?? 0
   const {
     tabs,
     bindConversationTab,
+    setChatDraftWorkingDir,
     setTabRuntimeConversationId,
     pinTab,
     openNewConversationTab,
@@ -242,8 +255,20 @@ const ConversationTabView = memo(function ConversationTabView({
     null
   )
   const [hasSentMessage, setHasSentMessage] = useState(false)
+  const [quickActionInject, setQuickActionInject] =
+    useState<ComposerInjectContent | null>(null)
 
   const hasPersistedConversation = dbConversationId != null
+
+  // A folderless chat draft before its first send (chat tab, not yet persisted).
+  // Used to trigger the eager scratch-dir prepare below, which gives the draft a
+  // real workingDir so the ACP connection can spawn BEFORE the first send — the
+  // composer is gated on `connected` like any normal conversation (no offline
+  // compose). Once bound it has a persisted row + workingDir and this is false.
+  const isChatDraft = useMemo(() => {
+    const ownTab = tabs.find((tab) => tab.id === tabId)
+    return ownTab?.isChat === true && !hasPersistedConversation
+  }, [tabs, tabId, hasPersistedConversation])
 
   // Expose the runtime session key to the tab so the aux panel (Diff sidebar)
   // can look up live turns even before the DB conversation is created.
@@ -272,6 +297,8 @@ const ConversationTabView = memo(function ConversationTabView({
   const mountedRef = useRef(true)
   const selectedAgentRef = useRef(selectedAgent)
   const createConversationPendingRef = useRef(false)
+  // Single-flight guard for the eager scratch-dir prepare (on chat-mode select).
+  const prepareChatDirPendingRef = useRef(false)
   const sessionIdRef = useRef<string | null>(null)
   const syncCancelRef = useRef<(() => void) | null>(null)
 
@@ -282,6 +309,47 @@ const ConversationTabView = memo(function ConversationTabView({
   useEffect(() => {
     selectedAgentRef.current = selectedAgent
   }, [selectedAgent])
+
+  // Eagerly create the chat-mode scratch dir the moment this becomes an unbound
+  // chat draft, so the ACP connection can spawn at a real cwd BEFORE the first
+  // send — picking "no-folder mode" no longer leaves the agent unconnected.
+  // Filesystem-only (writes no DB rows), so the lazy-conversation invariant
+  // holds; the first send reuses this dir via createChatConversation(existingDir),
+  // keeping the connection's cwd put across the bind. Single-flight and
+  // self-disarming: once workingDir lands the guard flips false. openChatModeTab
+  // clears workingDir on re-entry, so a fresh dir is prepared each time.
+  useEffect(() => {
+    if (!isActive || !isChatDraft || workingDir) return
+    if (prepareChatDirPendingRef.current) return
+    prepareChatDirPendingRef.current = true
+    void (async () => {
+      try {
+        const res = await createChatDir()
+        if (mountedRef.current) {
+          setChatDraftWorkingDir(tabId, res.path)
+        }
+      } catch (e) {
+        // The composer is gated on a live connection (no offline compose), and
+        // the connection needs this scratch dir. If the mkdir fails the draft
+        // would otherwise sit with a permanently disabled composer and no
+        // explanation — surface it on the welcome screen's error banner so the
+        // user can re-enter chat mode to retry.
+        console.error("[ConversationTabView] prepare chat dir:", e)
+        if (mountedRef.current) {
+          setAgentConnectError(tWelcome("prepareSessionFailed"))
+        }
+      } finally {
+        prepareChatDirPendingRef.current = false
+      }
+    })()
+  }, [
+    isActive,
+    isChatDraft,
+    workingDir,
+    tabId,
+    setChatDraftWorkingDir,
+    tWelcome,
+  ])
 
   // Sync the agentType prop into draftAgentType for draft tabs. The prop
   // changes when openNewConversationTab re-points an existing draft at a
@@ -400,6 +468,22 @@ const ConversationTabView = memo(function ConversationTabView({
     isViewerRef.current = conn.isViewer
   }, [conn.isViewer])
   const isConnecting = connStatus === "connecting"
+  // The live connection is ready for THIS tab only when it's connected AND its
+  // cwd matches the tab's intended working dir. A just-retargeted chat draft (or
+  // any mid-reconnect) can briefly read a stale "connected" for the PREVIOUS cwd;
+  // sending then would deliver the prompt to the wrong agent/workspace. Every
+  // direct send gates on this (handleSend), mirroring the flush effect's guard.
+  // No-op for normal conversations, whose connected cwd always equals intended.
+  const connectionReady = isConnectionReady(
+    connStatus,
+    conn.connectedWorkingDir,
+    workingDirForConnection
+  )
+  // Present "connecting" to the composer while connected-but-not-ready, so it
+  // disables its send affordance instead of inviting a submit handleSend rejects.
+  // Only ever differs from connStatus during that transient mismatch window.
+  const composerConnStatus =
+    connStatus === "connected" && !connectionReady ? "connecting" : connStatus
   const connectionModes = useMemo(
     () => conn.modes?.available_modes ?? [],
     [conn.modes?.available_modes]
@@ -507,6 +591,18 @@ const ConversationTabView = memo(function ConversationTabView({
   const runtimeSyncState = runtimeSession?.syncState ?? "idle"
   useEffect(() => {
     if (connStatus !== "connected") return
+    // Don't flush onto a connection whose cwd doesn't match the tab's intended
+    // working dir. This matters for a just-bound chat conversation: bind switches
+    // the tab's workingDir from the draft's previous folder to the scratch dir,
+    // and for one render `connStatus` can still read the stale "connected" of the
+    // old-folder session before the reconnect lands. Flushing then would deliver
+    // the queued prompt to the wrong folder's agent. (No-op for normal
+    // conversations, whose connection cwd always equals the intended one.)
+    if (
+      (conn.connectedWorkingDir ?? null) !== (workingDirForConnection ?? null)
+    ) {
+      return
+    }
     if (runtimeSyncState === "awaiting_persist") return
     if (msgQueue.length === 0) return
     // setTimeout (not microtask) so a COMPLETE_TURN commit settles first AND so
@@ -522,7 +618,13 @@ const ConversationTabView = memo(function ConversationTabView({
       }
     }, wait)
     return () => clearTimeout(timer)
-  }, [connStatus, runtimeSyncState, msgQueue.length])
+  }, [
+    connStatus,
+    runtimeSyncState,
+    msgQueue.length,
+    conn.connectedWorkingDir,
+    workingDirForConnection,
+  ])
 
   useEffect(() => {
     // Only sync non-null liveMessage updates to state. When conn.liveMessage
@@ -662,11 +764,24 @@ const ConversationTabView = memo(function ConversationTabView({
       // re-queues at the TAIL.
       opts?: { fromQueueFlush?: boolean }
     ) => {
+      // Capture the tab's chat-draft state + eager scratch dir synchronously,
+      // before any await. A folderless chat draft is NOT special-cased here:
+      // its first send takes the exact same gated, inline path as a normal new
+      // conversation (the new-tab branch below just creates the row via
+      // createChatConversation, reusing this eager dir). The composer is gated
+      // on `connected` for chat drafts too, so by the time we get here the agent
+      // is live and the prompt is delivered inline — never parked in the queue.
+      const sendOwnTab = tabs.find((tab) => tab.id === tabId)
+
       if (!hasPersistedConversation && !canAutoConnect) {
         setAgentConnectError(tWelcome("enableAgentFirstPlaceholder"))
         return
       }
-      if (connStatus !== "connected") return
+      // Connected AND the connection's cwd matches this tab's working dir. Bare
+      // `connStatus === "connected"` is not enough: a chat draft mid-reconnect can
+      // read a stale "connected" for the old cwd, and an inline send then would
+      // deliver to the wrong workspace. Same predicate the flush effect uses.
+      if (!connectionReady) return
 
       const fromQueueFlush = opts?.fromQueueFlush ?? false
       // Preserve FIFO: a direct send issued while the queue is non-empty joins
@@ -674,6 +789,23 @@ const ConversationTabView = memo(function ConversationTabView({
       // queue length synchronously (it reflects a same-tick bounce requeue).
       if (shouldQueueDirectSend(fromQueueFlush, mqGetQueueLength())) {
         mqEnqueue(draft, selectedModeIdArg ?? null)
+        return
+      }
+
+      // Single-flight the unbound new-tab create. A second direct submit fired
+      // before the first create resolves (a double Enter / double click) would
+      // otherwise append an optimistic turn it can never deliver: the
+      // createConversationPendingRef guard further down returns AFTER the
+      // optimistic append. Reject the duplicate here, before any optimistic
+      // mutation. Only the unbound path (no persisted id yet) is single-flighted,
+      // so persisted sends keep their concurrent queued-send behavior. Applies
+      // equally to chat and normal new conversations.
+      if (
+        shouldRejectDuplicateCreate(
+          dbConvIdRef.current != null,
+          createConversationPendingRef.current
+        )
+      ) {
         return
       }
 
@@ -733,44 +865,86 @@ const ConversationTabView = memo(function ConversationTabView({
 
       // New-tab path: create the DB row first, then send with the new id
       // pinned. This prevents the backend's send_prompt_linked from racing
-      // us to create its own conversation row.
+      // us to create its own conversation row. A folderless chat draft creates
+      // via createChatConversation (reusing the eager scratch dir) and binds to
+      // its hidden chat folder; every other step — the optimistic turn
+      // appended above, the inline lifecycleSend, the rollback — is identical to
+      // a normal new conversation. This is the whole point of the fix: after the
+      // scratch dir exists, chat mode shares the normal send path and never
+      // depends on the flush-on-connect queue to deliver its first prompt.
       if (createConversationPendingRef.current) return
       createConversationPendingRef.current = true
       const title = getPromptDraftDisplayText(
         draft,
         sharedT("attachedResources")
       ).slice(0, 80)
+      const chatSend = sendOwnTab?.isChat === true
+      const chatExistingDir = sendOwnTab?.workingDir
 
       void (async () => {
         try {
-          const newConversationId = await createConversation(
-            folderId,
-            selectedAgent,
-            title
-          )
-          dbConvIdRef.current = newConversationId
-          // Set external ID on the stable virtual session (no migration needed —
-          // effectiveConversationId never changes, so the session stays in place).
-          // DB persistence of external_id is now backend-driven from
-          // send_prompt_linked once the row is linked, so no explicit DB write here.
-          setExternalId(effectiveConversationId, sessionIdRef.current ?? null)
-
-          if (!mountedRef.current) {
-            // Component unmounted while creating — mark for deferred cleanup
-            // so the background turn_complete handler can clean up later.
-            setPendingCleanup(effectiveConversationId, true)
-            refreshConversations()
-            return
+          let newConversationId: number
+          // The send's folderId defaults to the active folder; a chat send
+          // overrides it with the backend-created hidden chat folder.
+          let sendFolderId = folderId
+          if (chatSend) {
+            const res = await createChatConversation(
+              selectedAgent,
+              title,
+              chatExistingDir
+            )
+            newConversationId = res.conversationId
+            sendFolderId = res.folderId
+            dbConvIdRef.current = newConversationId
+            setExternalId(effectiveConversationId, sessionIdRef.current ?? null)
+            if (!mountedRef.current) {
+              setPendingCleanup(effectiveConversationId, true)
+              refreshConversations()
+              return
+            }
+            // Seed allFolders with the hidden chat folder so the tab's new
+            // folderId resolves (cwd / active-folder) on the next render. bind
+            // reuses the eager scratch dir as workingDir, so the connection's
+            // cwd does not move and no reconnect is triggered.
+            upsertFolder(res.folder)
+            setCreatedConversationId(newConversationId)
+            bindConversationTab(
+              tabId,
+              newConversationId,
+              selectedAgent,
+              title,
+              effectiveConversationId,
+              res.folderId,
+              res.folder.path
+            )
+          } else {
+            newConversationId = await createConversation(
+              folderId,
+              selectedAgent,
+              title
+            )
+            dbConvIdRef.current = newConversationId
+            // Set external ID on the stable virtual session (no migration needed —
+            // effectiveConversationId never changes, so the session stays in place).
+            // DB persistence of external_id is now backend-driven from
+            // send_prompt_linked once the row is linked, so no explicit DB write here.
+            setExternalId(effectiveConversationId, sessionIdRef.current ?? null)
+            if (!mountedRef.current) {
+              // Component unmounted while creating — mark for deferred cleanup
+              // so the background turn_complete handler can clean up later.
+              setPendingCleanup(effectiveConversationId, true)
+              refreshConversations()
+              return
+            }
+            setCreatedConversationId(newConversationId)
+            bindConversationTab(
+              tabId,
+              newConversationId,
+              selectedAgent,
+              title,
+              effectiveConversationId
+            )
           }
-
-          setCreatedConversationId(newConversationId)
-          bindConversationTab(
-            tabId,
-            newConversationId,
-            selectedAgent,
-            title,
-            effectiveConversationId
-          )
           clearMessageInputDraft(buildNewConversationDraftStorageKey())
           refreshConversations()
 
@@ -778,13 +952,35 @@ const ConversationTabView = memo(function ConversationTabView({
           // conversation_id pinned so the backend adopts our row instead of
           // creating a duplicate one.
           lifecycleSend(draft, selectedModeIdArg, {
-            folderId,
+            folderId: sendFolderId,
             conversationId: newConversationId,
             clientMessageId: optimisticTurn.id,
             onTurnInProgress,
           })
         } catch (e) {
           console.error("[ConversationTabView] create conversation:", e)
+          // A failed create (chat OR normal) must fully restore the pre-send
+          // state, not strand the user behind a blank panel:
+          //   1. drop the optimistic turn (no ghost stuck in awaiting_persist),
+          //   2. return syncState to idle,
+          //   3. setHasSentMessage(false) → re-enters welcome mode (otherwise the
+          //      welcome screen never returns and the list is empty),
+          //   4. re-seed the draft text — message-input clears it synchronously on
+          //      send, so without this the user's prompt is lost on failure,
+          //   5. surface the error on the welcome banner so it isn't silent.
+          removeOptimisticTurn(effectiveConversationId, optimisticTurn.id)
+          setSyncState(effectiveConversationId, "idle")
+          setHasSentMessage(false)
+          const draftText = draft.displayText.trim()
+          if (draftText) {
+            saveMessageInputDraft(
+              buildNewConversationDraftStorageKey(),
+              draftText
+            )
+          }
+          if (mountedRef.current) {
+            setAgentConnectError(tWelcome("createConversationFailed"))
+          }
         } finally {
           createConversationPendingRef.current = false
         }
@@ -798,7 +994,7 @@ const ConversationTabView = memo(function ConversationTabView({
       mqGetQueueLength,
       bindConversationTab,
       canAutoConnect,
-      connStatus,
+      connectionReady,
       effectiveConversationId,
       folderId,
       hasPersistedConversation,
@@ -813,6 +1009,7 @@ const ConversationTabView = memo(function ConversationTabView({
       tabs,
       tWelcome,
       tabId,
+      upsertFolder,
     ]
   )
 
@@ -1019,6 +1216,14 @@ const ConversationTabView = memo(function ConversationTabView({
     return item?.draft.displayText ?? null
   }, [mqEditingItemId, msgQueue])
 
+  // The editing item's full blocks, so the composer can restore inline badges +
+  // attachments (not just the display text) when re-opening a queued message.
+  const editingQueueDraftBlocks = useMemo(() => {
+    if (!mqEditingItemId) return null
+    const item = msgQueue.find((m) => m.id === mqEditingItemId)
+    return item?.draft.blocks ?? null
+  }, [mqEditingItemId, msgQueue])
+
   const handleQueueEdit = useCallback(
     (id: string) => {
       mqStartEditing(id)
@@ -1041,6 +1246,14 @@ const ConversationTabView = memo(function ConversationTabView({
 
   const showDraftHeader = !hasPersistedConversation && !hasSentMessage
   const isWelcomeMode = showDraftHeader
+
+  const handleQuickAction = useCallback((payload: ComposerInjectContent) => {
+    setQuickActionInject(payload)
+  }, [])
+
+  const handleQuickActionConsumed = useCallback(() => {
+    setQuickActionInject(null)
+  }, [])
 
   const canShowDetailErrorActions =
     hasPersistedConversation && dbConversationId != null && !!folder
@@ -1154,6 +1367,7 @@ const ConversationTabView = memo(function ConversationTabView({
       onAddFeedback={feedback.featureEnabled ? feedback.openDialog : undefined}
       feedbackAddDisabled={!feedback.canSubmit}
       isActive={isActive}
+      showActiveFlow={showActiveFlow}
       queue={msgQueue}
       onEnqueue={mqEnqueue}
       onQueueReorder={mqReorder}
@@ -1161,6 +1375,7 @@ const ConversationTabView = memo(function ConversationTabView({
       onQueueDelete={mqRemove}
       editingItemId={mqEditingItemId}
       editingDraftText={editingQueueDraftText}
+      editingDraftBlocks={editingQueueDraftBlocks}
       isEditingQueueItem={mqEditingItemId != null}
       onSaveQueueEdit={handleSaveQueueEdit}
       onCancelQueueEdit={handleQueueCancelEdit}
@@ -1176,8 +1391,12 @@ const ConversationTabView = memo(function ConversationTabView({
       {isWelcomeMode ? (
         <div className="relative isolate flex h-full min-h-0 flex-col overflow-x-hidden overflow-y-auto">
           <div className="flex-1" />
-          <div className="mx-auto flex w-full max-w-2xl shrink-0 flex-col gap-6 px-4 py-4">
+          <div className="mx-auto flex w-full max-w-3xl shrink-0 flex-col gap-6 px-4 py-4">
             <WelcomeHero />
+            <QuickActions
+              onSelect={handleQuickAction}
+              agentType={selectedAgent}
+            />
             <div className="flex justify-center">
               <AgentSelector
                 defaultAgentType={selectedAgent}
@@ -1209,7 +1428,10 @@ const ConversationTabView = memo(function ConversationTabView({
               </button>
             ) : null}
             <ChatInput
-              status={connStatus}
+              // composerConnStatus (not connStatus): a chat draft mid-reconnect
+              // reads "connecting" until the connection's cwd matches, so the
+              // send affordance stays disabled until handleSend would accept it.
+              status={composerConnStatus}
               promptCapabilities={conn.promptCapabilities}
               defaultPath={workingDirForConnection}
               agentName={AGENT_LABELS[selectedAgent]}
@@ -1229,14 +1451,19 @@ const ConversationTabView = memo(function ConversationTabView({
               attachmentTabId={tabId}
               draftStorageKey={draftStorageKey}
               isActive={isActive}
+              showActiveFlow={showActiveFlow}
               onAddFeedback={
                 feedback.featureEnabled ? feedback.openDialog : undefined
               }
               feedbackAddDisabled={!feedback.canSubmit}
+              injectContent={quickActionInject}
+              onInjectConsumed={handleQuickActionConsumed}
+              flush
+              tall
             />
           </div>
           <div className="flex-1" />
-          <div className="mx-auto w-full max-w-2xl shrink-0 px-4 pb-6">
+          <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pb-6">
             <WelcomeTip />
           </div>
         </div>
@@ -1295,6 +1522,7 @@ export function ConversationDetailPanel() {
   const t = useTranslations("Folder.conversation")
   const tStatus = useTranslations("Folder.statusLabels")
   const tExport = useTranslations("Folder.conversation.exportLabels")
+  const tDetails = useTranslations("Folder.sessionDetails")
   const {
     completeTurn: runtimeCompleteTurn,
     getConversationIdByExternalId,
@@ -1322,6 +1550,7 @@ export function ConversationDetailPanel() {
   const { disconnect: disconnectByKey } = useAcpActions()
   const { addTask, updateTask } = useTaskContext()
   const [reloadByTabId, setReloadByTabId] = useState<Record<string, number>>({})
+  const [detailsOpen, setDetailsOpen] = useState(false)
 
   const exportLabels = useMemo<ExportLabels>(
     () => ({
@@ -1516,6 +1745,20 @@ export function ConversationDetailPanel() {
     activeConversationTab?.conversationId != null &&
     getSession(activeConversationTab.conversationId)?.detail != null
 
+  // Resolve the active conversation's summary + live token usage the same way
+  // the tab view renders them — a new conversation streams under a virtual
+  // `runtimeConversationId` with its usage on `sessionStats`. Extracted so the
+  // resolution is unit-tested (see active-session-details.test.ts).
+  const {
+    summary: activeSessionSummary,
+    stats: activeSessionStats,
+    model: activeSessionModel,
+  } = resolveActiveSessionDetails(
+    activeConversationTab,
+    getSession,
+    conversations
+  )
+
   const getExportData = useCallback(() => {
     if (!activeConversationTab?.conversationId) return null
     const session = getSession(activeConversationTab.conversationId)
@@ -1632,15 +1875,11 @@ export function ConversationDetailPanel() {
           canTile && !active ? () => switchTab(tab.id) : undefined
         }
       >
+        {/* The visible active cue is now the composer's flowing gradient border
+            (see message-input.tsx); keep a non-visual cue for assistive tech in
+            tiled mode, where the old top-center icon used to provide it. */}
         {canTile && active && (
-          <div
-            role="img"
-            aria-label={t("activeConversationIndicator")}
-            title={t("activeConversationIndicator")}
-            className="absolute top-2 left-1/2 z-20 flex h-6 w-6 -translate-x-1/2 items-center justify-center rounded-full bg-background/40 text-sidebar-primary shadow-sm ring-1 ring-sidebar-primary/20 backdrop-blur"
-          >
-            <Focus className="h-4 w-4" />
-          </div>
+          <span className="sr-only">{t("activeConversationIndicator")}</span>
         )}
         <ConversationTabView
           tabId={tab.id}
@@ -1648,6 +1887,7 @@ export function ConversationDetailPanel() {
           agentType={tab.agentType}
           workingDir={tab.workingDir ?? getFolder(tab.folderId)?.path}
           isActive={active}
+          showActiveFlow={canTile && active}
           reloadSignal={reloadByTabId[tab.id] ?? 0}
         />
       </div>
@@ -1655,81 +1895,99 @@ export function ConversationDetailPanel() {
   })
 
   return (
-    <ContextMenu onOpenChange={handleContextMenuOpenChange}>
-      <ContextMenuTrigger asChild>
-        <div
-          className="relative h-full min-h-0 overflow-hidden"
-          onPointerDown={handleContextMenuTriggerPointerDown}
-        >
-          {/* Stable wrapper across canTile flip — otherwise sibling tabs remount and a live streaming response is torn down. */}
-          <ScrollArea
-            x={canTile ? "scroll" : "hidden"}
-            y="hidden"
-            className="h-full w-full"
+    <>
+      <ContextMenu onOpenChange={handleContextMenuOpenChange}>
+        <ContextMenuTrigger asChild>
+          <div
+            className="relative h-full min-h-0 overflow-hidden"
+            onPointerDown={handleContextMenuTriggerPointerDown}
           >
-            <div
-              className={cn(
-                "relative h-full",
-                canTile && "flex min-w-full flex-row"
-              )}
+            {/* Stable wrapper across canTile flip — otherwise sibling tabs remount and a live streaming response is torn down. */}
+            <ScrollArea
+              x={canTile ? "scroll" : "hidden"}
+              y="hidden"
+              className="h-full w-full"
             >
-              {tabElements}
-            </div>
-          </ScrollArea>
-        </div>
-      </ContextMenuTrigger>
-      <ContextMenuContent>
-        <ContextMenuItem
-          disabled={!contextMenuSelectedText}
-          onSelect={handleCopySelectedText}
-        >
-          <Copy className="h-4 w-4" />
-          {t("copyText")}
-        </ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuItem
-          disabled={!folder?.path}
-          onSelect={handleNewConversation}
-        >
-          <Plus className="h-4 w-4" />
-          {t("newConversation")}
-        </ContextMenuItem>
-        <ContextMenuSub>
-          <ContextMenuSubTrigger disabled={!canExport}>
-            <Download className="h-4 w-4" />
-            {t("exportConversation")}
-          </ContextMenuSubTrigger>
-          <ContextMenuSubContent>
-            <ContextMenuItem onSelect={handleExportImage}>
-              <FileImage className="h-4 w-4" />
-              {t("exportImage")}
-            </ContextMenuItem>
-            <ContextMenuItem onSelect={handleExportMarkdown}>
-              <FileText className="h-4 w-4" />
-              {t("exportMarkdown")}
-            </ContextMenuItem>
-            <ContextMenuItem onSelect={handleExportHtml}>
-              <FileCode className="h-4 w-4" />
-              {t("exportHtml")}
-            </ContextMenuItem>
-          </ContextMenuSubContent>
-        </ContextMenuSub>
-        <ContextMenuItem
-          disabled={!canReloadActiveConversation}
-          onSelect={handleReloadActiveConversation}
-        >
-          <RefreshCw className="h-4 w-4" />
-          {t("reload")}
-        </ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuItem
-          disabled={!activeTabId}
-          onSelect={handleCloseActiveTab}
-        >
-          <X className="h-4 w-4" />
-          {t("closeConversation")}
-        </ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
+              <div
+                className={cn(
+                  "relative h-full",
+                  canTile && "flex min-w-full flex-row"
+                )}
+              >
+                {tabElements}
+              </div>
+            </ScrollArea>
+          </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent>
+          <ContextMenuItem
+            disabled={!contextMenuSelectedText}
+            onSelect={handleCopySelectedText}
+          >
+            <Copy className="h-4 w-4" />
+            {t("copyText")}
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem
+            disabled={!folder?.path}
+            onSelect={handleNewConversation}
+          >
+            <SquarePen className="h-4 w-4" />
+            {t("newConversation")}
+          </ContextMenuItem>
+          <ContextMenuSub>
+            <ContextMenuSubTrigger disabled={!canExport}>
+              <Download className="h-4 w-4" />
+              {t("exportConversation")}
+            </ContextMenuSubTrigger>
+            <ContextMenuSubContent>
+              <ContextMenuItem onSelect={handleExportImage}>
+                <FileImage className="h-4 w-4" />
+                {t("exportImage")}
+              </ContextMenuItem>
+              <ContextMenuItem onSelect={handleExportMarkdown}>
+                <FileText className="h-4 w-4" />
+                {t("exportMarkdown")}
+              </ContextMenuItem>
+              <ContextMenuItem onSelect={handleExportHtml}>
+                <FileCode className="h-4 w-4" />
+                {t("exportHtml")}
+              </ContextMenuItem>
+            </ContextMenuSubContent>
+          </ContextMenuSub>
+          <ContextMenuItem
+            disabled={!canReloadActiveConversation}
+            onSelect={handleReloadActiveConversation}
+          >
+            <RefreshCw className="h-4 w-4" />
+            {t("reload")}
+          </ContextMenuItem>
+          <ContextMenuItem
+            disabled={!activeSessionSummary}
+            onSelect={() => setDetailsOpen(true)}
+          >
+            <Info className="h-4 w-4" />
+            {tDetails("menuLabel")}
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem
+            disabled={!activeTabId}
+            onSelect={handleCloseActiveTab}
+          >
+            <X className="h-4 w-4" />
+            {t("closeConversation")}
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
+      {activeSessionSummary && (
+        <SessionDetailsDialog
+          open={detailsOpen}
+          onOpenChange={setDetailsOpen}
+          summary={activeSessionSummary}
+          stats={activeSessionStats}
+          model={activeSessionModel}
+        />
+      )}
+    </>
   )
 }

@@ -9,7 +9,8 @@ import { useAuxPanelContext } from "@/contexts/aux-panel-context"
 import { useActiveFolder } from "@/contexts/active-folder-context"
 import { useAppWorkspace } from "@/contexts/app-workspace-context"
 import { useTabContext } from "@/contexts/tab-context"
-import { useWorkspaceContext } from "@/contexts/workspace-context"
+import { useWorkbenchRoute } from "@/contexts/workbench-route-context"
+import { useWorkspaceActions } from "@/contexts/workspace-context"
 import { listAllConversations } from "@/lib/api"
 import type {
   AgentType,
@@ -29,6 +30,7 @@ import {
   CommandItem,
 } from "@/components/ui/command"
 import { cn } from "@/lib/utils"
+import { formatConversationTitle } from "@/lib/conversation-title"
 
 type SearchTab = "conversations" | "files"
 
@@ -56,7 +58,8 @@ export function SearchCommandDialog({
     [allConversations, activeFolderId]
   )
   const { openTab } = useTabContext()
-  const { openFilePreview } = useWorkspaceContext()
+  const { openConversations } = useWorkbenchRoute()
+  const { openFilePreview } = useWorkspaceActions()
   const { revealInFileTree } = useAuxPanelContext()
 
   const [activeTab, setActiveTab] = useState<SearchTab>("conversations")
@@ -147,10 +150,14 @@ export function SearchCommandDialog({
 
   const handleSelectConversation = useCallback(
     (conv: DbConversationSummary) => {
+      // Leave any workbench route (e.g. Automations) so the picked conversation
+      // isn't stranded behind the route overlay — covers re-selecting the
+      // already-active tab, which doesn't change activeTabId.
+      openConversations()
       openTab(conv.folder_id, conv.id, conv.agent_type, true)
       onOpenChange(false)
     },
-    [openTab, onOpenChange]
+    [openTab, onOpenChange, openConversations]
   )
 
   const handleSelectFile = useCallback(
@@ -280,14 +287,15 @@ export function SearchCommandDialog({
                 {results.map((conv) => (
                   <CommandItem
                     key={conv.id}
-                    value={`${conv.id}-${conv.title ?? ""}`}
+                    value={`${conv.id}-${formatConversationTitle(conv.title)}`}
                     onSelect={() => handleSelectConversation(conv)}
                   >
                     <ConversationStatusDot
                       status={conv.status as ConversationStatus}
                     />
                     <span className="flex-1 truncate">
-                      {conv.title || t("untitledConversation")}
+                      {formatConversationTitle(conv.title) ||
+                        t("untitledConversation")}
                     </span>
                     <span className="text-xs text-muted-foreground shrink-0">
                       {AGENT_LABELS[conv.agent_type]}

@@ -5,24 +5,28 @@ import { isDesktop } from "@/lib/platform"
 import Image from "next/image"
 import { useLocale, useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
 import {
   BookOpenText,
   Check,
   ChevronUp,
+  ClipboardPaste,
   Cog,
-  FileSearch,
+  Copy,
+  FileStack,
   FolderSearch,
   GitFork,
+  Lock,
   MessageSquarePlus,
   MessageSquareText,
   Paperclip,
   Plus,
+  Scissors,
   Search,
   Send,
   Command,
   Sparkles,
   Square,
+  TextSelect,
   Upload,
   X,
 } from "lucide-react"
@@ -30,22 +34,39 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu"
 import { ImagePreviewDialog } from "@/components/ui/image-preview-dialog"
 import { AgentIcon } from "@/components/agent-icon"
-import { cn, randomUUID } from "@/lib/utils"
+import { cn, copyTextFromMenu, randomUUID } from "@/lib/utils"
+import {
+  buildFileUri,
+  buildFileUriWithRange,
+  formatFileRangeLabel,
+} from "@/lib/reference-link"
 import {
   filesFromClipboard,
   clipboardHasText,
   imageFilesFromClipboardApi,
 } from "@/lib/clipboard-images"
-import { matchShortcutEvent } from "@/lib/keyboard-shortcuts"
 import { useShortcutSettings } from "@/hooks/use-shortcut-settings"
 import {
   readFileBase64,
@@ -53,6 +74,8 @@ import {
   uploadAttachment,
   uploadLocalPathToRemote,
   isEmptyAttachmentError,
+  openSettingsWindow,
+  type SettingsSection,
   UPLOAD_MAX_BYTES,
   UPLOAD_I18N_KEY_TOO_LARGE,
   UPLOAD_I18N_KEY_NOT_A_FILE,
@@ -64,6 +87,7 @@ import { getActiveRemoteConnectionId } from "@/lib/transport"
 import { ServerFileBrowserDialog } from "@/components/shared/server-file-browser-dialog"
 import { toast } from "sonner"
 import { disposeTauriListener } from "@/lib/tauri-listener"
+import { AGENT_LABELS } from "@/lib/types"
 import type {
   AgentSkillItem,
   AgentType,
@@ -87,30 +111,76 @@ import {
   ConversationFolderBranchPicker,
   useConversationFolderBranchPickerVisible,
 } from "@/components/chat/conversation-context-bar"
+import { InlineModeSelector } from "@/components/chat/mode-selector"
+import { InlineSessionConfigSelector } from "@/components/chat/session-config-selector"
+import { ModelOptionPicker } from "@/components/chat/model-option-picker"
 import {
-  InlineModeSelector,
-  ModeSelector,
-} from "@/components/chat/mode-selector"
+  SessionSelectorsPanel,
+  type SessionSelectorGroup,
+  type SessionSelectorSetting,
+} from "@/components/chat/session-selectors-panel"
 import {
-  InlineSessionConfigSelector,
-  SessionConfigSelector,
-} from "@/components/chat/session-config-selector"
-import {
-  getExpertIcon,
-  pickExpertLocalized,
-} from "@/components/chat/experts-command-menu"
-import { FileMentionMenu } from "@/components/chat/file-mention-menu"
+  deriveModelGroups,
+  isModelConfigOption,
+  modelListGroups,
+  MODEL_LIST_VIRTUALIZE_THRESHOLD,
+  type ModelOptionGroup,
+} from "@/lib/model-config-groups"
 import { DropdownRadioItemContent } from "@/components/chat/dropdown-radio-item-content"
-import { useFileTree } from "@/hooks/use-file-tree"
-import { useBuiltInExperts } from "@/hooks/use-built-in-experts"
-import { useAgentExperts } from "@/hooks/use-agent-experts"
 import { useAgentSkills } from "@/hooks/use-agent-skills"
-import { joinFsPath } from "@/lib/path-utils"
+import { useBuiltInExperts } from "@/hooks/use-built-in-experts"
+import { useEnabledSkillIds } from "@/hooks/use-enabled-skill-ids"
+import { getExpertIcon, pickLocalized } from "@/lib/expert-presentation"
+import { OFFICE_ACTIONS, type OfficeAction } from "@/lib/office-actions"
 import {
-  clearMessageInputDraft,
-  loadMessageInputDraft,
-  saveMessageInputDraft,
+  clearMessageInputDraftV2,
+  loadMessageInputDraftV2,
+  saveMessageInputDraftV2,
 } from "@/lib/message-input-draft"
+import {
+  RichComposer,
+  type RichComposerHandle,
+} from "@/components/chat/composer/rich-composer"
+import { docToPromptBlocks } from "@/components/chat/composer/to-prompt-blocks"
+import {
+  buildEmbeddedReferenceUri,
+  isEmbeddedReferenceUri,
+} from "@/components/chat/composer/reference-uri"
+import {
+  applyExpertReference,
+  isComposerChromeClick,
+  isComposerEmpty,
+  restoreBlocksIntoEditor,
+} from "@/components/chat/composer/composer-commands"
+import {
+  commandToReference,
+  skillToReference,
+} from "@/components/chat/composer/invocation-reference"
+import { cutSelectionToClipboard } from "@/components/chat/composer/clipboard-actions"
+import { referenceToMarkdown } from "@/components/chat/composer/reference-text"
+import type { ReferenceAttrs } from "@/components/chat/composer/types"
+import type { Editor, JSONContent } from "@tiptap/core"
+import {
+  useReferenceSearch,
+  type ReferenceGroupLabels,
+} from "@/components/chat/composer/use-reference-search"
+import type { MentionUiLabels } from "@/components/chat/composer/suggestion/types"
+import type {
+  ImageInputAttachment,
+  InputAttachment,
+  ResourceInputAttachment,
+} from "./message-input-attachments"
+
+/**
+ * Payload pushed into the composer from outside (e.g. a welcome-page quick
+ * action). `text` replaces the document; `skill`, when present, is prepended as
+ * the leading invocation badge (serializes to `${prefix}${id}` as the first
+ * token).
+ */
+export interface ComposerInjectContent {
+  text: string
+  skill?: { id: string; label: string }
+}
 
 interface MessageInputProps {
   onSend: (draft: PromptDraft, modeId?: string | null) => void
@@ -135,8 +205,22 @@ interface MessageInputProps {
   attachmentTabId?: string | null
   draftStorageKey?: string | null
   isActive?: boolean
+  /** Paint the flowing active-session gradient on the composer border. Set only
+   *  for the active tab while tiled across multiple sessions; a lone or
+   *  non-tiled session keeps the plain default border. Independent of
+   *  `isActive` (which still drives auto-focus/connect). */
+  showActiveFlow?: boolean
   onEnqueue?: (draft: PromptDraft, modeId: string | null) => void
+  /** Id of the queue item being edited — the stable key for (re)hydration, so
+   *  switching between two items with identical display text still reloads. */
+  editingItemId?: string | null
   editingDraftText?: string | null
+  /**
+   * The queued message's full `draft.blocks`, when editing a queue item. Lets
+   * the composer restore inline reference badges + attachments (not just text);
+   * falls back to {@link editingDraftText} when absent.
+   */
+  editingDraftBlocks?: PromptInputBlock[] | null
   isEditingQueueItem?: boolean
   onSaveQueueEdit?: (draft: PromptDraft) => void
   onCancelQueueEdit?: () => void
@@ -150,29 +234,9 @@ interface MessageInputProps {
   /** Grey out the live-feedback "+" entry when a note can't be sent right now
    *  (no active turn / agent lacks the tool). */
   feedbackAddDisabled?: boolean
+  injectContent?: ComposerInjectContent | null
+  onInjectConsumed?: () => void
 }
-
-interface ResourceInputAttachment {
-  id: string
-  type: "resource"
-  kind: "link" | "embedded"
-  uri: string
-  name: string
-  mimeType: string | null
-  text?: string | null
-  blob?: string | null
-}
-
-interface ImageInputAttachment {
-  id: string
-  type: "image"
-  data: string
-  uri: string | null
-  name: string
-  mimeType: string
-}
-
-type InputAttachment = ResourceInputAttachment | ImageInputAttachment
 
 const MIME_BY_EXT: Record<string, string> = {
   txt: "text/plain",
@@ -211,15 +275,6 @@ function fileNameFromPath(path: string): string {
 function mimeTypeFromPath(path: string): string | null {
   const ext = path.split(".").pop()?.toLowerCase() ?? ""
   return MIME_BY_EXT[ext] ?? null
-}
-
-function toFileUri(path: string): string {
-  const normalized = path.replace(/\\/g, "/")
-  const encoded = normalized.split("/").map(encodeURIComponent).join("/")
-  if (normalized.startsWith("/")) {
-    return `file://${encoded}`
-  }
-  return `file:///${encoded}`
 }
 
 function hasDragFiles(dataTransfer: DataTransfer | null): boolean {
@@ -328,6 +383,62 @@ function buildClipboardResourceUri(name: string): string {
   return `clipboard://${encodeURIComponent(normalizedName)}-${randomUUID()}`
 }
 
+// Non-image files attach as inline file badges in the editor (like `@`-file
+// references), not as out-of-band chips. A file with a real `file://` path uses
+// that uri directly (it serializes to a ResourceLink and round-trips through the
+// draft doc untouched). A path-less file (a local-desktop paste/drop carrying
+// inline bytes — an embedded resource or a `data:` link) can't live in the doc,
+// so its badge carries an inert `codeg://embedded/<uuid>` display uri
+// (`buildEmbeddedReferenceUri`) while the real bytes-bearing block is held in the
+// `embeddedPayloadsRef` map keyed by that uri. `docToPromptBlocks` drops the
+// embedded badge from the prose; `buildDraft` appends the mapped block for every
+// embedded badge still in the document. The `codeg://` scheme is never a real
+// path (no collision with a genuine attachment) and survives the transcript's
+// sanitize/harden pipeline, so it renders as an inert file badge, not a blocked
+// link — see {@link buildEmbeddedReferenceUri} / {@link isEmbeddedReferenceUri}.
+
+/** Whether the document already holds a file reference badge for `uri` (used to
+ *  dedupe repeated drops/picks of the same path, mirroring the old seen-set). */
+function editorHasFileReference(editor: Editor, uri: string): boolean {
+  let found = false
+  editor.state.doc.descendants((node) => {
+    if (found) return false
+    if (
+      node.type.name === "reference" &&
+      node.attrs?.refType === "file" &&
+      node.attrs?.uri === uri
+    ) {
+      found = true
+      return false
+    }
+    return true
+  })
+  return found
+}
+
+/** Drop embedded-attachment reference badges from a draft document before it is
+ *  persisted: their bytes live only in the in-memory `embeddedPayloadsRef` map
+ *  (never serialized into the draft), so a restored badge would send nothing.
+ *  Identified purely by the unambiguous `codeg://embedded/…` display uri (no map
+ *  needed) — a real `file://` attachment is never matched. Stripping at save
+ *  keeps the live badge visible this session but matches the pre-existing
+ *  behavior where out-of-band pasted bytes don't survive a draft round-trip. */
+function stripEmbeddedReferences(doc: JSONContent): JSONContent {
+  if (!doc.content) return doc
+  const content: JSONContent[] = []
+  for (const child of doc.content) {
+    if (
+      child.type === "reference" &&
+      typeof child.attrs?.uri === "string" &&
+      isEmbeddedReferenceUri(child.attrs.uri)
+    ) {
+      continue
+    }
+    content.push(stripEmbeddedReferences(child))
+  }
+  return { ...doc, content }
+}
+
 function buildDataUri(base64Data: string, mimeType: string | null): string {
   const safeMime =
     mimeType && mimeType.trim() ? mimeType : "application/octet-stream"
@@ -341,6 +452,21 @@ function SelectorLoadingChip({ label }: { label: string }) {
       <span>{label}</span>
     </div>
   )
+}
+
+// Groups for the searchable + virtualized model picker, or `null` when the
+// option should keep the lightweight selectors. Only the MODEL option, and only
+// when its list is long enough to jank, qualifies. Falls back to a single
+// headerless group for a long flat (un-prefixed) list.
+function modelPickerGroups(
+  option: SessionConfigOptionInfo
+): ModelOptionGroup[] | null {
+  if (!isModelConfigOption(option)) return null
+  if (option.kind.type !== "select") return null
+  if (option.kind.options.length <= MODEL_LIST_VIRTUALIZE_THRESHOLD) return null
+  // Preserve derived `provider/` groups, server-provided groups, or a flat list
+  // (never silently flatten server groups — keeps wide/collapsed consistent).
+  return modelListGroups(option)
 }
 
 export function MessageInput({
@@ -366,18 +492,22 @@ export function MessageInput({
   attachmentTabId,
   draftStorageKey,
   isActive = false,
+  showActiveFlow = false,
   onEnqueue,
+  editingItemId,
   editingDraftText,
+  editingDraftBlocks,
   isEditingQueueItem = false,
   onSaveQueueEdit,
   onCancelQueueEdit,
   onForkSend,
   onAddFeedback,
   feedbackAddDisabled,
+  injectContent,
+  onInjectConsumed,
 }: MessageInputProps) {
   const t = useTranslations("Folder.chat.messageInput")
   const tQueue = useTranslations("Folder.chat.messageQueue")
-  const tExperts = useTranslations("ExpertsSettings")
   // Kept as a separate binding from `t` so its call sites — exclusively
   // upload / attachment toasts — read as a single coherent group when
   // scanning the file. Same namespace, no extra runtime cost.
@@ -393,15 +523,6 @@ export function MessageInput({
     () => desktopMode && getActiveRemoteConnectionId() === null,
     [desktopMode]
   )
-  const locale = useLocale()
-  const builtInExperts = useBuiltInExperts()
-  const expertIdSet = useMemo(
-    () => new Set(builtInExperts.map((item) => item.metadata.id)),
-    [builtInExperts]
-  )
-  // Experts linked to the current agent via symlinks in the settings page.
-  // Kept so the dedicated expert (Sparkles) button can still surface them.
-  const availableExperts = useAgentExperts(agentType ?? null)
   // The `$` prefix autocomplete is Codex-only: Codex advertises very few
   // native slash commands, so we augment the dropdown with the agent's
   // skills read from disk. Other agents already surface their full command
@@ -412,123 +533,80 @@ export function MessageInput({
   // project skills (e.g. `{folder}/.codex/skills`). Without this, users
   // only ever saw global skills in the `$` autocomplete.
   const availableSkills = useAgentSkills(skillAgentType, defaultPath ?? null)
-  // Expert skills are symlinked into the agent's skill directories, so they
-  // also show up in `acp_list_agent_skills`. Strip them out — experts remain
-  // reachable via the expert button, and the `$` list is skills-only.
-  const nonExpertSkills = useMemo(
-    () => availableSkills.filter((skill) => !expertIdSet.has(skill.id)),
-    [availableSkills, expertIdSet]
-  )
-  const expertPrefix = agentType === "codex" ? "$" : "/"
-  // Stable presentation order for expert categories in the button
-  // dropdown. Keep this in sync with experts-settings.tsx so both surfaces
-  // group experts the same way.
-  const groupedExperts = useMemo(() => {
-    const CATEGORY_SORT: Record<string, number> = {
-      discovery: 1,
-      planning: 2,
-      execution: 3,
-      quality: 4,
-      debugging: 5,
-      review: 6,
-      meta: 7,
-    }
-    const groups = new Map<string, typeof availableExperts>()
-    const sorted = [...availableExperts].sort((a, b) => {
-      const ca = CATEGORY_SORT[a.metadata.category] ?? 99
-      const cb = CATEGORY_SORT[b.metadata.category] ?? 99
-      if (ca !== cb) return ca - cb
-      const sa = a.metadata.sort_order ?? 0
-      const sb = b.metadata.sort_order ?? 0
-      if (sa !== sb) return sa - sb
-      return a.metadata.id.localeCompare(b.metadata.id)
-    })
-    for (const item of sorted) {
-      const list = groups.get(item.metadata.category) ?? []
-      list.push(item)
-      groups.set(item.metadata.category, list)
-    }
-    return Array.from(groups.entries()).sort(
-      (a, b) => (CATEGORY_SORT[a[0]] ?? 99) - (CATEGORY_SORT[b[0]] ?? 99)
-    )
-  }, [availableExperts])
-  const translateExpertCategory = useCallback(
-    (category: string): string => {
-      switch (category) {
-        case "discovery":
-          return tExperts("categories.discovery")
-        case "planning":
-          return tExperts("categories.planning")
-        case "execution":
-          return tExperts("categories.execution")
-        case "quality":
-          return tExperts("categories.quality")
-        case "debugging":
-          return tExperts("categories.debugging")
-        case "review":
-          return tExperts("categories.review")
-        case "meta":
-          return tExperts("categories.meta")
-        default:
-          return category
-      }
-    },
-    [tExperts]
-  )
+  const skillPrefix = agentType === "codex" ? "$" : "/"
   const { shortcuts } = useShortcutSettings()
   const effectiveDraftStorageKey = draftStorageKey ?? null
   const resolvedPlaceholder = placeholder ?? t("askAnything")
-  const [text, setText] = useState(() => {
-    if (!effectiveDraftStorageKey) return ""
-    return loadMessageInputDraft(effectiveDraftStorageKey) ?? ""
-  })
+  // The "+" menu's expert / daily-office skill shortcuts mirror the welcome-page
+  // quick actions: localized labels (`tQa` reads the same namespace those cards
+  // use), the bundled experts, and per-agent skill-enabled gating.
+  const locale = useLocale()
+  const tQa = useTranslations("Folder.chat.welcomePanel.quickActions")
+  const experts = useBuiltInExperts()
+  const {
+    enabledIds,
+    ready: skillStatusReady,
+    supported: skillManagementSupported,
+  } = useEnabledSkillIds(agentType ?? null)
+  const editorRef = useRef<RichComposerHandle>(null)
+  // The editor owns the content now; this mirror of its empty state drives the
+  // send button and `hasSendableContent`.
+  const [composerEmpty, setComposerEmpty] = useState(true)
+  // Flips true once the RichComposer's async (immediatelyRender:false) editor has
+  // mounted, so the hydration effect can use the imperative handle.
+  const [composerReady, setComposerReady] = useState(false)
+  // `attachments` now holds only images; non-image files live inline as editor
+  // reference badges. This map carries the real bytes-bearing block for each
+  // embedded/data-uri badge, keyed by its synthetic `file://` sentinel uri, and
+  // is reconciled into the outgoing blocks by `buildDraft`.
   const [attachments, setAttachments] = useState<InputAttachment[]>([])
+  const embeddedPayloadsRef = useRef<Map<string, PromptInputBlock>>(new Map())
   const [isDragActive, setIsDragActive] = useState(false)
+  // Collapsed (narrow) selectors live in a controlled Popover holding a
+  // master–detail panel (`SessionSelectorsPanel`). It's controlled so a value
+  // pick closes it explicitly — matching the prior cog menu, which also closed
+  // on every selection.
+  const [collapsedSelectorsOpen, setCollapsedSelectorsOpen] = useState(false)
   const [quickMessages, setQuickMessages] = useState<QuickMessage[]>([])
   const [quickMessagesLoading, setQuickMessagesLoading] = useState(false)
+  // Whether the async Clipboard read API is usable here. It's absent in
+  // non-secure web deployments served over HTTP/LAN (see installClipboardFallback
+  // in lib/utils, which only shims writeText), so the composer's custom
+  // right-click "Paste" can't work there. When false we keep the radix context
+  // menu disabled and let the browser's native menu through — its Paste still
+  // works over the editable text. Resolved on the client after mount so SSR and
+  // the first client render agree (no hydration mismatch on the trigger).
+  const [clipboardReadSupported, setClipboardReadSupported] = useState(false)
+  // Snapshotted when the custom right-click menu opens: whether the editor holds
+  // a non-empty selection, which gates the Cut/Copy items. Read from the editor's
+  // ProseMirror state (not the DOM Selection) so it stays correct after the radix
+  // menu takes focus.
+  const [contextSelectionActive, setContextSelectionActive] = useState(false)
   const [previewAttachmentId, setPreviewAttachmentId] = useState<string | null>(
     null
   )
   const containerRef = useRef<HTMLDivElement>(null)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
   const lastDomDropAtRef = useRef(0)
-  const composingRef = useRef(false)
-  const cursorPosRef = useRef<number | null>(null)
-  const textRef = useRef(text)
   const disabledRef = useRef(disabled)
   const isPromptingRef = useRef(isPrompting)
+  const hydratedRef = useRef(false)
+  // Tracks the last queue-item id hydrated, so a re-edit of the *same* item
+  // doesn't clobber the user's in-progress changes — keyed on id, not display
+  // text (two attachment-only items share the text "Attached 1 attachment").
+  const prevEditingItemIdRef = useRef<string | null>(null)
+  const dragActiveRef = useRef(false)
+  // Bridge so the early `onChange` handler can call the editor-driven slash
+  // detection that is defined further down (after the slash state).
+  const detectSlashTriggerRef = useRef<(() => void) | null>(null)
+  const canAttachImages = promptCapabilities.image
 
   useEffect(() => {
     if (isActive && !disabled && !isPrompting) {
       requestAnimationFrame(() => {
-        textareaRef.current?.focus()
+        editorRef.current?.focus()
       })
     }
   }, [isActive, disabled, isPrompting])
-  const dragActiveRef = useRef(false)
-  const canAttachImages = promptCapabilities.image
-
-  useEffect(() => {
-    textRef.current = text
-  }, [text])
-
-  // `field-sizing-content` 触发的尺寸调整发生在浏览器布局阶段，原生 caret-
-  // into-view 滚动赶不上，导致光标停在末尾时新行被裁在可视区外。用 rAF 等
-  // 到本帧所有同步 `setSelectionRange` 调用之后再判断光标位置——程序化插入
-  // 路径（换行快捷键、快捷消息、斜杠命令等）都先 `setText` 再 rAF 设光标，
-  // 这里同样走 rAF 才能保证光标已经落到末尾。
-  useEffect(() => {
-    const ta = textareaRef.current
-    if (!ta) return
-    const id = requestAnimationFrame(() => {
-      const el = textareaRef.current
-      if (!el) return
-      if ((el.selectionStart ?? 0) >= el.value.length) {
-        el.scrollTop = el.scrollHeight
-      }
-    })
-    return () => cancelAnimationFrame(id)
-  }, [text])
 
   useEffect(() => {
     disabledRef.current = disabled
@@ -538,23 +616,254 @@ export function MessageInput({
     isPromptingRef.current = isPrompting
   }, [isPrompting])
 
-  // Load external draft text when editing a queue item
-  const prevEditingDraftRef = useRef<string | null>(null)
+  useEffect(() => {
+    // navigator.clipboard is undefined at runtime in non-secure contexts even
+    // though the DOM types claim it is always present, so guard with typeof.
+    setClipboardReadSupported(
+      typeof navigator !== "undefined" &&
+        typeof navigator.clipboard?.readText === "function"
+    )
+  }, [])
+
+  // Localized group headings + panel chrome for the `@` mention panel.
+  const referenceGroupLabels = useMemo<ReferenceGroupLabels>(
+    () => ({
+      file: t("mentionGroupFile"),
+      agent: t("mentionGroupAgent"),
+      session: t("mentionGroupSession"),
+      commit: t("mentionGroupCommit"),
+      skill: t("mentionGroupSkill"),
+    }),
+    [t]
+  )
+  const mentionUiLabels = useMemo<MentionUiLabels>(
+    () => ({
+      empty: t("mentionEmpty"),
+      loading: t("mentionLoading"),
+      listbox: t("mentionListLabel"),
+      more: t("mentionMore"),
+      count: (count: number) => t("mentionCount", { count }),
+    }),
+    [t]
+  )
+
+  // Live data sources for the unified `@` mention panel. Pre-warmed only while
+  // this composer is the active one (`enabled`). Referentially stable.
+  const referenceSearch = useReferenceSearch({
+    defaultPath: defaultPath ?? null,
+    enabled: isActive,
+    labels: referenceGroupLabels,
+  })
+
+  // Debounced v2 draft persistence. We snapshot the Tiptap *document* (JSON, not
+  // Markdown) ~300ms after the last change so inline reference badges survive a
+  // reload — a Markdown round-trip would downgrade them to plain links.
+  const draftSaveTimerRef = useRef<number | null>(null)
+  const scheduleDraftSave = useCallback(() => {
+    if (typeof window === "undefined") return
+    if (!effectiveDraftStorageKey || isEditingQueueItem) return
+    if (draftSaveTimerRef.current != null) {
+      window.clearTimeout(draftSaveTimerRef.current)
+    }
+    draftSaveTimerRef.current = window.setTimeout(() => {
+      draftSaveTimerRef.current = null
+      const ed = editorRef.current
+      if (!ed || !effectiveDraftStorageKey) return
+      if (ed.isEmpty()) {
+        clearMessageInputDraftV2(effectiveDraftStorageKey)
+      } else {
+        saveMessageInputDraftV2(
+          effectiveDraftStorageKey,
+          stripEmbeddedReferences(ed.getJSON())
+        )
+      }
+    }, 300)
+  }, [effectiveDraftStorageKey, isEditingQueueItem])
+
+  useEffect(() => {
+    return () => {
+      if (draftSaveTimerRef.current != null && typeof window !== "undefined") {
+        window.clearTimeout(draftSaveTimerRef.current)
+      }
+    }
+  }, [])
+
+  // Replay a sent `PromptInputBlock[]` (a queued message being re-edited) into
+  // the editor: prose + file badges inline, images into `attachments`, and any
+  // embedded/data-uri resources re-inlined as sentinel badges with their
+  // bytes-bearing blocks re-registered in the payload map.
+  const hydrateFromBlocks = useCallback(
+    (editor: Editor, blocks: PromptInputBlock[]) => {
+      embeddedPayloadsRef.current.clear()
+      const restored = restoreBlocksIntoEditor(editor, blocks)
+      setAttachments(
+        restored.filter((a): a is ImageInputAttachment => a.type === "image")
+      )
+      const resources = restored.filter(
+        (a): a is ResourceInputAttachment => a.type === "resource"
+      )
+      if (resources.length === 0) return
+      let chain = editor.chain().focus("end")
+      for (const att of resources) {
+        const refUri = buildEmbeddedReferenceUri()
+        const block: PromptInputBlock =
+          att.kind === "embedded"
+            ? {
+                type: "resource",
+                uri: att.uri,
+                mime_type: att.mimeType,
+                text: att.text ?? null,
+                blob: att.blob ?? null,
+              }
+            : {
+                type: "resource_link",
+                uri: att.uri,
+                name: att.name,
+                mime_type: att.mimeType,
+                description: null,
+              }
+        embeddedPayloadsRef.current.set(refUri, block)
+        chain = chain
+          .insertReference({
+            refType: "file",
+            id: refUri,
+            label: att.name,
+            uri: refUri,
+            meta: { fileKind: "file" },
+          })
+          .insertContent(" ")
+      }
+      chain.run()
+    },
+    []
+  )
+
+  // One-time hydration once the editor is ready: a queue-edit payload, else a v2
+  // draft document (or a legacy v1 Markdown draft migrated forward). Guarded so
+  // it never re-runs and clobbers later user edits.
+  useEffect(() => {
+    if (!composerReady || hydratedRef.current) return
+    hydratedRef.current = true
+    if (!editorRef.current) return
+    // Bookkeeping stays synchronous so the sibling re-hydrate effect below sees
+    // the claimed item and doesn't double-hydrate; only the editor mutation is
+    // deferred to the next frame. Restoring a draft/queue payload that contains
+    // a reference badge inserts a React NodeView, which @tiptap/react renders
+    // with a synchronous flushSync() — running that here in the effect body
+    // trips React's "flushSync from inside a lifecycle method" warning.
+    if (
+      isEditingQueueItem &&
+      (editingDraftBlocks != null || editingDraftText != null)
+    ) {
+      prevEditingItemIdRef.current = editingItemId ?? null
+    }
+    const raf = requestAnimationFrame(() => {
+      const ed = editorRef.current
+      if (!ed) return
+      if (
+        isEditingQueueItem &&
+        (editingDraftBlocks != null || editingDraftText != null)
+      ) {
+        const editor = ed.getEditor()
+        if (editingDraftBlocks && editingDraftBlocks.length > 0 && editor) {
+          // Full fidelity: restore inline badges + images from the blocks.
+          hydrateFromBlocks(editor, editingDraftBlocks)
+        } else if (editingDraftText != null) {
+          ed.setMarkdown(editingDraftText)
+        }
+      } else if (effectiveDraftStorageKey) {
+        const loaded = loadMessageInputDraftV2(effectiveDraftStorageKey)
+        if (loaded?.kind === "doc") {
+          ed.setDoc(loaded.doc)
+        } else if (loaded?.kind === "legacyMarkdown") {
+          ed.setMarkdown(loaded.markdown)
+        }
+      }
+      const editor = ed.getEditor()
+      setComposerEmpty(editor ? isComposerEmpty(editor) : true)
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [
+    composerReady,
+    isEditingQueueItem,
+    editingItemId,
+    editingDraftText,
+    editingDraftBlocks,
+    effectiveDraftStorageKey,
+    hydrateFromBlocks,
+  ])
+
+  // Re-hydrate when the user (re)edits a *different* queue item after the
+  // initial mount hydration above. Keyed on the item id (not display text) so
+  // switching between two items with identical text still reloads.
   useEffect(() => {
     if (
       isEditingQueueItem &&
-      editingDraftText != null &&
-      editingDraftText !== prevEditingDraftRef.current
+      editingItemId != null &&
+      editingItemId !== prevEditingItemIdRef.current
     ) {
-      prevEditingDraftRef.current = editingDraftText
-      setText(editingDraftText)
-      requestAnimationFrame(() => {
-        textareaRef.current?.focus()
+      prevEditingItemIdRef.current = editingItemId
+      // Same flushSync deferral as the hydration effect above: hydrateFromBlocks
+      // can insert reference-badge NodeViews (synchronous @tiptap/react
+      // flushSync). Mutation + focus run next frame, off the commit phase.
+      const raf = requestAnimationFrame(() => {
+        const editor = editorRef.current?.getEditor()
+        if (editingDraftBlocks && editingDraftBlocks.length > 0 && editor) {
+          hydrateFromBlocks(editor, editingDraftBlocks)
+        } else if (editingDraftText != null) {
+          editorRef.current?.setMarkdown(editingDraftText)
+        }
+        setComposerEmpty(editor ? isComposerEmpty(editor) : true)
+        editorRef.current?.focus()
       })
+      return () => cancelAnimationFrame(raf)
     } else if (!isEditingQueueItem) {
-      prevEditingDraftRef.current = null
+      prevEditingItemIdRef.current = null
     }
-  }, [isEditingQueueItem, editingDraftText])
+  }, [
+    isEditingQueueItem,
+    editingItemId,
+    editingDraftText,
+    editingDraftBlocks,
+    hydrateFromBlocks,
+  ])
+
+  useEffect(() => {
+    if (!injectContent || !composerReady) return
+    const payload = injectContent
+    // Defer the editor mutation to the next frame. Inserting the skill badge
+    // creates a React NodeView, which @tiptap/react renders with a synchronous
+    // flushSync(); doing that here in the effect body runs flushSync during
+    // React's commit phase and trips the "flushSync was called from inside a
+    // lifecycle method" warning. Scheduling it out of the commit phase is the
+    // same rAF pattern the hydration effects above use. onInjectConsumed fires
+    // inside the frame so the synchronous body never flips injectContent → null
+    // and lets the cleanup cancel our own rAF before it runs.
+    const raf = requestAnimationFrame(() => {
+      const handle = editorRef.current
+      if (handle) {
+        handle.setMarkdown(payload.text)
+        // Prepend the skill as the leading invocation badge, so the sent
+        // message opens with `${prefix}${id}`.
+        if (payload.skill) {
+          const editor = handle.getEditor()
+          if (editor) {
+            applyExpertReference(editor, {
+              refType: "skill",
+              id: payload.skill.id,
+              label: payload.skill.label,
+              uri: null,
+              meta: { invocationPrefix: skillPrefix, scope: "expert" },
+            })
+          }
+        }
+        setComposerEmpty(false)
+        handle.focus()
+      }
+      onInjectConsumed?.()
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [injectContent, composerReady, skillPrefix, onInjectConsumed])
 
   const setDragActiveIfChanged = useCallback((next: boolean) => {
     if (dragActiveRef.current === next) return
@@ -562,10 +871,20 @@ export function MessageInput({
     setIsDragActive(next)
   }, [])
 
-  useEffect(() => {
-    if (!effectiveDraftStorageKey || isEditingQueueItem) return
-    saveMessageInputDraft(effectiveDraftStorageKey, text)
-  }, [effectiveDraftStorageKey, text, isEditingQueueItem])
+  const syncComposerEmpty = useCallback(() => {
+    const ed = editorRef.current?.getEditor()
+    setComposerEmpty(ed ? isComposerEmpty(ed) : true)
+  }, [])
+
+  const handleComposerChange = useCallback(() => {
+    syncComposerEmpty()
+    scheduleDraftSave()
+    detectSlashTriggerRef.current?.()
+  }, [syncComposerEmpty, scheduleDraftSave])
+
+  const handleComposerReady = useCallback(() => {
+    setComposerReady(true)
+  }, [])
 
   const availableModes = useMemo(() => modes ?? [], [modes])
   const availableConfigOptions = useMemo(
@@ -610,39 +929,28 @@ export function MessageInput({
         : null,
     [previewAttachmentId, imageAttachments]
   )
-  const resourceAttachments = useMemo(
-    () =>
-      attachments.filter(
-        (attachment): attachment is ResourceInputAttachment =>
-          attachment.type === "resource"
-      ),
-    [attachments]
-  )
   const hasAttachments = attachments.length > 0
-  const hasSendableContent = text.trim().length > 0 || hasAttachments
+  const hasSendableContent = !composerEmpty || hasAttachments
 
   // ── Slash command autocomplete ──
   //
-  // Built-in experts are always surfaced via the Sparkles button, so any
-  // agent-advertised command whose name matches an expert id is hidden
-  // from the slash list to avoid showing the same item twice. For non-Codex
-  // agents the dropdown only shows the agent's own `availableCommands` —
-  // Codex additionally gets a `$`-triggered skills list because its native
-  // command set is very small.
+  // The slash list shows the agent's own `availableCommands` verbatim —
+  // experts are advertised as commands and now appear here alongside the
+  // rest. Codex additionally gets a `$`-triggered skills list (experts are
+  // symlinked skills, so they surface there) because its native command set
+  // is very small.
   const [slashMenuOpen, setSlashMenuOpen] = useState(false)
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0)
-  // Byte offset of the `/` or `$` character that opened the menu. Tracking the
-  // position lets the user invoke a slash command mid-text (e.g. after typing
-  // prose) and only replace the slash token on selection, leaving surrounding
-  // content intact.
-  const [slashTriggerPos, setSlashTriggerPos] = useState<number | null>(null)
-  const slashTriggerPosRef = useRef<number | null>(null)
-  useEffect(() => {
-    slashTriggerPosRef.current = slashTriggerPos
-  }, [slashTriggerPos])
+  // The trigger char (`/` for agent commands, `$` for Codex skills) and the
+  // typed filter token, both derived from the editor caret by
+  // `detectSlashTrigger` rather than from a raw string offset.
+  const [slashTriggerChar, setSlashTriggerChar] = useState<"/" | "$" | null>(
+    null
+  )
+  const [slashFilter, setSlashFilter] = useState("")
   const slashCommands = useMemo(
-    () => (availableCommands ?? []).filter((cmd) => !expertIdSet.has(cmd.name)),
-    [availableCommands, expertIdSet]
+    () => availableCommands ?? [],
+    [availableCommands]
   )
   const [slashDropdownOpen, setSlashDropdownOpen] = useState(false)
   const [slashDropdownSearch, setSlashDropdownSearch] = useState("")
@@ -676,38 +984,24 @@ export function MessageInput({
     })
     return () => cancelAnimationFrame(id)
   }, [slashDropdownOpen])
-  const slashFilterText = useMemo(() => {
-    if (!slashMenuOpen || slashTriggerPos == null) return ""
-    const trigger = text[slashTriggerPos]
-    if (trigger !== "/" && trigger !== "$") return ""
-    const afterTrigger = text.slice(slashTriggerPos + 1)
-    const endIdx = afterTrigger.search(/\s/)
-    return endIdx === -1 ? afterTrigger : afterTrigger.slice(0, endIdx)
-  }, [slashMenuOpen, text, slashTriggerPos])
   const filteredSlashCommands = useMemo(() => {
-    if (!slashMenuOpen || slashCommands.length === 0 || slashTriggerPos == null)
-      return []
-    if (text[slashTriggerPos] !== "/") return []
-    const filter = slashFilterText.toLowerCase()
+    if (!slashMenuOpen || slashCommands.length === 0) return []
+    if (slashTriggerChar !== "/") return []
+    const filter = slashFilter.toLowerCase()
     return slashCommands.filter((cmd) =>
       cmd.name.toLowerCase().includes(filter)
     )
-  }, [slashMenuOpen, slashCommands, text, slashTriggerPos, slashFilterText])
+  }, [slashMenuOpen, slashCommands, slashTriggerChar, slashFilter])
   const filteredSlashSkills = useMemo(() => {
     // Skills autocomplete is Codex-only and triggered by `$`.
     if (agentType !== "codex") return []
-    if (
-      !slashMenuOpen ||
-      nonExpertSkills.length === 0 ||
-      slashTriggerPos == null
-    )
-      return []
-    if (text[slashTriggerPos] !== "$") return []
-    const filter = slashFilterText.toLowerCase()
-    if (!filter) return nonExpertSkills
-    const nameMatches: typeof nonExpertSkills = []
-    const idOnlyMatches: typeof nonExpertSkills = []
-    for (const skill of nonExpertSkills) {
+    if (!slashMenuOpen || availableSkills.length === 0) return []
+    if (slashTriggerChar !== "$") return []
+    const filter = slashFilter.toLowerCase()
+    if (!filter) return availableSkills
+    const nameMatches: typeof availableSkills = []
+    const idOnlyMatches: typeof availableSkills = []
+    for (const skill of availableSkills) {
       if (skill.name.toLowerCase().includes(filter)) {
         nameMatches.push(skill)
       } else if (skill.id.toLowerCase().includes(filter)) {
@@ -715,14 +1009,7 @@ export function MessageInput({
       }
     }
     return [...nameMatches, ...idOnlyMatches]
-  }, [
-    slashMenuOpen,
-    nonExpertSkills,
-    text,
-    agentType,
-    slashTriggerPos,
-    slashFilterText,
-  ])
+  }, [slashMenuOpen, availableSkills, agentType, slashTriggerChar, slashFilter])
   const slashAutocompleteCount =
     filteredSlashCommands.length + filteredSlashSkills.length
 
@@ -761,36 +1048,97 @@ export function MessageInput({
     }
   }, [slashMenuOpen, slashSelectedIndex, slashAutocompleteCount])
 
-  // ── @ file mention autocomplete ──
-  const [atMenuOpen, setAtMenuOpen] = useState(false)
-  const [atSelectedIndex, setAtSelectedIndex] = useState(0)
-  const [atTriggerPos, setAtTriggerPos] = useState<number | null>(null)
-  const [atFileTreeEnabled, setAtFileTreeEnabled] = useState(false)
-
-  const { allFiles: atAllFiles } = useFileTree({
-    folderPath: defaultPath,
-    enabled: atFileTreeEnabled,
-  })
-
-  const filteredAtFiles = useMemo(() => {
-    if (!atMenuOpen || atTriggerPos == null) return []
-    // Extract the query after "@" up to the next space or end of text
-    const afterAt = text.slice(atTriggerPos + 1)
-    const spaceIdx = afterAt.indexOf(" ")
-    const filter =
-      spaceIdx === -1
-        ? afterAt.toLowerCase()
-        : afterAt.slice(0, spaceIdx).toLowerCase()
-    if (!filter) return atAllFiles.slice(0, 50)
-    const matched: typeof atAllFiles = []
-    for (const f of atAllFiles) {
-      if (f.lowerName.includes(filter) || f.lowerPath.includes(filter)) {
-        matched.push(f)
-        if (matched.length >= 50) break
-      }
+  // ── Editor-driven `/` (commands) and `$` (Codex skills) trigger detection ──
+  // The `@` mention panel is now owned by RichComposer; this only handles the
+  // runtime-command menus. We inspect the text before the collapsed caret in the
+  // current block: a `/` (any agent) or `$` (Codex) at the start or right after
+  // whitespace, and not inside inline code / a code block, opens the menu.
+  const detectSlashTrigger = useCallback(() => {
+    const editor = editorRef.current?.getEditor()
+    const hasSlashSource =
+      slashCommands.length > 0 || availableSkills.length > 0
+    const close = () => {
+      setSlashMenuOpen(false)
+      setSlashTriggerChar(null)
     }
-    return matched
-  }, [atMenuOpen, atTriggerPos, text, atAllFiles])
+    if (!editor || !hasSlashSource) return close()
+    const { selection } = editor.state
+    if (!selection.empty) return close()
+    if (editor.isActive("code") || editor.isActive("codeBlock")) return close()
+    const { $from } = selection
+    const before = $from.parent.textBetween(
+      0,
+      $from.parentOffset,
+      undefined,
+      " "
+    )
+    const regex =
+      agentType === "codex" ? /(^|\s)([/$])(\S*)$/ : /(^|\s)(\/)(\S*)$/
+    const match = before.match(regex)
+    if (!match) return close()
+    setSlashTriggerChar(match[2] as "/" | "$")
+    setSlashFilter(match[3])
+    setSlashSelectedIndex(0)
+    setSlashMenuOpen(true)
+  }, [slashCommands.length, availableSkills.length, agentType])
+
+  useEffect(() => {
+    detectSlashTriggerRef.current = detectSlashTrigger
+  }, [detectSlashTrigger])
+
+  // Insert one inline file reference badge per item, matching `@`-file mentions.
+  // A genuine `file://` item uses its uri directly (deduped against the document);
+  // an item carrying a `realBlock` (embedded bytes / `data:` link) gets an inert
+  // `codeg://embedded/…` display uri and its block is stashed in
+  // `embeddedPayloadsRef` for send-time reconciliation. Badges append at the doc
+  // end by default; pass `atCaret` to drop them at the composer's current caret
+  // (`focus()` keeps the retained selection even while the input is blurred —
+  // e.g. focus sits in the file editor), so "add to chat" lands a reference
+  // where the user left off instead of always at the end.
+  const insertFileReferences = useCallback(
+    (
+      items: Array<{
+        name: string
+        uri?: string
+        realBlock?: PromptInputBlock
+      }>,
+      opts: { atCaret?: boolean } = {}
+    ) => {
+      if (items.length === 0) return
+      const editor = editorRef.current?.getEditor()
+      if (!editor) return
+      const seen = new Set<string>()
+      let chain = opts.atCaret
+        ? editor.chain().focus()
+        : editor.chain().focus("end")
+      let inserted = 0
+      for (const item of items) {
+        let refUri: string
+        if (item.realBlock) {
+          refUri = buildEmbeddedReferenceUri()
+          embeddedPayloadsRef.current.set(refUri, item.realBlock)
+        } else {
+          if (!item.uri) continue
+          refUri = item.uri
+          if (seen.has(refUri) || editorHasFileReference(editor, refUri))
+            continue
+          seen.add(refUri)
+        }
+        chain = chain
+          .insertReference({
+            refType: "file",
+            id: refUri,
+            label: item.name,
+            uri: refUri,
+            meta: { fileKind: "file" },
+          })
+          .insertContent(" ")
+        inserted++
+      }
+      if (inserted > 0) chain.run()
+    },
+    []
+  )
 
   const appendResourceLinks = useCallback(
     (
@@ -799,42 +1147,43 @@ export function MessageInput({
         name: string
         mimeType: string | null
         dedupeKey: string
-      }>
+      }>,
+      opts: { atCaret?: boolean } = {}
     ) => {
-      if (links.length === 0) return
-      setAttachments((prev) => {
-        const seen = new Set(
-          prev.flatMap((item) =>
-            item.type === "resource" && item.kind === "link" ? [item.uri] : []
-          )
-        )
-        const next = [...prev]
-        for (const link of links) {
-          if (!link.uri || seen.has(link.dedupeKey)) continue
-          seen.add(link.dedupeKey)
-          next.push({
-            id: `resource-link:${link.dedupeKey}`,
-            type: "resource",
-            kind: "link",
-            uri: link.uri,
-            name: link.name,
-            mimeType: link.mimeType,
-          })
-        }
-        return next
-      })
+      // `file://` links the agent can read directly become inline file badges
+      // (uri used as-is); a non-fetchable `data:` link keeps its real block out
+      // of band behind a sentinel badge.
+      insertFileReferences(
+        links
+          .filter((link) => link.uri)
+          .map((link) =>
+            link.uri.toLowerCase().startsWith("file://")
+              ? { name: link.name, uri: link.uri }
+              : {
+                  name: link.name,
+                  realBlock: {
+                    type: "resource_link" as const,
+                    uri: link.uri,
+                    name: link.name,
+                    mime_type: link.mimeType,
+                    description: null,
+                  },
+                }
+          ),
+        opts
+      )
     },
-    []
+    [insertFileReferences]
   )
 
   const appendResourceAttachments = useCallback(
-    (paths: string[]) => {
+    (paths: string[], opts: { atCaret?: boolean } = {}) => {
       const normalized = paths
         .filter(
           (path): path is string => typeof path === "string" && path.length > 0
         )
         .map((path) => {
-          const uri = toFileUri(path)
+          const uri = buildFileUri(path)
           return {
             uri,
             name: fileNameFromPath(path),
@@ -842,9 +1191,35 @@ export function MessageInput({
             dedupeKey: uri,
           }
         })
-      appendResourceLinks(normalized)
+      appendResourceLinks(normalized, opts)
     },
     [appendResourceLinks]
+  )
+
+  // Attach a single file as a ranged badge (`foo.ts:10-25`), used by the file
+  // editor's "add selection to chat". The line span is encoded into both the
+  // label and the uri fragment (`file://…#L10-25`), so distinct selections of
+  // the same file stay distinct (the uri is the dedupe key in
+  // `insertFileReferences`) and the range rides along to the agent in the
+  // serialized `[label](uri)` link.
+  const appendFileRangeAttachment = useCallback(
+    (
+      path: string,
+      range: { start: number; end: number },
+      opts: { atCaret?: boolean } = {}
+    ) => {
+      if (!path) return
+      insertFileReferences(
+        [
+          {
+            name: formatFileRangeLabel(fileNameFromPath(path), range),
+            uri: buildFileUriWithRange(path, range),
+          },
+        ],
+        opts
+      )
+    },
+    [insertFileReferences]
   )
 
   // Shared upload pool used by the menu's "Upload local file" button,
@@ -945,22 +1320,22 @@ export function MessageInput({
         blob?: string | null
       }>
     ) => {
-      if (resources.length === 0) return
-      setAttachments((prev) => [
-        ...prev,
-        ...resources.map((resource) => ({
-          id: `resource-embedded:${randomUUID()}`,
-          type: "resource" as const,
-          kind: "embedded" as const,
-          uri: resource.uri,
+      // Inline bytes (no real path): each becomes a sentinel file badge whose
+      // embedded `resource` block is reconciled back in at send time.
+      insertFileReferences(
+        resources.map((resource) => ({
           name: resource.name,
-          mimeType: resource.mimeType,
-          text: resource.text ?? null,
-          blob: resource.blob ?? null,
-        })),
-      ])
+          realBlock: {
+            type: "resource" as const,
+            uri: resource.uri,
+            mime_type: resource.mimeType,
+            text: resource.text ?? null,
+            blob: resource.blob ?? null,
+          },
+        }))
+      )
     },
-    []
+    [insertFileReferences]
   )
 
   // Path-less files (browser `File` objects: drag-drop in web mode, paste,
@@ -998,7 +1373,7 @@ export function MessageInput({
         const name = file.name || `resource-${randomUUID()}`
         const mimeType = file.type || mimeTypeFromPath(name)
         if (path) {
-          const uri = toFileUri(path)
+          const uri = buildFileUri(path)
           pathLinks.push({
             uri,
             name: fileNameFromPath(path),
@@ -1093,7 +1468,7 @@ export function MessageInput({
             id: `image:${Date.now()}:${index}:${randomUUID()}`,
             type: "image" as const,
             data,
-            uri: toFileUri(path),
+            uri: buildFileUri(path),
             name: fileNameFromPath(path),
             mimeType: mimeTypeFromPath(path) ?? "image/png",
           }
@@ -1290,16 +1665,24 @@ export function MessageInput({
     [appendFilesAsResources, appendImageAttachments, canAttachImages]
   )
 
-  const handlePaste = useCallback(
-    (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
-      if (disabled) return
+  // Routed from RichComposer's `onPasteFiles`. Returns true when the paste was
+  // consumed as an attachment (so the editor doesn't also insert it as text).
+  const handlePasteFiles = useCallback(
+    (event: ClipboardEvent): boolean => {
+      if (disabled) return false
+      // The context-menu "Paste" drives text through `view.pasteText`, which
+      // runs this handler with a synthetic `new ClipboardEvent("paste")` whose
+      // `clipboardData` is null. There's nothing to attach from it (and the
+      // image fallback below would otherwise fire a stray async clipboard read),
+      // so let the editor's own text paste proceed. Real pastes always carry a
+      // (non-null) DataTransfer, so this never short-circuits a genuine paste.
+      if (!event.clipboardData) return false
       const files = filesFromClipboard(event.clipboardData)
       if (files.length > 0) {
-        event.preventDefault()
         void appendFilesFromInput(files).catch((error) => {
           console.error("[MessageInput] paste files failed:", error)
         })
-        return
+        return true
       }
 
       // Linux/Tauri (WebKitGTK) fallback: screenshot tools (e.g. WeChat) write
@@ -1309,9 +1692,7 @@ export function MessageInput({
       // (mirroring `filesFromClipboard`) so copying a spreadsheet cell or rich
       // web content isn't hijacked into an image attachment. Kept synchronous
       // so `imageFilesFromClipboardApi` runs inside the paste user gesture.
-      // No `preventDefault()`: the default paste of a textless clipboard is a
-      // no-op anyway, and it can't be cancelled after the async boundary.
-      if (clipboardHasText(event.clipboardData)) return
+      if (clipboardHasText(event.clipboardData)) return false
       void imageFilesFromClipboardApi()
         .then((imageFiles) => {
           if (imageFiles.length === 0) return
@@ -1320,6 +1701,8 @@ export function MessageInput({
         .catch((error) => {
           console.error("[MessageInput] clipboard image paste failed:", error)
         })
+      // The default paste of a textless clipboard is a no-op, so don't claim it.
+      return false
     },
     [appendFilesFromInput, disabled]
   )
@@ -1339,285 +1722,188 @@ export function MessageInput({
     [onModeChange]
   )
 
-  const handleSlashSearchChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const pos = slashTriggerPosRef.current
-      const current = textRef.current
-      if (pos == null || pos < 0 || pos >= current.length) return
-      const trigger = current[pos]
-      if (trigger !== "/" && trigger !== "$") return
-      const afterTrigger = current.slice(pos + 1)
-      const endIdx = afterTrigger.search(/\s/)
-      const tokenEnd = endIdx === -1 ? current.length : pos + 1 + endIdx
-      const before = current.slice(0, pos + 1)
-      const rest = current.slice(tokenEnd)
-      const sanitized = e.target.value.replace(/\s+/g, "")
-      setText(before + sanitized + rest)
-      setSlashSelectedIndex(0)
+  // Close the runtime-command menu and clear the trigger.
+  const closeSlashMenu = useCallback(() => {
+    setSlashMenuOpen(false)
+    setSlashTriggerChar(null)
+  }, [])
+
+  // Replace the live `/`-or-`$` token immediately before the caret with
+  // an inline reference badge (+ a trailing space unless one already follows),
+  // then close the menu. Used by both the command (`/`) and Codex-skill (`$`)
+  // selections — the badge serializes back to its literal `/cmd` / `$skill`
+  // token on send (see invocation-reference / referenceToMarkdown).
+  const replaceTriggerWithReference = useCallback(
+    (ref: ReferenceAttrs) => {
+      const editor = editorRef.current?.getEditor()
+      if (!editor) return
+      const { $from } = editor.state.selection
+      const before = $from.parent.textBetween(
+        0,
+        $from.parentOffset,
+        undefined,
+        " "
+      )
+      const match = before.match(/(^|\s)([/$])(\S*)$/)
+      const charAfter =
+        $from.parentOffset < $from.parent.content.size
+          ? $from.parent.textBetween(
+              $from.parentOffset,
+              $from.parentOffset + 1,
+              undefined,
+              " "
+            )
+          : ""
+      const suffix = charAfter && /\s/.test(charAfter) ? "" : " "
+      let chain = editor.chain().focus()
+      if (match) {
+        // Remove the live `/…` / `$…` token before the caret.
+        const tokenLen = match[2].length + match[3].length
+        chain = chain.deleteRange({ from: $from.pos - tokenLen, to: $from.pos })
+      }
+      chain = chain.insertReference(ref)
+      if (suffix) chain = chain.insertContent(suffix)
+      chain.run()
+      closeSlashMenu()
     },
-    []
+    [closeSlashMenu]
   )
 
-  const handleSlashSelect = useCallback((cmd: AvailableCommandInfo) => {
-    const pos = slashTriggerPosRef.current
-    const current = textRef.current
-    const insertion = `/${cmd.name}`
-    if (
-      pos == null ||
-      pos < 0 ||
-      pos >= current.length ||
-      current[pos] !== "/"
-    ) {
-      // Fallback path: no tracked trigger (shouldn't normally happen). Behave
-      // like the legacy wholesale-replace so slash commands still work.
-      setText(`${insertion} `)
-      setSlashMenuOpen(false)
-      setSlashTriggerPos(null)
-      return
-    }
-    const before = current.slice(0, pos)
-    const afterSlash = current.slice(pos + 1)
-    const tokenMatch = afterSlash.match(/^\S*/)
-    const tokenLen = tokenMatch ? tokenMatch[0].length : 0
-    const rest = afterSlash.slice(tokenLen)
-    const needsSpace = !/^\s/.test(rest)
-    const newText = before + insertion + (needsSpace ? " " : "") + rest
-    setText(newText)
-    setSlashMenuOpen(false)
-    setSlashTriggerPos(null)
-    requestAnimationFrame(() => {
-      const ta = textareaRef.current
-      if (ta) {
-        ta.focus()
-        const newPos = before.length + insertion.length + (needsSpace ? 1 : 0)
-        ta.setSelectionRange(newPos, newPos)
-      }
-    })
-  }, [])
+  const handleSlashSelect = useCallback(
+    (cmd: AvailableCommandInfo) => {
+      replaceTriggerWithReference(commandToReference(cmd))
+    },
+    [replaceTriggerWithReference]
+  )
 
-  const handleSlashPopoverSelect = useCallback((cmd: AvailableCommandInfo) => {
-    const pos = cursorPosRef.current ?? textRef.current.length
-    const before = textRef.current.slice(0, pos)
-    const after = textRef.current.slice(pos)
-    const needsSpace = pos > 0 && !/\s$/.test(before)
-    const insertion = `${needsSpace ? " " : ""}/${cmd.name} `
-    const newText = before + insertion + after
-    setText(newText)
-    requestAnimationFrame(() => {
-      const ta = textareaRef.current
-      if (ta) {
-        ta.focus()
-        const newPos = pos + insertion.length
-        ta.setSelectionRange(newPos, newPos)
-      }
-    })
-  }, [])
-
+  // Codex uses `$<id>`, other agents `/<id>` — matching the trigger prefix.
   const handleSkillAutocompleteSelect = useCallback(
     (skill: AgentSkillItem) => {
-      // Codex uses `$<id>`, other agents use `/<id>` — matching the prefix
-      // that triggered the autocomplete list.
-      const pos = slashTriggerPosRef.current
-      const current = textRef.current
-      const triggerChar = expertPrefix.length === 1 ? expertPrefix : "$"
-      const insertion = `${expertPrefix}${skill.id}`
-      if (
-        pos == null ||
-        pos < 0 ||
-        pos >= current.length ||
-        current[pos] !== triggerChar
-      ) {
-        setText(`${insertion} `)
-        setSlashMenuOpen(false)
-        setSlashTriggerPos(null)
-        return
-      }
-      const before = current.slice(0, pos)
-      const afterTrigger = current.slice(pos + 1)
-      const tokenMatch = afterTrigger.match(/^\S*/)
-      const tokenLen = tokenMatch ? tokenMatch[0].length : 0
-      const rest = afterTrigger.slice(tokenLen)
-      const needsSpace = !/^\s/.test(rest)
-      const newText = before + insertion + (needsSpace ? " " : "") + rest
-      setText(newText)
-      setSlashMenuOpen(false)
-      setSlashTriggerPos(null)
-      requestAnimationFrame(() => {
-        const ta = textareaRef.current
-        if (ta) {
-          ta.focus()
-          const newPos = before.length + insertion.length + (needsSpace ? 1 : 0)
-          ta.setSelectionRange(newPos, newPos)
-        }
-      })
+      replaceTriggerWithReference(skillToReference(skill, skillPrefix))
     },
-    [expertPrefix]
+    [replaceTriggerWithReference, skillPrefix]
   )
 
-  const handleSlashSearchKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLInputElement>) => {
-      const total = filteredSlashCommands.length + filteredSlashSkills.length
-      if (e.key === "ArrowDown") {
-        e.preventDefault()
-        if (total === 0) return
-        setSlashSelectedIndex((i) => (i < total - 1 ? i + 1 : 0))
-        return
-      }
-      if (e.key === "ArrowUp") {
-        e.preventDefault()
-        if (total === 0) return
-        setSlashSelectedIndex((i) => (i > 0 ? i - 1 : total - 1))
-        return
-      }
-      if (e.key === "Enter" || e.key === "Tab") {
-        if (total === 0) return
-        e.preventDefault()
-        if (slashSelectedIndex < filteredSlashCommands.length) {
-          handleSlashSelect(filteredSlashCommands[slashSelectedIndex])
-        } else {
-          const skillIndex = slashSelectedIndex - filteredSlashCommands.length
-          const skill = filteredSlashSkills[skillIndex]
-          if (skill) handleSkillAutocompleteSelect(skill)
-        }
-        return
-      }
-      if (e.key === "Escape") {
-        e.preventDefault()
-        setSlashMenuOpen(false)
-        setSlashTriggerPos(null)
-        requestAnimationFrame(() => textareaRef.current?.focus())
-      }
-    },
-    [
-      filteredSlashCommands,
-      filteredSlashSkills,
-      slashSelectedIndex,
-      handleSlashSelect,
-      handleSkillAutocompleteSelect,
-    ]
+  // The "+" → Slash commands picker inserts a command badge at the current caret
+  // (no trigger token to replace), adding a leading space if the caret isn't at
+  // a boundary, and a trailing space after.
+  const handleSlashPopoverSelect = useCallback((cmd: AvailableCommandInfo) => {
+    const editor = editorRef.current?.getEditor()
+    if (!editor) return
+    const { $from } = editor.state.selection
+    const charBefore =
+      $from.parentOffset > 0
+        ? $from.parent.textBetween(
+            $from.parentOffset - 1,
+            $from.parentOffset,
+            undefined,
+            " "
+          )
+        : ""
+    const needsSpace = charBefore !== "" && !/\s/.test(charBefore)
+    let chain = editor.chain().focus()
+    if (needsSpace) chain = chain.insertContent(" ")
+    chain.insertReference(commandToReference(cmd)).insertContent(" ").run()
+  }, [])
+
+  // ── "+" menu skill shortcuts (experts / daily office) ──
+  //
+  // Surface the welcome-page skill families inside an active conversation. Each
+  // item drops that skill's leading invocation badge into the composer. A skill
+  // not linked to the current agent is "locked": clicking it surfaces a hint
+  // (and a jump to Settings) instead of injecting a badge the agent can't act on
+  // — the same gating QuickActions applies, to avoid a wasted send.
+  const expertsSorted = useMemo(
+    () =>
+      [...experts].sort(
+        (a, b) =>
+          (a.metadata.sort_order ?? 0) - (b.metadata.sort_order ?? 0) ||
+          a.metadata.id.localeCompare(b.metadata.id)
+      ),
+    [experts]
   )
 
-  // Experts always inject `prefix + expert-id ` at the very front of the
-  // input, never at the cursor. The expert skill is a whole-turn directive
-  // that the agent inspects first, so prepending keeps semantics unambiguous
-  // regardless of what the user has already typed. If another expert prefix
-  // is already at the front (from a prior click), replace it instead of
-  // stacking — the agent only honors the first command, so a stacked prefix
-  // would silently drop the earlier choice.
-  const handleExpertPopoverSelect = useCallback(
-    (expert: ExpertListItem) => {
-      const current = textRef.current
-      const insertion = `${expertPrefix}${expert.metadata.id} `
-      const escapedPrefix = expertPrefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-      const existingPrefix = current.match(
-        new RegExp(`^${escapedPrefix}([A-Za-z0-9_-]+)\\s`)
+  const isSkillLocked = useCallback(
+    (id: string) => !!agentType && skillStatusReady && !enabledIds.has(id),
+    [agentType, skillStatusReady, enabledIds]
+  )
+
+  const notifySkillNotEnabled = useCallback(
+    (skillLabel: string, section: SettingsSection) => {
+      const agentLabel = agentType ? AGENT_LABELS[agentType] : ""
+      toast.warning(
+        tQa("notEnabled.title", { skill: skillLabel, agent: agentLabel }),
+        {
+          description: tQa("notEnabled.description"),
+          action: {
+            label: tQa("notEnabled.action"),
+            onClick: () => {
+              void openSettingsWindow(section).catch((err) =>
+                console.error("[MessageInput] failed to open settings:", err)
+              )
+            },
+          },
+        }
       )
-      let base = current
-      if (existingPrefix && expertIdSet.has(existingPrefix[1])) {
-        base = current.slice(existingPrefix[0].length)
-      }
-      const newText = base.length === 0 ? insertion : insertion + base
-      setText(newText)
+    },
+    [agentType, tQa]
+  )
+
+  // Insert a skill shortcut: seed the template only into an *empty* composer
+  // (never clobber an in-progress draft), then prepend the skill as the leading
+  // invocation badge. Deferred to the next frame — inserting the badge mounts a
+  // React NodeView rendered with a synchronous flushSync(), which warns if run
+  // during React's commit phase (same pattern as the inject/hydration effects).
+  const insertSkillShortcut = useCallback(
+    (skill: { id: string; label: string }, template: string) => {
       requestAnimationFrame(() => {
-        const ta = textareaRef.current
-        if (ta) {
-          ta.focus()
-          // Place the caret just after the inserted prefix so the user can
-          // start (or continue) typing context for the expert.
-          const pos = insertion.length
-          ta.setSelectionRange(pos, pos)
+        const handle = editorRef.current
+        const editor = handle?.getEditor()
+        if (!handle || !editor) return
+        if (template && isComposerEmpty(editor)) {
+          handle.setMarkdown(template)
         }
+        applyExpertReference(editor, {
+          refType: "skill",
+          id: skill.id,
+          label: skill.label,
+          uri: null,
+          meta: { invocationPrefix: skillPrefix, scope: "expert" },
+        })
+        syncComposerEmpty()
+        handle.focus()
       })
     },
-    [expertIdSet, expertPrefix]
+    [skillPrefix, syncComposerEmpty]
   )
 
-  const atTriggerPosRef = useRef(atTriggerPos)
-  useEffect(() => {
-    atTriggerPosRef.current = atTriggerPos
-  }, [atTriggerPos])
-
-  const handleAtSelect = useCallback(
-    (entry: { relativePath: string }) => {
-      const pos = atTriggerPosRef.current
-      if (!defaultPath || pos == null) return
-
-      // Remove the @... token from text
-      const current = textRef.current
-      const beforeAt = current.slice(0, pos)
-      const afterAt = current.slice(pos)
-      const spaceIdx = afterAt.indexOf(" ", 1)
-      const afterToken = spaceIdx === -1 ? "" : afterAt.slice(spaceIdx)
-      setText(beforeAt + afterToken)
-
-      // Attach the file
-      const absPath = joinFsPath(defaultPath, entry.relativePath)
-      appendResourceAttachments([absPath])
-
-      setAtMenuOpen(false)
-      setAtTriggerPos(null)
-
-      requestAnimationFrame(() => textareaRef.current?.focus())
+  const handleExpertShortcut = useCallback(
+    (item: ExpertListItem) => {
+      const label =
+        pickLocalized(item.metadata.display_name, locale) || item.metadata.id
+      if (isSkillLocked(item.metadata.id)) {
+        notifySkillNotEnabled(label, "experts")
+        return
+      }
+      // Experts are open-ended: just the leading badge, no canned template.
+      insertSkillShortcut({ id: item.metadata.id, label }, "")
     },
-    [defaultPath, appendResourceAttachments]
+    [locale, isSkillLocked, notifySkillNotEnabled, insertSkillShortcut]
   )
 
-  const handleTextChange = useCallback(
-    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      const value = e.target.value
-      setText(value)
-
-      const cursorPos = e.target.selectionStart ?? value.length
-      const beforeCursor = value.slice(0, cursorPos)
-
-      // Slash command detection. Allow the trigger at the very start of the
-      // input or immediately after whitespace, so users can still invoke a
-      // command after typing surrounding prose. Any of agent commands,
-      // agent-enabled experts, or (for Codex) skills can satisfy the prompt,
-      // so open the menu whenever at least one is available.
-      const hasSlashSource =
-        slashCommands.length > 0 ||
-        availableExperts.length > 0 ||
-        nonExpertSkills.length > 0
-      if (hasSlashSource) {
-        const slashRegex =
-          agentType === "codex" ? /(^|\s)([/$])(\S*)$/ : /(^|\s)(\/)(\S*)$/
-        const slashMatch = beforeCursor.match(slashRegex)
-        if (slashMatch) {
-          const triggerPos =
-            beforeCursor.length - slashMatch[0].length + slashMatch[1].length
-          setSlashTriggerPos(triggerPos)
-          setSlashSelectedIndex(0)
-          setSlashMenuOpen(true)
-          setAtMenuOpen(false)
-          return
-        }
+  const handleOfficeShortcut = useCallback(
+    (action: OfficeAction) => {
+      const label = tQa(action.id as Parameters<typeof tQa>[0])
+      if (isSkillLocked(action.skillId)) {
+        notifySkillNotEnabled(label, "office-tools")
+        return
       }
-      setSlashMenuOpen(false)
-      setSlashTriggerPos(null)
-
-      // @ file mention detection (at any cursor position)
-      if (defaultPath) {
-        const atMatch = beforeCursor.match(/(^|[\s])@([^\s]*)$/)
-        if (atMatch) {
-          const atPos =
-            beforeCursor.length - atMatch[0].length + atMatch[1].length
-          setAtTriggerPos(atPos)
-          setAtSelectedIndex(0)
-          setAtMenuOpen(true)
-          setAtFileTreeEnabled(true)
-          return
-        }
-      }
-      setAtMenuOpen(false)
+      insertSkillShortcut(
+        { id: action.skillId, label },
+        tQa(action.promptKey as Parameters<typeof tQa>[0])
+      )
     },
-    [
-      slashCommands.length,
-      availableExperts.length,
-      nonExpertSkills.length,
-      defaultPath,
-      agentType,
-    ]
+    [tQa, isSkillLocked, notifySkillNotEnabled, insertSkillShortcut]
   )
 
   const handlePickFiles = useCallback(async () => {
@@ -1680,7 +1966,8 @@ export function MessageInput({
   const handleAddMenuOpenChange = useCallback(
     (open: boolean) => {
       if (!open) return
-      cursorPosRef.current = textareaRef.current?.selectionStart ?? null
+      // The editor keeps its selection while the menu is open, so a quick
+      // message inserts back at the same caret without tracking an offset.
       loadQuickMessages().catch((error) => {
         console.error("[MessageInput] quick messages refresh failed:", error)
       })
@@ -1689,22 +1976,129 @@ export function MessageInput({
   )
 
   const handleQuickMessageSelect = useCallback((message: QuickMessage) => {
-    const insertion = message.content
-    if (!insertion) return
-    const current = textRef.current
-    const rawPos = cursorPosRef.current ?? current.length
-    const pos = Math.max(0, Math.min(rawPos, current.length))
-    const before = current.slice(0, pos)
-    const after = current.slice(pos)
-    setText(before + insertion + after)
-    requestAnimationFrame(() => {
-      const ta = textareaRef.current
-      if (!ta) return
-      ta.focus()
-      const newPos = pos + insertion.length
-      ta.setSelectionRange(newPos, newPos)
+    if (!message.content) return
+    editorRef.current?.insertMarkdownAtCursor(message.content)
+  }, [])
+
+  // Plain-text rendering of the editor's current selection, for the right-click
+  // Cut/Copy. Read straight from ProseMirror state (stable while the radix menu
+  // holds DOM focus); inline reference badges serialize to their Markdown form
+  // and hard breaks to newlines so a copied selection reads back as text.
+  const selectionPlainText = useCallback((editor: Editor): string => {
+    const { from, to } = editor.state.selection
+    if (from >= to) return ""
+    return editor.state.doc.textBetween(from, to, "\n", (leaf) => {
+      if (leaf.type.name === "reference") {
+        return referenceToMarkdown(leaf.attrs as ReferenceAttrs)
+      }
+      if (leaf.type.name === "hardBreak") return "\n"
+      return ""
     })
   }, [])
+
+  // The radix menu traps focus until it closes, so the clipboard write is
+  // deferred (see copyTextFromMenu) — otherwise the non-secure execCommand
+  // fallback can't focus its scratch textarea. Copy never mutates the document,
+  // so a failed write loses nothing; we still surface it (the native menu was
+  // suppressed) so the user can fall back to the keyboard.
+  const handleContextCopy = useCallback(async () => {
+    const editor = editorRef.current?.getEditor()
+    if (!editor) return
+    const text = selectionPlainText(editor)
+    if (!text) return
+    if (!(await copyTextFromMenu(text))) {
+      toast.error(t("clipboardWriteFailed"))
+    }
+  }, [selectionPlainText, t])
+
+  const handleContextCut = useCallback(async () => {
+    if (disabled) return
+    const editor = editorRef.current?.getEditor()
+    if (!editor) return
+    // Capture the range up front so the post-write delete targets exactly what
+    // was copied. Cut is atomic: the deferred clipboard write can fail in a
+    // non-secure context, so the range is removed only once the write succeeds —
+    // otherwise the selection is kept and the failure is surfaced (no data loss).
+    const { from, to } = editor.state.selection
+    await cutSelectionToClipboard({
+      text: selectionPlainText(editor),
+      copy: copyTextFromMenu,
+      remove: () => editor.chain().focus().deleteRange({ from, to }).run(),
+      onWriteFailed: () => toast.error(t("clipboardWriteFailed")),
+    })
+  }, [disabled, selectionPlainText, t])
+
+  const handleContextSelectAll = useCallback(() => {
+    if (disabled) return
+    const editor = editorRef.current?.getEditor()
+    if (!editor) return
+    editor.chain().focus().selectAll().run()
+  }, [disabled])
+
+  // Opening the custom right-click menu: snapshot whether there's a selection
+  // (gates Cut/Copy) and refresh the quick-messages list. The editor keeps its
+  // selection while the menu is open, so Paste / a quick message lands back at
+  // the same caret.
+  const handleContextMenuOpenChange = useCallback(
+    (open: boolean) => {
+      if (!open) return
+      const editor = editorRef.current?.getEditor()
+      setContextSelectionActive(editor ? !editor.state.selection.empty : false)
+      loadQuickMessages().catch((error) => {
+        console.error("[MessageInput] quick messages refresh failed:", error)
+      })
+    },
+    [loadQuickMessages]
+  )
+
+  // The composer's custom right-click "Paste". The native context menu only
+  // appears over the contenteditable text, so the blank chrome had no paste
+  // affordance — this reproduces Ctrl+V everywhere in the box. Reading the
+  // clipboard happens inside the menu-click user gesture, so the async
+  // Clipboard API has the activation it needs.
+  const handleContextPaste = useCallback(async () => {
+    if (disabled) return
+    const editor = editorRef.current?.getEditor()
+    if (!editor) return
+    let text = ""
+    // The async clipboard read can be blocked at call time even though the API
+    // exists (denied permission, browser policy), so track that: with the native
+    // menu (and its Paste) suppressed to show this one, a silent failure would
+    // leave the user with no feedback and no fallback.
+    let readBlocked = false
+    try {
+      text = (await navigator.clipboard.readText()) ?? ""
+    } catch {
+      // Permission denied / unsupported / no activation — fall through to the
+      // image path (a textless clipboard may still hold a screenshot).
+      readBlocked = true
+      text = ""
+    }
+    if (text) {
+      // Route through ProseMirror's own text paste so newlines, marks and the
+      // editor's paste pipeline behave exactly like a keyboard paste.
+      editor.view.focus()
+      editor.view.pasteText(text)
+      return
+    }
+    // No text — try a pasted image (screenshot), mirroring `handlePasteFiles`.
+    try {
+      const imageFiles = await imageFilesFromClipboardApi()
+      if (imageFiles.length > 0) {
+        await appendFilesFromInput(imageFiles)
+        return
+      }
+    } catch (error) {
+      console.error("[MessageInput] context menu paste failed:", error)
+      readBlocked = true
+    }
+    // Nothing landed. A blocked read leaves no visible result and no native menu
+    // to retry from, so point the user at the keyboard shortcut. A merely empty
+    // clipboard (read succeeded, returned "") stays a silent no-op as before.
+    if (readBlocked) {
+      toast.error(t("pasteUnavailable"))
+    }
+  }, [disabled, appendFilesFromInput, t])
 
   useEffect(() => {
     if (!attachmentTabId) return
@@ -1713,14 +2107,21 @@ export function MessageInput({
       const customEvent = event as CustomEvent<AttachFileToSessionDetail>
       if (!customEvent.detail) return
       if (customEvent.detail.tabId !== attachmentTabId) return
-      appendResourceAttachments([customEvent.detail.path])
+      const { path, range } = customEvent.detail
+      // Drop the badge at the composer's current caret rather than the end, so
+      // "add to chat" / "add file to chat" land where the user left off.
+      if (range) {
+        appendFileRangeAttachment(path, range, { atCaret: true })
+      } else {
+        appendResourceAttachments([path], { atCaret: true })
+      }
     }
 
     window.addEventListener(ATTACH_FILE_TO_SESSION_EVENT, handleAttachFile)
     return () => {
       window.removeEventListener(ATTACH_FILE_TO_SESSION_EVENT, handleAttachFile)
     }
-  }, [appendResourceAttachments, attachmentTabId])
+  }, [appendResourceAttachments, appendFileRangeAttachment, attachmentTabId])
 
   useEffect(() => {
     if (!attachmentTabId) return
@@ -1730,13 +2131,17 @@ export function MessageInput({
       if (!customEvent.detail) return
       if (customEvent.detail.tabId !== attachmentTabId) return
       const appendText = customEvent.detail.text
-      setText((prev) => {
-        if (prev.length === 0) return appendText
-        return prev.endsWith(" ") ? prev + appendText : prev + " " + appendText
-      })
-      requestAnimationFrame(() => {
-        textareaRef.current?.focus()
-      })
+      const editor = editorRef.current?.getEditor()
+      if (!editor) return
+      // Append at the very end, separated by a space when the document isn't
+      // empty (and doesn't already end in whitespace).
+      const ed = editorRef.current
+      const needsSpace = ed != null && !ed.isEmpty()
+      editor
+        .chain()
+        .focus("end")
+        .insertContent(`${needsSpace ? " " : ""}${appendText}`)
+        .run()
     }
 
     window.addEventListener(APPEND_TEXT_TO_SESSION_EVENT, handleAppendText)
@@ -1872,33 +2277,36 @@ export function MessageInput({
   }, [])
 
   const buildDraft = useCallback((): PromptDraft | null => {
-    const trimmed = textRef.current.trim()
-    if (!trimmed && attachments.length === 0) return null
-
-    const blocks: PromptInputBlock[] = []
-    if (trimmed) {
-      blocks.push({ type: "text", text: trimmed })
-    }
-    for (const attachment of attachments) {
-      if (attachment.type === "resource") {
-        if (attachment.kind === "link") {
-          blocks.push({
-            type: "resource_link",
-            uri: attachment.uri,
-            name: attachment.name,
-            mime_type: attachment.mimeType,
-            description: null,
-          })
-        } else {
-          blocks.push({
-            type: "resource",
-            uri: attachment.uri,
-            mime_type: attachment.mimeType,
-            text: attachment.text ?? null,
-            blob: attachment.blob ?? null,
-          })
+    const editor = editorRef.current?.getEditor()
+    // Inline badges + prose → text/resource_link blocks (file mentions become
+    // first-class ResourceLinks; agent/session/commit/skill stay inline text;
+    // embedded badges are dropped here and re-added below from the payload map).
+    const blocks: PromptInputBlock[] = editor ? docToPromptBlocks(editor) : []
+    // Append the real bytes-bearing block for every embedded-attachment badge
+    // still present in the document, looked up by its `codeg://embedded/…` uri.
+    // Walking the live doc (rather than a swap pass over a stored draft) means a
+    // deleted badge's stale map entry is simply never emitted, and an undo that
+    // resurrects a badge re-emits it — no pruning, and no orphan uri can leak.
+    if (editor) {
+      editor.state.doc.descendants((node) => {
+        if (
+          node.type.name === "reference" &&
+          typeof node.attrs?.uri === "string" &&
+          isEmbeddedReferenceUri(node.attrs.uri)
+        ) {
+          const real = embeddedPayloadsRef.current.get(node.attrs.uri)
+          if (real) blocks.push(real)
         }
-      } else {
+        return true
+      })
+    }
+    const displayMarkdown = editorRef.current?.getMarkdown().trim() ?? ""
+
+    if (blocks.length === 0 && attachments.length === 0) return null
+
+    // `attachments` holds only images now — files live inline as badges above.
+    for (const attachment of attachments) {
+      if (attachment.type === "image") {
         blocks.push({
           type: "image",
           data: attachment.data,
@@ -1909,38 +2317,49 @@ export function MessageInput({
     }
 
     const displayText =
-      trimmed ||
+      displayMarkdown ||
       `Attached ${attachments.length} attachment${attachments.length > 1 ? "s" : ""}`
     return { blocks, displayText }
   }, [attachments])
 
+  // Clear the editor + attachments after a send / enqueue / save.
+  const resetComposer = useCallback(() => {
+    editorRef.current?.clear()
+    setComposerEmpty(true)
+    setAttachments([])
+    embeddedPayloadsRef.current.clear()
+    closeSlashMenu()
+  }, [closeSlashMenu])
+
   const handleSend = useCallback(() => {
+    // The editor stays editable while `disabled` (the agent is busy) so the user
+    // can keep typing, but a plain send is blocked — only enqueue / queue-edit
+    // save go through. Mirrors the legacy textarea's keydown guard.
+    if (disabled && !isPrompting && !isEditingQueueItem) return
     const draft = buildDraft()
     if (!draft) return
 
     // Edit mode: save back to queue item
     if (isEditingQueueItem && onSaveQueueEdit) {
       onSaveQueueEdit(draft)
-      setText("")
-      setAttachments([])
+      resetComposer()
       return
     }
 
     // Prompting mode: enqueue instead of sending
     if (isPrompting && onEnqueue) {
       onEnqueue(draft, showModeSelector ? effectiveModeId : null)
-      setText("")
-      setAttachments([])
+      resetComposer()
       return
     }
 
     onSend(draft, showModeSelector ? effectiveModeId : null)
     if (effectiveDraftStorageKey) {
-      clearMessageInputDraft(effectiveDraftStorageKey)
+      clearMessageInputDraftV2(effectiveDraftStorageKey)
     }
-    setText("")
-    setAttachments([])
+    resetComposer()
   }, [
+    disabled,
     buildDraft,
     isEditingQueueItem,
     isPrompting,
@@ -1950,6 +2369,7 @@ export function MessageInput({
     effectiveModeId,
     showModeSelector,
     effectiveDraftStorageKey,
+    resetComposer,
   ])
 
   const handleForkSendClick = useCallback(() => {
@@ -1962,134 +2382,108 @@ export function MessageInput({
     // failure) the parent re-queues the draft, so it is never lost.
     onForkSend(draft, showModeSelector ? effectiveModeId : null)
     if (effectiveDraftStorageKey) {
-      clearMessageInputDraft(effectiveDraftStorageKey)
+      clearMessageInputDraftV2(effectiveDraftStorageKey)
     }
-    setText("")
-    setAttachments([])
+    resetComposer()
   }, [
     onForkSend,
     buildDraft,
     effectiveModeId,
     showModeSelector,
     effectiveDraftStorageKey,
+    resetComposer,
   ])
 
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (
-        e.nativeEvent.isComposing ||
-        composingRef.current ||
-        e.key === "Process" ||
-        e.keyCode === 229
-      ) {
-        return
+  // Navigation/confirm/escape keys for the `/` (commands) and `$` (Codex skills)
+  // runtime menu, routed from inside the editor (RichComposer.onExternalMenuKeyDown)
+  // because ProseMirror's DOM handler fires before a host capture handler could.
+  // Returns true for keys the menu consumed; false (e.g. a letter that filters)
+  // lets normal editing proceed.
+  const handleExternalMenuKeyDown = useCallback(
+    (event: KeyboardEvent): boolean => {
+      if (event.isComposing) return false
+      if (!slashMenuOpen || slashAutocompleteCount === 0) return false
+      if (event.key === "ArrowDown") {
+        setSlashSelectedIndex((i) =>
+          i < slashAutocompleteCount - 1 ? i + 1 : 0
+        )
+        return true
       }
-
-      if (slashMenuOpen && slashAutocompleteCount > 0) {
-        if (e.key === "ArrowDown") {
-          e.preventDefault()
-          setSlashSelectedIndex((i) =>
-            i < slashAutocompleteCount - 1 ? i + 1 : 0
-          )
-          return
-        }
-        if (e.key === "ArrowUp") {
-          e.preventDefault()
-          setSlashSelectedIndex((i) =>
-            i > 0 ? i - 1 : slashAutocompleteCount - 1
-          )
-          return
-        }
-        if (e.key === "Enter" || e.key === "Tab") {
-          e.preventDefault()
-          // The merged list is [commands, skills].
-          if (slashSelectedIndex < filteredSlashCommands.length) {
-            handleSlashSelect(filteredSlashCommands[slashSelectedIndex])
-          } else {
-            const skillIndex = slashSelectedIndex - filteredSlashCommands.length
-            const skill = filteredSlashSkills[skillIndex]
-            if (skill) {
-              handleSkillAutocompleteSelect(skill)
-            }
-          }
-          return
-        }
-        if (e.key === "Escape") {
-          e.preventDefault()
-          setSlashMenuOpen(false)
-          setSlashTriggerPos(null)
-          return
-        }
+      if (event.key === "ArrowUp") {
+        setSlashSelectedIndex((i) =>
+          i > 0 ? i - 1 : slashAutocompleteCount - 1
+        )
+        return true
       }
-
-      if (atMenuOpen && filteredAtFiles.length > 0) {
-        if (e.key === "ArrowDown") {
-          e.preventDefault()
-          setAtSelectedIndex((i) =>
-            i < filteredAtFiles.length - 1 ? i + 1 : 0
-          )
-          return
+      if (event.key === "Enter" || event.key === "Tab") {
+        // The merged list is [commands, skills].
+        if (slashSelectedIndex < filteredSlashCommands.length) {
+          handleSlashSelect(filteredSlashCommands[slashSelectedIndex])
+        } else {
+          const skill =
+            filteredSlashSkills[
+              slashSelectedIndex - filteredSlashCommands.length
+            ]
+          if (skill) handleSkillAutocompleteSelect(skill)
         }
-        if (e.key === "ArrowUp") {
-          e.preventDefault()
-          setAtSelectedIndex((i) =>
-            i > 0 ? i - 1 : filteredAtFiles.length - 1
-          )
-          return
-        }
-        if (e.key === "Enter" || e.key === "Tab") {
-          e.preventDefault()
-          handleAtSelect(filteredAtFiles[atSelectedIndex])
-          return
-        }
-        if (e.key === "Escape") {
-          e.preventDefault()
-          setAtMenuOpen(false)
-          return
-        }
+        return true
       }
-
-      if (isEditingQueueItem && e.key === "Escape") {
-        e.preventDefault()
-        onCancelQueueEdit?.()
-        return
+      if (event.key === "Escape") {
+        closeSlashMenu()
+        return true
       }
-
-      if (matchShortcutEvent(e, shortcuts.send_message)) {
-        e.preventDefault()
-        if (!disabled || isPrompting || isEditingQueueItem) handleSend()
-      } else if (matchShortcutEvent(e, shortcuts.newline_in_message)) {
-        e.preventDefault()
-        const textarea = e.currentTarget as HTMLTextAreaElement
-        const start = textarea.selectionStart
-        const end = textarea.selectionEnd
-        const value = textarea.value
-        const newValue = value.substring(0, start) + "\n" + value.substring(end)
-        setText(newValue)
-        requestAnimationFrame(() => {
-          textarea.selectionStart = textarea.selectionEnd = start + 1
-        })
-      }
+      return false
     },
     [
-      disabled,
-      isPrompting,
-      isEditingQueueItem,
-      onCancelQueueEdit,
-      handleSend,
-      shortcuts,
       slashMenuOpen,
       slashAutocompleteCount,
+      slashSelectedIndex,
       filteredSlashCommands,
       filteredSlashSkills,
-      slashSelectedIndex,
       handleSlashSelect,
       handleSkillAutocompleteSelect,
-      atMenuOpen,
-      filteredAtFiles,
-      atSelectedIndex,
-      handleAtSelect,
+      closeSlashMenu,
     ]
+  )
+
+  // Escape cancels a queue edit. ProseMirror doesn't consume Escape, so it
+  // bubbles up to this container handler. Skipped while the slash menu is open
+  // (the editor handles that Escape to close the menu first).
+  const handleContainerKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.nativeEvent.isComposing) return
+      if (
+        isEditingQueueItem &&
+        e.key === "Escape" &&
+        !slashMenuOpen &&
+        onCancelQueueEdit
+      ) {
+        e.preventDefault()
+        onCancelQueueEdit()
+      }
+    },
+    [isEditingQueueItem, slashMenuOpen, onCancelQueueEdit]
+  )
+
+  // Clicking the input's empty chrome (its padding, the blank space below a
+  // short message, the gaps in the action bar) focuses the editor — previously
+  // only the editor surface itself was clickable. Interactive controls, inline
+  // badges and the editor surface handle their own clicks, so they're excluded;
+  // `preventDefault` keeps the editor from blurring before we refocus it. We
+  // focus *at the click point* (not the end of the document) so clicking the
+  // left/top padding next to existing text lands the caret there, like a native
+  // textarea, instead of always jumping to the end.
+  const handleChromeMouseDown = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      // Not gated on `disabled`: the editor stays editable while connecting (see
+      // `handleSend`), so chrome clicks must focus too — else only the existing
+      // text line is clickable and the blank area below it is dead until ready.
+      if (!isComposerChromeClick(e.target)) return
+      // Keep the editor from blurring before we refocus it.
+      e.preventDefault()
+      editorRef.current?.focusAtCoords(e.clientX, e.clientY)
+    },
+    []
   )
 
   const handleContainerDragOver = useCallback(
@@ -2136,48 +2530,39 @@ export function MessageInput({
   )
 
   const hasImageAttachments = imageAttachments.length > 0
-  const hasResourceAttachments = resourceAttachments.length > 0
   const showDragActive = isDragActive && !disabled
-
-  const selectorItems = (
-    <>
-      {showConfigLoading && (
-        <SelectorLoadingChip label={t("loadingSettings")} />
-      )}
-      {hasConfigOptions &&
-        availableConfigOptions.map((option) => (
-          <SessionConfigSelector
-            key={option.id}
-            option={option}
-            onSelect={(configId, valueId) =>
-              onConfigOptionChange?.(configId, valueId)
-            }
-          />
-        ))}
-      {showModeLoading && <SelectorLoadingChip label={t("loadingMode")} />}
-      {showModeSelector && (
-        <ModeSelector
-          modes={availableModes}
-          selectedModeId={effectiveModeId!}
-          onSelect={handleModeSelect}
-          label={t("modeLabel")}
-        />
-      )}
-    </>
-  )
 
   const inlineSelectorItems = (
     <>
       {hasConfigOptions &&
-        availableConfigOptions.map((option) => (
-          <InlineSessionConfigSelector
-            key={option.id}
-            option={option}
-            onSelect={(configId, valueId) =>
-              onConfigOptionChange?.(configId, valueId)
-            }
-          />
-        ))}
+        availableConfigOptions.map((option) => {
+          // Long model lists get the searchable + virtualized popover (a Radix
+          // menu of hundreds of items is the scroll jank); every other option —
+          // and short model lists — keep the lightweight inline dropdown.
+          const listGroups = modelPickerGroups(option)
+          if (listGroups) {
+            return (
+              <ModelOptionPicker
+                key={option.id}
+                option={option}
+                groups={listGroups}
+                onSelect={(configId, valueId) =>
+                  onConfigOptionChange?.(configId, valueId)
+                }
+              />
+            )
+          }
+          return (
+            <InlineSessionConfigSelector
+              key={option.id}
+              option={option}
+              derivedGroups={deriveModelGroups(option)}
+              onSelect={(configId, valueId) =>
+                onConfigOptionChange?.(configId, valueId)
+              }
+            />
+          )
+        })}
       {showModeSelector && (
         <InlineModeSelector
           modes={availableModes}
@@ -2188,6 +2573,113 @@ export function MessageInput({
       )}
     </>
   )
+
+  // Normalized settings for the collapsed (narrow) master–detail panel. Config
+  // options and the mode picker are mutually exclusive in this UI (see
+  // `showModeSelector`), but both are mapped so the panel stays agnostic.
+  const collapsedSettings = useMemo<SessionSelectorSetting[]>(() => {
+    const result: SessionSelectorSetting[] = []
+    if (hasConfigOptions) {
+      for (const option of availableConfigOptions) {
+        if (option.kind.type !== "select") continue
+        const kind = option.kind
+        // Model values that carry a `provider/` prefix group by provider; every
+        // other option keeps its server groups or stays flat (`null` derived).
+        const derived = deriveModelGroups(option)
+        const groups: SessionSelectorGroup[] = derived
+          ? derived.map((group) => ({
+              key: group.key,
+              name: group.name,
+              options: group.options.map((item) => ({
+                value: item.value,
+                name: item.name,
+                description: item.description,
+              })),
+            }))
+          : kind.groups.length > 0
+            ? kind.groups.map((group) => ({
+                key: group.group,
+                name: group.name,
+                options: group.options.map((item) => ({
+                  value: item.value,
+                  name: item.name,
+                  description: item.description,
+                })),
+              }))
+            : [
+                {
+                  key: "__flat__",
+                  name: null,
+                  options: kind.options.map((item) => ({
+                    value: item.value,
+                    name: item.name,
+                    description: item.description,
+                  })),
+                },
+              ]
+        // Resolve the left-rail summary against the built groups so a grouped
+        // model shows its prefix-stripped name (the provider is implied) rather
+        // than repeating `provider/`.
+        const current = groups
+          .flatMap((group) => group.options)
+          .find((item) => item.value === kind.current_value)
+        // A long model list gets a searchable + virtualized detail pane (a plain
+        // list of hundreds of buttons janks); short lists keep plain buttons.
+        const searchable =
+          isModelConfigOption(option) &&
+          kind.options.length > MODEL_LIST_VIRTUALIZE_THRESHOLD
+        result.push({
+          key: `config:${option.id}`,
+          title: option.name,
+          currentValue: kind.current_value,
+          currentLabel: current?.name ?? kind.current_value,
+          groups,
+          onSelect: (value) => onConfigOptionChange?.(option.id, value),
+          ...(searchable && {
+            search: {
+              placeholder: t("searchModel"),
+              inputLabel: t("searchModelAria"),
+              listLabel: t("modelListLabel"),
+              empty: t("noModels"),
+            },
+          }),
+        })
+      }
+    }
+    if (showModeSelector) {
+      const selected = availableModes.find(
+        (mode) => mode.id === effectiveModeId
+      )
+      result.push({
+        key: "mode",
+        title: t("modeLabel"),
+        currentValue: effectiveModeId ?? "",
+        currentLabel: selected?.name ?? effectiveModeId ?? "",
+        groups: [
+          {
+            key: "__modes__",
+            name: null,
+            options: availableModes.map((mode) => ({
+              value: mode.id,
+              name: mode.name,
+              description: mode.description,
+            })),
+          },
+        ],
+        onSelect: (value) => handleModeSelect(value),
+      })
+    }
+    return result
+  }, [
+    hasConfigOptions,
+    availableConfigOptions,
+    showModeSelector,
+    availableModes,
+    effectiveModeId,
+    onConfigOptionChange,
+    handleModeSelect,
+    t,
+  ])
 
   const actionButtons = isEditingQueueItem ? (
     <div className="flex items-center gap-1">
@@ -2266,27 +2758,15 @@ export function MessageInput({
     <div
       ref={containerRef}
       className="relative"
+      onKeyDown={handleContainerKeyDown}
       onDragOver={handleContainerDragOver}
       onDragLeave={handleContainerDragLeave}
       onDrop={handleContainerDrop}
     >
       {slashMenuOpen && slashAutocompleteCount > 0 && (
         <div className="absolute bottom-full left-0 right-0 mb-1 z-50 flex max-h-[min(16rem,40dvh)] flex-col overflow-hidden rounded-xl border border-border bg-popover shadow-lg">
-          <div className="flex shrink-0 items-center gap-2 border-b border-border/60 px-3 py-2">
-            <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-            <input
-              type="text"
-              role="searchbox"
-              aria-label={t("slashSearchPlaceholder")}
-              value={slashFilterText}
-              onChange={handleSlashSearchChange}
-              onKeyDown={handleSlashSearchKeyDown}
-              placeholder={t("slashSearchPlaceholder")}
-              className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-              autoComplete="off"
-              spellCheck={false}
-            />
-          </div>
+          {/* No search box: the user types the filter inline after `/` (like the
+              `@` panel); navigation is routed from the editor's keydown. */}
           <div ref={slashMenuListRef} className="flex-1 overflow-y-auto p-1">
             {filteredSlashCommands.map((cmd, i) => (
               <button
@@ -2335,7 +2815,7 @@ export function MessageInput({
                       className="min-w-0 flex-1 truncate text-xs text-muted-foreground"
                       title={skill.description ?? undefined}
                     >
-                      {skill.description ?? `${expertPrefix}${skill.id}`}
+                      {skill.description ?? `${skillPrefix}${skill.id}`}
                     </span>
                   </div>
                 </button>
@@ -2343,13 +2823,6 @@ export function MessageInput({
             })}
           </div>
         </div>
-      )}
-      {atMenuOpen && filteredAtFiles.length > 0 && (
-        <FileMentionMenu
-          files={filteredAtFiles}
-          selectedIndex={atSelectedIndex}
-          onSelect={handleAtSelect}
-        />
       )}
       <div
         className={cn(
@@ -2361,407 +2834,528 @@ export function MessageInput({
             "ring-1 ring-primary/40"
         )}
       >
-        <div
-          className={cn(
-            "@container relative flex flex-col bg-transparent transition-colors",
-            folderBranchPickerAttached
-              ? "rounded-xl border border-input bg-background focus-within:border-ring focus-within:ring-[3px] focus-within:ring-inset focus-within:ring-ring/50"
-              : "rounded-xl border border-input focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50",
-            !folderBranchPickerAttached &&
-              showDragActive &&
-              "ring-1 ring-primary/40",
-            className
-          )}
-        >
-          <ConversationContextBar
-            hasExtraContent={hasImageAttachments || hasResourceAttachments}
-            scrollEndTrigger={attachments.length}
-            extraContent={
-              <>
-                {imageAttachments.map((attachment) => (
-                  <div
-                    key={attachment.id}
-                    className="relative shrink-0 overflow-hidden rounded-md border border-border/70 bg-muted/30"
-                  >
-                    <button
-                      type="button"
-                      onClick={() => setPreviewAttachmentId(attachment.id)}
-                      className="cursor-pointer transition-opacity hover:opacity-80"
-                    >
-                      <Image
-                        src={`data:${attachment.mimeType};base64,${attachment.data}`}
-                        alt={attachment.name}
-                        width={56}
-                        height={56}
-                        unoptimized
-                        className="h-14 w-14 object-cover"
-                      />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => removeAttachment(attachment.id)}
-                      className="absolute right-1 top-1 rounded-sm bg-background/70 p-0.5 hover:bg-background"
-                      aria-label={t("removeAttachmentAria", {
-                        name: attachment.name,
-                      })}
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </div>
-                ))}
-                {resourceAttachments.map((attachment) => (
-                  <div
-                    key={attachment.id}
-                    className="inline-flex h-6 shrink-0 items-center gap-1 rounded-full border border-border/70 bg-muted/40 px-2 text-[11px] text-muted-foreground"
-                  >
-                    <FileSearch className="h-3 w-3" />
-                    <span className="max-w-40 truncate">{attachment.name}</span>
-                    <button
-                      type="button"
-                      onClick={() => removeAttachment(attachment.id)}
-                      className="rounded-sm p-0.5 hover:bg-muted-foreground/15"
-                      aria-label={t("removeAttachmentAria", {
-                        name: attachment.name,
-                      })}
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </div>
-                ))}
-              </>
-            }
-          />
-          <Textarea
-            ref={textareaRef}
-            value={text}
-            onChange={handleTextChange}
-            onKeyDown={handleKeyDown}
-            onCompositionStart={() => (composingRef.current = true)}
-            onCompositionEnd={() => (composingRef.current = false)}
-            onPaste={handlePaste}
-            onFocus={onFocus}
-            placeholder={resolvedPlaceholder}
-            className="min-h-0 flex-1 overflow-y-auto rounded-none border-0 bg-transparent text-base md:text-sm shadow-none focus-visible:border-0 focus-visible:ring-0"
-            autoFocus={autoFocus}
-          />
-          <div className="flex shrink-0 items-end justify-between gap-1 px-2 pb-2">
-            <div className="flex min-w-0 items-end gap-1">
-              <DropdownMenu onOpenChange={handleAddMenuOpenChange}>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    disabled={disabled}
-                    variant="ghost"
-                    size="icon-xs"
-                    className="shrink-0"
-                    title={t("addActions")}
-                    aria-label={t("addActions")}
-                  >
-                    <Plus className="size-3" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent
-                  side="top"
-                  align="start"
-                  className="min-w-48"
-                >
-                  {showNativePaperclip ? (
-                    <DropdownMenuItem
-                      onClick={() => {
-                        handlePickFiles().catch((error) => {
-                          console.error(
-                            "[MessageInput] pick files from menu failed:",
-                            error
-                          )
-                        })
-                      }}
-                    >
-                      <Paperclip className="size-4" />
-                      {t("attachFiles")}
-                    </DropdownMenuItem>
-                  ) : (
-                    <>
-                      <DropdownMenuItem
-                        onClick={() => {
-                          handleUploadLocalFiles().catch((error) => {
-                            console.error(
-                              "[MessageInput] upload local files failed:",
-                              error
-                            )
-                          })
-                        }}
-                      >
-                        <Upload className="size-4" />
-                        {t("attachLocalUpload")}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={() => setServerFilePickerOpen(true)}
-                      >
-                        <FolderSearch className="size-4" />
-                        {t("attachServerFile")}
-                      </DropdownMenuItem>
-                    </>
-                  )}
-                  <DropdownMenuSub>
-                    <DropdownMenuSubTrigger>
-                      <MessageSquareText className="size-4" />
-                      {t("quickMessages")}
-                    </DropdownMenuSubTrigger>
-                    <DropdownMenuSubContent
-                      className="min-w-40 overflow-y-auto"
-                      style={{
-                        maxWidth: "min(20rem, calc(100vw - 1rem))",
-                        maxHeight:
-                          "min(32rem, var(--radix-dropdown-menu-content-available-height))",
-                      }}
-                    >
-                      {quickMessagesLoading && quickMessages.length === 0 ? (
-                        <div className="px-3 py-4 text-center text-xs text-muted-foreground">
-                          {t("quickMessagesLoading")}
-                        </div>
-                      ) : quickMessages.length === 0 ? (
-                        <div className="px-3 py-4 text-center text-xs text-muted-foreground">
-                          {t("quickMessagesEmpty")}
-                        </div>
-                      ) : (
-                        quickMessages.map((message) => (
-                          <DropdownMenuItem
-                            key={message.id}
-                            onClick={() => handleQuickMessageSelect(message)}
-                          >
-                            <span className="truncate">
-                              {message.title || (
-                                <span className="italic text-muted-foreground">
-                                  {t("quickMessageUntitled")}
-                                </span>
-                              )}
-                            </span>
-                          </DropdownMenuItem>
-                        ))
-                      )}
-                    </DropdownMenuSubContent>
-                  </DropdownMenuSub>
-                  {onAddFeedback && (
-                    <DropdownMenuItem
-                      disabled={feedbackAddDisabled}
-                      onClick={onAddFeedback}
-                      title={
-                        feedbackAddDisabled
-                          ? t("liveFeedbackDisabledHint")
-                          : undefined
-                      }
-                    >
-                      <MessageSquarePlus className="size-4" />
-                      {t("liveFeedback")}
-                    </DropdownMenuItem>
-                  )}
-                  <DropdownMenuSub>
-                    <DropdownMenuSubTrigger>
-                      <Sparkles className="size-4" />
-                      {t("expertSkills")}
-                    </DropdownMenuSubTrigger>
-                    <DropdownMenuSubContent
-                      className="min-w-72 overflow-y-auto"
-                      style={{
-                        maxWidth: "min(20rem, calc(100vw - 1rem))",
-                        maxHeight:
-                          "min(32rem, var(--radix-dropdown-menu-content-available-height))",
-                      }}
-                    >
-                      {availableExperts.length === 0 ? (
-                        <div className="px-3 py-6 text-center text-xs text-muted-foreground">
-                          {t("expertsEmptyForAgent")}
-                        </div>
-                      ) : (
-                        groupedExperts.map(([category, items], groupIndex) => (
-                          <div key={category}>
-                            {groupIndex > 0 && <DropdownMenuSeparator />}
-                            <DropdownMenuLabel className="text-[11px] font-semibold uppercase tracking-wide">
-                              {translateExpertCategory(category)}
-                            </DropdownMenuLabel>
-                            {items.map((expert) => {
-                              const Icon = getExpertIcon(expert.metadata.icon)
-                              const name =
-                                pickExpertLocalized(
-                                  expert.metadata.display_name,
-                                  locale
-                                ) || expert.metadata.id
-                              const description = pickExpertLocalized(
-                                expert.metadata.description,
-                                locale
-                              )
-                              return (
-                                <DropdownMenuItem
-                                  key={expert.metadata.id}
-                                  onClick={() =>
-                                    handleExpertPopoverSelect(expert)
-                                  }
-                                  className="items-start gap-2"
-                                >
-                                  <Icon className="mt-0.5 size-4 shrink-0" />
-                                  <div className="min-w-0 flex-1">
-                                    <div className="truncate font-medium">
-                                      {name}
-                                    </div>
-                                    {description && (
-                                      <div className="line-clamp-2 text-xs text-muted-foreground">
-                                        {description}
-                                      </div>
-                                    )}
-                                  </div>
-                                </DropdownMenuItem>
-                              )
-                            })}
-                          </div>
-                        ))
-                      )}
-                    </DropdownMenuSubContent>
-                  </DropdownMenuSub>
-                  <DropdownMenuSub
-                    open={slashDropdownOpen}
-                    onOpenChange={handleSlashDropdownOpenChange}
-                  >
-                    <DropdownMenuSubTrigger
-                      disabled={slashCommands.length === 0}
-                      onPointerDown={() => {
-                        cursorPosRef.current =
-                          textareaRef.current?.selectionStart ?? null
-                      }}
-                    >
-                      <Command className="size-4" />
-                      {t("slashCommands")}
-                    </DropdownMenuSubTrigger>
-                    <DropdownMenuSubContent
-                      className="flex min-w-72 flex-col overflow-hidden p-0"
-                      style={{
-                        maxWidth: "min(20rem, calc(100vw - 1rem))",
-                        maxHeight:
-                          "min(32rem, var(--radix-dropdown-menu-content-available-height))",
-                      }}
-                    >
-                      <div className="flex shrink-0 items-center gap-2 border-b border-border/60 px-3 py-2">
-                        <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                        <input
-                          ref={slashDropdownInputRef}
-                          type="text"
-                          role="searchbox"
-                          aria-label={t("slashSearchPlaceholder")}
-                          value={slashDropdownSearch}
-                          onChange={(e) =>
-                            setSlashDropdownSearch(e.target.value)
-                          }
-                          onKeyDown={(e) => {
-                            if (e.key === "ArrowDown") {
-                              e.preventDefault()
-                              const container = e.currentTarget.closest(
-                                '[data-slot="dropdown-menu-sub-content"]'
-                              )
-                              const firstItem =
-                                container?.querySelector<HTMLElement>(
-                                  '[role="menuitem"]'
-                                )
-                              firstItem?.focus()
-                              return
-                            }
-                            if (e.key === "Enter") {
-                              e.preventDefault()
-                              const first = filteredSlashDropdownCommands[0]
-                              if (first) {
-                                handleSlashPopoverSelect(first)
-                                setSlashDropdownOpen(false)
-                              }
-                              return
-                            }
-                            if (e.key === "Escape" || e.key === "Tab") return
-                            // Prevent radix DropdownMenu's built-in typeahead
-                            // from hijacking letter keys while the user is
-                            // typing.
-                            e.stopPropagation()
-                          }}
-                          placeholder={t("slashSearchPlaceholder")}
-                          className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-                          autoComplete="off"
-                          spellCheck={false}
-                        />
-                      </div>
-                      <div className="flex-1 overflow-y-auto p-1">
-                        {filteredSlashDropdownCommands.length === 0 ? (
-                          <div className="px-3 py-6 text-center text-xs text-muted-foreground">
-                            {t("slashSearchEmpty")}
-                          </div>
-                        ) : (
-                          filteredSlashDropdownCommands.map((cmd) => (
-                            <DropdownMenuItem
-                              key={cmd.name}
-                              onClick={() => handleSlashPopoverSelect(cmd)}
-                              // Radix focuses the item on pointermove, which
-                              // fires while scrolling (items slide under the
-                              // cursor) and steals focus from the search input.
-                              // Short-circuit that default with preventDefault
-                              // so the search keeps focus until the user
-                              // explicitly clicks.
-                              onPointerMove={(e) => e.preventDefault()}
-                              onPointerLeave={(e) => e.preventDefault()}
-                              className="hover:bg-accent hover:text-accent-foreground"
-                            >
-                              <DropdownRadioItemContent
-                                label={`/${cmd.name}`}
-                                description={cmd.description}
-                              />
-                            </DropdownMenuItem>
-                          ))
-                        )}
-                      </div>
-                    </DropdownMenuSubContent>
-                  </DropdownMenuSub>
-                </DropdownMenuContent>
-              </DropdownMenu>
-              {hasInlineSelectors && (
-                <div className="hidden min-w-0 items-end gap-1 @[30rem]:flex">
-                  {inlineSelectorItems}
-                </div>
+        <ContextMenu onOpenChange={handleContextMenuOpenChange}>
+          {/* Disabled in non-secure web (no async clipboard read) so the native
+              context menu — whose Paste still works over the editor text — is
+              not suppressed. Desktop/secure-web get the full custom menu. */}
+          <ContextMenuTrigger asChild disabled={!clipboardReadSupported}>
+            <div
+              onMouseDown={handleChromeMouseDown}
+              className={cn(
+                // `codeg-composer-chrome` paints the text I-beam across the box's
+                // blank areas (padding, the dead space below a short message, the
+                // action-bar gaps) so the whole input reads as clickable-to-type;
+                // interactive controls re-assert their own cursor (see globals.css).
+                "codeg-composer-chrome @container relative flex flex-col rounded-xl border border-input bg-transparent transition-colors",
+                // Standard focus ring — always shown when the composer is
+                // focused (the plain default input style).
+                folderBranchPickerAttached
+                  ? "bg-background focus-within:border-ring focus-within:ring-[3px] focus-within:ring-inset focus-within:ring-ring/50"
+                  : "focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50",
+                // Active session, tiled across multiple sessions: a gradient
+                // flows around the border to mark which tile is active — but ONLY
+                // while the composer itself is not focused. Focusing it hides the
+                // flow (globals.css) so the default focus ring above takes over.
+                // A lone/non-tiled session (showActiveFlow=false) and inactive
+                // tiles show the plain default border.
+                showActiveFlow && "codeg-composer-flow",
+                !folderBranchPickerAttached &&
+                  showDragActive &&
+                  "ring-1 ring-primary/40",
+                className
               )}
-              {hasAnySelector && (
-                <div
-                  className={cn(
-                    "flex",
-                    hasInlineSelectors && "@[30rem]:hidden"
-                  )}
-                >
-                  <DropdownMenu>
+            >
+              <ConversationContextBar
+                hasExtraContent={hasImageAttachments}
+                scrollEndTrigger={attachments.length}
+                extraContent={
+                  <>
+                    {imageAttachments.map((attachment) => (
+                      <div
+                        key={attachment.id}
+                        className="relative shrink-0 overflow-hidden rounded-md border border-border/70 bg-muted/30"
+                      >
+                        <button
+                          type="button"
+                          onClick={() => setPreviewAttachmentId(attachment.id)}
+                          className="cursor-pointer transition-opacity hover:opacity-80"
+                        >
+                          <Image
+                            src={`data:${attachment.mimeType};base64,${attachment.data}`}
+                            alt={attachment.name}
+                            width={56}
+                            height={56}
+                            unoptimized
+                            className="h-14 w-14 object-cover"
+                          />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => removeAttachment(attachment.id)}
+                          className="absolute right-1 top-1 rounded-sm bg-background/70 p-0.5 hover:bg-background"
+                          aria-label={t("removeAttachmentAria", {
+                            name: attachment.name,
+                          })}
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </>
+                }
+              />
+              <RichComposer
+                ref={editorRef}
+                placeholder={resolvedPlaceholder}
+                ariaLabel={resolvedPlaceholder}
+                autoFocus={autoFocus}
+                referenceSearch={referenceSearch}
+                mentionUiLabels={mentionUiLabels}
+                tabLabels={referenceGroupLabels}
+                onChange={handleComposerChange}
+                onReady={handleComposerReady}
+                onSubmit={handleSend}
+                onFocus={onFocus}
+                onPasteFiles={handlePasteFiles}
+                submitShortcut={shortcuts.send_message}
+                newlineShortcut={shortcuts.newline_in_message}
+                isExternalMenuOpen={slashMenuOpen && slashAutocompleteCount > 0}
+                onExternalMenuKeyDown={handleExternalMenuKeyDown}
+                className="min-h-0 flex-1"
+              />
+              <div className="flex shrink-0 items-end justify-between gap-1 px-2 pb-2">
+                <div className="flex min-w-0 items-end gap-1">
+                  <DropdownMenu onOpenChange={handleAddMenuOpenChange}>
                     <DropdownMenuTrigger asChild>
                       <Button
+                        disabled={disabled}
                         variant="ghost"
                         size="icon-xs"
-                        className="shrink-0"
-                        title={t("agentSettings")}
-                        aria-label={t("agentSettings")}
+                        className="shrink-0 text-muted-foreground"
+                        title={t("addActions")}
+                        aria-label={t("addActions")}
                       >
-                        {agentType ? (
-                          <AgentIcon agentType={agentType} className="size-3" />
-                        ) : (
-                          <Cog className="size-3" />
-                        )}
+                        <Plus className="size-4" />
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent
                       side="top"
                       align="start"
-                      className="min-w-56"
+                      className="min-w-48"
                     >
-                      {selectorItems}
+                      {showNativePaperclip ? (
+                        <DropdownMenuItem
+                          onClick={() => {
+                            handlePickFiles().catch((error) => {
+                              console.error(
+                                "[MessageInput] pick files from menu failed:",
+                                error
+                              )
+                            })
+                          }}
+                        >
+                          <Paperclip className="size-4" />
+                          {t("attachFiles")}
+                        </DropdownMenuItem>
+                      ) : (
+                        <>
+                          <DropdownMenuItem
+                            onClick={() => {
+                              handleUploadLocalFiles().catch((error) => {
+                                console.error(
+                                  "[MessageInput] upload local files failed:",
+                                  error
+                                )
+                              })
+                            }}
+                          >
+                            <Upload className="size-4" />
+                            {t("attachLocalUpload")}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => setServerFilePickerOpen(true)}
+                          >
+                            <FolderSearch className="size-4" />
+                            {t("attachServerFile")}
+                          </DropdownMenuItem>
+                        </>
+                      )}
+                      <DropdownMenuSub>
+                        <DropdownMenuSubTrigger>
+                          <MessageSquareText className="size-4" />
+                          {t("quickMessages")}
+                        </DropdownMenuSubTrigger>
+                        <DropdownMenuSubContent
+                          className="min-w-40 overflow-y-auto"
+                          style={{
+                            maxWidth: "min(20rem, calc(100vw - 1rem))",
+                            maxHeight:
+                              "min(32rem, var(--radix-dropdown-menu-content-available-height))",
+                          }}
+                        >
+                          {quickMessagesLoading &&
+                          quickMessages.length === 0 ? (
+                            <div className="px-3 py-4 text-center text-xs text-muted-foreground">
+                              {t("quickMessagesLoading")}
+                            </div>
+                          ) : quickMessages.length === 0 ? (
+                            <div className="px-3 py-4 text-center text-xs text-muted-foreground">
+                              {t("quickMessagesEmpty")}
+                            </div>
+                          ) : (
+                            quickMessages.map((message) => (
+                              <DropdownMenuItem
+                                key={message.id}
+                                onClick={() =>
+                                  handleQuickMessageSelect(message)
+                                }
+                              >
+                                <span className="truncate">
+                                  {message.title || (
+                                    <span className="italic text-muted-foreground">
+                                      {t("quickMessageUntitled")}
+                                    </span>
+                                  )}
+                                </span>
+                              </DropdownMenuItem>
+                            ))
+                          )}
+                        </DropdownMenuSubContent>
+                      </DropdownMenuSub>
+                      {onAddFeedback && (
+                        <DropdownMenuItem
+                          disabled={feedbackAddDisabled}
+                          onClick={onAddFeedback}
+                          title={
+                            feedbackAddDisabled
+                              ? t("liveFeedbackDisabledHint")
+                              : undefined
+                          }
+                        >
+                          <MessageSquarePlus className="size-4" />
+                          {t("liveFeedback")}
+                        </DropdownMenuItem>
+                      )}
+                      <DropdownMenuSub
+                        open={slashDropdownOpen}
+                        onOpenChange={handleSlashDropdownOpenChange}
+                      >
+                        <DropdownMenuSubTrigger
+                          disabled={slashCommands.length === 0}
+                        >
+                          <Command className="size-4" />
+                          {t("slashCommands")}
+                        </DropdownMenuSubTrigger>
+                        <DropdownMenuSubContent
+                          className="flex min-w-72 flex-col overflow-hidden p-0"
+                          style={{
+                            maxWidth: "min(20rem, calc(100vw - 1rem))",
+                            maxHeight:
+                              "min(32rem, var(--radix-dropdown-menu-content-available-height))",
+                          }}
+                        >
+                          <div className="flex shrink-0 items-center gap-2 border-b border-border/60 px-3 py-2">
+                            <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                            <input
+                              ref={slashDropdownInputRef}
+                              type="text"
+                              role="searchbox"
+                              aria-label={t("slashSearchPlaceholder")}
+                              value={slashDropdownSearch}
+                              onChange={(e) =>
+                                setSlashDropdownSearch(e.target.value)
+                              }
+                              onKeyDown={(e) => {
+                                if (e.key === "ArrowDown") {
+                                  e.preventDefault()
+                                  const container = e.currentTarget.closest(
+                                    '[data-slot="dropdown-menu-sub-content"]'
+                                  )
+                                  const firstItem =
+                                    container?.querySelector<HTMLElement>(
+                                      '[role="menuitem"]'
+                                    )
+                                  firstItem?.focus()
+                                  return
+                                }
+                                if (e.key === "Enter") {
+                                  e.preventDefault()
+                                  const first = filteredSlashDropdownCommands[0]
+                                  if (first) {
+                                    handleSlashPopoverSelect(first)
+                                    setSlashDropdownOpen(false)
+                                  }
+                                  return
+                                }
+                                if (e.key === "Escape" || e.key === "Tab")
+                                  return
+                                // Prevent radix DropdownMenu's built-in typeahead
+                                // from hijacking letter keys while the user is
+                                // typing.
+                                e.stopPropagation()
+                              }}
+                              placeholder={t("slashSearchPlaceholder")}
+                              className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                              autoComplete="off"
+                              spellCheck={false}
+                            />
+                          </div>
+                          <div className="flex-1 overflow-y-auto p-1">
+                            {filteredSlashDropdownCommands.length === 0 ? (
+                              <div className="px-3 py-6 text-center text-xs text-muted-foreground">
+                                {t("slashSearchEmpty")}
+                              </div>
+                            ) : (
+                              filteredSlashDropdownCommands.map((cmd) => (
+                                <DropdownMenuItem
+                                  key={cmd.name}
+                                  onClick={() => handleSlashPopoverSelect(cmd)}
+                                  // Radix focuses the item on pointermove, which
+                                  // fires while scrolling (items slide under the
+                                  // cursor) and steals focus from the search input.
+                                  // Short-circuit that default with preventDefault
+                                  // so the search keeps focus until the user
+                                  // explicitly clicks.
+                                  onPointerMove={(e) => e.preventDefault()}
+                                  onPointerLeave={(e) => e.preventDefault()}
+                                  className="hover:bg-accent hover:text-accent-foreground"
+                                >
+                                  <DropdownRadioItemContent
+                                    label={`/${cmd.name}`}
+                                    description={cmd.description}
+                                  />
+                                </DropdownMenuItem>
+                              ))
+                            )}
+                          </div>
+                        </DropdownMenuSubContent>
+                      </DropdownMenuSub>
+                      {/* A custom-dir pi can't have skills managed by codeg's
+                          default-dir store, so hide these shortcuts instead of
+                          offering ones that lock with a Settings path the
+                          Experts/Office matrices also hide for this agent. */}
+                      {skillManagementSupported && (
+                        <>
+                          <DropdownMenuSub>
+                            <DropdownMenuSubTrigger
+                              disabled={expertsSorted.length === 0}
+                            >
+                              <Sparkles className="size-4" />
+                              {t("experts")}
+                            </DropdownMenuSubTrigger>
+                            <DropdownMenuSubContent
+                              className="min-w-44 overflow-y-auto"
+                              style={{
+                                maxWidth: "min(20rem, calc(100vw - 1rem))",
+                                maxHeight:
+                                  "min(32rem, var(--radix-dropdown-menu-content-available-height))",
+                              }}
+                            >
+                              {expertsSorted.map((item) => {
+                                const Icon = getExpertIcon(item.metadata.icon)
+                                const label =
+                                  pickLocalized(
+                                    item.metadata.display_name,
+                                    locale
+                                  ) || item.metadata.id
+                                return (
+                                  <DropdownMenuItem
+                                    key={item.metadata.id}
+                                    onClick={() => handleExpertShortcut(item)}
+                                  >
+                                    <Icon className="size-4" />
+                                    <span className="flex-1 truncate">
+                                      {label}
+                                    </span>
+                                    {isSkillLocked(item.metadata.id) && (
+                                      <Lock className="ml-auto size-3.5 shrink-0 text-muted-foreground/70" />
+                                    )}
+                                  </DropdownMenuItem>
+                                )
+                              })}
+                            </DropdownMenuSubContent>
+                          </DropdownMenuSub>
+                          <DropdownMenuSub>
+                            <DropdownMenuSubTrigger>
+                              <FileStack className="size-4" />
+                              {t("office")}
+                            </DropdownMenuSubTrigger>
+                            <DropdownMenuSubContent
+                              className="min-w-44 overflow-y-auto"
+                              style={{
+                                maxWidth: "min(20rem, calc(100vw - 1rem))",
+                                maxHeight:
+                                  "min(32rem, var(--radix-dropdown-menu-content-available-height))",
+                              }}
+                            >
+                              {OFFICE_ACTIONS.map((action) => {
+                                const Icon = action.icon
+                                const label = tQa(
+                                  action.id as Parameters<typeof tQa>[0]
+                                )
+                                return (
+                                  <DropdownMenuItem
+                                    key={action.id}
+                                    onClick={() => handleOfficeShortcut(action)}
+                                  >
+                                    <Icon className="size-4" />
+                                    <span className="flex-1 truncate">
+                                      {label}
+                                    </span>
+                                    {isSkillLocked(action.skillId) && (
+                                      <Lock className="ml-auto size-3.5 shrink-0 text-muted-foreground/70" />
+                                    )}
+                                  </DropdownMenuItem>
+                                )
+                              })}
+                            </DropdownMenuSubContent>
+                          </DropdownMenuSub>
+                        </>
+                      )}
                     </DropdownMenuContent>
                   </DropdownMenu>
+                  {hasInlineSelectors && (
+                    <div className="hidden min-w-0 items-end gap-1 @[30rem]:flex">
+                      {inlineSelectorItems}
+                    </div>
+                  )}
+                  {hasAnySelector && (
+                    <div
+                      className={cn(
+                        "flex",
+                        hasInlineSelectors && "@[30rem]:hidden"
+                      )}
+                    >
+                      <Popover
+                        open={collapsedSelectorsOpen}
+                        onOpenChange={setCollapsedSelectorsOpen}
+                      >
+                        <PopoverTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            className="shrink-0"
+                            title={t("agentSettings")}
+                            aria-label={t("agentSettings")}
+                          >
+                            {agentType ? (
+                              <AgentIcon
+                                agentType={agentType}
+                                className="size-3"
+                              />
+                            ) : (
+                              <Cog className="size-3" />
+                            )}
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent
+                          side="top"
+                          align="start"
+                          aria-label={t("agentSettings")}
+                          className="w-[22rem] max-w-[calc(100vw-1rem)] p-1"
+                        >
+                          {showConfigLoading && (
+                            <SelectorLoadingChip label={t("loadingSettings")} />
+                          )}
+                          {showModeLoading && (
+                            <SelectorLoadingChip label={t("loadingMode")} />
+                          )}
+                          {collapsedSettings.length > 0 && (
+                            <SessionSelectorsPanel
+                              settings={collapsedSettings}
+                              settingsLabel={t("agentSettings")}
+                              onAfterSelect={() =>
+                                setCollapsedSelectorsOpen(false)
+                              }
+                            />
+                          )}
+                        </PopoverContent>
+                      </Popover>
+                    </div>
+                  )}
+                </div>
+                <div className="shrink-0">{actionButtons}</div>
+              </div>
+              {showDragActive && (
+                <div className="pointer-events-none absolute inset-1 z-20 flex items-center justify-center rounded-md border border-dashed border-primary/50 bg-background/80 text-xs text-muted-foreground">
+                  {t("dropFilesToAttach")}
                 </div>
               )}
             </div>
-            <div className="shrink-0">{actionButtons}</div>
-          </div>
-          {showDragActive && (
-            <div className="pointer-events-none absolute inset-1 z-20 flex items-center justify-center rounded-md border border-dashed border-primary/50 bg-background/80 text-xs text-muted-foreground">
-              {t("dropFilesToAttach")}
-            </div>
-          )}
-        </div>
+          </ContextMenuTrigger>
+          <ContextMenuContent>
+            <ContextMenuItem
+              disabled={disabled || !contextSelectionActive}
+              onSelect={() => void handleContextCut()}
+            >
+              <Scissors className="size-4" />
+              {t("cut")}
+            </ContextMenuItem>
+            <ContextMenuItem
+              disabled={!contextSelectionActive}
+              onSelect={() => void handleContextCopy()}
+            >
+              <Copy className="size-4" />
+              {t("copy")}
+            </ContextMenuItem>
+            <ContextMenuItem
+              disabled={disabled}
+              onSelect={() => {
+                void handleContextPaste()
+              }}
+            >
+              <ClipboardPaste className="size-4" />
+              {t("paste")}
+            </ContextMenuItem>
+            <ContextMenuItem
+              disabled={disabled}
+              onSelect={() => handleContextSelectAll()}
+            >
+              <TextSelect className="size-4" />
+              {t("selectAll")}
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+            <ContextMenuSub>
+              <ContextMenuSubTrigger disabled={disabled}>
+                <MessageSquareText className="size-4" />
+                {t("quickMessages")}
+              </ContextMenuSubTrigger>
+              <ContextMenuSubContent
+                className="min-w-40 overflow-y-auto"
+                style={{
+                  maxWidth: "min(20rem, calc(100vw - 1rem))",
+                  maxHeight:
+                    "min(32rem, var(--radix-context-menu-content-available-height))",
+                }}
+              >
+                {quickMessagesLoading && quickMessages.length === 0 ? (
+                  <div className="px-3 py-4 text-center text-xs text-muted-foreground">
+                    {t("quickMessagesLoading")}
+                  </div>
+                ) : quickMessages.length === 0 ? (
+                  <div className="px-3 py-4 text-center text-xs text-muted-foreground">
+                    {t("quickMessagesEmpty")}
+                  </div>
+                ) : (
+                  quickMessages.map((message) => (
+                    <ContextMenuItem
+                      key={message.id}
+                      onSelect={() => handleQuickMessageSelect(message)}
+                    >
+                      <span className="truncate">
+                        {message.title || (
+                          <span className="italic text-muted-foreground">
+                            {t("quickMessageUntitled")}
+                          </span>
+                        )}
+                      </span>
+                    </ContextMenuItem>
+                  ))
+                )}
+              </ContextMenuSubContent>
+            </ContextMenuSub>
+          </ContextMenuContent>
+        </ContextMenu>
         {hasFolderBranchPicker && (
           // `pl-2` mirrors the action bar's `px-2` so this row lines up with the
           // composer above. Kept on the rem scale (no px literals) so it tracks

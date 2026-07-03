@@ -1,5 +1,5 @@
 # Logs
-logs
+/logs/
 *.log
 npm-debug.log*
 yarn-debug.log*
@@ -37,6 +37,12 @@ coverage/
 *.snap.new
 .vitest-cache/
 
+# macOS signing material. Keep certificates and exported private keys out of git.
+*.cer
+*.csr
+*.p12
+certificate-base64.txt
+
 # Agent
 .claude
 .docs
@@ -46,3 +52,6 @@ docs/superpowers
 # The binaries are platform-specific build artifacts; ship them through
 # release.yml, not git.
 src-tauri/binaries/
+
+# pnpm local store (pnpm 11+)
+.pnpm-store/

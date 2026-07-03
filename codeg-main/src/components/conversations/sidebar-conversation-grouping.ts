@@ -1,5 +1,8 @@
 import type { DbConversationSummary } from "@/lib/types"
-import type { SidebarSortMode } from "@/lib/sidebar-view-mode-storage"
+import type {
+  SidebarSortMode,
+  SidebarSectionOrder,
+} from "@/lib/sidebar-view-mode-storage"
 
 export function parseTimestamp(value: string): number {
   const timestamp = Date.parse(value)
@@ -33,6 +36,35 @@ export function compareByCreatedAtDesc(
     parseTimestamp(right.updated_at) - parseTimestamp(left.updated_at)
   if (updatedDiff !== 0) return updatedDiff
 
+  return right.id - left.id
+}
+
+/**
+ * Oldest-created first, id as a stable tie-break — matching the backend
+ * `list_children` ORDER BY created_at ASC so a merged/inserted child lands where
+ * a refetch would put it.
+ */
+export function compareByCreatedAtAsc(
+  left: DbConversationSummary,
+  right: DbConversationSummary
+): number {
+  const createdDiff =
+    parseTimestamp(left.created_at) - parseTimestamp(right.created_at)
+  if (createdDiff !== 0) return createdDiff
+  return left.id - right.id
+}
+
+/**
+ * Most-recently-pinned first. Only ever applied to rows with a non-null
+ * `pinned_at` (the pinned bucket), so the empty-string fallback is just a guard.
+ */
+export function compareByPinnedAtDesc(
+  left: DbConversationSummary,
+  right: DbConversationSummary
+): number {
+  const diff =
+    parseTimestamp(right.pinned_at ?? "") - parseTimestamp(left.pinned_at ?? "")
+  if (diff !== 0) return diff
   return right.id - left.id
 }
 
@@ -165,6 +197,60 @@ export function groupByFolderWithReuse(
   return next
 }
 
+/**
+ * Select the pinned conversations (those with a non-null `pinned_at`), sorted
+ * most-recently-pinned first, reusing the previous array reference when the
+ * sorted membership is referentially unchanged.
+ *
+ * Same reference-stability motivation as {@link groupByFolderWithReuse}: a
+ * single status event replaces exactly one summary object, so this would
+ * otherwise build a fresh array each tick and defeat the Pinned section's memo.
+ * Built from the FULL `conversations` list (never the completed-filtered one): a
+ * pinned conversation stays in the Pinned section even when "Show completed" is
+ * off — pinning is an explicit "keep this handy" override of that filter.
+ *
+ * `prev` is the array returned by the last call (the caller threads it via a
+ * ref).
+ */
+export function selectPinnedWithReuse(
+  conversations: readonly DbConversationSummary[],
+  prev: DbConversationSummary[]
+): DbConversationSummary[] {
+  const next: DbConversationSummary[] = []
+  for (const conv of conversations) {
+    if (conv.pinned_at != null) next.push(conv)
+  }
+  next.sort(compareByPinnedAtDesc)
+  return arraysShallowEqual(prev, next) ? prev : next
+}
+
+/**
+ * Select the folderless "chat mode" conversations (`kind === "chat"`) for the
+ * flat "Chat" sidebar section. Sorted most-recently-updated first, with
+ * reference reuse (same motivation as {@link selectPinnedWithReuse}).
+ *
+ * Excludes pinned conversations (they surface in the Pinned section, an explicit
+ * override) and — unless `showCompleted` — completed ones, matching how
+ * `folderConversations` is filtered for the folders section.
+ *
+ * `prev` is the array returned last call (threaded via a ref by the caller).
+ */
+export function selectChatConversationsWithReuse(
+  conversations: readonly DbConversationSummary[],
+  showCompleted: boolean,
+  prev: DbConversationSummary[]
+): DbConversationSummary[] {
+  const next: DbConversationSummary[] = []
+  for (const conv of conversations) {
+    if (conv.pinned_at != null) continue
+    if (conv.kind !== "chat") continue
+    if (!showCompleted && conv.status === "completed") continue
+    next.push(conv)
+  }
+  next.sort(compareByUpdatedAtDesc)
+  return arraysShallowEqual(prev, next) ? prev : next
+}
+
 // ── Flat row model (Phase 2 virtualization) ─────────────────────────────────
 // The sidebar tree (folders → their conversation rows) is flattened into a
 // single linear array so it can be windowed by `virtua`. Each visible folder
@@ -185,56 +271,327 @@ export interface ConversationRow {
    * through the virtualized render. See {@link groupByFolderWithReuse}.
    */
   conversation: DbConversationSummary
+  /**
+   * Nesting depth in the delegation tree: 0 for a root / pinned / chat
+   * conversation, 1 for its direct delegation children, 2 for grandchildren,
+   * etc. Drives the card's per-level indent (a pure function of this number).
+   */
+  depth: number
 }
 
 export interface EmptyHintRow {
   kind: "empty"
   folderId: number
   /**
-   * Total (unfiltered) conversation count for this folder, used by the renderer
-   * to pick between the "empty folder" and "no unfinished conversations" hints.
+   * Total (unfiltered, pinned-excluded) conversation count for this folder, used
+   * by the renderer to pick between the "empty folder" and "no unfinished
+   * conversations" hints.
    */
   totalConversationCount: number
 }
 
-export type SidebarRow = FolderHeaderRow | ConversationRow | EmptyHintRow
+/**
+ * The single empty-state hint shown under an expanded but empty "Chat" section
+ * ("No chats yet"). Unlike {@link EmptyHintRow} it is folderless — chat
+ * conversations are a flat list — so it carries no folder id and renders with a
+ * flat (non-rail) indent.
+ */
+export interface ChatsEmptyRow {
+  kind: "chats-empty"
+}
 
 /**
- * Flatten folders + conversations into a single linear row list for windowing.
+ * A collapsible section heading. Three exist: "pinned" (above the folders, shown
+ * only when there are pinned conversations), "folders" (wraps the whole folder
+ * list), and "chats" (below the folders, a flat list of folderless chat-mode
+ * conversations, shown only when there are any). All live in the same flat row
+ * array so the single Virtualizer windows them like any other row — there is no
+ * separate, un-virtualized list.
+ */
+export interface SectionHeaderRow {
+  kind: "section"
+  section: "pinned" | "folders" | "chats"
+  expanded: boolean
+  /** Pinned count, folder count, or chat-conversation count — shown beside the title. */
+  count: number
+}
+
+/**
+ * A transient placeholder at the child indent, shown while a conversation's
+ * delegation children are being lazily fetched (between expand and the
+ * `listChildConversations` response). Replaced by the real child rows once
+ * loaded, or by nothing if the parent turns out to have no (live) children.
+ */
+export interface SubsessionLoadingRow {
+  kind: "subsession-loading"
+  parentId: number
+  depth: number
+}
+
+export type SidebarRow =
+  | SectionHeaderRow
+  | FolderHeaderRow
+  | ConversationRow
+  | EmptyHintRow
+  | ChatsEmptyRow
+  | SubsessionLoadingRow
+
+const MAX_RENDER_DEPTH = 32
+
+// Shared empty defaults so callers (and existing tests) that don't track
+// sub-session expansion can omit the two params without allocating per call —
+// the row output is then identical to the pre-subtree flat model.
+const EMPTY_EXPANDED: ReadonlySet<number> = new Set()
+const EMPTY_CHILDREN: ReadonlyMap<number, readonly DbConversationSummary[]> =
+  new Map()
+
+/**
+ * Merge a freshly-fetched children snapshot with child summaries already applied
+ * from live events (buffered into the lazy-load placeholder while the fetch was
+ * in flight). Keyed by id with the live event winning, so a child created or
+ * updated after the fetch's DB query is never lost — closing the lazy-load
+ * lost-update race. Sorted created_at-ascending to match `list_children`.
+ */
+export function mergeChildrenById(
+  snapshot: readonly DbConversationSummary[],
+  buffered: readonly DbConversationSummary[]
+): DbConversationSummary[] {
+  const byId = new Map<number, DbConversationSummary>()
+  for (const c of snapshot) byId.set(c.id, c)
+  for (const b of buffered) byId.set(b.id, b)
+  return [...byId.values()].sort(compareByCreatedAtAsc)
+}
+
+/**
+ * Push a conversation row and — when it is expanded and its delegation children
+ * are cached — recursively push its subtree (depth+1 per level). Bounded by
+ * `conversationExpanded` (a finite, user-controlled set) and by what is actually
+ * in `childrenByParent` (only fetched parents descend), so it always terminates;
+ * `MAX_RENDER_DEPTH` is defense-in-depth against pathological data. The
+ * `parent_id` chain is a tree by construction (set once at insert, never
+ * updated), so cycles cannot occur.
+ *
+ * Child summaries are pushed by reference (never copied), exactly like root
+ * rows, so a status event replacing one child keeps every sibling's identity and
+ * the card `memo` still bails out through the virtualized render.
+ */
+function pushConversationRow(
+  rows: SidebarRow[],
+  conversation: DbConversationSummary,
+  depth: number,
+  conversationExpanded: ReadonlySet<number>,
+  childrenByParent: ReadonlyMap<number, readonly DbConversationSummary[]>,
+  childrenLoading: ReadonlySet<number>
+): void {
+  rows.push({ kind: "conversation", conversation, depth })
+  if (
+    depth >= MAX_RENDER_DEPTH ||
+    conversation.child_count <= 0 ||
+    !conversationExpanded.has(conversation.id)
+  ) {
+    return
+  }
+  const kids = childrenByParent.get(conversation.id)
+  // Spinner while: not fetched yet (undefined), OR an in-flight placeholder
+  // (empty array still loading — events may not have buffered any child yet).
+  if (
+    kids === undefined ||
+    (kids.length === 0 && childrenLoading.has(conversation.id))
+  ) {
+    rows.push({
+      kind: "subsession-loading",
+      parentId: conversation.id,
+      depth: depth + 1,
+    })
+    return
+  }
+  // Loaded (possibly merged with mid-flight events). An empty array that is NOT
+  // loading means a stale child_count → the `for` renders nothing, self-healing.
+  for (const kid of kids) {
+    pushConversationRow(
+      rows,
+      kid,
+      depth + 1,
+      conversationExpanded,
+      childrenByParent,
+      childrenLoading
+    )
+  }
+}
+
+/**
+ * Flatten the (optional) pinned section and the folders section into a single
+ * linear row list for windowing by the one Virtualizer — pinned conversations
+ * are ordinary conversation rows in the SAME array, never a separate list.
  *
  * Pure and deliberately **does not take `now`**: the per-minute `now` tick that
  * refreshes relative time labels must not rebuild this array (that would defeat
  * the Phase 1 memo chain). `timeLabel` stays computed at the row renderer from
  * the shared `now` against the row's `conversation`.
  *
- * Order follows `orderedFolderIds`. A collapsed folder contributes only its
- * header; an expanded empty folder contributes header + one empty-hint row; an
- * expanded non-empty folder contributes header + its (already sorted) bucket.
+ * Structure (top to bottom): the "Pinned" section (when present) is always
+ * first; the "Folders" and "Chat" sections follow in the order set by
+ * `sectionOrder` (default `folders-first` = Folders then Chat; `chats-first`
+ * swaps them). Each section's own presence/expansion rules are unchanged by
+ * that order:
+ * - The "Pinned" section header + its conversations appear only when `pinned`
+ *   is non-empty, and its rows only when `pinnedExpanded`.
+ * - The "Folders" section header appears whenever there are folders; its folder
+ *   rows appear only when `foldersExpanded`. Within it, order follows
+ *   `orderedFolderIds`: a collapsed folder contributes only its header; an
+ *   expanded empty folder contributes header + one empty-hint row; an expanded
+ *   non-empty folder contributes header + its (already sorted) bucket. `byFolder`
+ *   / `folderTotalCounts` exclude pinned conversations (they live in the Pinned
+ *   section), so a folder whose only conversations are pinned reads as empty.
+ * - The "Chat" section header ALWAYS appears (even with zero chat
+ *   conversations), so the section is a permanent entry point — its New-chat
+ *   affordance and an empty hint stay reachable. When expanded and empty it
+ *   contributes a single `chats-empty` hint row; otherwise its (flat, folderless)
+ *   conversation rows. Pinned chat conversations live in the Pinned section, so
+ *   they are excluded from `chatConversations`.
  */
-export function buildRows(
-  orderedFolderIds: readonly number[],
-  byFolder: Map<number, DbConversationSummary[]>,
-  folderExpanded: Record<number, boolean>,
+export function buildRows(args: {
+  pinned: readonly DbConversationSummary[]
+  pinnedExpanded: boolean
+  orderedFolderIds: readonly number[]
+  byFolder: Map<number, DbConversationSummary[]>
+  folderExpanded: Record<number, boolean>
   folderTotalCounts: Map<number, number>
-): SidebarRow[] {
+  foldersExpanded: boolean
+  chatConversations: readonly DbConversationSummary[]
+  chatsExpanded: boolean
+  /** Vertical order of the Folders and Chat sections. The Pinned section (when
+   *  present) always stays on top regardless. Optional — omitted (e.g. in
+   *  tests) defaults to `folders-first`, the historical layout. */
+  sectionOrder?: SidebarSectionOrder
+  /** Ids whose delegation subtree is open. A conversation row with
+   *  `child_count > 0` and id in this set recurses into its cached children.
+   *  Optional — omitted (e.g. in tests) means nothing is expanded. */
+  conversationExpanded?: ReadonlySet<number>
+  /** Lazily-fetched direct children keyed by parent id. Absent key = not yet
+   *  fetched (renders a loading row when expanded); empty array = no live
+   *  children (renders nothing — self-heals stale `child_count`). Optional. */
+  childrenByParent?: ReadonlyMap<number, readonly DbConversationSummary[]>
+  /** Parent ids whose children are currently being fetched. With an empty
+   *  placeholder array in `childrenByParent`, membership here renders the loading
+   *  spinner; an empty array WITHOUT membership is a settled-empty subtree
+   *  (renders nothing). Optional. */
+  childrenLoading?: ReadonlySet<number>
+}): SidebarRow[] {
+  const {
+    pinned,
+    pinnedExpanded,
+    orderedFolderIds,
+    byFolder,
+    folderExpanded,
+    folderTotalCounts,
+    foldersExpanded,
+    chatConversations,
+    chatsExpanded,
+    sectionOrder = "folders-first",
+    conversationExpanded = EMPTY_EXPANDED,
+    childrenByParent = EMPTY_CHILDREN,
+    childrenLoading = EMPTY_EXPANDED,
+  } = args
   const rows: SidebarRow[] = []
-  for (const folderId of orderedFolderIds) {
-    rows.push({ kind: "folder", folderId })
-    const expanded = folderExpanded[folderId] ?? true
-    if (!expanded) continue
-    const convs = byFolder.get(folderId)
-    if (!convs || convs.length === 0) {
-      rows.push({
-        kind: "empty",
-        folderId,
-        totalConversationCount: folderTotalCounts.get(folderId) ?? 0,
-      })
-      continue
-    }
-    for (const conv of convs) {
-      rows.push({ kind: "conversation", conversation: conv })
+
+  if (pinned.length > 0) {
+    rows.push({
+      kind: "section",
+      section: "pinned",
+      expanded: pinnedExpanded,
+      count: pinned.length,
+    })
+    if (pinnedExpanded) {
+      for (const conv of pinned) {
+        pushConversationRow(
+          rows,
+          conv,
+          0,
+          conversationExpanded,
+          childrenByParent,
+          childrenLoading
+        )
+      }
     }
   }
+
+  // The Folders and Chat sections sit below the (always-top) Pinned section in
+  // an order the user controls via `sectionOrder`. Each is its own closure so
+  // the order they emit into `rows` is a one-line swap below — the conditional
+  // logic inside each (folders gated on count, chats header always present)
+  // stays intact regardless of position.
+  const pushFolders = () => {
+    if (orderedFolderIds.length === 0) return
+    rows.push({
+      kind: "section",
+      section: "folders",
+      expanded: foldersExpanded,
+      count: orderedFolderIds.length,
+    })
+    if (foldersExpanded) {
+      for (const folderId of orderedFolderIds) {
+        rows.push({ kind: "folder", folderId })
+        const expanded = folderExpanded[folderId] ?? true
+        if (!expanded) continue
+        const convs = byFolder.get(folderId)
+        if (!convs || convs.length === 0) {
+          rows.push({
+            kind: "empty",
+            folderId,
+            totalConversationCount: folderTotalCounts.get(folderId) ?? 0,
+          })
+          continue
+        }
+        for (const conv of convs) {
+          pushConversationRow(
+            rows,
+            conv,
+            0,
+            conversationExpanded,
+            childrenByParent,
+            childrenLoading
+          )
+        }
+      }
+    }
+  }
+
+  const pushChats = () => {
+    // The Chat section header is always present (a permanent entry point),
+    // unlike the conditional Pinned/Folders headers.
+    rows.push({
+      kind: "section",
+      section: "chats",
+      expanded: chatsExpanded,
+      count: chatConversations.length,
+    })
+    if (chatsExpanded) {
+      if (chatConversations.length === 0) {
+        rows.push({ kind: "chats-empty" })
+      } else {
+        for (const conv of chatConversations) {
+          pushConversationRow(
+            rows,
+            conv,
+            0,
+            conversationExpanded,
+            childrenByParent,
+            childrenLoading
+          )
+        }
+      }
+    }
+  }
+
+  if (sectionOrder === "chats-first") {
+    pushChats()
+    pushFolders()
+  } else {
+    pushFolders()
+    pushChats()
+  }
+
   return rows
 }
 

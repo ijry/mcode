@@ -4,6 +4,7 @@ import {
   adaptMessageTurn,
   createMessageTurnAdapter,
   dropHiddenFeedbackChecks,
+  extractUserResourcesFromText,
   groupConsecutiveDelegationStatus,
   groupGoalRuns,
   groupConsecutiveToolCalls,
@@ -131,6 +132,29 @@ describe("groupConsecutiveToolCalls", () => {
       "tool-call",
     ])
   })
+
+  it("leaves plan-mode tools standalone (no '思考 N 次' tool-group)", () => {
+    const out = groupConsecutiveToolCalls([
+      poll("read"),
+      poll("EnterPlanMode"),
+      poll("read"),
+    ])
+
+    expect(out.map((p) => p.type)).toEqual([
+      "tool-group",
+      "tool-call",
+      "tool-group",
+    ])
+  })
+
+  it("does not wrap a lone plan-mode tool into a group", () => {
+    expect(
+      groupConsecutiveToolCalls([poll("EnterPlanMode")]).map((p) => p.type)
+    ).toEqual(["tool-call"])
+    expect(
+      groupConsecutiveToolCalls([poll("switch_mode")]).map((p) => p.type)
+    ).toEqual(["tool-call"])
+  })
 })
 
 describe("dropHiddenFeedbackChecks", () => {
@@ -233,14 +257,26 @@ describe("groupGoalRuns", () => {
     expect(goalRun.isRunning).toBe(false)
   })
 
-  it("wraps an unfinished goal run as running", () => {
-    const out = groupGoalRuns([poll("create_goal"), text])
+  it("wraps an unfinished goal run as running while streaming", () => {
+    const out = groupGoalRuns([poll("create_goal"), text], true)
 
     expect(out).toHaveLength(1)
     const goalRun = goalRunOf(out[0])
     expect(goalRun.end).toBeNull()
     expect(goalRun.items).toEqual([text])
     expect(goalRun.isRunning).toBe(true)
+  })
+
+  it("settles an unfinished goal run when not streaming", () => {
+    // codex leaves a `/goal` active without a closing update_goal, so a stopped
+    // turn or a reloaded conversation must NOT shimmer the capsule forever.
+    const out = groupGoalRuns([poll("create_goal"), text], false)
+
+    expect(out).toHaveLength(1)
+    const goalRun = goalRunOf(out[0])
+    expect(goalRun.end).toBeNull()
+    expect(goalRun.items).toEqual([text])
+    expect(goalRun.isRunning).toBe(false)
   })
 
   it("does not mutate a reopened unfinished goal run when closing across turns", () => {
@@ -635,6 +671,53 @@ describe("adaptMessageTurn plan handling", () => {
     ])
   })
 
+  it("drops an empty redacted-thinking block and renders EnterPlanMode standalone (history)", () => {
+    const adapted = adaptMessageTurn(
+      {
+        id: "plan-mode",
+        role: "assistant",
+        timestamp: "2026-06-29T00:00:00.000Z",
+        blocks: [
+          { type: "thinking", text: "" },
+          { type: "text", text: "I'll plan it first" },
+          {
+            type: "tool_use",
+            tool_use_id: "epm-1",
+            tool_name: "EnterPlanMode",
+            input_preview: "{}",
+          },
+        ],
+      },
+      msgText,
+      false
+    )
+
+    // Empty thinking is dropped; EnterPlanMode is a standalone tool-call (not a
+    // "思考 N 次" tool-group).
+    expect(adapted.content.map((p) => p.type)).toEqual(["text", "tool-call"])
+    const tc = adapted.content[1]
+    if (tc.type !== "tool-call") throw new Error("expected a tool-call")
+    expect(tc.toolName).toBe("EnterPlanMode")
+  })
+
+  it("keeps an empty thinking block while streaming (live Thinking… indicator)", () => {
+    const adapted = adaptMessageTurn(
+      {
+        id: "plan-mode-live",
+        role: "assistant",
+        timestamp: "2026-06-29T00:00:00.000Z",
+        blocks: [{ type: "thinking", text: "" }],
+      },
+      msgText,
+      true
+    )
+
+    expect(adapted.content.map((p) => p.type)).toEqual(["reasoning"])
+    const reasoning = adapted.content[0]
+    if (reasoning.type !== "reasoning") throw new Error("expected a reasoning")
+    expect(reasoning.isStreaming).toBe(true)
+  })
+
   it("converts a persisted TodoWrite tool_use (+ its result) into a single plan part with no orphan tool-result", () => {
     const adapted = adaptMessageTurn(
       {
@@ -720,5 +803,503 @@ describe("adaptMessageTurn plan handling", () => {
     )
 
     expect(adapted.content.every((p) => p.type !== "plan")).toBe(true)
+  })
+
+  it("converts a persisted Kimi Code TodoList write (title/status shape) into a single plan part", () => {
+    const adapted = adaptMessageTurn(
+      {
+        id: "hist-kimi-plan",
+        role: "assistant",
+        timestamp: "2026-06-02T00:00:00.000Z",
+        blocks: [
+          {
+            type: "tool_use",
+            tool_use_id: "kc-todo-1",
+            tool_name: "TodoList",
+            input_preview: JSON.stringify({
+              todos: [
+                { status: "in_progress", title: "Confirm 401 behavior" },
+                { status: "pending", title: "Unify request.js" },
+                { status: "done", title: "Verify changes" },
+              ],
+            }),
+          },
+          {
+            type: "tool_result",
+            tool_use_id: "kc-todo-1",
+            output_preview: "Todo list updated.",
+            is_error: false,
+          },
+        ],
+      },
+      msgText,
+      false
+    )
+
+    expect(adapted.content.map((p) => p.type)).toEqual(["plan"])
+    expect(adapted.content.some((p) => p.type === "tool-result")).toBe(false)
+    const plan = adapted.content[0]
+    if (plan.type !== "plan") throw new Error("expected a plan part")
+    expect(plan.entries).toEqual([
+      {
+        content: "Confirm 401 behavior",
+        status: "in_progress",
+        priority: "medium",
+      },
+      { content: "Unify request.js", status: "pending", priority: "medium" },
+      { content: "Verify changes", status: "completed", priority: "medium" },
+    ])
+  })
+
+  it.each([
+    ["read", "{}"],
+    ["clear", JSON.stringify({ todos: [] })],
+  ])(
+    "keeps a persisted Kimi TodoList %s (no entries) as a tool card, not a plan part",
+    (_label, inputPreview) => {
+      const adapted = adaptMessageTurn(
+        {
+          id: "hist-kimi-noop",
+          role: "assistant",
+          timestamp: "2026-06-02T00:00:00.000Z",
+          blocks: [
+            {
+              type: "tool_use",
+              tool_use_id: "kc-todo-1",
+              tool_name: "TodoList",
+              input_preview: inputPreview,
+            },
+            {
+              type: "tool_result",
+              tool_use_id: "kc-todo-1",
+              output_preview: "Todo list (empty).",
+              is_error: false,
+            },
+          ],
+        },
+        msgText,
+        false
+      )
+
+      expect(adapted.content.every((p) => p.type !== "plan")).toBe(true)
+      // The non-write TodoList renders through the normal tool-card path
+      // (wrapped in a tool-group by groupConsecutiveToolCalls).
+      expect(adapted.content.some((p) => p.type === "tool-group")).toBe(true)
+    }
+  )
+})
+
+describe("adaptMessageTurn — image tool results", () => {
+  const msgText = {
+    attachedResources: "Attached resources",
+    toolCallFailed: "Tool failed",
+  }
+
+  it("renders a Read whose result carries an image as a generated-image part (matching the live path), not a Read tool card", () => {
+    const adapted = adaptMessageTurn(
+      {
+        id: "read-img",
+        role: "assistant",
+        timestamp: "2026-06-02T00:00:00.000Z",
+        blocks: [
+          {
+            type: "tool_use",
+            tool_use_id: "toolu_1",
+            tool_name: "Read",
+            input_preview: JSON.stringify({ file_path: "clean-v1.png" }),
+          },
+          {
+            type: "tool_result",
+            tool_use_id: "toolu_1",
+            output_preview: null,
+            is_error: false,
+            images: [{ data: "QUJD", mime_type: "image/png" }],
+          },
+        ],
+      },
+      msgText,
+      false
+    )
+
+    expect(adapted.content.map((p) => p.type)).toEqual(["generated-image"])
+    expect(adapted.content.some((p) => p.type === "tool-result")).toBe(false)
+    expect(adapted.content.some((p) => p.type === "tool-group")).toBe(false)
+    const part = adapted.content[0]
+    if (part.type !== "generated-image") {
+      throw new Error("expected a generated-image part")
+    }
+    expect(part.image).not.toBeNull()
+    expect(part.image?.data).toBe("QUJD")
+    expect(part.image?.mime_type).toBe("image/png")
+    expect(part.revisedPrompt).toBeNull()
+  })
+
+  it("emits one generated-image part per image (multi-page PDF read)", () => {
+    const adapted = adaptMessageTurn(
+      {
+        id: "read-pdf",
+        role: "assistant",
+        timestamp: "2026-06-02T00:00:00.000Z",
+        blocks: [
+          {
+            type: "tool_use",
+            tool_use_id: "toolu_2",
+            tool_name: "Read",
+            input_preview: JSON.stringify({ file_path: "doc.pdf" }),
+          },
+          {
+            type: "tool_result",
+            tool_use_id: "toolu_2",
+            output_preview: null,
+            is_error: false,
+            images: [
+              { data: "UAGE1", mime_type: "image/png" },
+              { data: "UAGE2", mime_type: "image/png" },
+            ],
+          },
+        ],
+      },
+      msgText,
+      false
+    )
+
+    expect(adapted.content.map((p) => p.type)).toEqual([
+      "generated-image",
+      "generated-image",
+    ])
+  })
+
+  it("leaves a normal text Read result as a tool card (no regression)", () => {
+    const adapted = adaptMessageTurn(
+      {
+        id: "read-text",
+        role: "assistant",
+        timestamp: "2026-06-02T00:00:00.000Z",
+        blocks: [
+          {
+            type: "tool_use",
+            tool_use_id: "toolu_3",
+            tool_name: "Read",
+            input_preview: JSON.stringify({ file_path: "notes.txt" }),
+          },
+          {
+            type: "tool_result",
+            tool_use_id: "toolu_3",
+            output_preview: "hello world",
+            is_error: false,
+          },
+        ],
+      },
+      msgText,
+      false
+    )
+
+    expect(adapted.content.some((p) => p.type === "generated-image")).toBe(
+      false
+    )
+    // A lone tool call folds into a tool-group.
+    const group = adapted.content.find((p) => p.type === "tool-group")
+    expect(group).toBeDefined()
+    if (group?.type !== "tool-group") throw new Error("expected tool-group")
+    expect(group.items[0]?.toolName).toBe("Read")
+  })
+
+  it("keeps the running tool card (spinner) when the image result's tool is still in-flight", () => {
+    const adapted = adaptMessageTurn(
+      {
+        id: "read-img-live",
+        role: "assistant",
+        timestamp: "2026-06-02T00:00:00.000Z",
+        blocks: [
+          {
+            type: "tool_use",
+            tool_use_id: "toolu_4",
+            tool_name: "Read",
+            input_preview: JSON.stringify({ file_path: "clean.png" }),
+          },
+          {
+            type: "tool_result",
+            tool_use_id: "toolu_4",
+            output_preview: null,
+            is_error: false,
+            images: [{ data: "QUJD", mime_type: "image/png" }],
+          },
+        ],
+      },
+      msgText,
+      true,
+      new Set(["toolu_4"])
+    )
+
+    expect(adapted.content.some((p) => p.type === "generated-image")).toBe(
+      false
+    )
+    const group = adapted.content.find((p) => p.type === "tool-group")
+    if (group?.type !== "tool-group") throw new Error("expected tool-group")
+    expect(group.items[0]?.state).toBe("input-available")
+  })
+})
+
+describe("extractUserResourcesFromText — codeg references stay inline", () => {
+  it("keeps a codeg://agent link inline (the @-prefixed label no longer lifts it to a chip)", () => {
+    const input = "ask [@Codex](codeg://agent/codex) to review"
+    const { text, resources } = extractUserResourcesFromText(input)
+    expect(resources).toEqual([])
+    expect(text).toBe(input)
+  })
+
+  it("keeps codeg://session and codeg://commit links inline", () => {
+    const session = extractUserResourcesFromText(
+      "see [#42](codeg://session/claude_code_abc)"
+    )
+    expect(session.resources).toEqual([])
+    expect(session.text).toBe("see [#42](codeg://session/claude_code_abc)")
+
+    const commit = extractUserResourcesFromText(
+      "from [a1b2c3d](codeg://commit/%2Frepo@a1b2c3ddeadbeef)"
+    )
+    expect(commit.resources).toEqual([])
+    expect(commit.text).toBe(
+      "from [a1b2c3d](codeg://commit/%2Frepo@a1b2c3ddeadbeef)"
+    )
+  })
+
+  it("keeps a codeg://session link inline even when its label starts with @ (a session titled '@…')", () => {
+    const input = "ping [@周报](codeg://session/codex_99)"
+    const { text, resources } = extractUserResourcesFromText(input)
+    expect(resources).toEqual([])
+    expect(text).toBe(input)
+  })
+
+  it("keeps a file:// link inline AND copies it to the resource row", () => {
+    const { text, resources } = extractUserResourcesFromText(
+      "look at [foo.ts](file:///x/foo.ts) here"
+    )
+    // Copied to the row (original grey-chip attachment list)…
+    expect(resources).toEqual([
+      { name: "foo.ts", uri: "file:///x/foo.ts", mime_type: null },
+    ])
+    // …and left in place in the prose so it still renders as an inline badge.
+    expect(text).toBe("look at [foo.ts](file:///x/foo.ts) here")
+  })
+
+  it("chips a file:// link with a space (CommonMark angle-bracket destination)", () => {
+    // `referenceToMarkdown` wraps uris with spaces/parens in <…>; the row must
+    // still pick the file up (the bare-destination regex would have missed it).
+    const { text, resources } = extractUserResourcesFromText(
+      "see [a b.ts](<file:///x/a b.ts>) please"
+    )
+    expect(resources).toEqual([
+      { name: "a b.ts", uri: "file:///x/a b.ts", mime_type: null },
+    ])
+    // The original bracketed form is preserved inline (Streamdown parses it).
+    expect(text).toBe("see [a b.ts](<file:///x/a b.ts>) please")
+  })
+
+  it("unescapes a filename with parentheses for the row chip (e.g. `Screenshot (1).png`)", () => {
+    // `referenceToMarkdown` backslash-escapes label punctuation and wraps the
+    // space/paren uri in <…>, so the text carries `[Screenshot \(1\).png](<…>)`.
+    // The chip name must read cleanly, not leak the escaping backslashes.
+    const { text, resources } = extractUserResourcesFromText(
+      "look at [Screenshot \\(1\\).png](<file:///x/Screenshot (1).png>) here"
+    )
+    expect(resources).toEqual([
+      {
+        name: "Screenshot (1).png",
+        uri: "file:///x/Screenshot (1).png",
+        mime_type: null,
+      },
+    ])
+    // Inline form (with its escaping) is preserved for Streamdown to render.
+    expect(text).toBe(
+      "look at [Screenshot \\(1\\).png](<file:///x/Screenshot (1).png>) here"
+    )
+  })
+
+  it("chips a filename containing `]` (escaped as `\\]` in the label)", () => {
+    // The escaped `]` would defeat a `[^\]]+` label regex, dropping the chip; the
+    // escape-aware regex matches it and the unescaped name reads `a]b.ts`.
+    const { text, resources } = extractUserResourcesFromText(
+      "open [a\\]b.ts](file:///x/a]b.ts) now"
+    )
+    expect(resources).toEqual([
+      { name: "a]b.ts", uri: "file:///x/a]b.ts", mime_type: null },
+    ])
+    expect(text).toBe("open [a\\]b.ts](file:///x/a]b.ts) now")
+  })
+
+  it("preserves consecutive spaces in a file path verbatim (no whitespace collapse)", () => {
+    // A filename with two spaces must round-trip byte-for-byte: collapsing the
+    // run would rewrite the inline link's path and break the badge target.
+    const { text, resources } = extractUserResourcesFromText(
+      "open [a  b.ts](<file:///x/a  b.ts>) now"
+    )
+    expect(resources).toEqual([
+      { name: "a  b.ts", uri: "file:///x/a  b.ts", mime_type: null },
+    ])
+    expect(text).toBe("open [a  b.ts](<file:///x/a  b.ts>) now")
+  })
+
+  it("keeps a leading `@` in a file name (scoped-package path), not a mention", () => {
+    // A file whose name starts with `@` (e.g. a scoped-package dir) must keep the
+    // `@` — the file uri takes precedence over the `@`-mention heuristic.
+    const { text, resources } = extractUserResourcesFromText(
+      "see [@scope](file:///repo/node_modules/@scope) here"
+    )
+    expect(resources).toEqual([
+      {
+        name: "@scope",
+        uri: "file:///repo/node_modules/@scope",
+        mime_type: null,
+      },
+    ])
+    expect(text).toBe("see [@scope](file:///repo/node_modules/@scope) here")
+  })
+
+  it("does not let the blocked-mention pass corrupt a file link containing `[blocked]`", () => {
+    // Pathological filename `@foo [blocked].txt`: the blocked-`@mention` pre-pass
+    // must NOT run inside the kept file link, so the inline link survives verbatim
+    // and the chip name is the real (unescaped) filename.
+    const { text, resources } = extractUserResourcesFromText(
+      "see [@foo \\[blocked\\].txt](<file:///x/@foo [blocked].txt>) ok"
+    )
+    expect(resources).toEqual([
+      {
+        name: "@foo [blocked].txt",
+        uri: "file:///x/@foo [blocked].txt",
+        mime_type: null,
+      },
+    ])
+    expect(text).toBe(
+      "see [@foo \\[blocked\\].txt](<file:///x/@foo [blocked].txt>) ok"
+    )
+  })
+
+  it("strips a real blocked @-mention in prose while keeping an adjacent file link", () => {
+    const { text, resources } = extractUserResourcesFromText(
+      "@secret.txt [blocked: outside] see [foo.ts](file:///x/foo.ts)"
+    )
+    expect(resources).toEqual([
+      { name: "secret.txt", uri: "secret.txt", mime_type: null },
+      { name: "foo.ts", uri: "file:///x/foo.ts", mime_type: null },
+    ])
+    expect(text).toBe("see [foo.ts](file:///x/foo.ts)")
+  })
+
+  it("does not corrupt a typed <file://…> angle-string containing [blocked]", () => {
+    // A bare angle-wrapped uri is not a Markdown link; the blocked-mention pass
+    // must skip `<…>` spans so it can't strip an `@…[blocked…]` substring out of
+    // a typed uri and rewrite the path.
+    const { text, resources } = extractUserResourcesFromText(
+      "raw <file:///x/@foo [blocked].txt> ok"
+    )
+    expect(resources).toEqual([])
+    expect(text).toBe("raw <file:///x/@foo [blocked].txt> ok")
+  })
+
+  it("chips a codeg://embedded attachment while keeping its inert badge inline", () => {
+    const { text, resources } = extractUserResourcesFromText(
+      "here [report.pdf](codeg://embedded/abc-123) ok"
+    )
+    expect(resources).toEqual([
+      { name: "report.pdf", uri: "codeg://embedded/abc-123", mime_type: null },
+    ])
+    expect(text).toBe("here [report.pdf](codeg://embedded/abc-123) ok")
+  })
+
+  it("still lifts blocked @-mentions to the resource list", () => {
+    const { resources } = extractUserResourcesFromText(
+      "@secret.txt [blocked: outside workspace]"
+    )
+    expect(resources).toEqual([
+      { name: "secret.txt", uri: "secret.txt", mime_type: null },
+    ])
+  })
+
+  it("keeps both file:// and session links inline; only the file is also chipped", () => {
+    const { text, resources } = extractUserResourcesFromText(
+      "compare [foo.ts](file:///x/foo.ts) with [#42](codeg://session/codex_abc)"
+    )
+    expect(resources).toEqual([
+      { name: "foo.ts", uri: "file:///x/foo.ts", mime_type: null },
+    ])
+    expect(text).toContain("[#42](codeg://session/codex_abc)")
+    expect(text).toContain("[foo.ts](file:///x/foo.ts)")
+  })
+
+  it("recovers a file chip after stray/unbalanced brackets in prose", () => {
+    // The unmatched `[oops` must not swallow the later real file reference.
+    const { text, resources } = extractUserResourcesFromText(
+      "text [oops [still open] [foo.ts](file:///x/foo.ts)"
+    )
+    expect(resources).toEqual([
+      { name: "foo.ts", uri: "file:///x/foo.ts", mime_type: null },
+    ])
+    expect(text).toContain("[foo.ts](file:///x/foo.ts)")
+  })
+
+  it("ignores an empty-label [](file://…) link, adding no chip", () => {
+    const { text, resources } = extractUserResourcesFromText(
+      "see [](file:///x/foo.ts) ok"
+    )
+    expect(resources).toEqual([])
+    expect(text).toBe("see [](file:///x/foo.ts) ok")
+  })
+})
+
+describe("adaptMessageTurn — user reference resources", () => {
+  const msgText = {
+    attachedResources: "Attached resources",
+    toolCallFailed: "Tool failed",
+  }
+
+  it("keeps an agent reference inline in the user turn (no chip row)", () => {
+    const adapted = adaptMessageTurn(
+      {
+        id: "u1",
+        role: "user",
+        timestamp: "2026-06-11T00:00:00.000Z",
+        blocks: [
+          { type: "text", text: "ask [@Codex](codeg://agent/codex) to review" },
+        ],
+      },
+      msgText
+    )
+
+    expect(adapted.userResources).toBeUndefined()
+    expect(adapted.content).toHaveLength(1)
+    const part = adapted.content[0]
+    if (part.type !== "text") throw new Error("expected a text part")
+    expect(part.text).toContain("[@Codex](codeg://agent/codex)")
+  })
+
+  it("chips a folded file link AND keeps it inline as a badge; session stays inline", () => {
+    // Mirrors the backend fold: prose+session in one text block, the file
+    // resource_link folded to a trailing `[name](uri)` text block. The file is
+    // copied to the row AND kept inline (rendered as an inline file badge).
+    const adapted = adaptMessageTurn(
+      {
+        id: "u2",
+        role: "user",
+        timestamp: "2026-06-11T00:00:00.000Z",
+        blocks: [
+          {
+            type: "text",
+            text: "compare these [#42](codeg://session/codex_abc)",
+          },
+          { type: "text", text: "[foo.ts](file:///x/foo.ts)" },
+        ],
+      },
+      msgText
+    )
+
+    expect(adapted.userResources).toEqual([
+      { name: "foo.ts", uri: "file:///x/foo.ts", mime_type: null },
+    ])
+    const joined = adapted.content
+      .map((p) => (p.type === "text" ? p.text : ""))
+      .join("\n")
+    expect(joined).toContain("[#42](codeg://session/codex_abc)")
+    expect(joined).toContain("[foo.ts](file:///x/foo.ts)")
   })
 })

@@ -7,6 +7,7 @@ import {
 } from "@/lib/adapters/tool-kind-classifier"
 import type { MessageRole, PlanEntryInfo } from "@/lib/types"
 import { normalizeToolName } from "@/lib/tool-call-normalization"
+import { parseBackgroundLaunch } from "@/lib/background-task"
 import { normalizePriority, normalizeStatus } from "@/lib/plan-parse"
 import { isDelegateToAgentToolName } from "@/lib/delegation-card"
 import { useTranslations } from "next-intl"
@@ -40,13 +41,17 @@ import {
 } from "@/components/ai-elements/reasoning"
 import { AgentToolCallPart } from "./agent-tool-call"
 import { AskQuestionResultCard } from "./ask-question-result-card"
+import { CollabAgentCard } from "./collab-agent-card"
 import { FeedbackCheckResultCard } from "./feedback-check-result-card"
+import { COLLAB_AGENT_TOOL_NAME } from "@/lib/collab-tool"
 import { DelegatedSubThread } from "./delegated-sub-thread"
 import { DelegationStatusCard } from "./delegation-status-card"
 import { DelegationStatusGroupCard } from "./delegation-status-group-card"
+import { BackgroundTaskCard } from "./background-task-card"
 import { GeneratedImagesBlock } from "./generated-images-block"
 import { GoalRunPart, GoalToolCallPart } from "./goal-tool-call"
 import { PlanCard, PlanEntriesList } from "./plan-card"
+import { PlanModeCard } from "./plan-mode-card"
 import {
   FileTextIcon,
   FilePenLineIcon,
@@ -65,6 +70,7 @@ import {
   ChevronRightIcon,
   BrainIcon,
   MessageCircleQuestionMarkIcon,
+  UsersIcon,
 } from "lucide-react"
 
 // ── helpers ────────────────────────────────────────────────────────────
@@ -842,6 +848,8 @@ function getToolIcon(
   if (name === "taskcreate" || name === "taskupdate" || name === "tasklist")
     return <ListTodoIcon className={ICON_CLASS} />
   if (name === "agent") return getTaskToolIcon(input ?? null)
+  if (name === COLLAB_AGENT_TOOL_NAME)
+    return <UsersIcon className={ICON_CLASS} />
   if (name === "skill") return <SparklesIcon className={ICON_CLASS} />
   if (
     name === "enterplanmode" ||
@@ -1291,7 +1299,48 @@ function BashToolInput({ input }: { input: Record<string, unknown> }) {
  * Parse structured read output from backend: `{"start_line":N,"content":"..."}`.
  * Falls back to raw text with startLine=1 if not structured.
  */
-function parseReadOutput(raw: string): { startLine: number; content: string } {
+/**
+ * codex classifies file-reading shell commands (sed/cat/head) as ACP `read`
+ * commandActions whose output is a command-execution envelope — codex-acp's
+ * `createCommandExecutionCompleteUpdate` always sends BOTH
+ * `{ formatted_output: <string>, exit_code: <number> }` — NOT the
+ * `{ start_line, content }` read shape. Return the inner `formatted_output` so the
+ * file content renders. Requiring BOTH keys keeps a genuine JSON-file read
+ * (`{ output: … }`, `{ stdout: … }`, a lone `{ exit_code: 0 }`, …) from being
+ * mistaken for a command envelope. Returns null when it isn't that exact shape.
+ */
+export function codexCommandReadOutput(raw: string): string | null {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+    return null
+  const obj = parsed as Record<string, unknown>
+  if (
+    typeof obj.exit_code !== "number" ||
+    typeof obj.formatted_output !== "string"
+  ) {
+    return null
+  }
+  const out = obj.formatted_output
+  // Strip codex's CLI framing ("Chunk ID:/Wall time:/…/Output:\n<content>") only
+  // when the output actually STARTS with that metadata — so a clean file whose
+  // first line happens to be "Output:" is never truncated by the envelope parser.
+  const firstLine = (
+    out.split("\n").find((l) => l.trim().length > 0) ?? ""
+  ).trim()
+  return CLI_META_LINE_RE.test(firstLine)
+    ? parseCliExecutionEnvelope(out).output
+    : out
+}
+
+export function parseReadOutput(raw: string): {
+  startLine: number
+  content: string
+} {
   try {
     const parsed = JSON.parse(raw)
     if (
@@ -1305,6 +1354,8 @@ function parseReadOutput(raw: string): { startLine: number; content: string } {
   } catch {
     // not JSON
   }
+  const cmdOut = codexCommandReadOutput(raw)
+  if (cmdOut !== null) return { startLine: 1, content: cmdOut }
   return { startLine: 1, content: raw }
 }
 
@@ -1598,39 +1649,6 @@ function ApplyPatchToolInput({ input }: { input: string }) {
   return <UnifiedDiffPreview diffText={input} clickableFilePath />
 }
 
-// ── Switch mode (plan) input ──────────────────────────────────────────
-
-function extractPlanMarkdown(input: Record<string, unknown>): string | null {
-  const direct = input.plan ?? input.Plan
-  if (typeof direct === "string" && direct.trim().length > 0) return direct
-
-  const nested =
-    typeof input.rawInput === "object" && input.rawInput !== null
-      ? (input.rawInput as Record<string, unknown>)
-      : typeof input.raw_input === "object" && input.raw_input !== null
-        ? (input.raw_input as Record<string, unknown>)
-        : null
-  if (nested) {
-    const nestedPlan = nested.plan ?? nested.Plan
-    if (typeof nestedPlan === "string" && nestedPlan.trim().length > 0) {
-      return nestedPlan
-    }
-  }
-
-  return null
-}
-
-function SwitchModeToolInput({ input }: { input: Record<string, unknown> }) {
-  const planMarkdown = extractPlanMarkdown(input)
-  if (!planMarkdown) return null
-
-  return (
-    <div className="text-sm prose prose-sm dark:prose-invert max-w-none [&_ul]:list-inside [&_ol]:list-inside">
-      <MessageResponse>{planMarkdown}</MessageResponse>
-    </div>
-  )
-}
-
 // ── Generic structured input (fallback) ──────────────────────────────
 
 /** Fields that typically contain code / long text → render in code blocks */
@@ -1835,15 +1853,6 @@ function StructuredToolInput({
     name === "tasklist"
   )
     return <TaskToolInput input={parsed} />
-  if (
-    name === "switch_mode" ||
-    name === "enterplanmode" ||
-    name === "exitplanmode"
-  ) {
-    if (extractPlanMarkdown(parsed)) {
-      return <SwitchModeToolInput input={parsed} />
-    }
-  }
 
   return <GenericToolInput input={input} />
 }
@@ -2097,6 +2106,17 @@ const ToolCallPart = memo(function ToolCallPart({
   const isCommandLikeTool = isCommandTool || toolNameLower === "apply_patch"
   const isRunning =
     part.state === "input-available" || part.state === "input-streaming"
+  // A `Bash(run_in_background: true)` launch — its result is just the task id +
+  // an "output is being written to …" notice. Flag the command card as a
+  // background launch (header badge + concise body) instead of dumping that
+  // notice; the actual run surfaces later in a <BackgroundTaskCard>.
+  const backgroundLaunch = useMemo(
+    () =>
+      isCommandTool
+        ? parseBackgroundLaunch(part.output ?? part.errorText ?? null)
+        : null,
+    [isCommandTool, part.output, part.errorText]
+  )
   const title = useMemo(() => {
     const rawTitle =
       deriveToolTitle(
@@ -2160,10 +2180,19 @@ const ToolCallPart = memo(function ToolCallPart({
     const hasStats =
       lineChangeStats &&
       (lineChangeStats.additions > 0 || lineChangeStats.deletions > 0)
-    if (!hasStats && !wallTime) return null
+    if (!hasStats && !wallTime && !backgroundLaunch) return null
 
     return (
       <span className="flex items-center gap-1.5 text-xs font-medium">
+        {backgroundLaunch && (
+          <span
+            className="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+            title={backgroundLaunch.taskId}
+          >
+            <TerminalIcon className="size-3" />
+            {t("backgroundTask.runningInBackground")}
+          </span>
+        )}
         {hasStats && lineChangeStats.additions > 0 && (
           <span className="inline-flex items-center gap-0.5 text-green-600 dark:text-green-400">
             <PlusIcon className="size-3" />
@@ -2183,7 +2212,7 @@ const ToolCallPart = memo(function ToolCallPart({
         )}
       </span>
     )
-  }, [lineChangeStats, wallTime])
+  }, [lineChangeStats, wallTime, backgroundLaunch, t])
 
   const icon = useMemo(
     () => getToolIcon(normalizedToolName, part.input),
@@ -2233,10 +2262,21 @@ const ToolCallPart = memo(function ToolCallPart({
       (typeof displayCommand === "string" && displayCommand.length > 0))
   const terminalOutput = useMemo(() => {
     if (!shouldRenderCommandTerminal) return ""
+    if (backgroundLaunch) {
+      // Replace the verbose "Output is being written to <tmp path>…" notice
+      // with a concise localized line; the real run shows in its own card.
+      return buildCommandTerminalOutput(
+        displayCommand,
+        t("backgroundTask.launchNote", { id: backgroundLaunch.taskId }),
+        false
+      )
+    }
     const output = hasLiveOutput ? (liveOutput ?? "") : (commandOutput ?? "")
     return buildCommandTerminalOutput(displayCommand, output, isRunning)
   }, [
     shouldRenderCommandTerminal,
+    backgroundLaunch,
+    t,
     hasLiveOutput,
     liveOutput,
     commandOutput,
@@ -2271,6 +2311,19 @@ const ToolCallPart = memo(function ToolCallPart({
 
   if (toolNameLower === "create_goal" || toolNameLower === "update_goal") {
     return <GoalToolCallPart part={{ ...part, toolName: normalizedToolName }} />
+  }
+
+  // codex live collab / sub-agent activity (codex-acp 1.0.1 #223): a compact
+  // streaming-time card showing the sub-agent message. Reconstructed into the
+  // richer "Agent" capsule from the rollout on history reload.
+  if (toolNameLower === COLLAB_AGENT_TOOL_NAME) {
+    return (
+      <CollabAgentCard
+        input={part.input ?? null}
+        errorText={part.errorText ?? null}
+        state={part.state}
+      />
+    )
   }
 
   // Multi-agent delegation tool: surfaces an inline DelegatedSubThread
@@ -2385,6 +2438,25 @@ const ToolCallPart = memo(function ToolCallPart({
           )}
         </ToolContent>
       </Tool>
+    )
+  }
+
+  // Plan-mode transition tools (EnterPlanMode/ExitPlanMode/switch_mode): render
+  // the plan directly via a dedicated card instead of folding into a misleading
+  // "思考 N 次" tool-group. `toolNameLower` is the underscore-preserving
+  // `tool-call-normalization` form, so `switch_mode` keeps its underscore here.
+  if (
+    toolNameLower === "enterplanmode" ||
+    toolNameLower === "exitplanmode" ||
+    toolNameLower === "switch_mode"
+  ) {
+    return (
+      <PlanModeCard
+        toolName={toolNameLower}
+        input={part.input ?? null}
+        errorText={part.errorText ?? null}
+        state={part.state}
+      />
     )
   }
 
@@ -2619,6 +2691,10 @@ export const ContentPartsRenderer = memo(function ContentPartsRenderer({
       return (
         <DelegationStatusGroupCard key={`dsg-${keyId}`} polls={part.polls} />
       )
+    }
+
+    if (part.type === "background-task-group") {
+      return <BackgroundTaskCard key={`btg-${keyId}`} polls={part.polls} />
     }
 
     if (part.type === "tool-result") {

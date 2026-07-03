@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use super::agent::AgentType;
 use super::message::{MessageTurn, TurnUsage};
+use crate::db::entities::conversation::ConversationKind;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConversationSummary {
@@ -34,12 +35,27 @@ pub struct DbConversationSummary {
     pub title_locked: bool,
     pub agent_type: AgentType,
     pub status: String,
+    /// Mirrors `conversation.kind` — drives sidebar visibility/grouping
+    /// (serialized as "regular" | "chat" | "loop" | "delegate").
+    pub kind: ConversationKind,
     pub model: Option<String>,
     pub git_branch: Option<String>,
     pub external_id: Option<String>,
     pub message_count: u32,
+    /// Number of direct, non-deleted delegation children. Drives the sidebar
+    /// chevron: a row with `child_count > 0` is expandable into its sub-session
+    /// subtree. Not stored on the row — computed by a single GROUP BY aggregate
+    /// (`fill_child_counts`) over the returned set, so `child_count > 0` iff
+    /// `list_children` would return rows. Always serialized (the frontend reads
+    /// `child_count` to decide chevron visibility).
+    pub child_count: u32,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Mirror of `conversation.pinned_at`: when set, the sidebar shows this row in
+    /// its "Pinned" section (sorted by this timestamp descending) instead of its
+    /// folder group. Serialized as `null` when absent so the frontend's
+    /// `pinned_at: string | null` always sees the field.
+    pub pinned_at: Option<DateTime<Utc>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_id: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]

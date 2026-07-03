@@ -44,6 +44,12 @@ describe("ConversationDetailPanel new conversation layout", () => {
     expect(welcomeBranch).toContain("<ChatInput")
     expect(welcomeBranch).toContain("overflow-x-hidden overflow-y-auto")
     expect(welcomeBranch).not.toContain("WelcomeBackdrop")
+    // The welcome input is flushed: the welcome column already supplies px-4, so
+    // the input must not double-pad (would make it narrower than the cards).
+    expect(welcomeBranch).toContain("flush")
+    // The welcome composer is taller (min-h-30) than the compact default kept by
+    // active/historical conversations.
+    expect(welcomeBranch).toContain("tall")
   })
 
   it("does not render a decorative welcome backdrop", () => {
@@ -78,8 +84,15 @@ describe("ConversationDetailPanel new conversation layout", () => {
     )
     expect(messageInputSource).not.toContain("bg-muted/60")
     expect(messageInputSource).toContain(': "contents"')
+    // The rounded border lives in the always-on base (so the active-session flow
+    // gradient can overlay a real 1px border without a layout shift); the
+    // attached folder-branch-picker treatment still adds bg-background + the
+    // inset focus ring on top.
     expect(messageInputSource).toContain(
-      '"rounded-xl border border-input bg-background focus-within:border-ring focus-within:ring-[3px] focus-within:ring-inset focus-within:ring-ring/50"'
+      "rounded-xl border border-input bg-transparent transition-colors"
+    )
+    expect(messageInputSource).toContain(
+      '"bg-background focus-within:border-ring focus-within:ring-[3px] focus-within:ring-inset focus-within:ring-ring/50"'
     )
     expect(pickerWrapper).not.toContain("border-t border-input")
     expect(pickerWrapper).not.toContain("bg-muted/30")
@@ -98,11 +111,114 @@ describe("ConversationDetailPanel new conversation layout", () => {
     expect(conversationShellSource).toContain(
       'className="mx-auto w-full max-w-3xl"'
     )
-    expect(chatInputSource).toContain('className="px-4 pt-0 pb-1"')
-    expect(chatInputSource).toContain('className="min-h-24 max-h-60"')
+    // Ordinary (active) chat input keeps its own px-4 gutter to align with the
+    // sibling cards in conversation-shell; only the welcome input drops it via
+    // `flush` (the welcome column already provides the px-4).
+    expect(chatInputSource).toContain('cn("pt-0 pb-1", !flush && "px-4")')
+    expect(chatInputSource).toContain(
+      'cn(tall ? "min-h-30" : "min-h-24", "max-h-60")'
+    )
     expect(chatInputSource).not.toContain("containerClassName")
     expect(source).not.toContain("containerClassName")
     expect(conversationShellSource).not.toContain("containerClassName")
-    expect(source).toContain("mx-auto flex w-full max-w-2xl")
+    expect(source).toContain("mx-auto flex w-full max-w-3xl")
+  })
+})
+
+describe("ConversationDetailPanel chat-mode send path", () => {
+  // Regression guard for the "first chat message gets stuck in the queue and is
+  // never sent" bug: the chat first-send must NOT enqueue-and-return, it must
+  // take the same inline create+bind+lifecycleSend path as a normal new
+  // conversation. The old failure mode relied on the flush-on-connect engine,
+  // which went dormant once the eager connection was already `connected`.
+  it("does not special-case the chat first send into an enqueue-and-return branch", () => {
+    // The old chat-draft early branch and its single-flight guard are gone.
+    expect(source).not.toContain(
+      "sendOwnTab?.isChat === true && dbConvIdRef.current == null"
+    )
+    expect(source).not.toContain("createChatPendingRef")
+  })
+
+  it("creates the chat row inline in the shared new-tab path and sends via lifecycleSend", () => {
+    // Chat send is selected synchronously, then the SAME async block that
+    // handles normal new conversations creates the row and delivers inline.
+    expect(source).toContain("const chatSend = sendOwnTab?.isChat === true")
+    expect(source).toContain("createChatConversation(")
+
+    const sendStart = source.indexOf("const chatSend = sendOwnTab?.isChat")
+    const sendEnd = source.indexOf(
+      "createConversationPendingRef.current = false"
+    )
+    expect(sendStart).toBeGreaterThan(-1)
+    expect(sendEnd).toBeGreaterThan(sendStart)
+    const block = source.slice(sendStart, sendEnd)
+    // Inline delivery (the fix) — not an mqEnqueue that defers to the queue.
+    expect(block).toContain("lifecycleSend(draft, selectedModeIdArg, {")
+    expect(block).not.toContain("mqEnqueue")
+  })
+
+  it("gates the chat-draft composer on a live connection (no offline compose)", () => {
+    // allowOfflineCompose let the user send before connecting, which is what
+    // parked the first prompt in the never-flushed queue. The composer now
+    // waits for `connected` like a normal conversation.
+    expect(source).not.toContain("allowOfflineCompose")
+  })
+
+  it("surfaces a non-silent error when the eager scratch-dir prepare fails", () => {
+    // Without offline compose, a failed mkdir would silently disable the
+    // composer forever; the eager effect must surface it instead.
+    expect(source).toContain(
+      'setAgentConnectError(tWelcome("prepareSessionFailed"))'
+    )
+  })
+})
+
+describe("ConversationDetailPanel send-path hardening", () => {
+  // Guards for the production-readiness fixes from the Codex review of the
+  // chat-mode work. The behavioral cores (readiness predicate, duplicate-create
+  // rejection) are unit-tested in src/lib/queue-flush.test.ts; these assert they
+  // are actually wired into the send path here.
+  it("gates the direct send on a cwd-matched connection, not bare connected", () => {
+    // A chat draft mid-reconnect can read a stale "connected" for the previous
+    // cwd; sending then would hit the wrong workspace. handleSend must gate on
+    // the readiness predicate (connected AND cwd matches), like the flush effect.
+    expect(source).toContain("isConnectionReady(")
+    expect(source).toContain("if (!connectionReady) return")
+  })
+
+  it("disables the welcome composer while connected-but-not-ready", () => {
+    // The composer reads a downgraded status so its send affordance is disabled
+    // during the transient mismatch window instead of inviting a rejected send.
+    expect(source).toContain("composerConnStatus")
+    expect(source).toContain("status={composerConnStatus}")
+  })
+
+  it("single-flights the unbound create before any optimistic mutation", () => {
+    // A double-submit during the create window must be rejected BEFORE the
+    // optimistic turn is appended, or it orphans a turn it can never deliver.
+    expect(source).toContain("shouldRejectDuplicateCreate(")
+    const guardIdx = source.indexOf("shouldRejectDuplicateCreate(")
+    // The CALL site (assignment), not the function definition earlier in the file.
+    const optimisticIdx = source.indexOf(
+      "const optimisticTurn = buildOptimisticUserTurnFromDraft("
+    )
+    expect(guardIdx).toBeGreaterThan(-1)
+    expect(optimisticIdx).toBeGreaterThan(guardIdx)
+  })
+
+  it("fully restores pre-send state when the create fails", () => {
+    // A failed create must not strand the user behind a blank panel: drop the
+    // optimistic turn, return to welcome mode, re-seed the draft, surface error.
+    const catchIdx = source.indexOf(
+      '"[ConversationTabView] create conversation:"'
+    )
+    expect(catchIdx).toBeGreaterThan(-1)
+    const catchBlock = source.slice(catchIdx, catchIdx + 1500)
+    expect(catchBlock).toContain("removeOptimisticTurn(")
+    expect(catchBlock).toContain("setHasSentMessage(false)")
+    expect(catchBlock).toContain("saveMessageInputDraft(")
+    expect(catchBlock).toContain(
+      'setAgentConnectError(tWelcome("createConversationFailed"))'
+    )
   })
 })

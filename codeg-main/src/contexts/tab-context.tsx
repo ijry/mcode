@@ -14,15 +14,28 @@ import {
 import { useTranslations } from "next-intl"
 import { useAppWorkspace } from "@/contexts/app-workspace-context"
 import { useAcpActions } from "@/contexts/acp-connections-context"
-import { useWorkspaceContext } from "@/contexts/workspace-context"
+import { useWorkspaceActions } from "@/contexts/workspace-context"
 import { useSortedAvailableAgents } from "@/hooks/use-sorted-available-agents"
-import { listOpenedTabs, saveOpenedTabs } from "@/lib/api"
+import {
+  getFolderConversation,
+  listOpenedTabs,
+  saveOpenedTabs,
+} from "@/lib/api"
 import { onTransportReconnect, subscribe } from "@/lib/platform"
 import { resolveDefaultAgent } from "@/lib/resolve-default-agent"
+import { formatConversationTitle } from "@/lib/conversation-title"
 import {
+  loadLastActiveContext,
+  saveLastActiveContext,
+  clearLastActiveContext,
+} from "@/lib/last-active-context-storage"
+import {
+  CONVERSATION_CHANGED_EVENT,
   TABS_CHANGED_EVENT,
   type AgentType,
+  type ConversationChange,
   type ConversationStatus,
+  type DbConversationSummary,
   type OpenedTab,
   type TabsChanged,
 } from "@/lib/types"
@@ -55,6 +68,16 @@ interface TabItemInternal {
    * runs (e.g. `acpListAgents()` keeps failing).
    */
   agentTypeProvisional?: boolean
+  /**
+   * Marks a draft tab as "chat mode" (folderless). Set by `openChatModeTab`,
+   * cleared implicitly once the draft binds to a real conversation (whose hidden
+   * hidden chat folder then drives chat-mode chrome via `useIsActiveChatMode`).
+   * **Internal-only and never persisted** — drafts (`conversationId == null`) are
+   * not written to opened_tabs, so this flag only ever lives in memory for the
+   * pre-send draft. While set, the draft has no resolvable folder, so the
+   * composer hides the branch picker and shows the "no-folder" chip.
+   */
+  isChat?: boolean
 }
 
 export type TabItem = TabItemInternal
@@ -84,6 +107,14 @@ interface TabContextValue {
   pinTab: (tabId: string) => void
   toggleTileMode: () => void
   /**
+   * Read-and-clear the "the last active-tab change came from a remote snapshot"
+   * flag. The workbench route-sync chokepoint calls this on every active-tab
+   * change so a remotely-mirrored focus (another client switching tabs) does
+   * not yank this window into the conversations route. Returns true exactly
+   * once per remote-driven focus change.
+   */
+  consumeRemoteActivation: () => boolean
+  /**
    * Open (or re-target the singleton) draft conversation tab.
    *
    * - `inheritFromActive: false` (default) — resolve the agent purely from
@@ -112,6 +143,25 @@ interface TabContextValue {
     }
   ) => void
   /**
+   * Re-target the singleton draft tab into folderless "chat mode" — no DB write
+   * and no working dir yet (the backend creates the dated scratch dir + hidden
+   * hidden chat folder lazily on first send, in `createChatConversation`). Sets
+   * the draft's `isChat` flag, drops its `workingDir`, and disconnects any live
+   * ACP session bound to the draft (its cwd is about to change). Wired from the
+   * composer folder picker's "no-folder mode" item.
+   */
+  openChatModeTab: () => void
+  /**
+   * Attach an eagerly-created scratch dir to a chat-mode draft so its ACP
+   * connection can spawn at a real cwd *before* the first send. Patches the
+   * draft's `workingDir` only while it is still an unbound chat draft
+   * (`isChat && conversationId == null`); `folderId` stays 0 (no DB row yet, so
+   * `activeFolder` resolves null until the lazy create binds the hidden folder).
+   * A stale call (the draft already bound, retargeted, or left chat mode) is a
+   * no-op. Wired from conversation-detail-panel's eager-prepare effect.
+   */
+  setChatDraftWorkingDir: (tabId: string, workingDir: string) => void
+  /**
    * Mark a draft tab's agent as user-confirmed. Patches `agentType` on
    * the tab and clears the `agentTypeProvisional` flag so the correction
    * effect won't overwrite the user's choice. No-op for tabs already
@@ -134,7 +184,16 @@ interface TabContextValue {
     conversationId: number,
     agentType: AgentType,
     title: string,
-    runtimeConversationId?: number
+    runtimeConversationId?: number,
+    /**
+     * When a chat-mode draft binds, the backend has just created its hidden
+     * hidden chat folder; pass the new `folderId`/`workingDir` so the tab points at
+     * the real per-conversation scratch dir (cwd) and `activeFolderId` syncs to
+     * the hidden folder (which drives chat-mode chrome). Omit for normal binds —
+     * the tab keeps its existing folder.
+     */
+    folderId?: number,
+    workingDir?: string
   ) => void
   setTabRuntimeConversationId: (
     tabId: string,
@@ -236,9 +295,15 @@ function buildPersistItems(
 
 export function TabProvider({ children }: TabProviderProps) {
   const t = useTranslations("Folder.tabContext")
-  const { activateConversationPane } = useWorkspaceContext()
-  const { conversations, folders, foldersHydrated, setActiveFolderId } =
-    useAppWorkspace()
+  const { activateConversationPane } = useWorkspaceActions()
+  const {
+    conversations,
+    conversationsLoading,
+    folders,
+    allFolders,
+    foldersHydrated,
+    setActiveFolderId,
+  } = useAppWorkspace()
   const { disconnect: acpDisconnect } = useAcpActions()
 
   const [tabState, setTabState] = useState<TabState>({
@@ -264,6 +329,12 @@ export function TabProvider({ children }: TabProviderProps) {
   //   save (no version churn).
   const versionRef = useRef(0)
   const applyingRemoteRef = useRef(false)
+  // One-shot flag: an incoming remote snapshot mirrored the focused tab, so the
+  // active tab changed for a non-local reason. The route-sync chokepoint
+  // consumes this to avoid hijacking this window into the conversations route
+  // (which would unmount e.g. the Automations editor + its unsaved edits) just
+  // because another client switched tabs.
+  const remoteActivationPendingRef = useRef(false)
   const pendingRemoteRef = useRef<TabsChanged | null>(null)
   const tabsHydratedRef = useRef(false)
   const lastSavedPayloadRef = useRef<string | null>(null)
@@ -313,10 +384,54 @@ export function TabProvider({ children }: TabProviderProps) {
     conversationsRef.current = conversations
   }, [conversations])
 
+  // ── Open sub-session tab title + status ─────────────────────────────────────
+  // Delegation sub-sessions (parent_id != null) live only in the sidebar's child
+  // cache, never in the root `conversations` list, so the `tabs` derivation below
+  // can't resolve their title/status from `conversationMap`. Keep an id-keyed
+  // summary cache for the sub-sessions currently OPEN as tabs: seed each by
+  // fetching its detail once (which also backfills the DB auto-title), then keep
+  // it live off the global conversation channel so the tab title + status dot
+  // track the running sub-agent. Roots are unaffected (resolved from `conversations`).
+  const [childSummaries, setChildSummaries] = useState<
+    Map<number, DbConversationSummary>
+  >(() => new Map())
+  const childSummariesRef = useRef(childSummaries)
+  childSummariesRef.current = childSummaries
+  const childSummaryInFlightRef = useRef<Set<number>>(new Set())
+  // ACCUMULATED state for events that land while an id's seed fetch is in flight,
+  // applied when the fetch resolves so nothing committed after the fetch's DB
+  // snapshot is lost. Accumulated (not last-event-wins) so a sequence like
+  // upsert→status keeps the upsert's newer title AND the later status, and a
+  // `deleted` stays terminal even if a stray status follows it.
+  const childSeedBufferRef = useRef<
+    Map<
+      number,
+      { summary?: DbConversationSummary; status?: string; deleted?: boolean }
+    >
+  >(new Map())
+  // Bumped on reconnect so an in-flight seed that resolves afterwards is dropped
+  // (its snapshot predates the missed-events window); paired with `reseedTick`,
+  // which re-runs the reconcile effect to refetch every still-open child tab.
+  const seedEpochRef = useRef(0)
+  const [reseedTick, setReseedTick] = useState(0)
+
   const foldersRef = useRef(folders)
   useEffect(() => {
     foldersRef.current = folders
   }, [folders])
+
+  // `allFolders` includes hidden chat folders (the user-facing `folders`
+  // list filters them out, and drops them on refetch), so chat-folder detection
+  // must read this ref — never `foldersRef`.
+  const allFoldersRef = useRef(allFolders)
+  useEffect(() => {
+    allFoldersRef.current = allFolders
+  }, [allFolders])
+
+  // Forward reference to `openChatModeTab` (defined after `openNewConversationTab`
+  // but called by it for the chat-folder redirect). Assigned at render time once
+  // the callback is created, mirroring the existing callback-ref idiom.
+  const openChatModeTabRef = useRef<() => void>(() => {})
 
   // ACP agent list driven by the shared hook. `sortedTypes` reflects the
   // user-defined drag-sort order (filtered to enabled+available) and is
@@ -449,6 +564,10 @@ export function TabProvider({ children }: TabProviderProps) {
                     workingDir: request.workingDir,
                     agentType: request.agentType,
                     agentTypeProvisional: request.provisional,
+                    // Retargets only ever move a draft to a REAL folder (the
+                    // chat-folder case is redirected to openChatModeTab), so this
+                    // clears chat mode if the draft was previously a chat draft.
+                    isChat: false,
                   }
                 : tab
             ),
@@ -620,16 +739,21 @@ export function TabProvider({ children }: TabProviderProps) {
     return m
   }, [conversations])
 
-  // Derive tabs with up-to-date titles and status from conversations
+  // Derive tabs with up-to-date titles and status from conversations, falling
+  // back to the sub-session cache for delegation children (absent from the
+  // root-only `conversationMap`) so their tabs show the real title + a live
+  // status dot instead of a frozen "Untitled".
   const tabs = useMemo(() => {
-    if (conversationMap.size === 0) return rawTabs
+    if (conversationMap.size === 0 && childSummaries.size === 0) return rawTabs
     return rawTabs.map((tab) => {
       if (tab.conversationId != null) {
-        const conv = conversationMap.get(
-          `${tab.folderId}-${tab.agentType}-${tab.conversationId}`
-        )
+        const conv =
+          conversationMap.get(
+            `${tab.folderId}-${tab.agentType}-${tab.conversationId}`
+          ) ?? childSummaries.get(tab.conversationId)
         if (conv) {
-          const newTitle = conv.title || t("untitledConversation")
+          const newTitle =
+            formatConversationTitle(conv.title) || t("untitledConversation")
           const newStatus = conv.status as ConversationStatus | undefined
           if (tab.title !== newTitle || tab.status !== newStatus) {
             return { ...tab, title: newTitle, status: newStatus }
@@ -638,7 +762,161 @@ export function TabProvider({ children }: TabProviderProps) {
       }
       return tab
     })
-  }, [rawTabs, conversationMap, t])
+  }, [rawTabs, conversationMap, childSummaries, t])
+
+  // Reconcile the sub-session cache to exactly the open child tabs: prune
+  // summaries whose tab has closed, and seed each open child tab not yet cached.
+  // Gated on `conversationsLoading` (NOT `conversationMap.size`) so a legitimately
+  // empty root list — e.g. only a restored orphan child tab is open — still seeds,
+  // while an unfinished initial load doesn't misfetch a root as a child. The seed
+  // fetch (`getFolderConversation`, which also backfills the DB auto-title) is
+  // deduped against the cache + in-flight set, epoch-guarded against a reconnect
+  // landing mid-flight, and merges any event buffered during the fetch (latest
+  // wins) so the initial window can't drop a live status/upsert.
+  useEffect(() => {
+    if (conversationsLoading) return
+    const openChildIds = new Set<number>()
+    for (const tab of rawTabs) {
+      const id = tab.conversationId
+      if (id == null) continue
+      if (conversationMap.has(`${tab.folderId}-${tab.agentType}-${id}`))
+        continue
+      openChildIds.add(id)
+    }
+    // Prune cached summaries for child tabs that have since closed (also keeps
+    // closed ids from absorbing later subscription updates).
+    setChildSummaries((prev) => {
+      let next: Map<number, DbConversationSummary> | null = null
+      for (const id of prev.keys()) {
+        if (!openChildIds.has(id)) {
+          next = next ?? new Map(prev)
+          next.delete(id)
+        }
+      }
+      return next ?? prev
+    })
+    // Seed the open child tabs that aren't cached or already being fetched.
+    for (const id of openChildIds) {
+      if (childSummariesRef.current.has(id)) continue
+      if (childSummaryInFlightRef.current.has(id)) continue
+      childSummaryInFlightRef.current.add(id)
+      const epoch = seedEpochRef.current
+      void getFolderConversation(id)
+        .then((detail) => {
+          // Reconnect since fetch start → snapshot is stale, drop it (a fresh
+          // reseed is already running under the new epoch).
+          if (seedEpochRef.current !== epoch) return
+          const buffered = childSeedBufferRef.current.get(id)
+          // Deleted while fetching → don't resurrect it (terminal).
+          if (buffered?.deleted) return
+          // Closed while fetching → don't re-add (prune may have already run).
+          if (!rawTabsRef.current.some((tb) => tb.conversationId === id)) return
+          // Apply the accumulated in-flight events over the fetched snapshot: a
+          // buffered upsert is a newer full summary; a buffered status (kept even
+          // across an intervening upsert that cleared it, only when it arrived
+          // last) patches the dot.
+          let summary = buffered?.summary ?? detail.summary
+          if (buffered?.status != null) {
+            summary = { ...summary, status: buffered.status }
+          }
+          setChildSummaries((prev) => {
+            const next = new Map(prev)
+            next.set(id, summary)
+            return next
+          })
+        })
+        .catch(() => {
+          // Leave unseeded (e.g. deleted) — a later pass or live event retries.
+        })
+        .finally(() => {
+          // A reconnect already cleared (and possibly re-seeded) this id; don't
+          // let this superseded fetch clear the new fetch's in-flight/buffer marks.
+          if (seedEpochRef.current !== epoch) return
+          childSummaryInFlightRef.current.delete(id)
+          childSeedBufferRef.current.delete(id)
+        })
+    }
+  }, [rawTabs, conversationMap, conversationsLoading, reseedTick])
+
+  // Keep seeded sub-session summaries live: a sub-agent advancing / finishing /
+  // being renamed emits on the global conversation channel. A tracked id is
+  // updated/dropped in place; an id whose seed fetch is still in flight has its
+  // latest event buffered (the seed merges it on resolve) so the initial window
+  // can't lose an event. On reconnect, invalidate in-flight seeds (epoch bump),
+  // clear the cache, and trigger a reseed of every still-open child tab.
+  useEffect(() => {
+    let disposed = false
+    let unlisten: (() => void) | undefined
+    void (async () => {
+      const dispose = await subscribe<ConversationChange>(
+        CONVERSATION_CHANGED_EVENT,
+        (change) => {
+          const id = change.kind === "upsert" ? change.summary.id : change.id
+          if (childSummariesRef.current.has(id)) {
+            if (change.kind === "upsert") {
+              const summary = change.summary
+              setChildSummaries((prev) => {
+                if (!prev.has(summary.id)) return prev
+                const next = new Map(prev)
+                next.set(summary.id, summary)
+                return next
+              })
+            } else if (change.kind === "status") {
+              setChildSummaries((prev) => {
+                const cur = prev.get(change.id)
+                if (!cur || cur.status === change.status) return prev
+                const next = new Map(prev)
+                next.set(change.id, { ...cur, status: change.status })
+                return next
+              })
+            } else {
+              setChildSummaries((prev) => {
+                if (!prev.has(change.id)) return prev
+                const next = new Map(prev)
+                next.delete(change.id)
+                return next
+              })
+            }
+            return
+          }
+          // Seed for this id is still in flight — accumulate into the pending
+          // buffer (the seed's resolve handler applies it) so the initial window
+          // can't lose state even across mixed event kinds.
+          if (childSummaryInFlightRef.current.has(id)) {
+            const pending = childSeedBufferRef.current.get(id) ?? {}
+            if (change.kind === "deleted") {
+              pending.deleted = true // terminal for this seed window
+            } else if (!pending.deleted) {
+              if (change.kind === "upsert") {
+                // Newer full summary supersedes any earlier summary AND any
+                // earlier status patch (its own status is current).
+                pending.summary = change.summary
+                pending.status = undefined
+              } else {
+                // status patch — layered over the pending/fetched summary.
+                pending.status = change.status
+              }
+            }
+            childSeedBufferRef.current.set(id, pending)
+          }
+        }
+      )
+      if (disposed) dispose()
+      else unlisten = dispose
+    })()
+    const offReconnect = onTransportReconnect(() => {
+      seedEpochRef.current += 1
+      childSummaryInFlightRef.current.clear()
+      childSeedBufferRef.current.clear()
+      setChildSummaries((prev) => (prev.size === 0 ? prev : new Map()))
+      setReseedTick((tick) => tick + 1)
+    })
+    return () => {
+      disposed = true
+      unlisten?.()
+      offReconnect?.()
+    }
+  }, [])
 
   const openTab = useCallback(
     (
@@ -673,15 +951,20 @@ export function TabProvider({ children }: TabProviderProps) {
           return { ...prevState, activeTabId: activateTabId }
         }
 
+        // Format the seed title so a draft/conversation title carrying an
+        // inline reference link (`[README.md](file://…)`) shows its label, not
+        // raw Markdown, before the `tabs` memo re-derives it from the refreshed
+        // conversation list.
         const resolvedTitle =
-          title ??
-          conversationsRef.current.find(
-            (c) =>
-              c.id === conversationId &&
-              c.agent_type === agentType &&
-              c.folder_id === folderId
-          )?.title ??
-          t("untitledConversation")
+          formatConversationTitle(
+            title ??
+              conversationsRef.current.find(
+                (c) =>
+                  c.id === conversationId &&
+                  c.agent_type === agentType &&
+                  c.folder_id === folderId
+              )?.title
+          ) || t("untitledConversation")
 
         const tabId = makeConversationTabId(folderId, agentType, conversationId)
         const newTab: TabItemInternal = {
@@ -732,11 +1015,26 @@ export function TabProvider({ children }: TabProviderProps) {
 
   const makeReplacementDraftTab = useCallback(
     (preferred?: TabItemInternal): TabItemInternal => {
-      const folderId = preferred?.folderId ?? foldersRef.current[0]?.id ?? 0
-      const workingDir =
-        preferred?.workingDir ??
-        foldersRef.current.find((f) => f.id === folderId)?.path ??
-        ""
+      // A closing chat-mode tab (its hidden chat folder, or the in-memory
+      // draft flag) must not seed the replacement draft — that folder is hidden
+      // from folder lists and has no real project cwd. Fall back to a real
+      // folder. Detection reads `allFoldersRef` (the in-memory draft flag is
+      // dropped on reload, and `foldersRef` excludes chat folders after refetch),
+      // while the fallback pool reads the user-facing `foldersRef`.
+      const preferredIsChat =
+        preferred?.isChat === true ||
+        allFoldersRef.current.find((f) => f.id === preferred?.folderId)
+          ?.kind === "chat"
+      const nonChatFallbackId =
+        foldersRef.current.find((f) => f.kind !== "chat")?.id ?? 0
+      const folderId = preferredIsChat
+        ? nonChatFallbackId
+        : (preferred?.folderId ?? nonChatFallbackId)
+      const workingDir = preferredIsChat
+        ? (foldersRef.current.find((f) => f.id === folderId)?.path ?? "")
+        : (preferred?.workingDir ??
+          foldersRef.current.find((f) => f.id === folderId)?.path ??
+          "")
       // If we have a preferred (closing) tab, inherit BOTH its agent and
       // its provisional flag — we should not silently launder a system
       // best-guess into a confirmed value just because the source tab was
@@ -823,9 +1121,6 @@ export function TabProvider({ children }: TabProviderProps) {
                 tb.conversationId === it.conversation_id &&
                 tb.folderId === it.folder_id &&
                 tb.agentType === it.agent_type
-            ) ??
-            prev.rawTabs.find(
-              (tb) => tb.conversationId === it.conversation_id
             )
           return {
             id: existing?.id ?? canonicalId,
@@ -842,12 +1137,15 @@ export function TabProvider({ children }: TabProviderProps) {
           }
         })
 
-        // Keep the device-local draft if its folder still exists.
+        // Keep the device-local draft if it's a folderless chat draft (its
+        // `folderId` 0 is in no folder list, so check the flag) or its real
+        // folder still exists. Never yank the user off an in-progress draft.
         const localDraft = prev.rawTabs.find((tb) => tb.conversationId == null)
         const nextTabs = [...remoteTabs]
         if (
           localDraft &&
-          foldersRef.current.some((f) => f.id === localDraft.folderId)
+          (localDraft.isChat === true ||
+            foldersRef.current.some((f) => f.id === localDraft.folderId))
         ) {
           nextTabs.push(localDraft)
         }
@@ -905,6 +1203,11 @@ export function TabProvider({ children }: TabProviderProps) {
           nextActiveId = nextTabs[0].id
         }
 
+        // A focus change driven by the remote snapshot (not local intent) must
+        // not trip the route-sync chokepoint into the conversations route.
+        if (nextActiveId !== prev.activeTabId) {
+          remoteActivationPendingRef.current = true
+        }
         // Seed the last-saved payload from the state we're about to commit
         // (focus included) so the guarded save-effect run is a confirmed no-op
         // AND a passive focus fallback never propagates to yank another client.
@@ -1176,6 +1479,17 @@ export function TabProvider({ children }: TabProviderProps) {
         folderDefaultAgent?: AgentType | null
       }
     ) => {
+      // "New conversation" while a chat conversation is active resolves the
+      // active (hidden) chat folder. Never pile a second conversation into a
+      // per-conversation chat folder — its delete cleanup retires the folder and
+      // it has no real project cwd — so start a fresh folderless chat draft
+      // instead. Single choke point for every "new conversation" entry point.
+      if (
+        allFoldersRef.current.find((f) => f.id === folderId)?.kind === "chat"
+      ) {
+        openChatModeTabRef.current()
+        return
+      }
       // Pick the agent for the new conversation via the shared resolver.
       // Only inherit from the active tab when the caller opted in. The
       // active tab counts as a valid inherit source if it's either:
@@ -1286,6 +1600,122 @@ export function TabProvider({ children }: TabProviderProps) {
     [activateConversationPane, resolveAgentForFolder, t]
   )
 
+  const openChatModeTab = useCallback(() => {
+    // Inherit the agent like openNewConversationTab's inherit path: keep the
+    // active tab's agent when it's a real conversation or a confirmed draft,
+    // else fall back to the global default (chat mode has no folder default).
+    const activeTab = rawTabsRef.current.find(
+      (x) => x.id === activeTabIdRef.current
+    )
+    const inherit =
+      activeTab &&
+      (activeTab.conversationId != null || !activeTab.agentTypeProvisional)
+        ? activeTab.agentType
+        : null
+    const { agentType: targetAgent, provisional } = resolveAgentForFolder(
+      0,
+      inherit,
+      null
+    )
+
+    // Capture the existing singleton draft (if any) up front so its stale ACP
+    // session can be torn down after we flip it to chat mode.
+    const existingDraft = rawTabsRef.current.find(
+      (t) => t.conversationId == null
+    )
+    const needsDisconnect =
+      existingDraft != null &&
+      !(existingDraft.isChat && existingDraft.folderId === 0)
+
+    const tabId = makeNewConversationTabId()
+    setTabState((prevState) => {
+      const existingTab = prevState.rawTabs.find(
+        (t) => t.conversationId == null
+      )
+
+      if (!existingTab) {
+        const newTab: TabItemInternal = {
+          id: tabId,
+          kind: "conversation",
+          folderId: 0,
+          conversationId: null,
+          agentType: targetAgent,
+          title: t("newConversation"),
+          isPinned: true,
+          workingDir: undefined,
+          agentTypeProvisional: provisional,
+          isChat: true,
+        }
+        return {
+          ...prevState,
+          rawTabs: [...prevState.rawTabs, newTab],
+          activeTabId: tabId,
+        }
+      }
+
+      // Already a chat-mode draft — just focus it.
+      if (existingTab.isChat && existingTab.folderId === 0) {
+        if (prevState.activeTabId === existingTab.id) return prevState
+        return { ...prevState, activeTabId: existingTab.id }
+      }
+
+      // Existing draft on a real folder: flip it to chat mode SYNCHRONOUSLY in
+      // this same state update (folderId + isChat together), so a send issued
+      // before any async teardown can never still create/send in the old folder.
+      // Its now-stale ACP session is disconnected fire-and-forget below. The
+      // agent is re-resolved for chat mode (no folder default), so a draft still
+      // carrying its old folder's provisional default doesn't leak into chat.
+      return {
+        ...prevState,
+        activeTabId: existingTab.id,
+        rawTabs: prevState.rawTabs.map((tab) =>
+          tab.id === existingTab.id
+            ? {
+                ...tab,
+                folderId: 0,
+                workingDir: undefined,
+                isChat: true,
+                agentType: targetAgent,
+                agentTypeProvisional: provisional,
+              }
+            : tab
+        ),
+      }
+    })
+    if (needsDisconnect && existingDraft) {
+      void acpDisconnect(existingDraft.id).catch((err) => {
+        console.error("[TabProvider] disconnect chat-mode draft:", err)
+      })
+    }
+    activateConversationPane()
+  }, [acpDisconnect, activateConversationPane, resolveAgentForFolder, t])
+  // Forward reference for `openNewConversationTab`'s chat-folder redirect (the
+  // callbacks are siblings; this mirrors the codebase's callback-ref idiom).
+  openChatModeTabRef.current = openChatModeTab
+
+  const setChatDraftWorkingDir = useCallback(
+    (tabId: string, workingDir: string) => {
+      setTabs((prev) =>
+        prev.map((tab) => {
+          if (tab.id !== tabId) return tab
+          // Guard against a stale eager-prepare result landing after the draft
+          // already bound, retargeted to a real folder, or left chat mode — any
+          // of which would make this workingDir wrong. Only patch a still-unbound
+          // chat draft, and skip a redundant write to keep the reference stable.
+          if (
+            tab.conversationId != null ||
+            tab.isChat !== true ||
+            tab.workingDir === workingDir
+          ) {
+            return tab
+          }
+          return { ...tab, workingDir }
+        })
+      )
+    },
+    [setTabs]
+  )
+
   const confirmDraftAgent = useCallback(
     (tabId: string, agentType: AgentType) => {
       setTabs((prev) =>
@@ -1323,7 +1753,9 @@ export function TabProvider({ children }: TabProviderProps) {
       conversationId: number,
       agentType: AgentType,
       title: string,
-      runtimeConversationId?: number
+      runtimeConversationId?: number,
+      folderId?: number,
+      workingDir?: string
     ) => {
       setTabState((prevState) => {
         const nextTabs = prevState.rawTabs.flatMap((tab) => {
@@ -1332,11 +1764,20 @@ export function TabProvider({ children }: TabProviderProps) {
               ...tab,
               conversationId,
               agentType,
-              title,
+              // The bind title is the first message's display text, which can
+              // carry an inline reference link — fold it to the label so the
+              // tab never flashes raw `[name](file://…)` Markdown.
+              title: formatConversationTitle(title) || tab.title,
               runtimeConversationId,
               // Bound to a real conversation now — drop the provisional
               // hint so the correction effect never revisits it.
               agentTypeProvisional: false,
+              // Chat-mode bind: point at the backend-created hidden chat
+              // folder and its scratch cwd. `isChat` stays set so chrome stays
+              // hidden through the brief window before the folder lands in
+              // `allFolders` (after which `activeFolder.kind === "chat"` takes over).
+              ...(folderId != null ? { folderId } : {}),
+              ...(workingDir != null ? { workingDir } : {}),
             }
             return [nextTab]
           }
@@ -1513,12 +1954,87 @@ export function TabProvider({ children }: TabProviderProps) {
     correctDraftAgents()
   }, [agentsFresh, tabsHydrated, foldersHydrated, correctDraftAgents])
 
+  // ── Post-hydration recovery ────────────────────────────────────────────────
+  // Drafts are device-local (never in `opened_tabs`), so a session that ends on
+  // a draft-only workspace hydrates to ZERO tabs. With no active tab there is no
+  // active folder, which leaves the conversation panel blank AND disables every
+  // "new conversation" affordance (all gated on the active folder) — a deadlock
+  // the user can't escape. `applyRemoteSnapshot` already synthesizes a draft when
+  // tabs go empty; the initial DB-hydration path must do the same. One-shot via a
+  // ref; only "consumed" when we actually recover (so a non-empty hydration that
+  // later empties via closeTab still relies on that path's own synthesis).
+  const recoveryRanRef = useRef(false)
+  const recoverActiveContext = useCallback(() => {
+    // Restore the user to where they left off, falling back progressively:
+    //   (a) the persisted last-active hint (chat mode, or a folder still open),
+    //   (b) the first open folder, else
+    //   (c) folderless chat mode (always available — needs no folder).
+    const hint = loadLastActiveContext()
+    if (hint?.isChat) {
+      openChatModeTabRef.current()
+      return
+    }
+    if (hint) {
+      const f = foldersRef.current.find((x) => x.id === hint.folderId)
+      if (f) {
+        // The agent isn't persisted: resolve it like any new conversation (the
+        // folder's default + availability fallback), not from a possibly-
+        // provisional hint. `f` is already in `foldersRef`, so the internal
+        // lookup finds its default — no need to pass `folderDefaultAgent`.
+        openNewConversationTab(f.id, f.path)
+        return
+      }
+    }
+    const first = foldersRef.current[0]
+    if (first) {
+      openNewConversationTab(first.id, first.path)
+      return
+    }
+    openChatModeTabRef.current()
+  }, [openNewConversationTab])
+
+  useEffect(() => {
+    if (recoveryRanRef.current) return
+    if (!tabsHydrated || !foldersHydrated) return
+    if (rawTabs.length > 0) return
+    recoveryRanRef.current = true
+    recoverActiveContext()
+  }, [tabsHydrated, foldersHydrated, rawTabs, recoverActiveContext])
+
+  // Persist the active draft's context (folder + agent, or chat mode) so the
+  // next cold start can restore it via `recoverActiveContext`. This is UI state
+  // only — it writes no conversation/folder DB row, preserving the
+  // delayed-persistence invariant. Cleared once the draft binds to a real
+  // conversation. Gated on `tabsHydrated` so the transient cold-start empty
+  // window (active === undefined) never clobbers a good hint.
+  useEffect(() => {
+    if (!tabsHydrated) return
+    const active = rawTabs.find((t) => t.id === activeTabId)
+    if (!active) return
+    if (active.conversationId == null) {
+      saveLastActiveContext({
+        folderId: active.folderId,
+        isChat: active.isChat === true,
+      })
+    } else {
+      clearLastActiveContext()
+    }
+  }, [rawTabs, activeTabId, tabsHydrated])
+
+  // Read-and-clear the remote-activation flag (see remoteActivationPendingRef).
+  const consumeRemoteActivation = useCallback(() => {
+    if (!remoteActivationPendingRef.current) return false
+    remoteActivationPendingRef.current = false
+    return true
+  }, [])
+
   const value = useMemo(
     () => ({
       tabs,
       activeTabId,
       tabsHydrated,
       isTileMode,
+      consumeRemoteActivation,
       openTab,
       closeTab,
       closeConversationTab,
@@ -1529,6 +2045,8 @@ export function TabProvider({ children }: TabProviderProps) {
       pinTab,
       toggleTileMode,
       openNewConversationTab,
+      openChatModeTab,
+      setChatDraftWorkingDir,
       confirmDraftAgent,
       setDraftAgentFromFallback,
       bindConversationTab,
@@ -1541,6 +2059,7 @@ export function TabProvider({ children }: TabProviderProps) {
       activeTabId,
       tabsHydrated,
       isTileMode,
+      consumeRemoteActivation,
       openTab,
       closeTab,
       closeConversationTab,
@@ -1551,6 +2070,8 @@ export function TabProvider({ children }: TabProviderProps) {
       pinTab,
       toggleTileMode,
       openNewConversationTab,
+      openChatModeTab,
+      setChatDraftWorkingDir,
       confirmDraftAgent,
       setDraftAgentFromFallback,
       bindConversationTab,
