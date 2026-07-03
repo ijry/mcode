@@ -19,7 +19,6 @@ import {
   findStoredConnectionById,
   type ConnectionContext,
 } from "@/services/connectionContext"
-import { buildProjectDetailRoute } from "@/services/projectDetail"
 
 const currentInstance = getCurrentInstance()
 const upThemeVars = computed(() => currentInstance?.proxy?.upThemeVars || {})

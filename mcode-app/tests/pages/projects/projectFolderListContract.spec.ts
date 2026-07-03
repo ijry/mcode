@@ -14,7 +14,15 @@ describe("ProjectFolderList extraction", () => {
     expect(source).toContain("buildProjectListItems")
     expect(source).toContain("RemoteDirectoryBrowser")
     expect(source).toContain("openRemoteFolder")
+    expect(source).toContain("buildProjectDetailRoute")
     expect(source).toContain("defineExpose")
+  })
+
+  it("does not reload when a resolved connection is emitted back to the parent", () => {
+    const source = readSource("components/projects/ProjectFolderList.vue")
+    expect(source).toContain("loadedConnectionKey")
+    expect(source).toContain("connectionIdentityKey")
+    expect(source).toContain("nextKey === loadedConnectionKey")
   })
 
   it("keeps projects page as a route wrapper", () => {

@@ -152,11 +152,18 @@ const currentProjectAction = ref<ProjectListItem | null>(null)
 const embedded = computed(() => Boolean(props.embedded))
 const connectionName = computed(() => connectionRef.value?.name || "项目列表")
 const projectActions = computed(() => [{ name: "Git 管理", color: "#2979ff" }])
+let loadedConnectionKey = ""
 
 watch(
   () => props.connection,
   (next) => {
+    const nextKey = connectionIdentityKey(next)
+    if (nextKey && nextKey === loadedConnectionKey) {
+      connectionRef.value = next
+      return
+    }
     connectionRef.value = next
+    loadedConnectionKey = nextKey
     void loadPage()
   },
   { immediate: true }
@@ -194,9 +201,13 @@ async function loadPage() {
 function openProjectSessions(item: ProjectListItem) {
   const connectionId = getCurrentConnectionId()
   if (!connectionId) return
-  const title = encodeURIComponent(item.name)
   uni.navigateTo({
-    url: `/pages/sessions/index?connectionId=${encodeURIComponent(connectionId)}&folderId=${item.id}&projectName=${title}`,
+    url: buildProjectDetailRoute({
+      connectionId,
+      folderId: item.id,
+      projectName: item.name,
+      projectPath: item.path,
+    }),
   })
 }
 
@@ -267,6 +278,18 @@ async function handleRemoteFolderSelected(path: string) {
 function toErrorMessage(error: unknown) {
   if (error instanceof Error && error.message.trim()) return error.message.trim()
   return "读取项目列表失败"
+}
+
+function connectionIdentityKey(connection: ConnectionContext | null) {
+  if (!connection) return ""
+  return [
+    connection.id || "",
+    connection.targetAgent || "",
+    connection.routeMode || "",
+    connection.routeMode === "direct"
+      ? connection.directBaseUrl || ""
+      : connection.gatewayBaseUrl || connection.gatewayProvider || "",
+  ].join("::")
 }
 </script>
 

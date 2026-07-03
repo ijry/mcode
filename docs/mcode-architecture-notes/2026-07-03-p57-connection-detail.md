@@ -6,6 +6,8 @@ MCode App 新增 `pages/connection-detail/index` 作为连接级工作台。页�
 
 文件夹标签复用 `ProjectFolderList`，旧 `pages/projects/index` 只保留路由包装。设置标签通过现有 `CodegGateway.call(command, payload)` 调用 codeg-main 已有设置命令，不新增连接 schema。
 
+`ProjectFolderList` 会在远端连接解析成功后把 resolved connection 回传给父页面保存。组件内部用连接身份 key 过滤这类同源回写，避免父页面更新 prop 后再次触发文件夹加载，造成连接详情默认 `文件夹` 标签重复请求或白屏卡住。
+
 ## 协议与数据流
 
 - 文件夹：继续使用 `list_open_folder_details`、`open_folder`、`get_home_directory`、`list_directory_entries` 等 P45 协议。
@@ -20,6 +22,8 @@ MCode App 新增 `pages/connection-detail/index` 作为连接级工作台。页�
 连接列表主卡进入详情页；底部主操作继续连接并打开文件夹列表。详情页 tab 顺序是 `文件夹 / 设置 / 连接信息 / 配置码`。设置页采用截图同类的分组列表：`个性化` 下有 `外观`、`语言`、`通用`、`快捷消息`。`通用` 内含 `委派` 与 `对话工具`。
 
 连接信息页只展示本地连接记录和远端描述符的摘要，不展示 direct token、pair secret、access token 或 refresh token；需要表达凭据状态时只显示 `已保存` 或 `未保存`。
+
+文件夹列表中的项目点击继续进入 P56 的 `pages/project-detail/index` 工作台；Git 管理仍保留在项目行菜单中。
 
 ## 兼容性
 
