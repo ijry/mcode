@@ -14,8 +14,8 @@ describe("ConversationDetailBody", () => {
     expect(source).toContain('class="message-list__content" :style="messageListContentStyle"')
     expect(source).toContain('class="composer-stack"')
     expect(source).toContain('class="composer-safe-area"')
-    expect(source).toContain('class="input-status-wrap"')
-    expect(source).toContain('class="input-wrap"')
+    expect(source).toContain("'input-status-wrap'")
+    expect(source).toContain("'input-wrap'")
   })
 
   it("owns layout styles that cannot cross the parent scoped boundary", () => {
@@ -86,6 +86,65 @@ describe("ConversationDetailBody", () => {
     expect(source).toContain('activation: "preserve"')
     expect(source).not.toContain('activation: "allow"')
     expect(source).not.toContain("const remoteActiveIndex = detailShellTabs.value.findIndex((tab) => tab.active)")
+  })
+
+  it("keeps custom detail backgrounds shared across opened tabs", () => {
+    const source = fs.readFileSync(
+      path.resolve(__dirname, "../../../src/pages/conversation-detail/index.vue"),
+      "utf8"
+    )
+
+    expect(source).toContain("return `${DETAIL_BACKGROUND_STORAGE_PREFIX}:${instanceKey}:shared`")
+    expect(source).toContain("function buildLegacyDetailBackgroundStorageKey")
+    expect(source).toContain("persistDetailBackgroundSnapshot(legacySnapshot.url)")
+    expect(source).toContain("removeLegacyDetailBackgroundSnapshots()")
+    expect(source).not.toContain("function buildDetailBackgroundStorageKey(targetConversationId")
+  })
+
+  it("exposes current-tab conversation actions from the detail more menu", () => {
+    const source = fs.readFileSync(
+      path.resolve(__dirname, "../../../src/pages/conversation-detail/index.vue"),
+      "utf8"
+    )
+
+    expect(source).toContain('{ name: "重命名", color: "#2979ff" }')
+    expect(source).toContain('{ name: "更改状态", color: "#2979ff" }')
+    expect(source).toContain('{ name: "删除", color: "#fa3534" }')
+    expect(source).toContain('title: "重命名会话"')
+    expect(source).toContain('gateway.call("update_conversation_title"')
+    expect(source).toContain('gateway.call("update_conversation_status"')
+    expect(source).toContain('title: "确认删除"')
+    expect(source).toContain('confirmText: "删除"')
+    expect(source).toContain('gateway.call("delete_conversation"')
+    expect(source).toContain("closeConversationTab({")
+  })
+
+  it("uses lighter translucent content surfaces over custom backgrounds", () => {
+    const detailStyles = fs.readFileSync(
+      path.resolve(__dirname, "../../../src/pages/conversation-detail/index.scss"),
+      "utf8"
+    )
+    const bodySource = fs.readFileSync(
+      path.resolve(__dirname, "../../../src/pages/conversation-detail/ConversationDetailBody.vue"),
+      "utf8"
+    )
+    const bubbleSource = fs.readFileSync(
+      path.resolve(__dirname, "../../../src/components/MessageBubble.vue"),
+      "utf8"
+    )
+
+    expect(bodySource).toContain("var(--up-card-bg-color, #ffffff) 38%, transparent 62%")
+    expect(bodySource).toContain("backdrop-filter: blur(12rpx)")
+    expect(bubbleSource).toContain("var(--up-primary, #2979ff) 54%, transparent 46%")
+    expect(bubbleSource).toContain("backdrop-filter: blur(0.1rem)")
+    expect(bubbleSource).toContain("var(--up-card-bg-color, #ffffff) 30%, transparent 70%")
+    expect(detailStyles).toContain("backdrop-filter: blur(10rpx)")
+    expect(detailStyles).toContain("var(--up-card-bg-color, #ffffff) 32%, transparent 68%")
+    expect(detailStyles).toContain("var(--up-card-bg-color, #ffffff) 22%, transparent 78%")
+    expect(detailStyles).toContain("send-btn--translucent")
+    expect(detailStyles).toContain("var(--up-primary, #2979ff) 48%, transparent 52%")
+    expect(detailStyles).not.toContain("backdrop-filter: blur(22rpx)")
+    expect(bubbleSource).not.toContain("backdrop-filter: blur(0.1625rem)")
   })
 
   it("does not replay cached config into a live session when the connection attaches", () => {
@@ -165,7 +224,7 @@ describe("ConversationDetailBody", () => {
     )
 
     expect(source).toMatch(/\.composer-stack\s*\{[\s\S]*bottom:\s*calc\(env\(safe-area-inset-bottom\) \+ 10rpx\);/)
-    expect(source).toMatch(/\.composer-safe-area\s*\{[\s\S]*height:\s*calc\(env\(safe-area-inset-bottom\) \+ 12rpx\);[\s\S]*background:\s*var\(--up-page-bg-color, var\(--up-bg-color, #f3f4f6\)\);/)
+    expect(source).toMatch(/\.composer-safe-area\s*\{[\s\S]*height:\s*calc\(env\(safe-area-inset-bottom\) \+ 12rpx\);[\s\S]*background:\s*transparent;/)
     expect(source).not.toContain("padding-bottom: calc(16rpx + env(safe-area-inset-bottom))")
   })
 
@@ -198,7 +257,7 @@ describe("ConversationDetailBody", () => {
       "utf8"
     )
 
-    expect(source).toContain('class="attachments-preview"')
+    expect(source).toContain("'attachments-preview'")
     expect(source).toContain("handleChooseImages")
     expect(source).toContain("handleChooseFiles")
     expect(source).toContain("uploadPickedFiles")

@@ -120,9 +120,9 @@ const emit = defineEmits<{
 }
 
 .input-status-wrap--translucent {
-  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 50%, transparent 50%);
-  border: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 42%, transparent 58%);
-  backdrop-filter: blur(18rpx);
+  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 38%, transparent 62%);
+  border: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 34%, transparent 66%);
+  backdrop-filter: blur(10rpx);
 }
 
 .input-wrap {
@@ -137,8 +137,8 @@ const emit = defineEmits<{
 }
 
 .input-wrap--translucent {
-  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 50%, transparent 50%);
-  border: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 42%, transparent 58%);
-  backdrop-filter: blur(22rpx);
+  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 38%, transparent 62%);
+  border: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 34%, transparent 66%);
+  backdrop-filter: blur(12rpx);
 }
 </style>

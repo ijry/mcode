@@ -85,6 +85,14 @@
       }
     },
     {
+      "path": "pages/project-detail/index",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "项目详情",
+        "enablePullDownRefresh": false
+      }
+    },
+    {
       "path": "pages/sessions/index",
       "style": {
         "navigationBarTitleText": "项目会话",

@@ -405,8 +405,12 @@
         </view>
 
         <view
-          class="send-btn"
-          :class="{ 'send-btn--active': canSend, 'send-btn--loading': sending }"
+          :class="[
+            'send-btn',
+            translucentMessageList && 'send-btn--translucent',
+            canSend && 'send-btn--active',
+            sending && 'send-btn--loading',
+          ]"
           @click="sendMessage"
         >
           <up-loading-icon v-if="sending" color="#ffffff" size="20"></up-loading-icon>

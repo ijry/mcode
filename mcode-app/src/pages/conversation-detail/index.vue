@@ -74,7 +74,7 @@
             class="detail-dropdown-menu__item"
             @click="handleDetailMoreMenuClick(action.name)"
           >
-            <text class="detail-dropdown-menu__label">{{ action.name }}</text>
+            <text class="detail-dropdown-menu__label" :style="{ color: action.color }">{{ action.name }}</text>
           </view>
         </view>
       </view>
@@ -956,6 +956,8 @@ import {
   getConversationSummaryById,
   getOlderTurns,
   getNewestTurns,
+  markConversationSummaryDeleted,
+  patchConversationSummaryStatus,
   type PersistedTurnWithParts,
 } from "@/services/db/repositories/conversationRepository"
 import {
@@ -1205,6 +1207,7 @@ interface QuickReplyItem {
 interface DetailBackgroundSnapshot {
   url: string
   updatedAt?: number
+  clearedAt?: number
 }
 
 const auth = useAuthStore()
@@ -1482,10 +1485,21 @@ const detailConnectionKey = computed(() => {
   }
   return resolveDetailInstanceKey()
 })
+const DETAIL_CONVERSATION_STATUS_ACTIONS = [
+  { label: "进行中", status: "in_progress" },
+  { label: "待处理", status: "pending_review" },
+  { label: "已完成", status: "completed" },
+  { label: "已取消", status: "cancelled" },
+  { label: "失败", status: "failed" },
+] as const
+
 const detailMoreActions = computed(() => [
   { name: "模型供应商", color: "#2979ff" },
   { name: "文件夹管理", color: "#2979ff" },
   { name: "背景图自定义", color: "#8b5cf6" },
+  { name: "重命名", color: "#2979ff" },
+  { name: "更改状态", color: "#2979ff" },
+  { name: "删除", color: "#fa3534" },
 ])
 const hasDetailBackgroundImage = computed(() => Boolean(detailBackgroundImageUrl.value))
 
@@ -2574,6 +2588,12 @@ function handleDetailMoreMenuClick(action: string) {
     openDetailProjectsPage()
   } else if (action === "背景图自定义") {
     openDetailBackgroundPicker()
+  } else if (action === "重命名") {
+    renameCurrentDetailConversation()
+  } else if (action === "更改状态") {
+    openCurrentDetailConversationStatusPicker()
+  } else if (action === "删除") {
+    confirmDeleteCurrentDetailConversation()
   }
   closeDetailMoreMenu()
 }
@@ -2618,6 +2638,163 @@ function openDetailBackgroundPicker() {
       }
     },
   })
+}
+
+function renameCurrentDetailConversation() {
+  const targetConversationId = Number(conversationId.value || 0)
+  if (!targetConversationId) return
+  const previousTitle = conversationTitle.value || "未命名会话"
+  uni.showModal({
+    title: "重命名会话",
+    editable: true,
+    placeholderText: previousTitle,
+    success: (result) => {
+      if (!result.confirm) return
+      const nextTitle = String(result.content || "").trim()
+      if (!nextTitle || nextTitle === previousTitle) return
+      void updateCurrentDetailConversationTitle(targetConversationId, nextTitle)
+    },
+  })
+}
+
+async function updateCurrentDetailConversationTitle(targetConversationId: number, title: string) {
+  try {
+    const gateway = await getDetailGateway()
+    await gateway.call("update_conversation_title", {
+      conversationId: targetConversationId,
+      title,
+    })
+    if (Number(conversationId.value || 0) === targetConversationId) {
+      syncConversationTitle(title)
+    } else {
+      detailTabTitleMap.value = {
+        ...detailTabTitleMap.value,
+        [targetConversationId]: title,
+      }
+    }
+    markConversationListDirty()
+    uni.showToast({ title: "重命名成功", icon: "success" })
+  } catch (error) {
+    uni.showToast({
+      title: toErrorMessage(error, "重命名失败"),
+      icon: "none",
+    })
+  }
+}
+
+function openCurrentDetailConversationStatusPicker() {
+  const targetConversationId = Number(conversationId.value || 0)
+  if (!targetConversationId) return
+  uni.showActionSheet({
+    itemList: DETAIL_CONVERSATION_STATUS_ACTIONS.map((item) => item.label),
+    success: (result) => {
+      const option = DETAIL_CONVERSATION_STATUS_ACTIONS[Number(result.tapIndex)]
+      if (!option) return
+      void updateCurrentDetailConversationStatus(targetConversationId, option.status, option.label)
+    },
+  })
+}
+
+async function updateCurrentDetailConversationStatus(
+  targetConversationId: number,
+  status: string,
+  label: string
+) {
+  try {
+    const gateway = await getDetailGateway()
+    await gateway.call("update_conversation_status", {
+      conversationId: targetConversationId,
+      status,
+    })
+    const instanceKey = resolveDetailInstanceKey()
+    if (instanceKey) {
+      void patchConversationSummaryStatus({
+        instanceKey,
+        conversationId: targetConversationId,
+        status,
+      }).catch((error) => {
+        console.warn("patch detail conversation status skipped", error)
+      })
+    }
+    markConversationListDirty()
+    uni.showToast({ title: `已标记为${label}`, icon: "success" })
+  } catch (error) {
+    uni.showToast({
+      title: toErrorMessage(error, "状态更新失败"),
+      icon: "none",
+    })
+  }
+}
+
+function confirmDeleteCurrentDetailConversation() {
+  const tab = detailShellTabs.value[activeDetailTabIndex.value]
+  const targetConversationId = Number(tab?.conversationId || conversationId.value || 0)
+  if (!targetConversationId) return
+  const title = detailTabTitleMap.value[targetConversationId] || conversationTitle.value || "当前会话"
+  uni.showModal({
+    title: "确认删除",
+    content: `确定要删除「${title}」吗？此操作不可恢复。`,
+    confirmText: "删除",
+    confirmColor: "#fa3534",
+    success: (result) => {
+      if (!result.confirm) return
+      void deleteCurrentDetailConversation(targetConversationId)
+    },
+  })
+}
+
+async function deleteCurrentDetailConversation(targetConversationId: number) {
+  const instanceKey = resolveDetailInstanceKey()
+  if (!instanceKey) return
+  const closingIndex = findDetailShellTabIndex(targetConversationId)
+  const safeClosingIndex = closingIndex >= 0 ? closingIndex : activeDetailTabIndex.value
+  const targetIndex = resolveDetailTabCloseTarget(
+    activeDetailTabIndex.value,
+    safeClosingIndex,
+    detailShellTabs.value.length,
+  )
+  const targetTab = targetIndex >= 0 ? detailShellTabs.value[targetIndex] : null
+  try {
+    const gateway = await getDetailGateway()
+    await gateway.call("delete_conversation", {
+      conversationId: targetConversationId,
+    })
+    await markConversationSummaryDeleted({
+      instanceKey,
+      conversationId: targetConversationId,
+    }).catch((error) => {
+      console.warn("mark detail conversation deleted skipped", error)
+    })
+    runtime.clearSession(targetConversationId)
+    detailTabStateMap.delete(targetConversationId)
+    const snapshot = await closeConversationTab({
+      instanceKey,
+      gateway,
+      conversationId: targetConversationId,
+      origin: "mcode-mobile",
+    })
+    if (snapshot) {
+      applyDetailOpenedTabsState({
+        instanceKey,
+        version: snapshot.version,
+        items: snapshot.items,
+        origin: "mcode-mobile",
+      })
+      await refreshDetailTabTitles(instanceKey, snapshot.items)
+    }
+    markConversationListDirty()
+    uni.showToast({ title: "删除成功", icon: "success" })
+    if (targetTab?.conversationId) {
+      await switchToDetailConversation(targetTab.conversationId, { syncRemote: false })
+      return
+    }
+    handleBackNavigation()
+  } catch (error) {
+    uni.showToast({
+      title: toErrorMessage(error, "删除失败"),
+      icon: "none",
+    })
+  }
 }
 
 function syncDetailBridgeHealth() {
@@ -3736,30 +3913,53 @@ function ensureHistoryCursorFromLoadedMessages() {
   oldestLoadedCursor.value = { sortKey, id: firstMessageId }
 }
 
-function buildDetailBackgroundStorageKey(targetConversationId = conversationId.value) {
+function buildDetailBackgroundStorageKey() {
+  const instanceKey = resolveDetailInstanceKey() || "anonymous"
+  return `${DETAIL_BACKGROUND_STORAGE_PREFIX}:${instanceKey}:shared`
+}
+
+function buildLegacyDetailBackgroundStorageKey(targetConversationId = conversationId.value) {
   const normalizedConversationId = Number(targetConversationId || 0)
   if (!normalizedConversationId) return ""
   const instanceKey = resolveDetailInstanceKey() || "anonymous"
   return `${DETAIL_BACKGROUND_STORAGE_PREFIX}:${instanceKey}:${normalizedConversationId}`
 }
 
-function readDetailBackgroundSnapshot(targetConversationId = conversationId.value): DetailBackgroundSnapshot | null {
-  const key = buildDetailBackgroundStorageKey(targetConversationId)
+function parseDetailBackgroundSnapshot(raw: unknown): DetailBackgroundSnapshot | null {
+  if (!raw) return null
+  const parsed = typeof raw === "string" ? JSON.parse(raw) : raw
+  const url = firstString((parsed as any)?.url) || ""
+  return {
+    url,
+    updatedAt: typeof (parsed as any)?.updatedAt === "number" ? (parsed as any).updatedAt : undefined,
+    clearedAt: typeof (parsed as any)?.clearedAt === "number" ? (parsed as any).clearedAt : undefined,
+  }
+}
+
+function readStoredDetailBackgroundSnapshot(key: string): DetailBackgroundSnapshot | null {
   if (!key) return null
   try {
     const raw = uni.getStorageSync(key)
-    if (!raw) return null
-    const parsed = typeof raw === "string" ? JSON.parse(raw) : raw
-    const url = firstString((parsed as any)?.url)
-    if (!url) return null
-    return {
-      url,
-      updatedAt: typeof (parsed as any)?.updatedAt === "number" ? (parsed as any).updatedAt : undefined,
-    }
+    return parseDetailBackgroundSnapshot(raw)
   } catch (error) {
     console.warn("read detail background snapshot skipped", error)
     return null
   }
+}
+
+function readDetailBackgroundSnapshot(targetConversationId = conversationId.value): DetailBackgroundSnapshot | null {
+  const sharedKey = buildDetailBackgroundStorageKey()
+  const sharedSnapshot = readStoredDetailBackgroundSnapshot(sharedKey)
+  if (sharedSnapshot) return sharedSnapshot
+
+  const legacySnapshot = readStoredDetailBackgroundSnapshot(
+    buildLegacyDetailBackgroundStorageKey(targetConversationId)
+  )
+  if (legacySnapshot?.url) {
+    persistDetailBackgroundSnapshot(legacySnapshot.url)
+    return legacySnapshot
+  }
+  return null
 }
 
 function applyDetailBackgroundFromStorage(targetConversationId = conversationId.value) {
@@ -3767,20 +3967,33 @@ function applyDetailBackgroundFromStorage(targetConversationId = conversationId.
   detailBackgroundImageUrl.value = snapshot?.url || ""
 }
 
-function persistDetailBackgroundSnapshot(url: string, targetConversationId = conversationId.value) {
-  const key = buildDetailBackgroundStorageKey(targetConversationId)
+function persistDetailBackgroundSnapshot(url: string) {
+  const key = buildDetailBackgroundStorageKey()
   if (!key) return
-  if (!url) {
-    uni.removeStorageSync(key)
-    return
-  }
   try {
     uni.setStorageSync(key, JSON.stringify({
       url,
-      updatedAt: Date.now(),
+      ...(url ? { updatedAt: Date.now() } : { clearedAt: Date.now() }),
     }))
   } catch (error) {
     console.warn("persist detail background snapshot skipped", error)
+  }
+}
+
+function removeLegacyDetailBackgroundSnapshots() {
+  const conversationIds = new Set<number>([
+    Number(conversationId.value || 0),
+    ...detailShellTabs.value.map((tab) => Number(tab.conversationId || 0)),
+  ])
+  for (const legacyConversationId of conversationIds) {
+    if (!legacyConversationId) continue
+    const key = buildLegacyDetailBackgroundStorageKey(legacyConversationId)
+    if (!key) continue
+    try {
+      uni.removeStorageSync(key)
+    } catch (error) {
+      console.warn("remove legacy detail background snapshot skipped", error)
+    }
   }
 }
 
@@ -3869,6 +4082,7 @@ function clearConversationDetailBackgroundImage(showToast = false) {
   const previousUrl = detailBackgroundImageUrl.value
   detailBackgroundImageUrl.value = ""
   persistDetailBackgroundSnapshot("")
+  removeLegacyDetailBackgroundSnapshots()
   if (previousUrl) {
     void removeSavedFileIfPossible(previousUrl)
   }

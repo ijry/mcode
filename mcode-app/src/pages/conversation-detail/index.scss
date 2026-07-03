@@ -206,9 +206,9 @@
 }
 
 .detail-tabs-bar--translucent {
-  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 50%, transparent 50%);
-  border-color: color-mix(in srgb, var(--up-border-color, #dadbde) 42%, transparent 58%);
-  backdrop-filter: blur(22rpx);
+  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 38%, transparent 62%);
+  border-color: color-mix(in srgb, var(--up-border-color, #dadbde) 34%, transparent 66%);
+  backdrop-filter: blur(10rpx);
 }
 
 :deep(.detail-tabs-bar .u-tabs__wrapper) {
@@ -258,8 +258,8 @@
 }
 
 .detail-tab-pill--translucent {
-  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 42%, transparent 58%);
-  border-color: color-mix(in srgb, var(--up-border-color, #dadbde) 36%, transparent 64%);
+  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 32%, transparent 68%);
+  border-color: color-mix(in srgb, var(--up-border-color, #dadbde) 30%, transparent 70%);
 }
 
 .detail-tab-pill--active {
@@ -577,17 +577,17 @@
     linear-gradient(
       180deg,
       color-mix(in srgb, var(--up-primary, #2979ff) 10%, transparent 90%) 0%,
-      color-mix(in srgb, var(--up-card-bg-color, #ffffff) 50%, transparent 50%) 100%
+      color-mix(in srgb, var(--up-card-bg-color, #ffffff) 38%, transparent 62%) 100%
     );
-  border: 1rpx solid color-mix(in srgb, var(--up-primary, #2979ff) 24%, transparent 76%);
+  border: 1rpx solid color-mix(in srgb, var(--up-primary, #2979ff) 20%, transparent 80%);
   box-shadow: 0 18rpx 40rpx rgba(41, 121, 255, 0.06);
-  backdrop-filter: blur(22rpx);
+  backdrop-filter: blur(12rpx);
 }
 
 .pending-response-card--translucent .pending-response-card__badge {
-  background: color-mix(in srgb, var(--up-primary, #2979ff) 10%, transparent 90%);
-  border: 1rpx solid color-mix(in srgb, var(--up-primary, #2979ff) 18%, transparent 82%);
-  backdrop-filter: blur(14rpx);
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 8%, transparent 92%);
+  border: 1rpx solid color-mix(in srgb, var(--up-primary, #2979ff) 14%, transparent 86%);
+  backdrop-filter: blur(8rpx);
 }
 
 .pending-response-card__pulse {
@@ -813,11 +813,11 @@
     linear-gradient(
       135deg,
       color-mix(in srgb, var(--up-primary, #2979ff) 12%, transparent 88%) 0%,
-      color-mix(in srgb, var(--up-card-bg-color, #ffffff) 50%, transparent 50%) 78%
+      color-mix(in srgb, var(--up-card-bg-color, #ffffff) 38%, transparent 62%) 78%
     );
-  border: 1rpx solid color-mix(in srgb, var(--up-primary, #2979ff) 24%, transparent 76%);
+  border: 1rpx solid color-mix(in srgb, var(--up-primary, #2979ff) 20%, transparent 80%);
   box-shadow: 0 6rpx 16rpx rgba(41, 121, 255, 0.05);
-  backdrop-filter: blur(20rpx);
+  backdrop-filter: blur(10rpx);
 }
 
 .bottom-generating__orb {
@@ -948,23 +948,23 @@
     linear-gradient(
       180deg,
       color-mix(in srgb, var(--up-warning, #f9ae3d) 12%, transparent 88%) 0%,
-      color-mix(in srgb, var(--up-card-bg-color, #ffffff) 50%, transparent 50%) 100%
+      color-mix(in srgb, var(--up-card-bg-color, #ffffff) 38%, transparent 62%) 100%
     );
-  border: 1rpx solid color-mix(in srgb, var(--up-warning, #f9ae3d) 24%, transparent 76%);
+  border: 1rpx solid color-mix(in srgb, var(--up-warning, #f9ae3d) 20%, transparent 80%);
   box-shadow: 0 10rpx 28rpx rgba(250, 173, 20, 0.06);
-  backdrop-filter: blur(22rpx);
+  backdrop-filter: blur(12rpx);
 }
 
 .permission-card--translucent .permission-card__command-scroll {
   background: color-mix(in srgb, var(--up-main-color, #303133) 4%, transparent 96%);
-  border: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 36%, transparent 64%);
-  backdrop-filter: blur(14rpx);
+  border: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 30%, transparent 70%);
+  backdrop-filter: blur(8rpx);
 }
 
 .permission-card--translucent .permission-card__action {
-  background: color-mix(in srgb, var(--up-warning, #f9ae3d) 14%, transparent 86%);
-  border: 1rpx solid color-mix(in srgb, var(--up-warning, #f9ae3d) 18%, transparent 82%);
-  backdrop-filter: blur(12rpx);
+  background: color-mix(in srgb, var(--up-warning, #f9ae3d) 10%, transparent 90%);
+  border: 1rpx solid color-mix(in srgb, var(--up-warning, #f9ae3d) 14%, transparent 86%);
+  backdrop-filter: blur(6rpx);
 }
 
 .permission-card__header {
@@ -1106,15 +1106,15 @@
     linear-gradient(
       180deg,
       color-mix(in srgb, var(--up-primary, #2979ff) 10%, transparent 90%) 0%,
-      color-mix(in srgb, var(--up-card-bg-color, #ffffff) 50%, transparent 50%) 100%
+      color-mix(in srgb, var(--up-card-bg-color, #ffffff) 38%, transparent 62%) 100%
     );
-  border: 1rpx solid color-mix(in srgb, var(--up-primary, #2979ff) 22%, transparent 78%);
+  border: 1rpx solid color-mix(in srgb, var(--up-primary, #2979ff) 18%, transparent 82%);
   box-shadow: 0 12rpx 30rpx rgba(41, 121, 255, 0.06);
-  backdrop-filter: blur(22rpx);
+  backdrop-filter: blur(12rpx);
 }
 
 .ask-question-card--translucent .ask-question-card__question + .ask-question-card__question {
-  border-top-color: color-mix(in srgb, var(--up-border-color, #dadbde) 42%, transparent 58%);
+  border-top-color: color-mix(in srgb, var(--up-border-color, #dadbde) 34%, transparent 66%);
 }
 
 .ask-question-card__header {
@@ -1224,9 +1224,9 @@
 }
 
 .ask-question-card--translucent .ask-question-option {
-  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 48%, transparent 52%);
-  border-color: color-mix(in srgb, var(--up-border-color, #dadbde) 42%, transparent 58%);
-  backdrop-filter: blur(14rpx);
+  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 36%, transparent 64%);
+  border-color: color-mix(in srgb, var(--up-border-color, #dadbde) 34%, transparent 66%);
+  backdrop-filter: blur(8rpx);
 }
 
 .ask-question-option--active {
@@ -1235,8 +1235,8 @@
 }
 
 .ask-question-card--translucent .ask-question-option--active {
-  border-color: color-mix(in srgb, var(--up-primary, #2979ff) 58%, transparent 42%);
-  background: color-mix(in srgb, var(--up-primary, #2979ff) 12%, transparent 88%);
+  border-color: color-mix(in srgb, var(--up-primary, #2979ff) 48%, transparent 52%);
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 10%, transparent 90%);
 }
 
 .ask-question-option--disabled {
@@ -1331,9 +1331,9 @@
 }
 
 .ask-question-card--translucent .ask-question-card__other-input {
-  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 48%, transparent 52%);
-  border-color: color-mix(in srgb, var(--up-border-color, #dadbde) 42%, transparent 58%);
-  backdrop-filter: blur(14rpx);
+  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 36%, transparent 64%);
+  border-color: color-mix(in srgb, var(--up-border-color, #dadbde) 34%, transparent 66%);
+  backdrop-filter: blur(8rpx);
 }
 
 .ask-question-card__footer {
@@ -1454,9 +1454,9 @@
 }
 
 .slash-panel--translucent {
-  border-color: color-mix(in srgb, var(--up-border-color, #dadbde) 42%, transparent 58%);
-  background-color: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 50%, transparent 50%);
-  backdrop-filter: blur(18rpx);
+  border-color: color-mix(in srgb, var(--up-border-color, #dadbde) 34%, transparent 66%);
+  background-color: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 38%, transparent 62%);
+  backdrop-filter: blur(10rpx);
 }
 
 .composer-config-row {
@@ -1552,9 +1552,9 @@
 }
 
 .upload-queue--translucent {
-  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 50%, transparent 50%);
-  border: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 42%, transparent 58%);
-  backdrop-filter: blur(18rpx);
+  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 38%, transparent 62%);
+  border: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 34%, transparent 66%);
+  backdrop-filter: blur(10rpx);
 }
 
 .upload-queue__item {
@@ -1598,14 +1598,14 @@
 }
 
 .attachments-preview--translucent .attachment-file {
-  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 50%, transparent 50%);
-  border-color: color-mix(in srgb, var(--up-border-color, #dadbde) 42%, transparent 58%);
-  backdrop-filter: blur(16rpx);
+  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 38%, transparent 62%);
+  border-color: color-mix(in srgb, var(--up-border-color, #dadbde) 34%, transparent 66%);
+  backdrop-filter: blur(8rpx);
 }
 
 .attachments-preview--translucent .attachment-remove {
-  background-color: color-mix(in srgb, var(--up-main-color, #303133) 34%, transparent 66%);
-  backdrop-filter: blur(12rpx);
+  background-color: color-mix(in srgb, var(--up-main-color, #303133) 28%, transparent 72%);
+  backdrop-filter: blur(6rpx);
 }
 
 .attachment-item {
@@ -1917,14 +1917,19 @@
 }
 
 .tool-toggle-btn--translucent {
-  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 42%, transparent 58%);
-  border: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 36%, transparent 64%);
-  backdrop-filter: blur(14rpx);
+  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 22%, transparent 78%);
+  border: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 24%, transparent 76%);
+  backdrop-filter: blur(6rpx);
 }
 
 .tool-toggle-btn--active {
   background: color-mix(in srgb, var(--up-primary, #2979ff) 12%, var(--up-card-bg-color, #ffffff) 88%);
   transform: translateY(-1rpx);
+}
+
+.tool-toggle-btn--active.tool-toggle-btn--translucent {
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 14%, transparent 86%);
+  border-color: color-mix(in srgb, var(--up-primary, #2979ff) 22%, transparent 78%);
 }
 
 .input-status-row {
@@ -1992,9 +1997,9 @@
 }
 
 .input-box--translucent {
-  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 42%, transparent 58%);
-  border: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 36%, transparent 64%);
-  backdrop-filter: blur(14rpx);
+  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 22%, transparent 78%);
+  border: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 24%, transparent 76%);
+  backdrop-filter: blur(6rpx);
 }
 
 .composer-textarea {
@@ -2046,6 +2051,18 @@
   }
 }
 
+.send-btn--translucent {
+  background-color: color-mix(in srgb, var(--up-main-color, #303133) 24%, transparent 76%);
+  border: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 24%, transparent 76%);
+  backdrop-filter: blur(6rpx);
+}
+
+.send-btn--translucent.send-btn--active,
+.send-btn--translucent.send-btn--loading {
+  background-color: color-mix(in srgb, var(--up-primary, #2979ff) 48%, transparent 52%);
+  border-color: color-mix(in srgb, var(--up-primary, #2979ff) 28%, transparent 72%);
+}
+
 .input-tool-row {
   display: flex;
   align-items: center;
@@ -2088,9 +2105,9 @@
 }
 
 .input-tool-btn__icon--translucent {
-  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 42%, transparent 58%);
-  border: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 36%, transparent 64%);
-  backdrop-filter: blur(14rpx);
+  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 22%, transparent 78%);
+  border: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 24%, transparent 76%);
+  backdrop-filter: blur(6rpx);
 }
 
 .input-tool-btn__glyph {
@@ -2102,6 +2119,11 @@
 .input-tool-btn--active .input-tool-btn__icon {
   background: color-mix(in srgb, var(--up-primary, #2979ff) 12%, var(--up-card-bg-color, #ffffff) 88%);
   transform: translateY(-1rpx);
+}
+
+.input-tool-btn--active .input-tool-btn__icon--translucent {
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 14%, transparent 86%);
+  border-color: color-mix(in srgb, var(--up-primary, #2979ff) 22%, transparent 78%);
 }
 
 .input-tool-btn--danger .input-tool-btn__icon {
@@ -2132,15 +2154,15 @@
 }
 
 .composer-panel--translucent {
-  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 50%, transparent 50%);
-  border: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 42%, transparent 58%);
-  backdrop-filter: blur(20rpx);
+  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 38%, transparent 62%);
+  border: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 34%, transparent 66%);
+  backdrop-filter: blur(10rpx);
 }
 
 .composer-panel--translucent .composer-quick-chip {
-  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 46%, transparent 54%);
-  border-color: color-mix(in srgb, var(--up-border-color, #dadbde) 42%, transparent 58%);
-  backdrop-filter: blur(14rpx);
+  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 36%, transparent 64%);
+  border-color: color-mix(in srgb, var(--up-border-color, #dadbde) 34%, transparent 66%);
+  backdrop-filter: blur(8rpx);
 }
 
 .composer-panel__body {

@@ -313,9 +313,9 @@ function normalizeAgentType(raw?: string) {
   }
 
   &--user-translucent {
-    background-color: color-mix(in srgb, var(--up-primary, #2979ff) 72%, transparent 28%);
-    border: 1rpx solid color-mix(in srgb, var(--up-primary, #2979ff) 34%, transparent 66%);
-    backdrop-filter: blur(0.1625rem);
+    background-color: color-mix(in srgb, var(--up-primary, #2979ff) 54%, transparent 46%);
+    border: 1rpx solid color-mix(in srgb, var(--up-primary, #2979ff) 24%, transparent 76%);
+    backdrop-filter: blur(0.1rem);
     box-shadow: 0 10rpx 24rpx rgba(41, 121, 255, 0.08);
   }
 
@@ -326,9 +326,9 @@ function normalizeAgentType(raw?: string) {
   }
 
   &--assistant-translucent {
-    background-color: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 50%, transparent 50%);
-    border: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 42%, transparent 58%);
-    backdrop-filter: blur(18rpx);
+    background-color: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 30%, transparent 70%);
+    border: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 28%, transparent 72%);
+    backdrop-filter: blur(10rpx);
     box-shadow: 0 10rpx 24rpx rgba(15, 23, 42, 0.045);
   }
 }
@@ -451,8 +451,8 @@ function normalizeAgentType(raw?: string) {
 }
 
 .part-plan--translucent {
-  background: color-mix(in srgb, var(--up-primary, #2979ff) 10%, transparent 90%);
-  border: 1rpx solid color-mix(in srgb, var(--up-primary, #2979ff) 24%, transparent 76%);
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 8%, transparent 92%);
+  border: 1rpx solid color-mix(in srgb, var(--up-primary, #2979ff) 18%, transparent 82%);
   border-left: 4rpx solid var(--up-primary, #2979ff);
 }
 

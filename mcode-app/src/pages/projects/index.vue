@@ -115,6 +115,7 @@ import {
   type ProjectListItem,
 } from "@/services/projectSessions"
 import { buildProjectGitRoute } from "@/services/projectGit"
+import { buildProjectDetailRoute } from "@/services/projectDetail"
 import type { CodegGateway } from "@/services/gateway"
 import { openRemoteFolder } from "@/services/remoteDirectoryBrowser"
 
@@ -177,9 +178,13 @@ async function loadPage(stopPullDown = false) {
 function openProjectSessions(item: ProjectListItem) {
   const connectionId = getCurrentConnectionId()
   if (!connectionId) return
-  const title = encodeURIComponent(item.name)
   uni.navigateTo({
-    url: `/pages/sessions/index?connectionId=${encodeURIComponent(connectionId)}&folderId=${item.id}&projectName=${title}`,
+    url: buildProjectDetailRoute({
+      connectionId,
+      folderId: item.id,
+      projectName: item.name,
+      projectPath: item.path,
+    }),
   })
 }
 

@@ -1,8 +1,11 @@
 import {
   applyTodoEdit,
   createTodoItem,
+  createProjectTodoItem,
+  getProjectTodoSections,
   getVisibleTodoSections,
   hideCompletedTodos,
+  isTodoBoundToProject,
   normalizeStoredTodos,
   toggleTodoCompletion,
 } from "@/pages/todos/todoState"
@@ -119,5 +122,54 @@ describe("todoState", () => {
       expect.objectContaining({ text: "新文案" }),
     ])
     expect(applyTodoEdit(items, items[0].id, "   ")).toEqual([])
+  })
+
+  it("normalizes old rows without adding project metadata", () => {
+    const normalized = normalizeStoredTodos(
+      [{ id: "1", text: "旧待办", completed: false }],
+      100
+    )
+
+    expect(normalized[0]).toEqual({
+      id: "1",
+      text: "旧待办",
+      completed: false,
+      createdAt: 100,
+      completedAt: null,
+      hidden: false,
+      hiddenAt: null,
+    })
+  })
+
+  it("creates project-bound todos with connection and project metadata", () => {
+    expect(
+      createProjectTodoItem(
+        "修复登录",
+        { connectionId: "conn123", projectId: 42, projectName: "demo" },
+        200
+      )
+    ).toMatchObject({
+      id: "200",
+      text: "修复登录",
+      connectionId: "conn123",
+      projectId: 42,
+      projectName: "demo",
+      completed: false,
+    })
+  })
+
+  it("filters visible todos by connection and project id", () => {
+    const binding = { connectionId: "conn123", projectId: 42, projectName: "demo" }
+    const items = [
+      createProjectTodoItem("当前项目任务", binding, 1),
+      createProjectTodoItem("其他项目任务", { connectionId: "conn123", projectId: 43 }, 2),
+      createTodoItem("未绑定任务", 3),
+      { ...createProjectTodoItem("已完成", binding, 4), completed: true, completedAt: 5 },
+    ]
+
+    expect(isTodoBoundToProject(items[0], binding)).toBe(true)
+    const sections = getProjectTodoSections(items, binding, "")
+    expect(sections.inProgress.map((item) => item.text)).toEqual(["当前项目任务"])
+    expect(sections.completed.map((item) => item.text)).toEqual(["已完成"])
   })
 })
