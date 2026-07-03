@@ -1,5 +1,6 @@
 import {
   buildConnectionInfoRows,
+  buildSettingsRows,
   getAppearanceAccentOptions,
 } from "@/pages/connection-detail/connectionDetailPresentation"
 
@@ -40,6 +41,20 @@ describe("connection detail presentation", () => {
       "blue",
       "yellow",
       "violet",
+    ])
+  })
+
+  it("builds P57 settings groups in the approved order", () => {
+    expect(buildSettingsRows()).toEqual([
+      {
+        title: "个性化",
+        rows: [
+          expect.objectContaining({ key: "appearance", label: "外观" }),
+          expect.objectContaining({ key: "language", label: "语言" }),
+          expect.objectContaining({ key: "general", label: "通用" }),
+          expect.objectContaining({ key: "quickMessages", label: "快捷消息" }),
+        ],
+      },
     ])
   })
 })

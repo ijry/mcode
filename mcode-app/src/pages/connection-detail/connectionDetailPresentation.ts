@@ -30,6 +30,20 @@ export function getAppearanceAccentOptions() {
   return DESKTOP_ACCENT_OPTIONS.map((value) => ({ value, label: value }))
 }
 
+export function buildSettingsRows() {
+  return [
+    {
+      title: "个性化",
+      rows: [
+        { key: "appearance", label: "外观", value: "强调色" },
+        { key: "language", label: "语言", value: "系统" },
+        { key: "general", label: "通用", value: "委派 · 对话工具" },
+        { key: "quickMessages", label: "快捷消息", value: "" },
+      ],
+    },
+  ] as const
+}
+
 export function buildConnectionInfoRows(connection: ConnectionRecordV2): InfoRow[] {
   const target = connection.targetProfile || null
   const gatewaySession = connection.gatewaySession || null
