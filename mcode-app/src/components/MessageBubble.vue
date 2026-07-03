@@ -45,12 +45,27 @@
           </view>
 
           <!-- 思考 -->
-          <view v-else-if="part.type === 'thinking'" class="part-thinking">
-            <view class="thinking-hd">
-              <up-icon name="bulb" size="15" :color="upThemeVar('--up-warning', '#f9ae3d')"></up-icon>
+          <view
+            v-else-if="part.type === 'thinking'"
+            :class="['part-thinking', isThinkingCollapsed(index) && 'part-thinking--collapsed', translucent && 'part-thinking--translucent']"
+          >
+            <view class="thinking-hd" @click="toggleThinkingCollapse(index)">
+              <image
+                class="thinking-hd__icon"
+                src="/static/icons/brain.svg"
+                mode="aspectFit"
+              />
               <text class="thinking-hd__label">深度思考</text>
+              <up-icon
+                :name="isThinkingCollapsed(index) ? 'arrow-down' : 'arrow-up'"
+                size="13"
+                :color="upThemeVar('--up-warning', '#f9ae3d')"
+                class="thinking-hd__arrow"
+              ></up-icon>
             </view>
-            <text class="thinking-hd__text">{{ part.thinking }}</text>
+            <view v-show="!isThinkingCollapsed(index)" class="thinking-bd">
+              <text class="thinking-hd__text">{{ part.thinking }}</text>
+            </view>
           </view>
 
           <!-- P48 工具调用：分组调用使用紧凑中性 summary pill -->
@@ -155,7 +170,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from "vue"
+import { computed, ref, watch } from "vue"
 import type { ContentPart, MessageTurn, ToolCall } from "@/types/acp"
 import ToolCallBlock from "./ToolCallBlock.vue"
 import ToolCallGroupBlock from "./ToolCallGroupBlock.vue"
@@ -170,6 +185,53 @@ const props = defineProps<{
 const emit = defineEmits<{
   regenerate: []
 }>()
+
+// 思考折叠状态
+const manuallyCollapsed = ref<Set<number>>(new Set())
+const manuallyExpanded = ref<Set<number>>(new Set())
+
+// 当消息正在流式输出时，思考部分展开；完成后自动折叠
+const isStreaming = computed(() => props.message.status === "streaming")
+
+function isThinkingCollapsed(index: number): boolean {
+  // 流式中：如果用户没手动折叠，则展开
+  if (isStreaming.value) {
+    return manuallyCollapsed.value.has(index)
+  }
+  // 非流式（含历史消息）：默认折叠，除非用户手动展开
+  return !manuallyExpanded.value.has(index)
+}
+
+function toggleThinkingCollapse(index: number) {
+  if (isStreaming.value) {
+    // 流式中：切换手动折叠
+    const next = new Set(manuallyCollapsed.value)
+    if (next.has(index)) {
+      next.delete(index)
+    } else {
+      next.add(index)
+    }
+    manuallyCollapsed.value = next
+  } else {
+    // 完成后：切换手动展开
+    const next = new Set(manuallyExpanded.value)
+    if (next.has(index)) {
+      next.delete(index)
+    } else {
+      next.add(index)
+    }
+    manuallyExpanded.value = next
+  }
+}
+
+// 当消息从 streaming 变为 completed 时，清除手动折叠状态并折叠所有 thinking
+watch(isStreaming, (streaming, prevStreaming) => {
+  if (prevStreaming && !streaming) {
+    // 流式结束 → 自动折叠
+    manuallyCollapsed.value = new Set()
+    manuallyExpanded.value = new Set()
+  }
+})
 
 type DisplayPart = ContentPart | {
   type: "tool_call_group"
@@ -389,6 +451,17 @@ function normalizeAgentType(raw?: string) {
   background-color: color-mix(in srgb, var(--up-warning, #f9ae3d) 12%, var(--up-card-bg-color, #ffffff) 88%);
   border-radius: 12rpx;
   border-left: 4rpx solid var(--up-warning, #f9ae3d);
+  transition: all 0.2s ease;
+}
+
+.part-thinking--collapsed {
+  padding-bottom: 16rpx;
+}
+
+.part-thinking--translucent {
+  background: color-mix(in srgb, var(--up-warning, #f9ae3d) 10%, transparent 90%);
+  border: 1rpx solid color-mix(in srgb, var(--up-warning, #f9ae3d) 20%, transparent 80%);
+  border-left: 4rpx solid var(--up-warning, #f9ae3d);
 }
 
 .part-tool-result {
@@ -428,6 +501,29 @@ function normalizeAgentType(raw?: string) {
   align-items: center;
   gap: 10rpx;
   margin-bottom: 12rpx;
+  cursor: pointer;
+  user-select: none;
+}
+
+.part-thinking--collapsed .thinking-hd {
+  margin-bottom: 0;
+}
+
+.thinking-hd__icon {
+  width: 30rpx;
+  height: 30rpx;
+  flex-shrink: 0;
+}
+
+.thinking-hd__arrow {
+  margin-left: auto;
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+}
+
+.thinking-bd {
+  overflow: hidden;
+  transition: max-height 0.25s ease;
 }
 
 .thinking-hd__label {
