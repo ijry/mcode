@@ -59,7 +59,7 @@
           class="connection-card"
           :class="getConnectionCardClass(conn)"
           :style="upThemeCardStyle"
-          @click="activateConnection(conn)"
+          @click="openConnectionDetail(conn)"
         >
           <view
             class="connection-card__icon"
@@ -399,6 +399,10 @@ import {
   readStoredConnections,
   type ConnectionContext,
 } from "@/services/connectionContext"
+import {
+  buildConnectionDetailRoute,
+  type ConnectionDetailTab,
+} from "@/services/connectionDetail"
 import { migrateLegacyStoredConnectionsToV2 } from "@/services/connectionMigration"
 import {
   buildConnectionRecordKey,
@@ -827,7 +831,7 @@ function handleActionSelect(e: any) {
   } else if (action === "模型供应商") {
     openModelProviders(conn)
   } else if (action === "配置码") {
-    openConfigCodePopup(conn)
+    openConnectionDetail(conn, { tab: "config" })
   } else if (action === "编辑") {
     editConnection(conn, currentConnectionIndex.value)
   } else if (action === "删除") {
@@ -871,6 +875,23 @@ function copyConfigCode() {
     fail: () => {
       uni.showToast({ title: "复制失败", icon: "none" })
     },
+  })
+}
+
+function openConnectionDetail(
+  conn: ConnectionItem,
+  options: { tab?: ConnectionDetailTab } = {}
+) {
+  const connectionId = String(conn.id || "").trim()
+  if (!connectionId) {
+    uni.showToast({ title: "缺少连接信息，请重新保存连接。", icon: "none" })
+    return
+  }
+  uni.navigateTo({
+    url: buildConnectionDetailRoute({
+      connectionId,
+      tab: options.tab || "folders",
+    }),
   })
 }
 
