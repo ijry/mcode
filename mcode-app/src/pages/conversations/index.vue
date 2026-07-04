@@ -395,8 +395,8 @@
           <text class="config-hint__text">{{ createAgentConfig.message }}</text>
         </view>
 
-        <view v-if="showStandaloneCreateMode" class="config-section">
-          <text class="config-section__title">模式</text>
+        <view v-if="showCreateModeOptions" class="config-section">
+          <text class="config-section__title">授权类型</text>
           <view class="config-chip-grid">
             <view
               v-for="mode in createAgentConfig.modes?.available_modes || []"
@@ -435,7 +435,7 @@
         </view>
 
         <view
-          v-if="!showStandaloneCreateMode && createAgentConfig.configOptions.length === 0"
+          v-if="!showCreateModeOptions && createAgentConfig.configOptions.length === 0"
           class="config-hint"
         >
           <text class="config-hint__text">该智能体将使用远端默认配置</text>
@@ -528,6 +528,7 @@ import { ensureConversationSchema } from "@/services/db/migrations"
 import {
   buildAgentConfigContextKey,
   createReadyDetailAgentConfigState,
+  hasSessionModeOptions,
   persistAgentConfigCache,
   persistAgentConfigSelection,
   readFreshAgentConfigCache,
@@ -816,21 +817,13 @@ const projectColumns = computed(() => [
   })),
 ])
 
-const hasCreateConfigOptions = computed(() => createAgentConfig.value.configOptions.length > 0)
-
-const showStandaloneCreateMode = computed(() => {
-  const modes = createAgentConfig.value.modes
-  if (!modes || !Array.isArray(modes.available_modes) || modes.available_modes.length === 0) {
-    return false
-  }
-  return !hasCreateConfigOptions.value
-})
+const showCreateModeOptions = computed(() => hasSessionModeOptions(createAgentConfig.value.modes))
 
 const createConfigSummary = computed(() => {
   if (createAgentConfig.value.status === "loading") return "正在读取可用配置..."
   const parts: string[] = []
 
-  if (showStandaloneCreateMode.value && createAgentConfig.value.modes) {
+  if (showCreateModeOptions.value && createAgentConfig.value.modes) {
     const activeMode = createAgentConfig.value.modes.available_modes.find(
       (item) => item.id === createAgentConfig.value.selectedModeId
     )

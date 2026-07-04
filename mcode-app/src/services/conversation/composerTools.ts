@@ -254,6 +254,10 @@ export function findModeName(modes: SessionModeStateInfo | null, selectedModeId:
   return modes.available_modes.find((mode) => mode.id === selectedModeId)?.name || ""
 }
 
+export function hasSessionModeOptions(modes: SessionModeStateInfo | null): boolean {
+  return Boolean(modes && Array.isArray(modes.available_modes) && modes.available_modes.length > 0)
+}
+
 export function findSelectedOptionValueName(
   option: SessionConfigOptionInfo | null,
   selectedValues: Record<string, string>

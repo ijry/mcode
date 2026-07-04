@@ -2267,13 +2267,15 @@
 .input-tool-row {
   display: flex;
   align-items: center;
-  gap: 8rpx;
+  justify-content: flex-start;
+  gap: 18rpx;
   margin-top: 10rpx;
 }
 
 .input-tool-btn {
-  flex: 1;
-  min-width: 0;
+  flex: 0 0 72rpx;
+  width: 72rpx;
+  min-width: 72rpx;
   height: 64rpx;
   padding: 0;
   border-radius: 20rpx;
@@ -2413,6 +2415,10 @@
   display: flex;
   flex-direction: column;
   gap: 12rpx;
+}
+
+.composer-panel__section + .composer-panel__section {
+  margin-top: 18rpx;
 }
 
 .composer-panel__section-title {
