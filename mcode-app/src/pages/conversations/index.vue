@@ -552,6 +552,11 @@ import {
   normalizeOpenedTabsList,
 } from "@/services/conversation/pcTabSyncService"
 import {
+  applyConversationTabBarBadge,
+  fetchOngoingActiveSessionCount,
+  getOngoingActiveSessionCount,
+} from "@/services/conversation/tabbarActiveSessions"
+import {
   buildConnectionConversationSnapshot,
   mapConversationSummaryRecordToConversation,
   mapConversationToSummaryRecord,
@@ -615,17 +620,20 @@ const overviewRefreshPromiseMap = new Map<string, Promise<void>>()
 const connectionFolderSnapshotMap = new Map<string, Project[]>()
 const connectionTabSnapshotMap = new Map<string, OpenedTabItem[]>()
 const instanceConnectionKeyMap = new Map<string, string>()
+const activeSessionBadgeCountMap = new Map<string, number>()
 const loadingCreateAgents = ref(false)
 const createAgentListError = ref("")
 let createAgentProbeToken = 0
 let createAgentListToken = 0
 let disposeOverviewInvalidation: (() => void) | null = null
 const disposeOpenedTabsChangedMap = new Map<string, () => void>()
+const disposeActiveSessionsChangedMap = new Map<string, () => void>()
 let activeCreateRequestId = ""
 let activeCreateRequestFingerprint = ""
 let activeCreateConversationId = 0
 let activeCreatePromptAttempted = false
 let createProgressTimer: ReturnType<typeof setInterval> | null = null
+let activeSessionBadgeRefreshPromise: Promise<void> | null = null
 
 interface CreateAgentOption {
   label: string
@@ -1220,6 +1228,8 @@ onUnload(() => {
   disposeOverviewInvalidation = null
   disposeOpenedTabsChangedMap.forEach((dispose) => dispose())
   disposeOpenedTabsChangedMap.clear()
+  disposeActiveSessionsChangedMap.forEach((dispose) => dispose())
+  disposeActiveSessionsChangedMap.clear()
   stopCreateProgressTimer()
 })
 
@@ -1230,6 +1240,7 @@ onPullDownRefresh(() => {
   }
 
   loadOverviewData({ force: true }).finally(() => {
+    void refreshActiveSessionTabBadge()
     uni.stopPullDownRefresh()
   })
 })
@@ -1237,6 +1248,7 @@ onPullDownRefresh(() => {
 onShow(() => {
   const shouldForceRefresh = consumeConversationListDirty()
   void loadOverviewData(shouldForceRefresh ? { force: true } : undefined)
+  void refreshActiveSessionTabBadge()
 })
 
 async function loadOverviewData(options?: { force?: boolean }) {
@@ -1268,6 +1280,8 @@ async function loadOverviewDataInternal() {
       connectionGroups.value = []
       showHistoryPanel.value = false
       projects.value = []
+      activeSessionBadgeCountMap.clear()
+      void applyConversationTabBarBadge(0)
       return
     }
     const connectedMap = (uni.getStorageSync("mcode_connected_map") || {}) as Record<string, boolean>
@@ -1329,6 +1343,7 @@ async function loadConnectionGroup(conn: ConnectionItem): Promise<ConnectionGrou
     console.warn("ensure global conversation sync skipped:", error)
   })
   ensureOpenedTabsSubscription(descriptor.instanceKey)
+  ensureActiveSessionsSubscription(descriptor.instanceKey)
   const foldersRaw = await gateway.call<unknown>("list_open_folder_details")
   const folders = normalizeList(foldersRaw) as Project[]
   const tabsRaw = await gateway.call<unknown>("list_opened_tabs")
@@ -1443,6 +1458,7 @@ async function refreshConnectionGroupFromRemote(conn: ConnectionItem, current: C
     console.warn("ensure global conversation sync skipped:", error)
   })
   ensureOpenedTabsSubscription(descriptor.instanceKey)
+  ensureActiveSessionsSubscription(descriptor.instanceKey)
   const foldersRaw = await gateway.call<unknown>("list_open_folder_details")
   const folders = normalizeList(foldersRaw) as Project[]
   const tabsRaw = await gateway.call<unknown>("list_opened_tabs")
@@ -1587,6 +1603,65 @@ function ensureOpenedTabsSubscription(instanceKey: string) {
     void refreshConnectionGroupFromLocalCache(instanceKey)
   }, instanceKey)
   disposeOpenedTabsChangedMap.set(instanceKey, unsubscribe)
+}
+
+function ensureActiveSessionsSubscription(instanceKey: string) {
+  if (!instanceKey || disposeActiveSessionsChangedMap.has(instanceKey)) return
+  const unsubscribe = acpApi.subscribeGlobalEvent("pet://sessions", (payload) => {
+    activeSessionBadgeCountMap.set(instanceKey, getOngoingActiveSessionCount(payload))
+    void applyConversationTabBarBadge(sumActiveSessionBadgeCounts())
+  }, instanceKey)
+  disposeActiveSessionsChangedMap.set(instanceKey, unsubscribe)
+}
+
+async function refreshActiveSessionTabBadge() {
+  if (activeSessionBadgeRefreshPromise) {
+    return await activeSessionBadgeRefreshPromise
+  }
+  activeSessionBadgeRefreshPromise = refreshActiveSessionTabBadgeInternal()
+  try {
+    await activeSessionBadgeRefreshPromise
+  } finally {
+    activeSessionBadgeRefreshPromise = null
+  }
+}
+
+async function refreshActiveSessionTabBadgeInternal() {
+  const conns = getConnectedConnections()
+  if (conns.length === 0) {
+    activeSessionBadgeCountMap.clear()
+    await applyConversationTabBarBadge(0)
+    return
+  }
+
+  const results = await Promise.allSettled(
+    conns.map(async (conn) => {
+      const gateway = await createConnectionGateway(conn)
+      const instanceKey = gateway.getRemoteInstanceDescriptor().instanceKey
+      ensureActiveSessionsSubscription(instanceKey)
+      return {
+        instanceKey,
+        count: await fetchOngoingActiveSessionCount(gateway),
+      }
+    })
+  )
+
+  activeSessionBadgeCountMap.clear()
+  results.forEach((result) => {
+    if (result.status === "fulfilled") {
+      activeSessionBadgeCountMap.set(result.value.instanceKey, result.value.count)
+      return
+    }
+    console.warn("refresh active session tabbar badge skipped:", result.reason)
+  })
+  await applyConversationTabBarBadge(sumActiveSessionBadgeCounts())
+}
+
+function sumActiveSessionBadgeCounts() {
+  return Array.from(activeSessionBadgeCountMap.values()).reduce(
+    (total, count) => total + Math.max(0, Number(count) || 0),
+    0
+  )
 }
 
 function replaceConnectionGroup(nextGroup: ConnectionGroup) {
@@ -2291,6 +2366,7 @@ async function confirmCreate() {
     createAgentListError.value = ""
     markConversationListDirty()
     await loadOverviewData({ force: true })
+    await refreshActiveSessionTabBadge()
     openConversation(
       { id: newConversationId, folder_id: selectedProjectId.value },
       selectedConnectionKey.value
