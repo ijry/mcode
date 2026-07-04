@@ -1,5 +1,9 @@
 <template>
-  <view class="page" :style="[upThemeVars, upThemePageStyle]">
+  <view
+    class="page"
+    :class="[cyberModeEnabled && 'page--cyber', cyberModeEnabled && `page--cyber-${cyberEffectPhase}`]"
+    :style="[upThemeVars, upThemePageStyle]"
+  >
     <view v-if="!conversationId" class="empty-container">
       <up-empty mode="data" text="会话不存在"></up-empty>
     </view>
@@ -7,13 +11,13 @@
     <view v-else class="detail-container">
       <view class="detail-atmosphere" aria-hidden="true">
         <image
-          v-if="detailBackgroundImageUrl"
+          v-if="showDetailBackgroundImage"
           class="detail-atmosphere__background-image"
           :src="detailBackgroundImageUrl"
           mode="aspectFill"
           @error="handleDetailBackgroundLoadError"
         />
-        <view v-if="detailBackgroundImageUrl" class="detail-atmosphere__background-scrim"></view>
+        <view v-if="showDetailBackgroundImage" class="detail-atmosphere__background-scrim"></view>
         <view class="detail-atmosphere__blob detail-atmosphere__blob--primary"></view>
         <view class="detail-atmosphere__blob detail-atmosphere__blob--secondary"></view>
         <view class="detail-atmosphere__blob detail-atmosphere__blob--accent"></view>
@@ -1133,6 +1137,14 @@ import {
   type RenderMessageItem,
 } from "./detailMessagePresentation"
 import {
+  DETAIL_CYBER_MODE_STORAGE_KEY,
+  buildCyberModeMenuAction,
+  deriveCyberEffectPhase,
+  normalizeCyberModeStorage,
+  shouldShowDetailBackgroundImage,
+  type CyberEffectPhase,
+} from "./detailCyberMode"
+import {
   buildConversationDraftSnapshot,
   firstString,
   getTurnContentParts,
@@ -1348,6 +1360,8 @@ const bridgeHealth = ref<RealtimeBridgeHealth | null>(null)
 const bridgeRecoveredAt = ref(0)
 const conversationTitle = ref("未命名会话")
 const detailBackgroundImageUrl = ref("")
+const cyberModeEnabled = ref(false)
+const lastCyberStreamEndedAt = ref(0)
 const inputText = ref("")
 const composerCursor = ref<number | null>(null)
 const mentionTrigger = ref<MentionTriggerState | null>(null)
@@ -1398,6 +1412,7 @@ const measuredPageHeight = ref(0)
 let detailBridgeHealthUnsubscribe: (() => void) | null = null
 let longWaitTimer: ReturnType<typeof setInterval> | null = null
 let bridgeRecoveryTimer: ReturnType<typeof setTimeout> | null = null
+let cyberSettleTimer: ReturnType<typeof setTimeout> | null = null
 const expandedConfigKey = ref<ComposerConfigKey>("")
 const detailAgentConfig = ref<DetailAgentConfigState>(createEmptyDetailAgentConfigState())
 const currentAgentType = ref("claude_code")
@@ -1597,12 +1612,19 @@ const DETAIL_CONVERSATION_STATUS_ACTIONS = [
 const detailMoreActions = computed(() => [
   { name: "模型供应商", color: "#2979ff" },
   { name: "文件夹管理", color: "#2979ff" },
+  buildCyberModeMenuAction(cyberModeEnabled.value),
   { name: "背景图自定义", color: "#8b5cf6" },
   { name: "重命名", color: "#2979ff" },
   { name: "更改状态", color: "#2979ff" },
   { name: "删除", color: "#fa3534" },
 ])
-const hasDetailBackgroundImage = computed(() => Boolean(detailBackgroundImageUrl.value))
+const showDetailBackgroundImage = computed(() =>
+  shouldShowDetailBackgroundImage({
+    cyberModeEnabled: cyberModeEnabled.value,
+    detailBackgroundImageUrl: detailBackgroundImageUrl.value,
+  })
+)
+const hasDetailBackgroundImage = computed(() => showDetailBackgroundImage.value)
 
 const historyStatusText = computed(() => {
   if (loadingOlder.value) return "历史加载中..."
@@ -1638,9 +1660,33 @@ const runtimeStatus = computed<string>(() => {
   if (status === "connected" && !hasBoundConnection.value) return "connecting"
   return status
 })
+const cyberEffectPhase = computed<CyberEffectPhase>(() =>
+  deriveCyberEffectPhase({
+    cyberModeEnabled: cyberModeEnabled.value,
+    runtimeStatus: runtimeStatus.value,
+    hasLiveMessage: Boolean(
+      session.value?.liveMessage && !session.value?.liveMessage?.isPlaceholderThinking
+    ),
+    lastStreamEndedAt: lastCyberStreamEndedAt.value,
+    now: Date.now(),
+  })
+)
 const canStopSession = computed(() => isStoppableRuntimeStatus(runtimeStatus.value))
 const liveActivitySignature = computed(() =>
   buildLiveActivitySignature(session.value?.liveMessage?.content || [])
+)
+watch(
+  () => session.value?.liveMessage?.id || "",
+  (next, previous) => {
+    if (!previous || next) return
+    lastCyberStreamEndedAt.value = Date.now()
+    if (cyberSettleTimer) clearTimeout(cyberSettleTimer)
+    cyberSettleTimer = setTimeout(() => {
+      lastCyberStreamEndedAt.value = 0
+      cyberSettleTimer = null
+    }, 1_300)
+  },
+  { flush: "sync" }
 )
 const conversationActivitySignature = computed(() => {
   const latest = renderMessageItems.value[renderMessageItems.value.length - 1]
@@ -2627,6 +2673,7 @@ onLoad((options: any) => {
   conversationId.value = Number(options.id || 0)
   folderId.value = Number(options.folderId || 0)
   needsResumeRefresh.value = false
+  restoreCyberModePreference()
   const connectionId = typeof options.connectionId === "string"
     ? decodeURIComponent(options.connectionId)
     : ""
@@ -2650,6 +2697,7 @@ onLoad((options: any) => {
 })
 
 onShow(() => {
+  restoreCyberModePreference()
   if (!hasLoadedOnce.value || !conversationId.value || loading.value) return
   if (!needsResumeRefresh.value) return
   needsResumeRefresh.value = false
@@ -2668,6 +2716,7 @@ onHide(() => {
   teardownDetailBridgeHealth()
   clearLongWaitTimer()
   clearBridgeRecoveryTimer()
+  clearCyberSettleTimer()
   clearStuckPromptTimer()
   captureActiveDetailLocalState()
   persistDetailRuntimeState()
@@ -2681,6 +2730,7 @@ onUnload(() => {
   teardownDetailBridgeHealth()
   clearLongWaitTimer()
   clearBridgeRecoveryTimer()
+  clearCyberSettleTimer()
   clearStuckPromptTimer()
   detailOpenedTabsUnsubscribe?.()
   detailOverviewInvalidationUnsubscribe?.()
@@ -2714,6 +2764,8 @@ function handleDetailMoreMenuClick(action: string) {
     openDetailModelProvidersPage()
   } else if (action === "文件夹管理") {
     openDetailProjectsPage()
+  } else if (action === "炫酷模式" || action === "关闭炫酷模式") {
+    toggleCyberModeFromMenu()
   } else if (action === "背景图自定义") {
     openDetailBackgroundPicker()
   } else if (action === "重命名") {
@@ -2990,6 +3042,12 @@ function clearBridgeRecoveryTimer() {
   if (!bridgeRecoveryTimer) return
   clearTimeout(bridgeRecoveryTimer)
   bridgeRecoveryTimer = null
+}
+
+function clearCyberSettleTimer() {
+  if (!cyberSettleTimer) return
+  clearTimeout(cyberSettleTimer)
+  cyberSettleTimer = null
 }
 
 function handleDetailStatusAction(actionKey?: "reconnect" | "inspect") {
@@ -4041,6 +4099,35 @@ function persistDetailRuntimeState() {
     isActive: Boolean(currentSession?.connectionId),
   }).catch((error) => {
     console.warn("persist detail runtime skipped", error)
+  })
+}
+
+function restoreCyberModePreference() {
+  try {
+    cyberModeEnabled.value = normalizeCyberModeStorage(
+      uni.getStorageSync(DETAIL_CYBER_MODE_STORAGE_KEY)
+    )
+  } catch (error) {
+    console.warn("restore cyber mode preference skipped", error)
+    cyberModeEnabled.value = false
+  }
+}
+
+function persistCyberModePreference(enabled: boolean) {
+  cyberModeEnabled.value = enabled
+  try {
+    uni.setStorageSync(DETAIL_CYBER_MODE_STORAGE_KEY, JSON.stringify({ enabled }))
+  } catch (error) {
+    console.warn("persist cyber mode preference skipped", error)
+  }
+}
+
+function toggleCyberModeFromMenu() {
+  const nextEnabled = !cyberModeEnabled.value
+  persistCyberModePreference(nextEnabled)
+  uni.showToast({
+    title: nextEnabled ? "炫酷模式已开启" : "炫酷模式已关闭",
+    icon: "none",
   })
 }
 

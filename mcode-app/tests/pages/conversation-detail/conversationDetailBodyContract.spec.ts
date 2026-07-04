@@ -160,6 +160,22 @@ describe("ConversationDetailBody", () => {
     expect(source).toContain("closeConversationTab({")
   })
 
+  it("restores and forwards the global cyber mode from the detail more menu", () => {
+    const source = fs.readFileSync(
+      path.resolve(__dirname, "../../../src/pages/conversation-detail/index.vue"),
+      "utf8"
+    )
+
+    expect(source).toContain("DETAIL_CYBER_MODE_STORAGE_KEY")
+    expect(source).toContain("buildCyberModeMenuAction(cyberModeEnabled.value)")
+    expect(source).toContain('action === "炫酷模式" || action === "关闭炫酷模式"')
+    expect(source).toContain('title: nextEnabled ? "炫酷模式已开启" : "炫酷模式已关闭"')
+    expect(source).toContain("restoreCyberModePreference()")
+    expect(source).toContain("shouldShowDetailBackgroundImage")
+    expect(source).toContain("showDetailBackgroundImage")
+    expect(source).toContain("page--cyber")
+  })
+
   it("uses lighter translucent content surfaces over custom backgrounds", () => {
     const detailStyles = fs.readFileSync(
       path.resolve(__dirname, "../../../src/pages/conversation-detail/index.scss"),
