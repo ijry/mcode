@@ -1,5 +1,12 @@
 <template>
-  <view class="readonly-pane" :style="messageListPageStyle">
+  <view
+    :class="[
+      'readonly-pane',
+      cyberModeEnabled && 'readonly-pane--cyber',
+      cyberModeEnabled && `readonly-pane--${cyberEffectPhase || 'idle'}`,
+    ]"
+    :style="messageListPageStyle"
+  >
     <scroll-view class="readonly-pane__scroll" scroll-y>
       <view class="readonly-pane__content" :style="messageListContentStyle">
         <view v-if="showWaitingState" class="empty-messages empty-messages--pending">
@@ -59,6 +66,7 @@ import { computed, type StyleValue } from "vue"
 import MessageBubble from "@/components/MessageBubble.vue"
 import { useConversationRuntimeStore } from "@/stores/conversationRuntime"
 import { buildRenderMessageItems } from "./detailMessagePresentation"
+import type { CyberEffectPhase } from "./detailCyberMode"
 import { formatTokenCountK } from "./detailRuntimePresentation"
 import {
   bottomGeneratingText as resolveBottomGeneratingText,
@@ -72,6 +80,8 @@ const props = defineProps<{
   agentType?: string
   messageListPageStyle?: StyleValue
   messageListContentStyle?: StyleValue
+  cyberModeEnabled?: boolean
+  cyberEffectPhase?: CyberEffectPhase
 }>()
 
 const runtime = useConversationRuntimeStore()

@@ -1,5 +1,11 @@
 <template>
-  <view class="detail-body">
+  <view
+    :class="[
+      'detail-body',
+      cyberModeEnabled && 'detail-body--cyber',
+      cyberModeEnabled && `detail-body--${cyberEffectPhase || 'idle'}`,
+    ]"
+  >
     <slot name="history"></slot>
     <scroll-view
       class="message-list"
@@ -33,6 +39,7 @@
 
 <script setup lang="ts">
 import { computed, type StyleValue } from "vue"
+import type { CyberEffectPhase } from "./detailCyberMode"
 
 const props = defineProps<{
   messageListPageStyle?: StyleValue
@@ -43,6 +50,8 @@ const props = defineProps<{
   messageScrollIntoView?: string
   messageScrollWithAnimation?: boolean
   upperThreshold?: number
+  cyberModeEnabled?: boolean
+  cyberEffectPhase?: CyberEffectPhase
 }>()
 
 const resolvedInputWrapStyle = computed(() =>

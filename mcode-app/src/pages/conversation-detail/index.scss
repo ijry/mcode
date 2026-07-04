@@ -12,6 +12,78 @@
   overscroll-behavior: none;
 }
 
+.page--cyber {
+  background:
+    radial-gradient(circle at top right, rgba(33, 255, 121, 0.14) 0, transparent 28%),
+    radial-gradient(circle at bottom left, rgba(10, 180, 84, 0.1) 0, transparent 34%),
+    linear-gradient(180deg, #03130a 0%, #010a05 52%, #000603 100%);
+}
+
+.page--cyber .detail-navbar__title,
+.page--cyber .detail-navbar__subtitle,
+.page--cyber .detail-tab-pill__title,
+.page--cyber .input-status-row__text,
+.page--cyber .stats-text {
+  color: #8dffb4;
+}
+
+.page--cyber .detail-tabs-bar,
+.page--cyber .detail-tabs-bar--cyber {
+  background: rgba(4, 19, 10, 0.82);
+  border-color: rgba(96, 255, 161, 0.12);
+}
+
+.page--cyber .detail-tab-pill,
+.page--cyber .input-box,
+.page--cyber .tool-toggle-btn,
+.page--cyber .composer-panel,
+.page--cyber .slash-panel,
+.page--cyber .mention-panel,
+.page--cyber .pending-response-card,
+.page--cyber .permission-card,
+.page--cyber .ask-question-card {
+  background: rgba(7, 24, 13, 0.78);
+  border-color: rgba(103, 255, 167, 0.16);
+  box-shadow: 0 0 0 1rpx rgba(79, 255, 151, 0.08), 0 16rpx 34rpx rgba(0, 0, 0, 0.28);
+}
+
+.page--cyber .send-btn {
+  background: linear-gradient(135deg, rgba(31, 212, 108, 0.94), rgba(7, 122, 56, 0.96));
+  box-shadow: 0 0 18rpx rgba(54, 255, 136, 0.28);
+}
+
+.page--cyber .message-item {
+  position: relative;
+}
+
+.page--cyber .message-item::after {
+  content: "";
+  position: absolute;
+  inset: -4rpx 0 auto 0;
+  height: 1rpx;
+  background: linear-gradient(90deg, transparent, rgba(111, 255, 169, 0.16), transparent);
+}
+
+.page--cyber .detail-body--cyber .input-status-wrap,
+.page--cyber .detail-body--cyber .input-wrap {
+  background: rgba(5, 20, 11, 0.78);
+  border-color: rgba(102, 255, 166, 0.18);
+}
+
+.page--cyber-streaming .detail-body--cyber .input-status-wrap,
+.page--cyber-ramp .detail-body--cyber .input-status-wrap {
+  animation: cyberScanPulse 1.8s ease-in-out infinite;
+}
+
+@keyframes cyberScanPulse {
+  0%, 100% {
+    box-shadow: 0 0 0 1rpx rgba(89, 255, 154, 0.1), 0 0 16rpx rgba(47, 255, 133, 0.08);
+  }
+  50% {
+    box-shadow: 0 0 0 1rpx rgba(89, 255, 154, 0.24), 0 0 28rpx rgba(47, 255, 133, 0.22);
+  }
+}
+
 .loading-container,
 .empty-container {
   flex: 1;

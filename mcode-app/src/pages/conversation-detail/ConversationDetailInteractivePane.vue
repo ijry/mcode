@@ -1,5 +1,11 @@
 <template>
-  <view class="detail-interactive-pane">
+  <view
+    :class="[
+      'detail-interactive-pane',
+      cyberModeEnabled && 'detail-interactive-pane--cyber',
+      cyberModeEnabled && `detail-interactive-pane--${cyberEffectPhase || 'idle'}`,
+    ]"
+  >
   <ConversationDetailBody
     :message-list-page-style="messageListPageStyle"
     :message-list-content-style="messageListContentStyle"
@@ -9,6 +15,8 @@
     :message-scroll-into-view="messageScrollIntoView"
     :message-scroll-with-animation="messageScrollWithAnimation"
     :upper-threshold="120"
+    :cyber-mode-enabled="cyberModeEnabled"
+    :cyber-effect-phase="cyberEffectPhase"
     @message-scroll="handleMessageListScroll"
     @message-scroll-upper="handleMessageListScrollUpper"
   >
@@ -822,6 +830,7 @@ import { getRemoteProjectFileTree, type ProjectFileNode } from "@/services/proje
 import { loadRemoteProjectConversations } from "@/services/projectSessions"
 import type { AgentOptionsSnapshot, PendingQuestionState, PermissionRequest, QuestionAnswer } from "@/types/acp"
 import ConversationDetailBody from "./ConversationDetailBody.vue"
+import type { CyberEffectPhase } from "./detailCyberMode"
 import { buildRenderMessageItems } from "./detailMessagePresentation"
 import {
   firstString,
@@ -944,6 +953,8 @@ const props = defineProps<{
   translucentMessageList?: boolean
   slashCommands?: SlashCommandItem[]
   uploadTarget?: { url: string; header: Record<string, string> } | null
+  cyberModeEnabled?: boolean
+  cyberEffectPhase?: CyberEffectPhase
 }>()
 
 const emit = defineEmits<{

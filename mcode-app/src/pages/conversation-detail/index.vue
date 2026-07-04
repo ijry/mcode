@@ -18,6 +18,7 @@
           @error="handleDetailBackgroundLoadError"
         />
         <view v-if="showDetailBackgroundImage" class="detail-atmosphere__background-scrim"></view>
+        <ConversationDetailCyberRain :enabled="cyberModeEnabled" :phase="cyberEffectPhase" />
         <view class="detail-atmosphere__blob detail-atmosphere__blob--primary"></view>
         <view class="detail-atmosphere__blob detail-atmosphere__blob--secondary"></view>
         <view class="detail-atmosphere__blob detail-atmosphere__blob--accent"></view>
@@ -929,6 +930,8 @@
               :translucent-message-list="hasDetailBackgroundImage"
               :slash-commands="slashCommands"
               :upload-target="detailUploadTarget"
+              :cyber-mode-enabled="cyberModeEnabled"
+              :cyber-effect-phase="cyberEffectPhase"
               @layout-change="measureMessageListHeight"
             />
           </view>
@@ -1119,6 +1122,7 @@ import type { RelaySessionInfo } from "@/services/gateway"
 import type { RemoteInstanceDescriptor } from "@/services/realtime/types"
 import MessageBubble from "@/components/MessageBubble.vue"
 import ConversationDetailBody from "./ConversationDetailBody.vue"
+import ConversationDetailCyberRain from "./ConversationDetailCyberRain.vue"
 import ConversationDetailInteractivePane from "./ConversationDetailInteractivePane.vue"
 import {
   buildDetailShellTabs,
