@@ -28,6 +28,13 @@ export function resolveSlashState(text: string): SlashState {
   return { visible: true, keyword: (match[1] || "").toLowerCase() }
 }
 
+export function resolveSlashTriggerKey(text: string): string {
+  const source = String(text || "")
+  if (!resolveSlashState(source).visible) return ""
+  const lineStart = source.lastIndexOf("\n") + 1
+  return source.slice(0, lineStart + 1)
+}
+
 export function filterSlashCommands(
   commands: SlashCommandItem[],
   state: SlashState

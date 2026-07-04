@@ -1446,11 +1446,26 @@
 }
 
 .slash-panel {
+  position: relative;
   margin-bottom: 12rpx;
   border: 1rpx solid var(--up-border-color, #dadbde);
   border-radius: 16rpx;
   background-color: var(--up-card-bg-color, #ffffff);
   overflow: hidden;
+}
+
+.slash-panel__close {
+  position: absolute;
+  top: 8rpx;
+  right: 8rpx;
+  z-index: 1;
+  width: 42rpx;
+  height: 42rpx;
+  border-radius: 999rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 86%, transparent 14%);
 }
 
 .slash-panel--translucent {
@@ -1466,6 +1481,12 @@
   background: var(--up-card-bg-color, #ffffff);
   overflow: hidden;
   box-shadow: 0 14rpx 34rpx color-mix(in srgb, var(--up-main-color, #303133) 10%, transparent 90%);
+}
+
+.mention-panel--translucent {
+  border-color: color-mix(in srgb, var(--up-border-color, #dadbde) 34%, transparent 66%);
+  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 38%, transparent 62%);
+  backdrop-filter: blur(10rpx);
 }
 
 .mention-panel__header {
@@ -1688,7 +1709,7 @@
 }
 
 .slash-item {
-  padding: 16rpx 18rpx;
+  padding: 16rpx 58rpx 16rpx 18rpx;
   display: flex;
   align-items: center;
   justify-content: space-between;

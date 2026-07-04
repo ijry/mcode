@@ -63,6 +63,47 @@ describe("ConversationDetailBody", () => {
     expect(source).toContain("const DEFAULT_DETAIL_TOOLBAR_HEIGHT = 0")
   })
 
+  it("keeps config and stop controls side by side in the interactive composer", () => {
+    const source = fs.readFileSync(
+      path.resolve(__dirname, "../../../src/pages/conversation-detail/ConversationDetailInteractivePane.vue"),
+      "utf8"
+    )
+
+    expect(source).toContain("@click=\"toggleComposerPanel('config')\"")
+    expect(source).toContain("composerPanelMode === 'config'")
+    expect(source).toContain('<up-icon name="setting"')
+    expect(source).toContain('class="input-tool-btn input-tool-btn--danger"')
+    expect(source).toContain("function loadDetailAgentConfig()")
+  })
+
+  it("wires composer mentions into the actual interactive composer", () => {
+    const source = fs.readFileSync(
+      path.resolve(__dirname, "../../../src/pages/conversation-detail/ConversationDetailInteractivePane.vue"),
+      "utf8"
+    )
+
+    expect(source).toContain("@input=\"handleComposerInput\"")
+    expect(source).toContain('v-if="showMentionPanel"')
+    expect(source).toContain("@click=\"insertMentionReference(item)\"")
+    expect(source).toContain("@/services/composerReferences")
+    expect(source).toContain("function ensureMentionSourcesLoaded()")
+    expect(source).toContain("getRemoteProjectFileTree")
+    expect(source).toContain("loadRemoteProjectConversations")
+    expect(source).toContain("getRemoteGitLog")
+  })
+
+  it("lets users dismiss the slash command panel for the current trigger", () => {
+    const source = fs.readFileSync(
+      path.resolve(__dirname, "../../../src/pages/conversation-detail/ConversationDetailInteractivePane.vue"),
+      "utf8"
+    )
+
+    expect(source).toContain('v-if="showSlashPanel"')
+    expect(source).toContain('@click.stop="dismissSlashPanel"')
+    expect(source).toContain("const dismissedSlashTriggerKey = ref(\"\")")
+    expect(source).toContain("dismissedSlashTriggerKey.value !== slashTriggerKey.value")
+  })
+
   it("renders each mounted swiper item with an interactive per-conversation pane", () => {
     const source = fs.readFileSync(
       path.resolve(__dirname, "../../../src/pages/conversation-detail/index.vue"),

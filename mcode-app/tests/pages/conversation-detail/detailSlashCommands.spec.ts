@@ -5,6 +5,7 @@ import {
   normalizeSlashCommandsFromSnapshot,
   resolveSlashPreset,
   resolveSlashState,
+  resolveSlashTriggerKey,
   slashCommandDescription,
   type SlashCommandItem,
 } from "@/pages/conversation-detail/detailSlashCommands"
@@ -20,6 +21,15 @@ describe("detailSlashCommands", () => {
     expect(resolveSlashState("/re")).toEqual({ visible: true, keyword: "re" })
     expect(resolveSlashState("hello\n/IN")).toEqual({ visible: true, keyword: "in" })
     expect(resolveSlashState("hello /no")).toEqual({ visible: false, keyword: "" })
+  })
+
+  it("keeps a stable slash trigger key while the current slash query changes", () => {
+    expect(resolveSlashTriggerKey("/")).toBe("/")
+    expect(resolveSlashTriggerKey("/review")).toBe("/")
+    expect(resolveSlashTriggerKey("hello\n/")).toBe("hello\n/")
+    expect(resolveSlashTriggerKey("hello\n/re")).toBe("hello\n/")
+    expect(resolveSlashTriggerKey("hello\n/re ")).toBe("")
+    expect(resolveSlashTriggerKey("hello /re")).toBe("")
   })
 
   it("filters slash commands by key, name, desc, and hint", () => {

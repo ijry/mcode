@@ -2,11 +2,11 @@
 
 ## Architecture
 
-The conversation-detail composer supports `@` references without replacing the mobile `up-textarea`. A shared TypeScript service converts files, agents, sessions, and commits into codeg-main-compatible Markdown reference tokens. The Vue page only manages trigger detection, remote loading, panel display, and insertion.
+The conversation-detail composer supports `@` references without replacing the mobile `up-textarea`. A shared TypeScript service converts files, agents, sessions, and commits into codeg-main-compatible Markdown reference tokens. The active per-tab composer implementation is `ConversationDetailInteractivePane`; it owns trigger detection, remote loading, panel display, and insertion. The parent `index.vue` may still contain legacy inline-composer mention code, but native and web replication should follow the interactive pane because it is the rendered input path for mounted detail tabs.
 
 ## Data Flow
 
-When the composer has an active trailing `@query`, the detail page loads reference sources from the active gateway:
+When the composer has an active trailing `@query`, `ConversationDetailInteractivePane` loads reference sources from the active gateway:
 
 - `get_file_tree` for project files under the active project path.
 - `acp_list_agents` for enabled agents.

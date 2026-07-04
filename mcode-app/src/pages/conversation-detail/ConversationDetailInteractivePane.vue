@@ -290,12 +290,15 @@
       </view>
 
       <view
-        v-if="slashState.visible && filteredSlashCommands.length > 0"
+        v-if="showSlashPanel"
         :class="[
           'slash-panel',
           translucentMessageList && 'slash-panel--translucent',
         ]"
       >
+        <view class="slash-panel__close" @click.stop="dismissSlashPanel">
+          <up-icon name="close" size="13" :color="upThemeVar('--up-tips-color', '#909193')"></up-icon>
+        </view>
         <view
           v-for="item in filteredSlashCommands"
           :key="item.key"
@@ -307,6 +310,81 @@
           </view>
           <text class="slash-item__desc">{{ getSlashCommandDesc(item) }}</text>
         </view>
+      </view>
+
+      <view
+        v-if="showMentionPanel"
+        :class="[
+          'mention-panel',
+          translucentMessageList && 'mention-panel--translucent',
+        ]"
+      >
+        <view class="mention-panel__header">
+          <view class="mention-panel__title">
+            <text class="mention-panel__trigger">@</text>
+            <text class="mention-panel__title-text">引用上下文</text>
+          </view>
+          <text class="mention-panel__hint">{{ mentionPanelHint }}</text>
+        </view>
+
+        <view
+          v-if="mentionSourceStatus === 'loading'"
+          class="mention-panel__state"
+        >
+          <up-loading-icon
+            mode="circle"
+            size="15"
+            :color="upThemeVar('--up-tips-color', '#909193')"
+          ></up-loading-icon>
+          <text class="mention-panel__state-text">正在读取项目上下文</text>
+        </view>
+        <view
+          v-else-if="mentionSourceStatus === 'error'"
+          class="mention-panel__state mention-panel__state--error"
+        >
+          <text class="mention-panel__state-text">{{ mentionSourceError || "引用加载失败" }}</text>
+        </view>
+        <view
+          v-else-if="mentionResultCount === 0"
+          class="mention-panel__state"
+        >
+          <text class="mention-panel__state-text">继续输入以过滤文件、会话、提交或智能体</text>
+        </view>
+        <scroll-view
+          v-else
+          scroll-y
+          class="mention-panel__scroll"
+        >
+          <view class="mention-panel__body">
+            <view
+              v-for="group in mentionVisibleGroups"
+              :key="group.kind"
+              class="mention-group"
+            >
+              <view class="mention-group__header">
+                <text class="mention-group__title">{{ group.label }}</text>
+                <text class="mention-group__count">{{ group.items.length }}</text>
+              </view>
+              <view
+                v-for="item in group.items"
+                :key="`${group.kind}:${item.id}`"
+                class="mention-item"
+                @click="insertMentionReference(item)"
+              >
+                <view :class="['mention-item__badge', `mention-item__badge--${item.kind}`]">
+                  <text>{{ mentionKindShortLabel(item.kind) }}</text>
+                </view>
+                <view class="mention-item__body">
+                  <text class="mention-item__label u-line-1">{{ item.label }}</text>
+                  <text v-if="item.detail" class="mention-item__detail u-line-1">{{ item.detail }}</text>
+                </view>
+              </view>
+              <text v-if="group.truncated" class="mention-group__more">
+                结果较多，继续输入可缩小范围
+              </text>
+            </view>
+          </view>
+        </scroll-view>
       </view>
 
       <view
@@ -392,13 +470,16 @@
           <up-textarea
             class="composer-textarea"
             v-model="inputText"
-            placeholder="发送消息，输入 / 调出命令"
+            placeholder="发送消息，输入 / 或 @ 调出工具"
             autoHeight
             fixed
+            :cursor="composerCursorProp"
             :maxlength="10000"
             border="none"
             height="34rpx"
             :customStyle="{ backgroundColor: 'transparent', background: 'transparent', padding: '0', borderColor: 'transparent' }"
+            @input="handleComposerInput"
+            @blur="handleComposerBlur"
             @linechange="handleComposerLayoutChange"
             @keyboardheightchange="handleComposerLayoutChange"
           ></up-textarea>
@@ -418,7 +499,7 @@
         </view>
       </view>
 
-        <view v-if="showInputToolRow" class="input-tool-row">
+      <view v-if="showInputToolRow" class="input-tool-row">
         <view class="input-tool-btn" @click="handleChooseImages">
           <view
             :class="[
@@ -452,6 +533,20 @@
             ]"
           >
             <up-icon name="share" size="20" :color="upThemeVar('--up-content-color', '#606266')"></up-icon>
+          </view>
+        </view>
+
+        <view
+          :class="['input-tool-btn', composerPanelMode === 'config' && 'input-tool-btn--active']"
+          @click="toggleComposerPanel('config')"
+        >
+          <view
+            :class="[
+              'input-tool-btn__icon',
+              translucentMessageList && 'input-tool-btn__icon--translucent',
+            ]"
+          >
+            <up-icon name="setting" size="20" :color="upThemeVar('--up-content-color', '#606266')"></up-icon>
           </view>
         </view>
 
@@ -497,6 +592,101 @@
             <text class="composer-quick-chip__text">{{ item.label }}</text>
           </view>
         </view>
+        <scroll-view v-else scroll-y class="composer-panel__scroll">
+          <view class="composer-panel__scroll-content">
+            <view class="composer-panel__section">
+              <text class="composer-panel__section-title">模型配置</text>
+              <view
+                :class="['composer-config-row', !modelOption && 'composer-config-row--disabled']"
+                @click="toggleConfigRow('model')"
+              >
+                <text class="composer-config-row__label">模型</text>
+                <text class="composer-config-row__value">{{ modelSummary }}</text>
+              </view>
+              <view
+                v-if="expandedConfigKey === 'model' && modelOption"
+                class="config-chip-grid"
+              >
+                <view
+                  v-for="value in modelOption?.kind.options || []"
+                  :key="value.value"
+                  :class="[
+                    'config-chip',
+                    detailAgentConfig.selectedValues[modelOption?.id || ''] === value.value && 'config-chip--active',
+                  ]"
+                  @click.stop="selectDetailConfigValue(modelOption?.id || '', value.value)"
+                >
+                  <text class="config-chip__title">{{ value.name }}</text>
+                </view>
+              </view>
+            </view>
+
+            <view class="composer-panel__section">
+              <view
+                :class="['composer-config-row', !reasoningOption && 'composer-config-row--disabled']"
+                @click="toggleConfigRow('reasoning')"
+              >
+                <text class="composer-config-row__label">推理强度</text>
+                <text class="composer-config-row__value">{{ reasoningSummary }}</text>
+              </view>
+              <view
+                v-if="expandedConfigKey === 'reasoning' && reasoningOption"
+                class="config-chip-grid"
+              >
+                <view
+                  v-for="value in reasoningOption?.kind.options || []"
+                  :key="value.value"
+                  :class="[
+                    'config-chip',
+                    detailAgentConfig.selectedValues[reasoningOption?.id || ''] === value.value && 'config-chip--active',
+                  ]"
+                  @click.stop="selectDetailConfigValue(reasoningOption?.id || '', value.value)"
+                >
+                  <text class="config-chip__title">{{ value.name }}</text>
+                </view>
+              </view>
+            </view>
+
+            <view class="composer-panel__section">
+              <view
+                :class="['composer-config-row', !hasPermissionOptions && 'composer-config-row--disabled']"
+                @click="toggleConfigRow('permission')"
+              >
+                <text class="composer-config-row__label">授权类型</text>
+                <text class="composer-config-row__value">{{ permissionSummary }}</text>
+              </view>
+              <view
+                v-if="expandedConfigKey === 'permission' && detailAgentConfig.modes?.available_modes?.length"
+                class="config-chip-grid"
+              >
+                <view
+                  v-for="mode in detailAgentConfig.modes?.available_modes || []"
+                  :key="mode.id"
+                  :class="['config-chip', detailAgentConfig.selectedModeId === mode.id && 'config-chip--active']"
+                  @click.stop="selectDetailMode(mode.id)"
+                >
+                  <text class="config-chip__title">{{ mode.name }}</text>
+                </view>
+              </view>
+              <view
+                v-else-if="expandedConfigKey === 'permission' && permissionOption"
+                class="config-chip-grid"
+              >
+                <view
+                  v-for="value in permissionOption?.kind.options || []"
+                  :key="value.value"
+                  :class="[
+                    'config-chip',
+                    detailAgentConfig.selectedValues[permissionOption?.id || ''] === value.value && 'config-chip--active',
+                  ]"
+                  @click.stop="selectDetailConfigValue(permissionOption?.id || '', value.value)"
+                >
+                  <text class="config-chip__title">{{ value.name }}</text>
+                </view>
+              </view>
+            </view>
+          </view>
+        </scroll-view>
       </view>
 
       <view v-if="showRuntimeRetryFeedback" class="input-feedback input-feedback--floating input-feedback--retry">
@@ -588,16 +778,49 @@
 import { computed, getCurrentInstance, nextTick, ref, watch, type StyleValue } from "vue"
 import { acpApi } from "@/api/acp"
 import MessageBubble from "@/components/MessageBubble.vue"
+import { createGateway, type RelaySessionInfo } from "@/services/gateway"
+import { getDirectToken } from "@/services/gateway/directTokenStore"
+import { getRegisteredRemoteInstanceDescriptor } from "@/services/realtime/remoteInstanceRegistry"
+import type { RemoteInstanceDescriptor } from "@/services/realtime/types"
+import { useAuthStore } from "@/stores/auth"
 import { useConversationRuntimeStore } from "@/stores/conversationRuntime"
 import { usePetStore } from "@/stores/pet"
+import {
+  buildAgentConfigContextKey,
+  createEmptyDetailAgentConfigState,
+  createReadyDetailAgentConfigState,
+  persistAgentConfigCache,
+  persistAgentConfigSelection,
+  projectDetailConfigOptions,
+  readFreshAgentConfigCache,
+  readPersistedAgentConfigSelection,
+  type ComposerConfigKey,
+  type DetailAgentConfigState,
+} from "@/services/conversation/composerTools"
 import { touchHotConversation } from "@/services/conversation/hotConversationCoordinator"
+import {
+  applyMentionReference,
+  buildMentionReferenceGroups,
+  resolveMentionTrigger,
+  type MentionAgentSource,
+  type MentionCommitSource,
+  type MentionFileSource,
+  type MentionReferenceGroup,
+  type MentionReferenceItem,
+  type MentionReferenceKind,
+  type MentionSessionSource,
+  type MentionTriggerState,
+} from "@/services/composerReferences"
 import {
   countConversationTurns,
   getNewestTurns,
   getOlderTurns,
 } from "@/services/db/repositories/conversationRepository"
 import { toErrorMessage } from "@/services/gateway/error"
-import type { PendingQuestionState, PermissionRequest, QuestionAnswer } from "@/types/acp"
+import { getRemoteGitLog } from "@/services/projectGit"
+import { getRemoteProjectFileTree, type ProjectFileNode } from "@/services/projectFiles"
+import { loadRemoteProjectConversations } from "@/services/projectSessions"
+import type { AgentOptionsSnapshot, PendingQuestionState, PermissionRequest, QuestionAnswer } from "@/types/acp"
 import ConversationDetailBody from "./ConversationDetailBody.vue"
 import { buildRenderMessageItems } from "./detailMessagePresentation"
 import {
@@ -605,6 +828,7 @@ import {
   getTurnContentParts,
   mapPersistedTurnToMessage,
   normalizeAgentType,
+  normalizeList,
   type QueuedDraft,
   type UploadedAttachment,
 } from "./detailDataNormalization"
@@ -646,6 +870,14 @@ import {
   type PlanTaskFilter,
 } from "./detailPlanPresentation"
 import {
+  detailAgentConfigSelectionPayload,
+  detailConfigOptionSummary,
+  detailPermissionSummary,
+  nextExpandedConfigKey,
+  withSelectedDetailConfigValue,
+  withSelectedDetailMode,
+} from "./detailComposerPresentation"
+import {
   buildQuestionAnswer as buildPendingQuestionAnswer,
   createQuestionSelectionState,
   isQuestionRecommended,
@@ -677,6 +909,7 @@ import {
   applySlashCommandText,
   filterSlashCommands,
   resolveSlashState,
+  resolveSlashTriggerKey,
   slashCommandDescription,
   type SlashCommandItem,
 } from "./detailSlashCommands"
@@ -691,6 +924,13 @@ interface UploadQueueItem {
   status: "uploading" | "success" | "error"
   error?: string
 }
+
+interface DetailProjectEntry {
+  id: number
+  path: string
+}
+
+type ComposerPanelMode = "" | "quick_reply" | "config"
 
 const props = defineProps<{
   conversationId: number
@@ -710,6 +950,7 @@ const emit = defineEmits<{
   (event: "layout-change"): void
 }>()
 
+const auth = useAuthStore()
 const runtime = useConversationRuntimeStore()
 const currentInstance = getCurrentInstance()
 const upThemeVar = (varName: string, fallbackColor?: string) =>
@@ -729,12 +970,25 @@ const quickReplyItems = [
 ]
 
 const inputText = ref("")
+const composerCursor = ref<number | null>(null)
+const dismissedSlashTriggerKey = ref("")
+const mentionTrigger = ref<MentionTriggerState | null>(null)
+const mentionFiles = ref<MentionFileSource[]>([])
+const mentionAgents = ref<MentionAgentSource[]>([])
+const mentionSessions = ref<MentionSessionSource[]>([])
+const mentionCommits = ref<MentionCommitSource[]>([])
+const mentionSourceStatus = ref<"idle" | "loading" | "ready" | "error">("idle")
+const mentionSourceError = ref("")
+const mentionSourceKey = ref("")
 const attachments = ref<UploadedAttachment[]>([])
 const uploadQueue = ref<UploadQueueItem[]>([])
 const uploadingCount = ref(0)
 const sending = ref(false)
 const stoppingSession = ref(false)
 const toolRowExpanded = ref(false)
+const detailProjectEntries = ref<DetailProjectEntry[]>([])
+const expandedConfigKey = ref<ComposerConfigKey>("")
+const detailAgentConfig = ref<DetailAgentConfigState>(createEmptyDetailAgentConfigState())
 const messageScrollTop = ref(0)
 const messageScrollIntoView = ref("")
 const messageScrollWithAnimation = ref(false)
@@ -757,8 +1011,23 @@ let syncedHistoryConversationId = 0
 let syncedHistoryLocalTurnCount = -1
 let historySyncToken = 0
 let preservingHistoryAnchor = false
+let detailAgentProbeToken = 0
+let detailProjectEntriesToken = 0
+let mentionSourceLoadToken = 0
 
 const normalizedAgentType = computed(() => normalizeAgentType(props.agentType))
+const detailProjectPath = computed(() => {
+  const matched = detailProjectEntries.value.find((item) => Number(item?.id || 0) === Number(props.folderId || 0))
+  return String(matched?.path || "").trim()
+})
+const detailAgentConfigContextKey = computed(() =>
+  buildAgentConfigContextKey(
+    firstString(props.instanceKey) || "anonymous",
+    normalizedAgentType.value,
+    detailProjectPath.value,
+    Number(props.conversationId || 0) || null
+  )
+)
 const session = computed(() => runtime.getOrCreateSession(Number(props.conversationId || 0)))
 const messages = computed(() => runtime.getMessages(Number(props.conversationId || 0)))
 const renderMessageItems = computed(() => buildRenderMessageItems(messages.value))
@@ -847,12 +1116,80 @@ const canStopSession = computed(() => isStoppableRuntimeStatus(runtimeStatus.val
 const canSendSharedLive = computed(() => runtime.canSend(Number(props.conversationId || 0)))
 const canSend = computed(() => Boolean(inputText.value.trim() || attachments.value.length > 0))
 const slashState = computed(() => resolveSlashState(inputText.value || ""))
+const slashTriggerKey = computed(() => resolveSlashTriggerKey(inputText.value || ""))
 const filteredSlashCommands = computed(() =>
   filterSlashCommands(props.slashCommands || [], slashState.value)
 )
-const composerPanelMode = ref<"" | "quick_reply">("")
+const showSlashPanel = computed(() =>
+  Boolean(
+    slashState.value.visible &&
+    filteredSlashCommands.value.length > 0 &&
+    slashTriggerKey.value &&
+    dismissedSlashTriggerKey.value !== slashTriggerKey.value
+  )
+)
+const composerCursorProp = computed(() =>
+  composerCursor.value == null ? undefined : composerCursor.value
+)
+const mentionReferenceGroups = computed<MentionReferenceGroup[]>(() =>
+  buildMentionReferenceGroups({
+    query: mentionTrigger.value?.query || "",
+    projectPath: detailProjectPath.value,
+    files: mentionFiles.value,
+    agents: mentionAgents.value,
+    sessions: mentionSessions.value,
+    commits: mentionCommits.value,
+  })
+)
+const mentionVisibleGroups = computed(() =>
+  mentionReferenceGroups.value.filter((group) => group.items.length > 0)
+)
+const mentionResultCount = computed(() =>
+  mentionVisibleGroups.value.reduce((total, group) => total + group.items.length, 0)
+)
+const showMentionPanel = computed(() => Boolean(mentionTrigger.value))
+const mentionPanelHint = computed(() => {
+  if (mentionSourceStatus.value === "loading") return "正在搜索引用..."
+  if (mentionSourceStatus.value === "error") return mentionSourceError.value || "引用加载失败"
+  if (mentionResultCount.value === 0) return "没有匹配的引用"
+  return mentionTrigger.value?.query ? `匹配 ${mentionResultCount.value} 项` : "选择要引用的上下文"
+})
+const composerPanelMode = ref<ComposerPanelMode>("")
 const showComposerPanel = computed(() => composerPanelMode.value !== "")
 const showInputToolRow = computed(() => toolRowExpanded.value || showComposerPanel.value)
+const detailConfigProjection = computed(() =>
+  projectDetailConfigOptions(detailAgentConfig.value.configOptions)
+)
+const modelOption = computed(() => detailConfigProjection.value.modelOption)
+const reasoningOption = computed(() => detailConfigProjection.value.reasoningOption)
+const permissionOption = computed(() => detailConfigProjection.value.permissionOption)
+const hasModelOptions = computed(() => Boolean(modelOption.value))
+const hasPermissionOptions = computed(() =>
+  Boolean(detailAgentConfig.value.modes?.available_modes?.length || permissionOption.value)
+)
+const modelSummary = computed(() =>
+  detailConfigOptionSummary({
+    status: detailAgentConfig.value.status,
+    option: modelOption.value,
+    selectedValues: detailAgentConfig.value.selectedValues,
+    message: detailAgentConfig.value.message,
+  })
+)
+const reasoningSummary = computed(() =>
+  detailConfigOptionSummary({
+    status: detailAgentConfig.value.status,
+    option: reasoningOption.value,
+    selectedValues: detailAgentConfig.value.selectedValues,
+    message: detailAgentConfig.value.message,
+  })
+)
+const permissionSummary = computed(() =>
+  detailPermissionSummary({
+    status: detailAgentConfig.value.status,
+    state: detailAgentConfig.value,
+    permissionOption: permissionOption.value,
+  })
+)
 const isBusyForSend = computed(() =>
   sending.value ||
   runtimeStatus.value === "thinking" ||
@@ -913,7 +1250,51 @@ watch(
   () => [
     slashState.value.visible,
     filteredSlashCommands.value.length,
+    showSlashPanel.value,
     props.slashCommands?.length || 0,
+  ] as const,
+  () => {
+    scheduleViewportSync()
+  }
+)
+
+watch(
+  () => slashTriggerKey.value,
+  (triggerKey) => {
+    if (!triggerKey) {
+      dismissedSlashTriggerKey.value = ""
+    }
+  },
+  { immediate: true }
+)
+
+watch(
+  () => [inputText.value, composerCursor.value] as const,
+  () => {
+    syncMentionTrigger()
+  }
+)
+
+watch(
+  () => [
+    firstString(props.instanceKey),
+    firstString(session.value.connectionId),
+    Number(props.folderId || 0),
+    detailProjectPath.value,
+  ] as const,
+  () => {
+    clearMentionSources()
+    if (mentionTrigger.value) {
+      void ensureMentionSourcesLoaded()
+    }
+  }
+)
+
+watch(
+  () => [
+    mentionTrigger.value?.query || "",
+    mentionSourceStatus.value,
+    mentionResultCount.value,
   ] as const,
   () => {
     scheduleViewportSync()
@@ -926,6 +1307,28 @@ watch(
     if (active) {
       scheduleViewportSync()
     }
+  },
+  { immediate: true }
+)
+
+watch(
+  () => [firstString(props.instanceKey), Number(props.folderId || 0)] as const,
+  () => {
+    void loadDetailProjectEntries()
+  },
+  { immediate: true }
+)
+
+watch(
+  () => [
+    Number(props.conversationId || 0),
+    normalizedAgentType.value,
+    firstString(session.value.connectionId),
+    detailProjectPath.value,
+  ] as const,
+  ([conversationId, agentType]) => {
+    if (!conversationId || !agentType) return
+    void loadDetailAgentConfig()
   },
   { immediate: true }
 )
@@ -956,6 +1359,172 @@ function setProgrammaticAnchor(messageId: string) {
   anchorMessageId.value = messageId
   messageScrollWithAnimation.value = false
   messageScrollIntoView.value = messageAnchorId(messageId)
+}
+
+function resolveDetailDescriptor(): RemoteInstanceDescriptor {
+  const instanceKey = firstString(props.instanceKey)
+  if (instanceKey) {
+    const registered = getRegisteredRemoteInstanceDescriptor(instanceKey)
+    if (registered) return registered
+  }
+  return auth.currentRemoteInstance()
+}
+
+async function getDetailGateway() {
+  const descriptor = resolveDetailDescriptor()
+  if (descriptor.mode === "direct") {
+    const gateway = createGateway({
+      mode: "direct",
+      directBaseUrl: descriptor.baseUrl,
+    })
+    const token = firstString(descriptor.authToken, getDirectToken(descriptor.baseUrl))
+    if (token) {
+      await gateway.pair({
+        directBaseUrl: descriptor.baseUrl,
+        token,
+      })
+    }
+    return gateway
+  }
+
+  const session: RelaySessionInfo = {
+    accessToken: descriptor.authToken || "",
+    refreshToken: descriptor.refreshToken,
+    targetId: descriptor.principal,
+  }
+  return createGateway({
+    mode: "relay",
+    relayUrl: descriptor.baseUrl,
+    session,
+  })
+}
+
+async function loadDetailProjectEntries() {
+  if (!Number(props.folderId || 0)) {
+    detailProjectEntries.value = []
+    return
+  }
+
+  const token = ++detailProjectEntriesToken
+  try {
+    const gateway = await getDetailGateway()
+    const foldersRaw = await gateway.call<unknown>("list_open_folder_details")
+    if (token !== detailProjectEntriesToken) return
+    detailProjectEntries.value = normalizeList(foldersRaw).map((item: any) => ({
+      id: Number(item?.id || 0),
+      path: String(item?.path || "").trim(),
+    }))
+  } catch (error) {
+    if (token !== detailProjectEntriesToken) return
+    console.warn("load detail pane project entries failed", error)
+    detailProjectEntries.value = []
+  }
+}
+
+async function loadDetailAgentConfig() {
+  if (!Number(props.conversationId || 0) || !normalizedAgentType.value) {
+    detailAgentConfig.value = createEmptyDetailAgentConfigState()
+    return
+  }
+
+  const contextKey = detailAgentConfigContextKey.value
+  const persistedSelection = readPersistedAgentConfigSelection(contextKey) || undefined
+  const cachedSnapshot = readFreshAgentConfigCache(contextKey)
+  if (cachedSnapshot) {
+    detailAgentConfig.value = createReadyDetailAgentConfigState(cachedSnapshot, persistedSelection)
+  }
+
+  const token = ++detailAgentProbeToken
+  if (!cachedSnapshot) {
+    detailAgentConfig.value = {
+      ...createEmptyDetailAgentConfigState(),
+      status: "loading",
+    }
+  }
+
+  try {
+    const gateway = await getDetailGateway()
+    const snapshot = await gateway.call<AgentOptionsSnapshot>("acp_describe_agent_options", {
+      agentType: normalizedAgentType.value,
+      workingDir: detailProjectPath.value || null,
+    })
+    if (token !== detailAgentProbeToken) return
+    persistAgentConfigCache(contextKey, snapshot)
+    detailAgentConfig.value = createReadyDetailAgentConfigState(snapshot, persistedSelection || {
+      selectedModeId: detailAgentConfig.value.selectedModeId,
+      selectedValues: detailAgentConfig.value.selectedValues,
+    })
+  } catch (error) {
+    if (token !== detailAgentProbeToken) return
+    if (cachedSnapshot) return
+    console.warn("load detail pane agent config failed", error)
+    detailAgentConfig.value = {
+      ...createEmptyDetailAgentConfigState("读取失败，将使用远端默认配置"),
+      status: "failed",
+    }
+  }
+}
+
+function persistDetailAgentConfigSelection() {
+  persistAgentConfigSelection(
+    detailAgentConfigContextKey.value,
+    detailAgentConfigSelectionPayload(detailAgentConfig.value)
+  )
+}
+
+function toggleConfigRow(key: ComposerConfigKey) {
+  expandedConfigKey.value = nextExpandedConfigKey({
+    currentKey: expandedConfigKey.value,
+    targetKey: key,
+    availability: {
+      hasModelOptions: hasModelOptions.value,
+      hasReasoningOption: Boolean(reasoningOption.value),
+      hasPermissionOptions: hasPermissionOptions.value,
+    },
+  })
+  scheduleViewportSync()
+}
+
+async function selectDetailMode(modeId: string) {
+  if (!modeId) return
+  const conn = firstString(session.value.connectionId)
+  if (!conn) {
+    detailAgentConfig.value = withSelectedDetailMode(detailAgentConfig.value, modeId)
+    persistDetailAgentConfigSelection()
+    return
+  }
+  try {
+    await acpApi.acpSetMode(conn, modeId)
+    detailAgentConfig.value = withSelectedDetailMode(detailAgentConfig.value, modeId)
+    persistDetailAgentConfigSelection()
+  } catch (error) {
+    uni.showToast({ title: `模型切换失败: ${toErrorMessage(error)}`, icon: "none" })
+  }
+}
+
+async function selectDetailConfigValue(configId: string, valueId: string) {
+  if (!configId || !valueId) return
+  const conn = firstString(session.value.connectionId)
+  if (!conn) {
+    detailAgentConfig.value = withSelectedDetailConfigValue({
+      state: detailAgentConfig.value,
+      configId,
+      valueId,
+    })
+    persistDetailAgentConfigSelection()
+    return
+  }
+  try {
+    await acpApi.acpSetConfigOption(conn, configId, valueId)
+    detailAgentConfig.value = withSelectedDetailConfigValue({
+      state: detailAgentConfig.value,
+      configId,
+      valueId,
+    })
+    persistDetailAgentConfigSelection()
+  } catch (error) {
+    uni.showToast({ title: `配置切换失败: ${toErrorMessage(error)}`, icon: "none" })
+  }
 }
 
 function scrollToBottom(force = false) {
@@ -993,6 +1562,187 @@ function scheduleViewportSync(forceBottom = false) {
 
 function handleComposerLayoutChange() {
   scheduleViewportSync()
+}
+
+function handleComposerInput(event: unknown) {
+  const nextValue = resolveComposerInputValue(event)
+  if (nextValue != null && nextValue !== inputText.value) {
+    inputText.value = nextValue
+  }
+  const cursor = resolveComposerInputCursor(event)
+  composerCursor.value = typeof cursor === "number" && Number.isFinite(cursor)
+    ? cursor
+    : (nextValue ?? inputText.value).length
+  syncMentionTrigger()
+}
+
+function handleComposerBlur(event: unknown) {
+  const cursor = resolveComposerInputCursor(event)
+  if (typeof cursor === "number" && Number.isFinite(cursor)) {
+    composerCursor.value = cursor
+  }
+}
+
+function resolveComposerInputValue(event: unknown): string | null {
+  if (typeof event === "string") return event
+  const detailValue = (event as { detail?: { value?: unknown } })?.detail?.value
+  if (typeof detailValue === "string") return detailValue
+  const targetValue = (event as { target?: { value?: unknown } })?.target?.value
+  return typeof targetValue === "string" ? targetValue : null
+}
+
+function resolveComposerInputCursor(event: unknown): number | null {
+  const detail = (event as { detail?: unknown })?.detail
+  if (typeof detail === "number") return detail
+  const cursor = (detail as { cursor?: unknown } | undefined)?.cursor
+  return typeof cursor === "number" && Number.isFinite(cursor) ? cursor : null
+}
+
+function syncMentionTrigger() {
+  mentionTrigger.value = resolveMentionTrigger(inputText.value || "", composerCursor.value)
+  if (mentionTrigger.value) {
+    void ensureMentionSourcesLoaded()
+  }
+}
+
+function closeMentionPanel() {
+  mentionTrigger.value = null
+}
+
+function clearMentionSources() {
+  mentionFiles.value = []
+  mentionAgents.value = []
+  mentionSessions.value = []
+  mentionCommits.value = []
+  mentionSourceStatus.value = "idle"
+  mentionSourceError.value = ""
+  mentionSourceKey.value = ""
+}
+
+function currentMentionSourceKey() {
+  return JSON.stringify([
+    firstString(props.instanceKey),
+    firstString(session.value.connectionId),
+    Number(props.folderId || 0),
+    detailProjectPath.value,
+  ])
+}
+
+async function ensureMentionSourcesLoaded() {
+  const key = currentMentionSourceKey()
+  if (mentionSourceStatus.value === "ready" && mentionSourceKey.value === key) return
+  if (mentionSourceStatus.value === "loading" && mentionSourceKey.value === key) return
+
+  const token = ++mentionSourceLoadToken
+  mentionSourceKey.value = key
+  mentionSourceStatus.value = "loading"
+  mentionSourceError.value = ""
+
+  try {
+    const gateway = await getDetailGateway()
+    const projectPath = detailProjectPath.value
+    const activeFolderId = Number(props.folderId || 0)
+
+    const [files, agents, sessions, commits] = await Promise.all([
+      loadMentionFiles(gateway, projectPath),
+      loadMentionAgents(gateway),
+      loadMentionSessions(gateway, activeFolderId),
+      loadMentionCommits(gateway, projectPath),
+    ])
+
+    if (token !== mentionSourceLoadToken) return
+    mentionFiles.value = files
+    mentionAgents.value = agents
+    mentionSessions.value = sessions
+    mentionCommits.value = commits
+    mentionSourceStatus.value = "ready"
+  } catch (error) {
+    if (token !== mentionSourceLoadToken) return
+    mentionSourceStatus.value = "error"
+    mentionSourceError.value = toErrorMessage(error, "引用加载失败")
+  }
+}
+
+async function loadMentionFiles(gateway: Awaited<ReturnType<typeof getDetailGateway>>, projectPath: string) {
+  if (!projectPath) return []
+  try {
+    const tree = await getRemoteProjectFileTree(gateway, projectPath, 6)
+    return flattenMentionFileTree(tree)
+  } catch (error) {
+    console.warn("load mention files skipped", error)
+    return []
+  }
+}
+
+async function loadMentionAgents(gateway: Awaited<ReturnType<typeof getDetailGateway>>) {
+  try {
+    const raw = await gateway.call<unknown>("acp_list_agents", {})
+    return normalizeList(raw) as MentionAgentSource[]
+  } catch (error) {
+    console.warn("load mention agents skipped", error)
+    return []
+  }
+}
+
+async function loadMentionSessions(gateway: Awaited<ReturnType<typeof getDetailGateway>>, activeFolderId: number) {
+  if (!activeFolderId) return []
+  try {
+    const sessions = await loadRemoteProjectConversations(gateway, activeFolderId)
+    return sessions.map((item) => ({
+      id: item.id,
+      title: item.title,
+      agentType: item.agentType,
+      status: item.status,
+    }))
+  } catch (error) {
+    console.warn("load mention sessions skipped", error)
+    return []
+  }
+}
+
+async function loadMentionCommits(gateway: Awaited<ReturnType<typeof getDetailGateway>>, projectPath: string) {
+  if (!projectPath) return []
+  try {
+    const result = await getRemoteGitLog(gateway, projectPath)
+    return result.entries as MentionCommitSource[]
+  } catch (error) {
+    console.warn("load mention commits skipped", error)
+    return []
+  }
+}
+
+function flattenMentionFileTree(nodes: ProjectFileNode[]): MentionFileSource[] {
+  const items: MentionFileSource[] = []
+  const walk = (node: ProjectFileNode) => {
+    items.push({
+      name: node.name,
+      path: node.path,
+      kind: node.kind === "directory" ? "directory" : "file",
+    })
+    node.children.forEach(walk)
+  }
+  nodes.forEach(walk)
+  return items
+}
+
+function insertMentionReference(item: MentionReferenceItem) {
+  const trigger = mentionTrigger.value || resolveMentionTrigger(inputText.value || "", composerCursor.value)
+  if (!trigger) return
+  const result = applyMentionReference(inputText.value || "", trigger, item)
+  inputText.value = result.text
+  composerCursor.value = result.cursor
+  closeMentionPanel()
+  nextTick(() => {
+    composerCursor.value = result.cursor
+    handleComposerLayoutChange()
+  })
+}
+
+function mentionKindShortLabel(kind: MentionReferenceKind) {
+  if (kind === "agent") return "AI"
+  if (kind === "file") return "F"
+  if (kind === "session") return "S"
+  return "G"
 }
 
 function handleMessageListScroll(event: any) {
@@ -1133,15 +1883,20 @@ function toggleInputToolRow() {
   toolRowExpanded.value = !toolRowExpanded.value
   if (!toolRowExpanded.value) {
     composerPanelMode.value = ""
+    expandedConfigKey.value = ""
   }
   scheduleViewportSync()
 }
 
-function toggleComposerPanel(mode: "" | "quick_reply") {
+function toggleComposerPanel(mode: ComposerPanelMode) {
   toolRowExpanded.value = true
-  composerPanelMode.value = composerPanelMode.value === mode ? "" : mode
+  const nextMode = composerPanelMode.value === mode ? "" : mode
+  composerPanelMode.value = nextMode
   if (!composerPanelMode.value) {
     toolRowExpanded.value = false
+  }
+  if (nextMode !== "config") {
+    expandedConfigKey.value = ""
   }
   scheduleViewportSync()
 }
@@ -1150,7 +1905,14 @@ function getSlashCommandDesc(item: SlashCommandItem) {
   return slashCommandDescription(item)
 }
 
+function dismissSlashPanel() {
+  if (!slashTriggerKey.value) return
+  dismissedSlashTriggerKey.value = slashTriggerKey.value
+  scheduleViewportSync()
+}
+
 function applySlashCommand(item: SlashCommandItem) {
+  dismissedSlashTriggerKey.value = ""
   inputText.value = applySlashCommandText(inputText.value || "", item)
   scheduleViewportSync()
 }
@@ -1163,6 +1925,8 @@ function createDraftFromComposer(): QueuedDraft | null {
   })
   if (!draft) return null
   inputText.value = ""
+  composerCursor.value = null
+  closeMentionPanel()
   attachments.value = []
   return draft
 }
@@ -1179,6 +1943,7 @@ async function sendQuickReply(text: string) {
   if (!draft) return
   toolRowExpanded.value = false
   composerPanelMode.value = ""
+  expandedConfigKey.value = ""
   await sendDraft(draft)
 }
 
