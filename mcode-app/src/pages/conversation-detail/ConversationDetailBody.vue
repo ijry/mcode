@@ -1,7 +1,7 @@
 <template>
   <view
+    class="detail-body"
     :class="[
-      'detail-body',
       cyberModeEnabled && 'detail-body--cyber',
       cyberModeEnabled && `detail-body--${cyberEffectPhase || 'idle'}`,
     ]"

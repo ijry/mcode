@@ -35,6 +35,9 @@
               :message="item.message"
               :agent-type="agentType"
               :showRegenerate="false"
+              :cyber-mode-enabled="cyberModeEnabled"
+              :cyber-effect-phase="cyberEffectPhase || 'idle'"
+              :cyber-active="false"
             />
           </view>
 

@@ -41,7 +41,11 @@
         <view v-for="(part, index) in displayParts" :key="index" class="part-wrap">
           <!-- 文本 -->
           <view v-if="part.type === 'text'" class="part-text">
-            <up-markdown :content="part.text || ''"></up-markdown>
+            <view v-if="shouldRenderCyberDecode(part.text || '')" class="part-text__cyber">
+              <up-markdown class="part-text__cyber-real" :content="part.text || ''"></up-markdown>
+              <text class="part-text__cyber-overlay">{{ renderCyberDecodeText(part.text || '', index) }}</text>
+            </view>
+            <up-markdown v-else :content="part.text || ''"></up-markdown>
           </view>
 
           <!-- 思考 -->
@@ -170,8 +174,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from "vue"
+import { computed, onBeforeUnmount, ref, watch } from "vue"
 import type { ContentPart, MessageTurn, ToolCall } from "@/types/acp"
+import {
+  buildCyberDecodeText,
+  type CyberEffectPhase,
+} from "@/pages/conversation-detail/detailCyberMode"
 import ToolCallBlock from "./ToolCallBlock.vue"
 import ToolCallGroupBlock from "./ToolCallGroupBlock.vue"
 
@@ -180,6 +188,9 @@ const props = defineProps<{
   agentType?: string
   showRegenerate?: boolean
   translucent?: boolean
+  cyberModeEnabled?: boolean
+  cyberEffectPhase?: CyberEffectPhase
+  cyberActive?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -221,8 +232,35 @@ const displayParts = computed<DisplayPart[]>(() => {
 // 思考折叠状态
 const manuallyCollapsed = ref<Set<number>>(new Set())
 const manuallyExpanded = ref<Set<number>>(new Set())
+const cyberTick = ref(0)
+let cyberTimer: ReturnType<typeof setInterval> | null = null
 
 const isStreaming = computed(() => props.message.status === "streaming")
+const isCyberStreamingPhase = computed(() => {
+  const phase = props.cyberEffectPhase || "idle"
+  return phase === "streaming" || phase === "settle"
+})
+const showCyberDecodeOverlay = computed(() =>
+  Boolean(
+    props.cyberModeEnabled &&
+    props.cyberActive &&
+    isCyberStreamingPhase.value &&
+    props.message.role === "assistant" &&
+    props.message.status === "streaming"
+  )
+)
+const cyberRevealProgress = computed(() => {
+  const phase = props.cyberEffectPhase || "idle"
+  const base = phase === "streaming" ? 0.18 : 0.12
+  const step = phase === "streaming" ? 0.06 : 0.04
+  return Math.min(0.92, base + cyberTick.value * step)
+})
+const textSignature = computed(() =>
+  (props.message.content || [])
+    .filter((part) => part.type === "text")
+    .map((part) => part.text || "")
+    .join("\n")
+)
 
 // 判断某个 thinking part 是否已经"思考结束"：后面还有其他内容 part
 function isThinkingDone(index: number): boolean {
@@ -270,6 +308,41 @@ watch(isStreaming, (streaming, prevStreaming) => {
   }
 })
 
+watch(
+  showCyberDecodeOverlay,
+  (active) => {
+    if (cyberTimer) {
+      clearInterval(cyberTimer)
+      cyberTimer = null
+    }
+    if (!active) {
+      cyberTick.value = 0
+      return
+    }
+    cyberTimer = setInterval(() => {
+      cyberTick.value += 1
+    }, 90)
+  },
+  { immediate: true }
+)
+
+watch(
+  textSignature,
+  () => {
+    if (showCyberDecodeOverlay.value) {
+      cyberTick.value = 0
+    }
+  },
+  { flush: "sync" }
+)
+
+onBeforeUnmount(() => {
+  if (cyberTimer) {
+    clearInterval(cyberTimer)
+    cyberTimer = null
+  }
+})
+
 const agentLogoPath = computed(() => {
   const key = normalizeAgentType(props.agentType)
   if (key === "claude_code") return "/static/agent-logos/claude-code.svg"
@@ -296,6 +369,21 @@ function copyMessage() {
 function previewImage(url?: string) {
   if (!url) return
   uni.previewImage({ urls: [url], current: url })
+}
+
+function shouldRenderCyberDecode(text: string) {
+  if (!showCyberDecodeOverlay.value) return false
+  const normalized = String(text || "")
+  if (!normalized.trim()) return false
+  return !/```|^\s*#|^\s*[-*]\s|^\s*\d+\.\s|\|.+\|/m.test(normalized)
+}
+
+function renderCyberDecodeText(text: string, index: number) {
+  return buildCyberDecodeText({
+    text,
+    progress: cyberRevealProgress.value,
+    tick: cyberTick.value + index * 11,
+  })
 }
 
 function normalizeAgentType(raw?: string) {
@@ -448,6 +536,36 @@ function normalizeAgentType(raw?: string) {
     color: #ffffff;
     :deep(*) { color: #ffffff !important; }
   }
+}
+
+.part-text__cyber {
+  position: relative;
+  min-height: 1em;
+}
+
+.part-text__cyber-real {
+  opacity: 0.26;
+  filter: saturate(0.82);
+}
+
+.part-text__cyber-overlay {
+  position: absolute;
+  inset: 0;
+  display: block;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 13px;
+  line-height: 1.2;
+  font-family: "Courier New", monospace;
+  color: color-mix(in srgb, var(--up-success, #19be6b) 72%, #c8ffd9 28%);
+  text-shadow: 0 0 10rpx rgba(68, 255, 144, 0.34);
+  pointer-events: none;
+  animation: cyberTextGlitch 0.18s steps(2) infinite;
+}
+
+@keyframes cyberTextGlitch {
+  0%, 100% { opacity: 0.92; transform: translateX(0); }
+  50% { opacity: 0.74; transform: translateX(2rpx); }
 }
 
 /* ===== 思考块 ===== */

@@ -68,6 +68,9 @@
           :agent-type="normalizedAgentType"
           :showRegenerate="index === renderMessageItems.length - 1 && item.message.role === 'assistant'"
           :translucent="translucentMessageList"
+          :cyber-mode-enabled="Boolean(cyberModeEnabled && active)"
+          :cyber-effect-phase="cyberEffectPhase || 'idle'"
+          :cyber-active="Boolean(cyberModeEnabled && active)"
           @regenerate="regenerateLastMessage"
         />
       </view>
