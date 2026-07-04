@@ -1459,6 +1459,186 @@
   backdrop-filter: blur(10rpx);
 }
 
+.mention-panel {
+  margin-bottom: 12rpx;
+  border: 1rpx solid var(--up-border-color, #dadbde);
+  border-radius: 18rpx;
+  background: var(--up-card-bg-color, #ffffff);
+  overflow: hidden;
+  box-shadow: 0 14rpx 34rpx color-mix(in srgb, var(--up-main-color, #303133) 10%, transparent 90%);
+}
+
+.mention-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+  padding: 14rpx 16rpx;
+  border-bottom: 1rpx solid var(--up-border-color, #dadbde);
+}
+
+.mention-panel__title {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  min-width: 0;
+}
+
+.mention-panel__trigger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34rpx;
+  height: 34rpx;
+  border-radius: 12rpx;
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 12%, var(--up-card-bg-color, #ffffff) 88%);
+  color: var(--up-primary, #2979ff);
+  font-size: 22rpx;
+  font-weight: 700;
+}
+
+.mention-panel__title-text {
+  font-size: 24rpx;
+  font-weight: 650;
+  color: var(--up-main-color, #303133);
+}
+
+.mention-panel__hint {
+  flex-shrink: 0;
+  max-width: 360rpx;
+  font-size: 21rpx;
+  color: var(--up-tips-color, #909193);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mention-panel__state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10rpx;
+  min-height: 96rpx;
+  padding: 18rpx;
+  box-sizing: border-box;
+}
+
+.mention-panel__state--error {
+  color: var(--up-error, #fa3534);
+}
+
+.mention-panel__state-text {
+  font-size: 23rpx;
+  color: var(--up-tips-color, #909193);
+}
+
+.mention-panel__state--error .mention-panel__state-text {
+  color: var(--up-error, #fa3534);
+}
+
+.mention-panel__scroll {
+  max-height: 430rpx;
+}
+
+.mention-panel__body {
+  padding: 8rpx;
+}
+
+.mention-group + .mention-group {
+  margin-top: 8rpx;
+  padding-top: 8rpx;
+  border-top: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 60%, transparent 40%);
+}
+
+.mention-group__header {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  padding: 6rpx 8rpx;
+}
+
+.mention-group__title {
+  font-size: 20rpx;
+  color: var(--up-tips-color, #909193);
+}
+
+.mention-group__count {
+  min-width: 28rpx;
+  padding: 1rpx 8rpx;
+  border-radius: 999rpx;
+  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
+  color: var(--up-tips-color, #909193);
+  font-size: 18rpx;
+  text-align: center;
+}
+
+.mention-item {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  padding: 12rpx 10rpx;
+  border-radius: 14rpx;
+}
+
+.mention-item:active {
+  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
+}
+
+.mention-item__badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42rpx;
+  height: 42rpx;
+  flex-shrink: 0;
+  border-radius: 14rpx;
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 10%, var(--up-card-bg-color, #ffffff) 90%);
+  color: var(--up-primary, #2979ff);
+  font-size: 18rpx;
+  font-weight: 700;
+}
+
+.mention-item__badge--file {
+  background: color-mix(in srgb, var(--up-success, #19be6b) 10%, var(--up-card-bg-color, #ffffff) 90%);
+  color: var(--up-success, #19be6b);
+}
+
+.mention-item__badge--session {
+  background: color-mix(in srgb, var(--up-warning, #f9ae3d) 12%, var(--up-card-bg-color, #ffffff) 88%);
+  color: var(--up-warning, #f9ae3d);
+}
+
+.mention-item__badge--commit {
+  background: color-mix(in srgb, var(--up-error, #fa3534) 9%, var(--up-card-bg-color, #ffffff) 91%);
+  color: var(--up-error, #fa3534);
+}
+
+.mention-item__body {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3rpx;
+}
+
+.mention-item__label {
+  font-size: 24rpx;
+  font-weight: 600;
+  color: var(--up-main-color, #303133);
+}
+
+.mention-item__detail {
+  font-size: 20rpx;
+  color: var(--up-tips-color, #909193);
+}
+
+.mention-group__more {
+  display: block;
+  padding: 4rpx 10rpx 8rpx;
+  font-size: 19rpx;
+  color: var(--up-tips-color, #909193);
+}
+
 .composer-config-row {
   display: flex;
   align-items: center;

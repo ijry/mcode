@@ -442,6 +442,78 @@
           </view>
         </view>
 
+        <view
+          v-if="showMentionPanel"
+          class="mention-panel"
+        >
+          <view class="mention-panel__header">
+            <view class="mention-panel__title">
+              <text class="mention-panel__trigger">@</text>
+              <text class="mention-panel__title-text">引用上下文</text>
+            </view>
+            <text class="mention-panel__hint">{{ mentionPanelHint }}</text>
+          </view>
+
+          <view
+            v-if="mentionSourceStatus === 'loading'"
+            class="mention-panel__state"
+          >
+            <up-loading-icon
+              mode="circle"
+              size="15"
+              :color="upThemeVar('--up-tips-color', '#909193')"
+            ></up-loading-icon>
+            <text class="mention-panel__state-text">正在读取项目上下文</text>
+          </view>
+          <view
+            v-else-if="mentionSourceStatus === 'error'"
+            class="mention-panel__state mention-panel__state--error"
+          >
+            <text class="mention-panel__state-text">{{ mentionSourceError || "引用加载失败" }}</text>
+          </view>
+          <view
+            v-else-if="mentionResultCount === 0"
+            class="mention-panel__state"
+          >
+            <text class="mention-panel__state-text">继续输入以过滤文件、会话、提交或智能体</text>
+          </view>
+          <scroll-view
+            v-else
+            scroll-y
+            class="mention-panel__scroll"
+          >
+            <view class="mention-panel__body">
+              <view
+                v-for="group in mentionVisibleGroups"
+                :key="group.kind"
+                class="mention-group"
+              >
+                <view class="mention-group__header">
+                  <text class="mention-group__title">{{ group.label }}</text>
+                  <text class="mention-group__count">{{ group.items.length }}</text>
+                </view>
+                <view
+                  v-for="item in group.items"
+                  :key="`${group.kind}:${item.id}`"
+                  class="mention-item"
+                  @click="insertMentionReference(item)"
+                >
+                  <view :class="['mention-item__badge', `mention-item__badge--${item.kind}`]">
+                    <text>{{ mentionKindShortLabel(item.kind) }}</text>
+                  </view>
+                  <view class="mention-item__body">
+                    <text class="mention-item__label u-line-1">{{ item.label }}</text>
+                    <text v-if="item.detail" class="mention-item__detail u-line-1">{{ item.detail }}</text>
+                  </view>
+                </view>
+                <text v-if="group.truncated" class="mention-group__more">
+                  结果较多，继续输入可缩小范围
+                </text>
+              </view>
+            </view>
+          </scroll-view>
+        </view>
+
         <view v-if="uploadQueue.length > 0" class="upload-queue">
           <view
             v-for="item in uploadQueue"
@@ -644,10 +716,13 @@
               placeholder="发送消息，输入 / 调出命令"
               autoHeight
               fixed
+              :cursor="composerCursorProp"
               :maxlength="10000"
               border="none"
               height="34rpx"
               :customStyle="{ backgroundColor: 'transparent', background: 'transparent', padding: '0', borderColor: 'transparent' }"
+              @input="handleComposerInput"
+              @blur="handleComposerBlur"
               @linechange="handleComposerLayoutChange"
               @keyboardheightchange="handleComposerLayoutChange"
             ></up-textarea>
@@ -986,6 +1061,19 @@ import {
 } from "@/services/conversation/globalConversationSync"
 import { touchHotConversation } from "@/services/conversation/hotConversationCoordinator"
 import {
+  applyMentionReference,
+  buildMentionReferenceGroups,
+  resolveMentionTrigger,
+  type MentionAgentSource,
+  type MentionCommitSource,
+  type MentionFileSource,
+  type MentionReferenceGroup,
+  type MentionReferenceItem,
+  type MentionReferenceKind,
+  type MentionSessionSource,
+  type MentionTriggerState,
+} from "@/services/composerReferences"
+import {
   hasInFlightConversationDetail,
   hasRenderableRuntimeState,
   hasVolatileRuntimeState,
@@ -994,6 +1082,9 @@ import {
   getRegisteredRemoteInstanceDescriptor,
   registerRemoteInstanceDescriptor,
 } from "@/services/realtime/remoteInstanceRegistry"
+import { getRemoteProjectFileTree, type ProjectFileNode } from "@/services/projectFiles"
+import { getRemoteGitLog } from "@/services/projectGit"
+import { loadRemoteProjectConversations } from "@/services/projectSessions"
 import {
   decodeConnectionContext,
   findStoredConnectionById as findStoredConnectionContextById,
@@ -1258,6 +1349,15 @@ const bridgeRecoveredAt = ref(0)
 const conversationTitle = ref("未命名会话")
 const detailBackgroundImageUrl = ref("")
 const inputText = ref("")
+const composerCursor = ref<number | null>(null)
+const mentionTrigger = ref<MentionTriggerState | null>(null)
+const mentionFiles = ref<MentionFileSource[]>([])
+const mentionAgents = ref<MentionAgentSource[]>([])
+const mentionSessions = ref<MentionSessionSource[]>([])
+const mentionCommits = ref<MentionCommitSource[]>([])
+const mentionSourceStatus = ref<"idle" | "loading" | "ready" | "error">("idle")
+const mentionSourceError = ref("")
+const mentionSourceKey = ref("")
 const pageScrollTop = ref(0)
 const messageScrollTop = ref(0)
 const messageScrollIntoView = ref("")
@@ -1330,6 +1430,7 @@ let detailOpenedTabsInstanceKey = ""
 let detailOverviewInstanceKey = ""
 let detailSwitching = false
 let detailLoadSequence = 0
+let mentionSourceLoadToken = 0
 let pendingDetailTabIndex: number | null = null
 let pendingDetailTabOptions: { syncRemote?: boolean } | null = null
 const connectingBackgroundConversationIds = new Set<number>()
@@ -1620,6 +1721,33 @@ const detailAgentConfigContextKey = computed(() => {
     detailProjectPath.value,
     conversationId.value || null
   )
+})
+const composerCursorProp = computed(() =>
+  composerCursor.value == null ? undefined : composerCursor.value
+)
+const mentionReferenceGroups = computed<MentionReferenceGroup[]>(() =>
+  buildMentionReferenceGroups({
+    query: mentionTrigger.value?.query || "",
+    projectPath: detailProjectPath.value,
+    files: mentionFiles.value,
+    agents: mentionAgents.value,
+    sessions: mentionSessions.value,
+    commits: mentionCommits.value,
+    maxPerGroup: 20,
+  })
+)
+const mentionVisibleGroups = computed(() =>
+  mentionReferenceGroups.value.filter((group) => group.items.length > 0)
+)
+const mentionResultCount = computed(() =>
+  mentionVisibleGroups.value.reduce((total, group) => total + group.items.length, 0)
+)
+const showMentionPanel = computed(() => Boolean(mentionTrigger.value))
+const mentionPanelHint = computed(() => {
+  if (mentionSourceStatus.value === "loading") return "正在搜索引用..."
+  if (mentionSourceStatus.value === "error") return mentionSourceError.value || "引用加载失败"
+  if (mentionResultCount.value === 0) return "没有匹配的引用"
+  return mentionTrigger.value?.query ? `匹配 ${mentionResultCount.value} 项` : "选择要引用的上下文"
 })
 
 const stats = computed(() => session.value?.stats || {
@@ -2997,6 +3125,23 @@ watch(
 )
 
 watch(
+  () => [inputText.value, composerCursor.value] as const,
+  () => {
+    syncMentionTrigger()
+  }
+)
+
+watch(
+  () => [detailConnectionKey.value, folderId.value, detailProjectPath.value] as const,
+  () => {
+    clearMentionSources()
+    if (mentionTrigger.value) {
+      void ensureMentionSourcesLoaded()
+    }
+  }
+)
+
+watch(
   () => [currentAgentType.value, session.value?.connectionId] as const,
   ([agentType, connectionId]) => {
     if (!conversationId.value || !agentType || !connectionId) return
@@ -3015,6 +3160,9 @@ watch(
     JSON.stringify(askQuestionSelections.value),
     slashState.value.visible,
     filteredSlashCommands.value.length,
+    mentionTrigger.value?.query || "",
+    mentionSourceStatus.value,
+    mentionResultCount.value,
     composerPanelMode.value,
     expandedConfigKey.value,
   ],
@@ -4322,6 +4470,168 @@ function scheduleViewportSync(forceBottom = false) {
 function handleComposerLayoutChange() {
   if (!hasInitialBottomScroll.value) return
   scheduleViewportSync()
+}
+
+function handleComposerInput(event: unknown) {
+  const cursor = (event as { detail?: { cursor?: number } })?.detail?.cursor
+  composerCursor.value = typeof cursor === "number" && Number.isFinite(cursor)
+    ? cursor
+    : inputText.value.length
+  syncMentionTrigger()
+}
+
+function handleComposerBlur(event: unknown) {
+  const cursor = (event as { detail?: { cursor?: number } })?.detail?.cursor
+  if (typeof cursor === "number" && Number.isFinite(cursor)) {
+    composerCursor.value = cursor
+  }
+}
+
+function syncMentionTrigger() {
+  mentionTrigger.value = resolveMentionTrigger(inputText.value || "", composerCursor.value)
+  if (mentionTrigger.value) {
+    void ensureMentionSourcesLoaded()
+  }
+}
+
+function closeMentionPanel() {
+  mentionTrigger.value = null
+}
+
+function clearMentionSources() {
+  mentionFiles.value = []
+  mentionAgents.value = []
+  mentionSessions.value = []
+  mentionCommits.value = []
+  mentionSourceStatus.value = "idle"
+  mentionSourceError.value = ""
+  mentionSourceKey.value = ""
+}
+
+function currentMentionSourceKey() {
+  return JSON.stringify([
+    resolveDetailInstanceKey(),
+    detailConnectionKey.value,
+    folderId.value,
+    detailProjectPath.value,
+  ])
+}
+
+async function ensureMentionSourcesLoaded() {
+  const key = currentMentionSourceKey()
+  if (mentionSourceStatus.value === "ready" && mentionSourceKey.value === key) return
+  if (mentionSourceStatus.value === "loading" && mentionSourceKey.value === key) return
+
+  const token = ++mentionSourceLoadToken
+  mentionSourceKey.value = key
+  mentionSourceStatus.value = "loading"
+  mentionSourceError.value = ""
+
+  try {
+    const gateway = await getDetailGateway()
+    const projectPath = detailProjectPath.value
+    const activeFolderId = folderId.value
+
+    const [files, agents, sessions, commits] = await Promise.all([
+      loadMentionFiles(gateway, projectPath),
+      loadMentionAgents(gateway),
+      loadMentionSessions(gateway, activeFolderId),
+      loadMentionCommits(gateway, projectPath),
+    ])
+
+    if (token !== mentionSourceLoadToken) return
+    mentionFiles.value = files
+    mentionAgents.value = agents
+    mentionSessions.value = sessions
+    mentionCommits.value = commits
+    mentionSourceStatus.value = "ready"
+  } catch (error) {
+    if (token !== mentionSourceLoadToken) return
+    mentionSourceStatus.value = "error"
+    mentionSourceError.value = toErrorMessage(error, "引用加载失败")
+  }
+}
+
+async function loadMentionFiles(gateway: Awaited<ReturnType<typeof getDetailGateway>>, projectPath: string) {
+  if (!projectPath) return []
+  try {
+    const tree = await getRemoteProjectFileTree(gateway, projectPath, 6)
+    return flattenMentionFileTree(tree)
+  } catch (error) {
+    console.warn("load mention files skipped", error)
+    return []
+  }
+}
+
+async function loadMentionAgents(gateway: Awaited<ReturnType<typeof getDetailGateway>>) {
+  try {
+    const raw = await gateway.call<unknown>("acp_list_agents", {})
+    return normalizeList(raw) as MentionAgentSource[]
+  } catch (error) {
+    console.warn("load mention agents skipped", error)
+    return []
+  }
+}
+
+async function loadMentionSessions(gateway: Awaited<ReturnType<typeof getDetailGateway>>, activeFolderId: number) {
+  if (!activeFolderId) return []
+  try {
+    const sessions = await loadRemoteProjectConversations(gateway, activeFolderId)
+    return sessions.map((item) => ({
+      id: item.id,
+      title: item.title,
+      agentType: item.agentType,
+      status: item.status,
+    }))
+  } catch (error) {
+    console.warn("load mention sessions skipped", error)
+    return []
+  }
+}
+
+async function loadMentionCommits(gateway: Awaited<ReturnType<typeof getDetailGateway>>, projectPath: string) {
+  if (!projectPath) return []
+  try {
+    const result = await getRemoteGitLog(gateway, projectPath)
+    return result.entries as MentionCommitSource[]
+  } catch (error) {
+    console.warn("load mention commits skipped", error)
+    return []
+  }
+}
+
+function flattenMentionFileTree(nodes: ProjectFileNode[]): MentionFileSource[] {
+  const items: MentionFileSource[] = []
+  const walk = (node: ProjectFileNode) => {
+    items.push({
+      name: node.name,
+      path: node.path,
+      kind: node.kind === "directory" ? "directory" : "file",
+    })
+    node.children.forEach(walk)
+  }
+  nodes.forEach(walk)
+  return items
+}
+
+function insertMentionReference(item: MentionReferenceItem) {
+  const trigger = mentionTrigger.value || resolveMentionTrigger(inputText.value || "", composerCursor.value)
+  if (!trigger) return
+  const result = applyMentionReference(inputText.value || "", trigger, item)
+  inputText.value = result.text
+  composerCursor.value = result.cursor
+  closeMentionPanel()
+  nextTick(() => {
+    composerCursor.value = result.cursor
+    handleComposerLayoutChange()
+  })
+}
+
+function mentionKindShortLabel(kind: MentionReferenceKind) {
+  if (kind === "agent") return "AI"
+  if (kind === "file") return "F"
+  if (kind === "session") return "S"
+  return "G"
 }
 
 function handleMessageListScroll(event: any) {
