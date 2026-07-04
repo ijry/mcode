@@ -85,18 +85,8 @@
           </view>
         </view>
 
-        <view class="project-card__menu" @click.stop="openProjectActionSheet(item)">
-          <u-icon name="more-dot-fill" size="18" color="#c7c7cc"></u-icon>
-        </view>
       </view>
     </view>
-
-    <u-action-sheet
-      :show="showProjectActionSheet"
-      :actions="projectActions"
-      @select="handleProjectActionSelect"
-      @close="showProjectActionSheet = false"
-    ></u-action-sheet>
 
     <RemoteDirectoryBrowser
       v-model:show="showDirectoryBrowser"
@@ -120,7 +110,6 @@ import {
   loadRemoteProjects,
   type ProjectListItem,
 } from "@/services/projectSessions"
-import { buildProjectGitRoute } from "@/services/projectGit"
 import { buildProjectDetailRoute } from "@/services/projectDetail"
 import type { CodegGateway } from "@/services/gateway"
 import { openRemoteFolder } from "@/services/remoteDirectoryBrowser"
@@ -143,15 +132,12 @@ const loading = ref(false)
 const errorMessage = ref("")
 const projectItems = ref<ProjectListItem[]>([])
 const connectionRef = ref<ConnectionContext | null>(props.connection)
-const showProjectActionSheet = ref(false)
 const showDirectoryBrowser = ref(false)
 const directoryBrowserGateway = ref<CodegGateway | null>(null)
 const addingProject = ref(false)
-const currentProjectAction = ref<ProjectListItem | null>(null)
 
 const embedded = computed(() => Boolean(props.embedded))
 const connectionName = computed(() => connectionRef.value?.name || "项目列表")
-const projectActions = computed(() => [{ name: "Git 管理", color: "#2979ff" }])
 let loadedConnectionKey = ""
 
 watch(
@@ -203,26 +189,6 @@ function openProjectSessions(item: ProjectListItem) {
   if (!connectionId) return
   uni.navigateTo({
     url: buildProjectDetailRoute({
-      connectionId,
-      folderId: item.id,
-      projectName: item.name,
-      projectPath: item.path,
-    }),
-  })
-}
-
-function openProjectActionSheet(item: ProjectListItem) {
-  currentProjectAction.value = item
-  showProjectActionSheet.value = true
-}
-
-function handleProjectActionSelect() {
-  const item = currentProjectAction.value
-  showProjectActionSheet.value = false
-  const connectionId = getCurrentConnectionId()
-  if (!item || !connectionId) return
-  uni.navigateTo({
-    url: buildProjectGitRoute({
       connectionId,
       folderId: item.id,
       projectName: item.name,
@@ -462,17 +428,6 @@ function connectionIdentityKey(connection: ConnectionContext | null) {
   align-items: center;
   gap: 18rpx;
   flex-shrink: 0;
-}
-
-.project-card__menu {
-  width: 56rpx;
-  height: 56rpx;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
 }
 
 .project-card__stat {
