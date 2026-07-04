@@ -1,5 +1,12 @@
 <template>
-  <view :class="['bubble-wrap', `bubble-wrap--${message.role}`]">
+  <view
+    :class="[
+      'bubble-wrap',
+      `bubble-wrap--${message.role}`,
+      cyberModeEnabled && 'bubble-wrap--cyber',
+      cyberModeEnabled && `bubble-wrap--cyber-${cyberEffectPhase || 'idle'}`,
+    ]"
+  >
     <!-- 头像 -->
     <view class="bubble-avatar">
       <!-- <up-avatar
@@ -41,7 +48,7 @@
         <view v-for="(part, index) in displayParts" :key="index" class="part-wrap">
           <!-- 文本 -->
           <view v-if="part.type === 'text'" class="part-text">
-            <view v-if="shouldRenderCyberDecode(part.text || '')" class="part-text__cyber">
+            <view v-if="shouldRenderCyberDecode(part.text || '', index)" class="part-text__cyber">
               <up-markdown class="part-text__cyber-real" :content="part.text || ''"></up-markdown>
               <text class="part-text__cyber-overlay">{{ renderCyberDecodeText(part.text || '', index) }}</text>
             </view>
@@ -261,6 +268,15 @@ const textSignature = computed(() =>
     .map((part) => part.text || "")
     .join("\n")
 )
+const latestCyberTextPartIndex = computed(() => {
+  for (let index = displayParts.value.length - 1; index >= 0; index -= 1) {
+    const part = displayParts.value[index]
+    if (part.type === "text" && String(part.text || "").trim()) {
+      return index
+    }
+  }
+  return -1
+})
 
 // 判断某个 thinking part 是否已经"思考结束"：后面还有其他内容 part
 function isThinkingDone(index: number): boolean {
@@ -371,8 +387,10 @@ function previewImage(url?: string) {
   uni.previewImage({ urls: [url], current: url })
 }
 
-function shouldRenderCyberDecode(text: string) {
+function shouldRenderCyberDecode(text: string, index: number) {
   if (!showCyberDecodeOverlay.value) return false
+  const isLatestCyberTextPart = index === latestCyberTextPartIndex.value
+  if (!isLatestCyberTextPart) return false
   const normalized = String(text || "")
   if (!normalized.trim()) return false
   return !/```|^\s*#|^\s*[-*]\s|^\s*\d+\.\s|\|.+\|/m.test(normalized)
@@ -488,6 +506,55 @@ function normalizeAgentType(raw?: string) {
   }
 }
 
+.bubble-wrap--cyber {
+  font-family: "Courier New", monospace;
+}
+
+.bubble-wrap--cyber .bubble-body {
+  max-width: 680rpx;
+}
+
+.bubble-wrap--cyber .bubble {
+  position: relative;
+  overflow: hidden;
+  border-radius: 10rpx;
+  border: 1rpx solid rgba(0, 255, 65, 0.24);
+  background: rgba(0, 13, 4, 0.9);
+  color: #baffc8;
+  box-shadow: inset 0 0 28rpx rgba(0, 255, 65, 0.06), 0 0 20rpx rgba(0, 255, 65, 0.08);
+}
+
+.bubble-wrap--cyber .bubble::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 2rpx;
+  background: linear-gradient(90deg, transparent, rgba(0, 255, 65, 0.92), transparent);
+  opacity: 0.62;
+}
+
+.bubble-wrap--cyber .bubble--assistant {
+  background:
+    linear-gradient(135deg, rgba(0, 255, 65, 0.08), transparent 34%),
+    rgba(0, 13, 4, 0.92);
+  border-top-left-radius: 4rpx;
+}
+
+.bubble-wrap--cyber .bubble--user {
+  background:
+    linear-gradient(135deg, rgba(124, 255, 158, 0.16), transparent 42%),
+    rgba(0, 58, 18, 0.9);
+  border-color: rgba(137, 255, 168, 0.34);
+  border-top-right-radius: 4rpx;
+}
+
+.bubble-wrap--cyber .bubble--assistant-translucent,
+.bubble-wrap--cyber .bubble--user-translucent {
+  backdrop-filter: blur(3rpx);
+}
+
 /* ===== 内容区块 ===== */
 .part-wrap {
   &:not(:last-child) { margin-bottom: 16rpx; }
@@ -557,10 +624,57 @@ function normalizeAgentType(raw?: string) {
   font-size: 13px;
   line-height: 1.2;
   font-family: "Courier New", monospace;
-  color: color-mix(in srgb, var(--up-success, #19be6b) 72%, #c8ffd9 28%);
-  text-shadow: 0 0 10rpx rgba(68, 255, 144, 0.34);
+  color: #8dffb4;
+  text-shadow: 0 0 12rpx rgba(0, 255, 65, 0.58), 0 0 28rpx rgba(0, 255, 65, 0.18);
   pointer-events: none;
   animation: cyberTextGlitch 0.18s steps(2) infinite;
+}
+
+.bubble-wrap--cyber .part-text {
+  color: #baffc8;
+
+  :deep(*) {
+    color: #baffc8 !important;
+  }
+}
+
+.bubble-wrap--cyber .part-text__cyber {
+  padding: 8rpx 10rpx;
+  border-radius: 8rpx;
+  background: rgba(0, 28, 10, 0.46);
+  border-left: 2rpx solid rgba(0, 255, 65, 0.64);
+  box-shadow: inset 0 0 18rpx rgba(0, 255, 65, 0.08);
+}
+
+.bubble-wrap--cyber .part-text__cyber-real {
+  opacity: 0.18;
+}
+
+.bubble-wrap--cyber .part-thinking,
+.bubble-wrap--cyber .part-tool-result,
+.bubble-wrap--cyber .part-plan {
+  background: rgba(24, 17, 0, 0.86);
+  border-color: rgba(255, 186, 73, 0.42);
+  color: #ffe4a8;
+}
+
+.bubble-wrap--cyber .thinking-hd__label,
+.bubble-wrap--cyber .thinking-hd__text,
+.bubble-wrap--cyber .tool-result__text,
+.bubble-wrap--cyber .tool-result-hd__label,
+.bubble-wrap--cyber .plan-hd__label,
+.bubble-wrap--cyber .plan-step__text {
+  color: #ffe4a8;
+}
+
+.bubble-wrap--cyber .dot {
+  background-color: #00ff41;
+  box-shadow: 0 0 12rpx rgba(0, 255, 65, 0.74);
+}
+
+.bubble-wrap--cyber .action-btn {
+  background: rgba(0, 22, 8, 0.88);
+  border: 1rpx solid rgba(0, 255, 65, 0.18);
 }
 
 @keyframes cyberTextGlitch {

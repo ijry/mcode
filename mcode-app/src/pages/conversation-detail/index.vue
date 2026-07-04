@@ -2,7 +2,7 @@
   <view
     class="page"
     :class="[cyberModeEnabled && 'page--cyber', cyberModeEnabled && `page--cyber-${cyberEffectPhase}`]"
-    :style="[upThemeVars, upThemePageStyle]"
+    :style="[upThemeVars, upThemePageStyle, cyberPageStyle]"
   >
     <view v-if="!conversationId" class="empty-container">
       <up-empty mode="data" text="会话不存在"></up-empty>
@@ -33,7 +33,7 @@
         height="45px"
         :bgColor="navbarBgColor"
         :statusBarBgColor="navbarStatusBarBgColor"
-        :leftIconColor="upThemeVar('--up-content-color', '#303133')"
+        :leftIconColor="cyberModeEnabled ? '#8dffb4' : upThemeVar('--up-content-color', '#303133')"
         @leftClick="handleBackNavigation"
       >
         <template #center>
@@ -60,7 +60,7 @@
             <up-icon
               name="more-dot-fill"
               size="18"
-              :color="upThemeVar('--up-content-color', '#303133')"
+              :color="cyberModeEnabled ? '#8dffb4' : upThemeVar('--up-content-color', '#303133')"
             ></up-icon>
           </view>
         </template>
@@ -150,7 +150,7 @@
               v-if="false && isActiveDetailTabPage(index)"
               :message-list-page-style="messageListPageStyle"
               :message-list-content-style="messageListContentStyle"
-              :input-wrap-style="upThemeCardStyle"
+              :input-wrap-style="cyberModeEnabled ? undefined : upThemeCardStyle"
               :translucent-message-list="hasDetailBackgroundImage"
               :message-scroll-top="messageScrollTop"
               :message-scroll-into-view="messageScrollIntoView"
@@ -926,7 +926,7 @@
               :active="isActiveDetailTabPage(index)"
               :message-list-page-style="messageListPageStyle"
               :message-list-content-style="messageListContentStyle"
-              :input-wrap-style="upThemeCardStyle"
+              :input-wrap-style="cyberModeEnabled ? undefined : upThemeCardStyle"
               :translucent-message-list="hasDetailBackgroundImage"
               :slash-commands="slashCommands"
               :upload-target="detailUploadTarget"
@@ -1323,6 +1323,15 @@ const runtime = useConversationRuntimeStore()
 const currentInstance = getCurrentInstance()
 const upThemeVars = computed(() => currentInstance?.proxy?.upThemeVars || {})
 const upThemePageStyle = computed(() => currentInstance?.proxy?.upThemePageStyle || {})
+const cyberPageStyle = computed(() =>
+  cyberModeEnabled.value
+    ? {
+        background: "#000000",
+        backgroundColor: "#000000",
+        color: "#baffc8",
+      }
+    : {}
+)
 const upThemeCardStyle = computed(() => currentInstance?.proxy?.upThemeCardStyle || {})
 const upThemeVar = (varName: string, fallbackColor?: string) =>
   currentInstance?.proxy?.upThemeVar?.(varName, fallbackColor) ?? (fallbackColor || "")
@@ -1548,9 +1557,17 @@ const effectiveBottomComposerHeight = computed(() =>
 const messageListContentStyle = computed(() =>
   buildMessageListContentStyle(effectiveBottomComposerHeight.value)
 )
-const detailTabsBarThemeStyle = computed(() =>
-  hasDetailBackgroundImage.value ? {} : upThemeCardStyle.value
-)
+const detailTabsBarThemeStyle = computed(() => {
+  if (cyberModeEnabled.value) {
+    return {
+      background: "rgba(0, 12, 4, 0.96)",
+      backgroundColor: "rgba(0, 12, 4, 0.96)",
+      borderColor: "rgba(0, 255, 65, 0.26)",
+      boxShadow: "0 0 24rpx rgba(0, 255, 65, 0.14)",
+    }
+  }
+  return hasDetailBackgroundImage.value ? {} : upThemeCardStyle.value
+})
 const detailTabsBarStyle = computed(() => ({
   ...buildTopOffsetStyle(getNavbarHeight()),
   borderRadius: "0",
@@ -2018,7 +2035,9 @@ const detailShellTabs = computed<DetailShellTabItem[]>(() =>
   })
 )
 
-const navbarStatusBarBgColor = computed(() => upThemeVar("--up-card-bg-color", "#ffffff"))
+const navbarStatusBarBgColor = computed(() =>
+  cyberModeEnabled.value ? "#000000" : upThemeVar("--up-card-bg-color", "#ffffff")
+)
 const navbarBgColor = computed(() => navbarStatusBarBgColor.value)
 const detailTabsItemStyle = {
   paddingLeft: "0px",
@@ -2026,12 +2045,13 @@ const detailTabsItemStyle = {
   height: "72rpx",
   borderRadius: "999px",
 }
-const detailTabsActiveStyle = {
-  color: "#ffffff",
-}
-const detailTabsInactiveStyle = {
-  color: upThemeVar("--up-content-color", "#606266"),
-}
+const detailTabsActiveStyle = computed(() => ({
+  color: cyberModeEnabled.value ? "#d8ffe4" : "#ffffff",
+  fontWeight: cyberModeEnabled.value ? 700 : 500,
+}))
+const detailTabsInactiveStyle = computed(() => ({
+  color: cyberModeEnabled.value ? "#73c989" : upThemeVar("--up-content-color", "#606266"),
+}))
 
 const slashCommands = ref<SlashCommandItem[]>([])
 

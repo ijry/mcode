@@ -84,6 +84,204 @@
   }
 }
 
+.page--cyber {
+  position: relative;
+  background:
+    radial-gradient(circle at 74% 12%, rgba(0, 255, 65, 0.16) 0, transparent 26%),
+    radial-gradient(circle at 10% 76%, rgba(0, 122, 36, 0.22) 0, transparent 34%),
+    linear-gradient(180deg, #001607 0%, #000803 45%, #000000 100%) !important;
+  background-color: #000000 !important;
+  color: #baffc8;
+}
+
+.page--cyber::before,
+.page--cyber::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 33;
+}
+
+.page--cyber::before {
+  background:
+    repeating-linear-gradient(
+      180deg,
+      rgba(160, 255, 184, 0.055) 0,
+      rgba(160, 255, 184, 0.055) 1rpx,
+      transparent 1rpx,
+      transparent 7rpx
+    );
+  mix-blend-mode: screen;
+  opacity: 0.72;
+}
+
+.page--cyber::after {
+  background:
+    linear-gradient(90deg, transparent 0, rgba(0, 255, 65, 0.05) 50%, transparent 100%),
+    radial-gradient(circle at 50% 18%, rgba(0, 255, 65, 0.12), transparent 28%);
+  opacity: 0.36;
+  animation: cyberScreenSweep 4.8s ease-in-out infinite;
+}
+
+.page--cyber .detail-container,
+.page--cyber .detail-shell__swiper,
+.page--cyber .detail-shell__swiper-item,
+.page--cyber .detail-shell__page {
+  background: transparent !important;
+}
+
+.page--cyber .detail-atmosphere {
+  background:
+    linear-gradient(90deg, rgba(0, 255, 65, 0.035) 1rpx, transparent 1rpx),
+    linear-gradient(180deg, rgba(0, 255, 65, 0.028) 1rpx, transparent 1rpx),
+    #000000;
+  background-size: 52rpx 52rpx, 52rpx 52rpx, auto;
+}
+
+.page--cyber .detail-atmosphere__blob {
+  opacity: 0.28;
+  filter: blur(68rpx);
+  background: rgba(0, 255, 65, 0.22);
+}
+
+.page--cyber .detail-tabs-bar {
+  background: rgba(0, 12, 4, 0.96) !important;
+  border-top-color: rgba(0, 255, 65, 0.22) !important;
+  border-bottom-color: rgba(0, 255, 65, 0.2) !important;
+  box-shadow: 0 0 0 1rpx rgba(0, 255, 65, 0.12), 0 12rpx 36rpx rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(4rpx);
+}
+
+.page--cyber .detail-tab-pill {
+  background: rgba(0, 28, 10, 0.82);
+  border-color: rgba(0, 255, 65, 0.2);
+  box-shadow: inset 0 0 18rpx rgba(0, 255, 65, 0.08);
+}
+
+.page--cyber .detail-tab-pill--active {
+  background: rgba(0, 54, 18, 0.94) !important;
+  border-color: rgba(132, 255, 164, 0.58);
+  box-shadow: 0 0 28rpx rgba(0, 255, 65, 0.2), inset 0 0 20rpx rgba(0, 255, 65, 0.16);
+}
+
+.page--cyber .detail-tab-pill__dot {
+  background: #00ff41;
+  box-shadow: 0 0 12rpx rgba(0, 255, 65, 0.78);
+}
+
+.page--cyber .detail-navbar__title,
+.page--cyber .detail-navbar__subtitle,
+.page--cyber .detail-tab-pill__title,
+.page--cyber .input-status-row__text,
+.page--cyber .stats-text,
+.page--cyber .history-status__text {
+  color: #8dffb4 !important;
+  text-shadow: 0 0 12rpx rgba(0, 255, 65, 0.34);
+}
+
+.page--cyber .detail-navbar__logo--fallback {
+  background: rgba(0, 255, 65, 0.14);
+  border: 1rpx solid rgba(0, 255, 65, 0.36);
+}
+
+.page--cyber .detail-dropdown-menu,
+.page--cyber .plan-drawer,
+:deep(.detail-interactive-pane--cyber .input-wrap),
+:deep(.detail-interactive-pane--cyber .input-status-wrap),
+:deep(.detail-interactive-pane--cyber .input-box),
+:deep(.detail-interactive-pane--cyber .tool-toggle-btn),
+:deep(.detail-interactive-pane--cyber .input-tool-btn__icon),
+:deep(.detail-interactive-pane--cyber .composer-panel),
+:deep(.detail-interactive-pane--cyber .slash-panel),
+:deep(.detail-interactive-pane--cyber .mention-panel),
+:deep(.detail-interactive-pane--cyber .attachments-preview),
+:deep(.detail-interactive-pane--cyber .upload-queue),
+:deep(.detail-interactive-pane--cyber .pending-response-card),
+:deep(.detail-interactive-pane--cyber .permission-card),
+:deep(.detail-interactive-pane--cyber .ask-question-card),
+:deep(.detail-interactive-pane--cyber .queue-item),
+:deep(.detail-interactive-pane--cyber .shared-queue-item),
+:deep(.detail-interactive-pane--cyber .shared-queue-bar),
+:deep(.detail-interactive-pane--cyber .queue-bar) {
+  background: rgba(0, 15, 5, 0.92) !important;
+  border-color: rgba(0, 255, 65, 0.26) !important;
+  color: #baffc8 !important;
+  box-shadow: 0 0 0 1rpx rgba(0, 255, 65, 0.08), 0 0 28rpx rgba(0, 255, 65, 0.08), 0 18rpx 44rpx rgba(0, 0, 0, 0.58) !important;
+  backdrop-filter: blur(3rpx);
+}
+
+:deep(.detail-interactive-pane--cyber .input-box) {
+  background: rgba(0, 28, 10, 0.9) !important;
+  border: 1rpx solid rgba(88, 255, 134, 0.32);
+}
+
+:deep(.detail-interactive-pane--cyber .composer-textarea),
+:deep(.detail-interactive-pane--cyber .u-textarea),
+:deep(.detail-interactive-pane--cyber .u-textarea__field),
+:deep(.detail-interactive-pane--cyber textarea),
+:deep(.detail-interactive-pane--cyber .uni-textarea-textarea) {
+  color: #baffc8 !important;
+  caret-color: #00ff41;
+}
+
+:deep(.detail-interactive-pane--cyber .send-btn) {
+  background: radial-gradient(circle at 38% 28%, #7cff9e 0, #00c739 45%, #00651f 100%) !important;
+  box-shadow: 0 0 28rpx rgba(0, 255, 65, 0.34), inset 0 0 18rpx rgba(255, 255, 255, 0.18);
+}
+
+:deep(.detail-interactive-pane--cyber .bubble--assistant),
+:deep(.readonly-pane--cyber .bubble--assistant) {
+  background: rgba(0, 13, 4, 0.9) !important;
+  border: 1rpx solid rgba(0, 255, 65, 0.24) !important;
+  box-shadow: inset 0 0 28rpx rgba(0, 255, 65, 0.06), 0 0 20rpx rgba(0, 255, 65, 0.08) !important;
+}
+
+:deep(.detail-interactive-pane--cyber .bubble--user),
+:deep(.readonly-pane--cyber .bubble--user) {
+  background: rgba(0, 62, 20, 0.88) !important;
+  border: 1rpx solid rgba(137, 255, 168, 0.32) !important;
+  box-shadow: inset 0 0 22rpx rgba(0, 255, 65, 0.08), 0 0 20rpx rgba(0, 255, 65, 0.1) !important;
+}
+
+:deep(.detail-interactive-pane--cyber .part-text),
+:deep(.readonly-pane--cyber .part-text),
+:deep(.detail-interactive-pane--cyber .tool-result__text),
+:deep(.detail-interactive-pane--cyber .plan-step__text),
+:deep(.detail-interactive-pane--cyber .composer-config-row__label),
+:deep(.detail-interactive-pane--cyber .composer-config-row__value),
+:deep(.detail-interactive-pane--cyber .composer-panel__section-title),
+:deep(.detail-interactive-pane--cyber .config-chip__title) {
+  color: #baffc8 !important;
+}
+
+:deep(.detail-interactive-pane--cyber .part-thinking),
+:deep(.readonly-pane--cyber .part-thinking),
+:deep(.detail-interactive-pane--cyber .part-tool-result),
+:deep(.detail-interactive-pane--cyber .part-plan),
+:deep(.readonly-pane--cyber .part-plan) {
+  background: rgba(24, 17, 0, 0.88) !important;
+  border-color: rgba(255, 186, 73, 0.42) !important;
+  color: #ffe4a8 !important;
+  box-shadow: inset 0 0 22rpx rgba(255, 173, 51, 0.08);
+}
+
+.page--cyber-ramp :deep(.detail-interactive-pane--cyber .input-status-wrap),
+.page--cyber-streaming :deep(.detail-interactive-pane--cyber .input-status-wrap) {
+  animation: cyberScanPulse 1.12s ease-in-out infinite;
+}
+
+@keyframes cyberScreenSweep {
+  0%, 100% {
+    transform: translateX(-18%);
+    opacity: 0.22;
+  }
+  50% {
+    transform: translateX(18%);
+    opacity: 0.42;
+  }
+}
+
 .loading-container,
 .empty-container {
   flex: 1;

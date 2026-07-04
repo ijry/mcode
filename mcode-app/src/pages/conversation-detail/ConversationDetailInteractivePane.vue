@@ -725,7 +725,7 @@
     </view>
 
     <up-popup v-model:show="showPlanDrawer" mode="bottom" :round="20">
-      <view class="plan-drawer" :style="upThemeCardStyle">
+      <view class="plan-drawer" :style="cyberPanelStyle">
         <view class="plan-drawer__hd">
           <text class="plan-drawer__title">计划任务</text>
           <text class="plan-drawer__count">{{ completedTaskCount }}/{{ planTasks.length }}</text>
@@ -970,6 +970,16 @@ const currentInstance = getCurrentInstance()
 const upThemeVar = (varName: string, fallbackColor?: string) =>
   currentInstance?.proxy?.upThemeVar?.(varName, fallbackColor) ?? (fallbackColor || "")
 const upThemeCardStyle = computed(() => currentInstance?.proxy?.upThemeCardStyle || {})
+const cyberPanelStyle = computed(() =>
+  props.cyberModeEnabled
+    ? {
+        background: "rgba(0, 12, 4, 0.98)",
+        backgroundColor: "rgba(0, 12, 4, 0.98)",
+        borderColor: "rgba(0, 255, 65, 0.24)",
+        color: "#baffc8",
+      }
+    : upThemeCardStyle.value
+)
 
 const PROMPT_START_TIMEOUT_MS = 4000
 const HISTORY_LOADING_MIN_MS = 480

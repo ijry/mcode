@@ -261,7 +261,7 @@ describe("ConversationDetailBody", () => {
     )
 
     expect(source).toContain(':statusBarBgColor="navbarStatusBarBgColor"')
-    expect(source).toContain('const navbarStatusBarBgColor = computed(() => upThemeVar("--up-card-bg-color", "#ffffff"))')
+    expect(source).toContain('cyberModeEnabled.value ? "#000000" : upThemeVar("--up-card-bg-color", "#ffffff")')
     expect(source).toContain("const navbarBgColor = computed(() => navbarStatusBarBgColor.value)")
   })
 
