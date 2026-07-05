@@ -1,6 +1,8 @@
 import {
   getConnectionBadgeText,
   getConnectionCapabilityChips,
+  getConnectionHostKindLabel,
+  getConnectionHostPresentation,
   getConnectionProviderLabel,
   getConnectionRouteLabel,
   getConnectionSubtitle,
@@ -75,5 +77,51 @@ describe("connection presentation", () => {
         },
       } as any)
     ).toEqual(["Codex CLI", "内网穿透"])
+  })
+
+  it("resolves host presentation for saved host model ids", () => {
+    expect(getConnectionHostPresentation({ hostModelId: "apple-imac" } as any)).toMatchObject({
+      id: "apple-imac",
+      brand: "Apple",
+      model: "iMac",
+      displayName: "Apple iMac",
+      kindLabel: "台式机",
+    })
+
+    expect(getConnectionHostPresentation({ hostModelId: "aws-ec2" } as any)).toMatchObject({
+      id: "aws-ec2",
+      brand: "AWS",
+      model: "EC2",
+      displayName: "AWS EC2",
+      kindLabel: "云服务器",
+    })
+  })
+
+  it("uses Other Computer host presentation when host type is absent", () => {
+    expect(getConnectionHostPresentation({} as any)).toMatchObject({
+      id: "other-computer",
+      displayName: "Other Computer",
+      kindLabel: "电脑",
+    })
+  })
+
+  it("keeps connection subtitle independent from host presentation", () => {
+    const base = {
+      targetAgent: "codeg",
+      routeMode: "direct",
+      directBaseUrl: "http://127.0.0.1:3089",
+    } as any
+
+    expect(getConnectionSubtitle({ ...base, hostModelId: "apple-macbook-air" })).toBe(
+      getConnectionSubtitle({ ...base, hostModelId: "aws-ec2" })
+    )
+  })
+
+  it("maps host kind labels for card tags", () => {
+    expect(getConnectionHostKindLabel("laptop")).toBe("笔记本")
+    expect(getConnectionHostKindLabel("desktop")).toBe("台式机")
+    expect(getConnectionHostKindLabel("mini-pc")).toBe("Mini PC")
+    expect(getConnectionHostKindLabel("cloud-server")).toBe("云服务器")
+    expect(getConnectionHostKindLabel("computer")).toBe("电脑")
   })
 })
