@@ -857,6 +857,21 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     sessions.value.delete(conversationId)
   }
 
+  function releasePreviewSession(conversationId: number) {
+    const session = sessions.value.get(conversationId)
+    if (!session) return false
+
+    releaseHotConversation(conversationId)
+    detachConversationRealtime(conversationId)
+    unbindConversationEventHandler(conversationId)
+    if (session.connectionId) {
+      connections.value.delete(session.connectionId)
+    }
+    connectionSessionManager.clearConversation(conversationId)
+    sessions.value.delete(conversationId)
+    return true
+  }
+
   function clearCachedSessionState() {
     for (const session of sessions.value.values()) {
       if (
@@ -994,6 +1009,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     connect,
     disconnect,
     clearSession,
+    releasePreviewSession,
     clearCachedSessionState,
     clearPendingPermission,
     clearPendingQuestion,
