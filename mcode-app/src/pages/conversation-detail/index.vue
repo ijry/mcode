@@ -1233,6 +1233,7 @@ import {
   getOldestCursorFromPersistedTurns,
   messageAnchorId as buildMessageAnchorId,
   resolveInitialTurnLimit as resolveInitialTurnLimitValue,
+  resolveNearBottomState,
   resolveRenderAnchorId as resolveRenderAnchorIdValue,
   resolveScrollRestoreAction,
   resolveViewportSyncAction,
@@ -4970,19 +4971,17 @@ function handleMessageListScroll(event: any) {
   const scrollTopValue = Math.max(0, Number(event?.detail?.scrollTop || 0))
   const scrollHeight = Math.max(0, Number(event?.detail?.scrollHeight || 0))
   const deltaY = Math.max(0, Number(event?.detail?.deltaY || 0))
-  const currentViewportHeight = Math.max(
-    0,
-    Number(
-      event?.detail?.height ||
-      event?.detail?.scrollHeight - event?.detail?.deltaY - event?.detail?.scrollTop ||
-      0
-    )
-  )
+  const currentViewportHeight = Math.max(0, Number(event?.detail?.height || 0))
   pageScrollTop.value = scrollTopValue
   lastMeasuredScrollTop.value = scrollTopValue
-  if (currentViewportHeight > 0 && scrollHeight > 0) {
-    const distanceToBottom = Math.max(0, scrollHeight - (scrollTopValue + currentViewportHeight))
-    shouldAutoFollowBottom.value = distanceToBottom <= 72
+  const nearBottomState = resolveNearBottomState({
+    scrollTop: scrollTopValue,
+    scrollHeight,
+    viewportHeight: currentViewportHeight,
+    fallbackViewportHeight: Math.max(0, detailViewportHeight.value - topChromeHeight.value),
+  })
+  if (nearBottomState.canMeasure) {
+    shouldAutoFollowBottom.value = nearBottomState.nearBottom
     if (shouldAutoFollowBottom.value) {
       hasUnreadBelow.value = false
       const tail = renderMessageItems.value[renderMessageItems.value.length - 1]

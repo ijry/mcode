@@ -3,6 +3,7 @@ import {
   getOldestCursorFromPersistedTurns,
   messageAnchorId,
   resolveInitialTurnLimit,
+  resolveNearBottomState,
   resolveRenderAnchorId,
   resolveScrollRestoreAction,
   resolveViewportSyncAction,
@@ -135,5 +136,52 @@ describe("detailScrollState", () => {
       allowScrollTopRestore: true,
       lastMeasuredScrollTop: 240,
     })).toEqual({ type: "scrollTop", scrollTop: 240 })
+  })
+
+  it("resolves near-bottom state from explicit or measured fallback viewport height", () => {
+    expect(resolveNearBottomState({
+      scrollTop: 200,
+      scrollHeight: 1200,
+      viewportHeight: 500,
+      threshold: 72,
+    })).toEqual({
+      canMeasure: true,
+      nearBottom: false,
+      distanceToBottom: 500,
+    })
+
+    expect(resolveNearBottomState({
+      scrollTop: 640,
+      scrollHeight: 1200,
+      viewportHeight: 500,
+      threshold: 72,
+    })).toEqual({
+      canMeasure: true,
+      nearBottom: true,
+      distanceToBottom: 60,
+    })
+
+    expect(resolveNearBottomState({
+      scrollTop: 200,
+      scrollHeight: 1200,
+      viewportHeight: 0,
+      fallbackViewportHeight: 500,
+      threshold: 72,
+    })).toEqual({
+      canMeasure: true,
+      nearBottom: false,
+      distanceToBottom: 500,
+    })
+
+    expect(resolveNearBottomState({
+      scrollTop: 200,
+      scrollHeight: 1200,
+      viewportHeight: 0,
+      fallbackViewportHeight: 0,
+    })).toEqual({
+      canMeasure: false,
+      nearBottom: false,
+      distanceToBottom: 0,
+    })
   })
 })

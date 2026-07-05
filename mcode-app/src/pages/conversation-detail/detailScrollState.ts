@@ -114,3 +114,30 @@ export function resolveViewportSyncAction(input: {
   }
   return { type: "none" }
 }
+
+export function resolveNearBottomState(input: {
+  scrollTop: number
+  scrollHeight: number
+  viewportHeight?: number | null
+  fallbackViewportHeight?: number | null
+  threshold?: number | null
+}) {
+  const scrollTop = Math.max(0, Number(input.scrollTop || 0))
+  const scrollHeight = Math.max(0, Number(input.scrollHeight || 0))
+  const viewportHeight = Math.max(
+    0,
+    Number(input.viewportHeight || 0) || Number(input.fallbackViewportHeight || 0)
+  )
+  const threshold = Math.max(0, Number(input.threshold ?? 72))
+
+  if (scrollHeight <= 0 || viewportHeight <= 0) {
+    return { canMeasure: false, nearBottom: false, distanceToBottom: 0 }
+  }
+
+  const distanceToBottom = Math.max(0, scrollHeight - (scrollTop + viewportHeight))
+  return {
+    canMeasure: true,
+    nearBottom: distanceToBottom <= threshold,
+    distanceToBottom,
+  }
+}

@@ -919,6 +919,7 @@ import {
   bottomAnchorId,
   getOldestCursorFromPersistedTurns,
   messageAnchorId as buildMessageAnchorId,
+  resolveNearBottomState,
   resolveRenderAnchorId,
   type HistoryPageCursor,
 } from "./detailScrollState"
@@ -1774,23 +1775,30 @@ function mentionKindShortLabel(kind: MentionReferenceKind) {
   return "G"
 }
 
+function resolveMessageListViewportHeight() {
+  const style = props.messageListPageStyle as { height?: string | number } | undefined
+  const rawHeight = style?.height
+  const height = typeof rawHeight === "number"
+    ? rawHeight
+    : Number.parseFloat(String(rawHeight || "0"))
+  return Number.isFinite(height) ? Math.max(0, height) : 0
+}
+
 function handleMessageListScroll(event: any) {
   const scrollTopValue = Math.max(0, Number(event?.detail?.scrollTop || 0))
   const scrollHeight = Math.max(0, Number(event?.detail?.scrollHeight || 0))
   const deltaY = Number(event?.detail?.deltaY || 0)
-  const currentViewportHeight = Math.max(
-    0,
-    Number(
-      event?.detail?.height ||
-      event?.detail?.scrollHeight - event?.detail?.deltaY - event?.detail?.scrollTop ||
-      0
-    )
-  )
+  const currentViewportHeight = Math.max(0, Number(event?.detail?.height || 0))
   pageScrollTop.value = scrollTopValue
   lastMeasuredScrollTop.value = scrollTopValue
-  if (currentViewportHeight > 0 && scrollHeight > 0) {
-    const distanceToBottom = Math.max(0, scrollHeight - (scrollTopValue + currentViewportHeight))
-    shouldAutoFollowBottom.value = distanceToBottom <= 72
+  const nearBottomState = resolveNearBottomState({
+    scrollTop: scrollTopValue,
+    scrollHeight,
+    viewportHeight: currentViewportHeight,
+    fallbackViewportHeight: resolveMessageListViewportHeight(),
+  })
+  if (nearBottomState.canMeasure) {
+    shouldAutoFollowBottom.value = nearBottomState.nearBottom
     if (shouldAutoFollowBottom.value) {
       hasUnreadBelow.value = false
       const tail = renderMessageItems.value[renderMessageItems.value.length - 1]
