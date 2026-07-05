@@ -138,6 +138,12 @@
                   <view class="live-card__body">
                     <text class="live-card__project-title u-line-1">{{ card.projectName }}</text>
                     <text class="live-card__session-name u-line-1">{{ card.title || "未命名会话" }}</text>
+                    <text
+                      v-if="card.livePreviewText"
+                      class="live-card__preview u-line-1"
+                    >
+                      {{ card.livePreviewText }}
+                    </text>
                   </view>
 
                   <view class="live-card__side">
@@ -505,12 +511,16 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from "vue"
-import { onPullDownRefresh, onShow, onUnload } from "@dcloudio/uni-app"
+import { onHide, onPullDownRefresh, onShow, onUnload } from "@dcloudio/uni-app"
 import { useAuthStore } from "@/stores/auth"
 import { useConversationRuntimeStore } from "@/stores/conversationRuntime"
 import { acpApi } from "@/api/acp"
 import RemoteDirectoryBrowser from "@/components/remote/RemoteDirectoryBrowser.vue"
 import { resolveOverviewCardDisplayStatus } from "@/pages/conversations/conversationOverviewPresentation"
+import {
+  resolveConversationLivePreviewText,
+  selectConversationLivePreviewIds,
+} from "@/pages/conversations/conversationLivePreview"
 import { getDirectToken } from "@/services/gateway/directTokenStore"
 import { toErrorMessage } from "@/services/gateway/error"
 import { openRemoteFolder } from "@/services/remoteDirectoryBrowser"
@@ -538,6 +548,9 @@ import {
   consumeConversationListDirty,
   markConversationListDirty,
 } from "@/services/conversation/conversationListRefresh"
+import {
+  readConversationListLiveStreamEnabled,
+} from "@/services/conversation/conversationListLiveStreamPreference"
 import {
   ensureGlobalConversationSync,
   subscribeConversationOverviewInvalidation,
@@ -620,6 +633,7 @@ const overviewRefreshPromiseMap = new Map<string, Promise<void>>()
 const connectionFolderSnapshotMap = new Map<string, Project[]>()
 const connectionTabSnapshotMap = new Map<string, OpenedTabItem[]>()
 const instanceConnectionKeyMap = new Map<string, string>()
+const connectionInstanceKeyMap = new Map<string, string>()
 const activeSessionBadgeCountMap = new Map<string, number>()
 const loadingCreateAgents = ref(false)
 const createAgentListError = ref("")
@@ -634,6 +648,12 @@ let activeCreateConversationId = 0
 let activeCreatePromptAttempted = false
 let createProgressTimer: ReturnType<typeof setInterval> | null = null
 let activeSessionBadgeRefreshPromise: Promise<void> | null = null
+const livePreviewEnabled = ref(false)
+const livePreviewPageVisible = ref(false)
+const livePreviewOwnedConversationIds = new Set<number>()
+const livePreviewTransferredConversationIds = new Set<number>()
+const livePreviewConnectPromiseMap = new Map<number, Promise<void>>()
+let livePreviewReconcileTimer: ReturnType<typeof setTimeout> | null = null
 
 interface CreateAgentOption {
   label: string
@@ -700,6 +720,7 @@ interface LiveSessionCard {
 
 interface DisplayLiveSessionCard extends LiveSessionCard {
   displayStatus: string
+  livePreviewText: string
 }
 
 interface DisplayConnectionGroup extends ConnectionGroup {
@@ -718,10 +739,17 @@ const filteredConnectionGroups = computed<DisplayConnectionGroup[]>(() => {
   const kw = searchKeyword.value.trim().toLowerCase()
   const groups = connectionGroups.value.map((group) => ({
     ...group,
-    cards: group.cards.map((card) => ({
-      ...card,
-      displayStatus: resolveOverviewCardDisplayStatus(card.status, runtime.sessions.get(card.conversationId || 0)?.status),
-    })),
+    cards: group.cards.map((card) => {
+      const runtimeSession = runtime.sessions.get(card.conversationId || 0)
+      const displayStatus = resolveOverviewCardDisplayStatus(card.status, runtimeSession?.status)
+      return {
+        ...card,
+        displayStatus,
+        livePreviewText: livePreviewEnabled.value
+          ? resolveConversationLivePreviewText(runtimeSession)
+          : "",
+      }
+    }),
   }))
   if (!kw) return groups
   return groups
@@ -780,6 +808,32 @@ watch(
     }
   },
   { immediate: true }
+)
+
+watch(
+  () => livePreviewEnabled.value,
+  () => {
+    scheduleLivePreviewReconcile()
+  }
+)
+
+watch(
+  () =>
+    filteredConnectionGroups.value
+      .flatMap((group) =>
+        group.cards.map((card) => `${group.key}:${card.conversationId || 0}:${card.displayStatus}`)
+      )
+      .join("|"),
+  () => {
+    scheduleLivePreviewReconcile()
+  }
+)
+
+watch(
+  () => buildLivePreviewRuntimeSignature(),
+  () => {
+    scheduleLivePreviewReconcile()
+  }
 )
 
 watch(
@@ -1215,6 +1269,8 @@ const hasActiveConnection = computed(() => {
 })
 
 onMounted(() => {
+  loadConversationLivePreviewPreference()
+  scheduleLivePreviewReconcile()
   if (!disposeOverviewInvalidation) {
     disposeOverviewInvalidation = subscribeConversationOverviewInvalidation((instanceKey) => {
       markConversationListDirty()
@@ -1230,7 +1286,19 @@ onUnload(() => {
   disposeOpenedTabsChangedMap.clear()
   disposeActiveSessionsChangedMap.forEach((dispose) => dispose())
   disposeActiveSessionsChangedMap.clear()
+  if (livePreviewReconcileTimer) {
+    clearTimeout(livePreviewReconcileTimer)
+    livePreviewReconcileTimer = null
+  }
+  releaseAllLivePreviewOwnedSessions()
+  livePreviewConnectPromiseMap.clear()
+  livePreviewTransferredConversationIds.clear()
   stopCreateProgressTimer()
+})
+
+onHide(() => {
+  livePreviewPageVisible.value = false
+  releaseAllLivePreviewOwnedSessions()
 })
 
 onPullDownRefresh(() => {
@@ -1246,10 +1314,143 @@ onPullDownRefresh(() => {
 })
 
 onShow(() => {
+  livePreviewPageVisible.value = true
+  livePreviewTransferredConversationIds.clear()
+  loadConversationLivePreviewPreference()
+  scheduleLivePreviewReconcile()
   const shouldForceRefresh = consumeConversationListDirty()
   void loadOverviewData(shouldForceRefresh ? { force: true } : undefined)
   void refreshActiveSessionTabBadge()
 })
+
+function loadConversationLivePreviewPreference() {
+  livePreviewEnabled.value = readConversationListLiveStreamEnabled()
+}
+
+function scheduleLivePreviewReconcile() {
+  if (livePreviewReconcileTimer) {
+    clearTimeout(livePreviewReconcileTimer)
+  }
+  livePreviewReconcileTimer = setTimeout(() => {
+    livePreviewReconcileTimer = null
+    void reconcileLivePreviewSubscriptions()
+  }, 160)
+}
+
+function getLivePreviewCandidates() {
+  return filteredConnectionGroups.value.flatMap((group) =>
+    group.cards.map((card) => ({
+      ...card,
+      groupKey: group.key,
+      instanceKey: connectionInstanceKeyMap.get(group.key) || "",
+    }))
+  )
+}
+
+async function reconcileLivePreviewSubscriptions() {
+  if (!livePreviewPageVisible.value || !livePreviewEnabled.value) {
+    releaseAllLivePreviewOwnedSessions()
+    return
+  }
+
+  const candidates = getLivePreviewCandidates()
+  const selectedIds = selectConversationLivePreviewIds({ cards: candidates })
+  const selectedIdSet = new Set(selectedIds)
+
+  for (const conversationId of Array.from(livePreviewOwnedConversationIds)) {
+    if (!selectedIdSet.has(conversationId)) {
+      releaseLivePreviewOwnedSession(conversationId)
+    }
+  }
+
+  await Promise.all(
+    selectedIds.map(async (conversationId) => {
+      const candidate = candidates.find((item) => item.conversationId === conversationId)
+      if (candidate) {
+        await ensureLivePreviewSubscription(candidate)
+      }
+    })
+  )
+}
+
+async function ensureLivePreviewSubscription(
+  candidate: ReturnType<typeof getLivePreviewCandidates>[number]
+) {
+  const conversationId = Number(candidate.conversationId || 0)
+  if (!conversationId || !candidate.instanceKey) return
+  if (runtime.getManagedConversation(conversationId)?.connectionId) return
+  if (livePreviewConnectPromiseMap.has(conversationId)) {
+    return await livePreviewConnectPromiseMap.get(conversationId)
+  }
+
+  const task = (async () => {
+    try {
+      await runtime.connect(
+        conversationId,
+        normalizeAgentType(candidate.agentType),
+        undefined,
+        undefined,
+        runtime.sessions.get(conversationId)?.lastAppliedSeq ?? undefined,
+        candidate.instanceKey
+      )
+      if (livePreviewTransferredConversationIds.has(conversationId)) {
+        return
+      }
+      if (isLivePreviewCandidateStillSelected(conversationId)) {
+        livePreviewOwnedConversationIds.add(conversationId)
+      } else {
+        runtime.releasePreviewSession(conversationId)
+      }
+    } catch (error) {
+      console.warn("[conversation-list-live-preview] attach skipped", {
+        conversationId,
+        instanceKey: candidate.instanceKey,
+        error,
+      })
+    }
+  })().finally(() => {
+    livePreviewConnectPromiseMap.delete(conversationId)
+  })
+
+  livePreviewConnectPromiseMap.set(conversationId, task)
+  await task
+}
+
+function isLivePreviewCandidateStillSelected(conversationId: number) {
+  if (!livePreviewPageVisible.value || !livePreviewEnabled.value) return false
+  return selectConversationLivePreviewIds({ cards: getLivePreviewCandidates() })
+    .includes(conversationId)
+}
+
+function transferLivePreviewOwnership(conversationId?: number) {
+  const normalizedConversationId = Number(conversationId || 0)
+  if (!normalizedConversationId) return
+  livePreviewTransferredConversationIds.add(normalizedConversationId)
+  livePreviewOwnedConversationIds.delete(normalizedConversationId)
+}
+
+function releaseLivePreviewOwnedSession(conversationId: number) {
+  livePreviewOwnedConversationIds.delete(conversationId)
+  runtime.releasePreviewSession(conversationId)
+}
+
+function releaseAllLivePreviewOwnedSessions() {
+  for (const conversationId of Array.from(livePreviewOwnedConversationIds)) {
+    releaseLivePreviewOwnedSession(conversationId)
+  }
+}
+
+function buildLivePreviewRuntimeSignature() {
+  return Array.from(runtime.sessions.entries())
+    .map(([conversationId, session]) => [
+      conversationId,
+      session.status,
+      session.connectionId || "",
+      session.pendingPermission ? "permission" : "",
+      session.pendingQuestion ? "question" : "",
+    ].join(":"))
+    .join("|")
+}
 
 async function loadOverviewData(options?: { force?: boolean }) {
   const force = options?.force === true
@@ -1281,6 +1482,8 @@ async function loadOverviewDataInternal() {
       showHistoryPanel.value = false
       projects.value = []
       activeSessionBadgeCountMap.clear()
+      connectionInstanceKeyMap.clear()
+      livePreviewTransferredConversationIds.clear()
       void applyConversationTabBarBadge(0)
       return
     }
@@ -1589,6 +1792,9 @@ function rememberConnectionRemoteState(
 ) {
   if (instanceKey) {
     instanceConnectionKeyMap.set(instanceKey, key)
+  }
+  if (key && instanceKey) {
+    connectionInstanceKeyMap.set(key, instanceKey)
   }
   connectionFolderSnapshotMap.set(key, folders)
   connectionTabSnapshotMap.set(key, tabs)
@@ -2002,6 +2208,7 @@ function openLiveSession(card: LiveSessionCard, groupKey?: string) {
     uni.showToast({ title: "该标签暂无会话记录", icon: "none" })
     return
   }
+  transferLivePreviewOwnership(card.conversationId)
   openConversation({
     id: card.conversationId,
     folder_id: card.folderId,
@@ -2819,6 +3026,14 @@ function formatTime(time?: string): string {
   font-size: 28rpx;
   color: color-mix(in srgb, var(--up-content-color, #606266) 80%, transparent);
   line-height: 1.3;
+}
+
+.live-card__preview {
+  display: block;
+  margin-top: 6rpx;
+  font-size: 22rpx;
+  line-height: 1.35;
+  color: var(--up-tips-color, #909193);
 }
 
 .live-card__side {
