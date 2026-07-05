@@ -10,7 +10,7 @@ The list page derives eligible cards from loaded conversation groups, resolves d
 
 ## UI Behavior
 
-The Profile page exposes "会话列表实时消息流" under "会话设置". It is off by default. When off, the list creates no preview-owned per-conversation subscriptions. When on, each eligible card may show one line such as generated text, thinking text, running tool name, waiting confirmation, or waiting answer.
+The Profile page exposes "会话列表实时消息流" under "会话设置". It is off by default. The setting row renders the icon/title as a single non-wrapping title row, with the explanatory copy below it and the switch pinned to the right so narrow screens do not squeeze the title into vertical text. When off, the list creates no preview-owned per-conversation subscriptions. When on, each eligible card may show one line such as generated text, thinking text, running tool name, waiting confirmation, or waiting answer.
 
 ## Compatibility
 

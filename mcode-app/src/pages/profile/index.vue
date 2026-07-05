@@ -62,6 +62,7 @@
             </text>
           </view>
           <switch
+            class="menu-switch"
             :checked="conversationListLiveStreamEnabled"
             color="#2979ff"
             @change="handleConversationListLiveStreamChange"
@@ -614,6 +615,7 @@ function logout() {
 }
 
 .menu-left--column {
+  flex-direction: column;
   align-items: flex-start;
   flex: 1;
   min-width: 0;
@@ -623,6 +625,12 @@ function logout() {
   display: flex;
   align-items: center;
   gap: 20rpx;
+  min-width: 0;
+
+  .menu-text {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
 }
 
 .menu-right {
@@ -653,6 +661,10 @@ function logout() {
   font-size: 24rpx;
   line-height: 1.45;
   color: var(--up-tips-color, #909193);
+}
+
+.menu-switch {
+  flex-shrink: 0;
 }
 
 .logout-container {

@@ -167,6 +167,7 @@ function getKindLabel(kind: ConnectionHostKind) {
 
 .host-picker__filter {
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: center;
   padding: 12rpx 20rpx;
@@ -176,6 +177,11 @@ function getKindLabel(kind: ConnectionHostKind) {
   color: var(--up-content-color, #606266);
   font-size: 22rpx;
   font-weight: 600;
+  white-space: nowrap;
+}
+
+.host-picker__filter > text {
+  white-space: nowrap;
 }
 
 .host-picker__filter--active {

@@ -16,6 +16,8 @@ Connection identity and dedupe do not include `hostModelId`. Changing only the s
 
 The add/edit connection sheet shows `电脑/主机型号`. Tapping it opens a unified host picker with search, filter chips, brand/model cards, local imagery, kind tags, and selected state. Chips are filters only; cloud server entries such as Alibaba Cloud ECS and AWS EC2 appear in the same result list as laptops, desktops, and mini PCs.
 
+The host picker filter row is horizontally scrollable on narrow screens. Individual chips must not shrink or wrap, so labels like `云服务器` and `Mini PC` remain single-line even when the chip list overflows the viewport.
+
 Connection list cards are host-forward: the leading visual is the host image, the title line shows logo plus brand/model, and the saved connection name becomes a secondary alias. Existing status pill, subtitle, capability chips, health warning, menu actions, and project navigation behavior stay unchanged.
 
 ## Compatibility
