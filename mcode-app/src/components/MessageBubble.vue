@@ -807,32 +807,32 @@ function normalizeAgentType(raw?: string) {
 }
 
 .bubble-wrap--theme-sweet {
-  --message-sweet-text: rgba(122, 40, 79, 0.9);
-  --message-sweet-border: rgba(236, 72, 153, 0.18);
+  --message-sweet-text: rgba(122, 40, 79, 0.86);
+  --message-sweet-border: rgba(236, 72, 153, 0.16);
 }
 
 .bubble-wrap--theme-sweet .bubble {
   position: relative;
   overflow: hidden;
-  border-radius: 24rpx;
+  border-radius: 28rpx;
   border: 1rpx solid var(--message-sweet-border) !important;
   background:
-    radial-gradient(circle at 24% 18%, rgba(255, 255, 255, 0.92), transparent 32%),
-    linear-gradient(135deg, rgba(255, 214, 236, 0.52), rgba(255, 255, 255, 0.38)),
-    rgba(255, 248, 252, 0.54) !important;
+    radial-gradient(circle at 24% 18%, rgba(255, 255, 255, 0.88), transparent 30%),
+    linear-gradient(135deg, rgba(255, 221, 239, 0.34), rgba(255, 255, 255, 0.24)),
+    rgba(255, 248, 252, 0.42) !important;
   color: var(--message-sweet-text) !important;
   box-shadow:
-    inset 0 0 22rpx rgba(255, 255, 255, 0.34),
-    0 18rpx 34rpx rgba(244, 114, 182, 0.12) !important;
-  backdrop-filter: blur(12rpx);
+    inset 0 0 20rpx rgba(255, 255, 255, 0.26),
+    0 16rpx 30rpx rgba(244, 114, 182, 0.08) !important;
+  backdrop-filter: blur(14rpx);
 }
 
 .bubble-wrap--theme-sweet .bubble--user {
   background:
-    radial-gradient(circle at 28% 20%, rgba(255, 255, 255, 0.94), transparent 34%),
-    linear-gradient(135deg, rgba(255, 191, 226, 0.74), rgba(253, 224, 241, 0.64)),
-    rgba(255, 236, 245, 0.6) !important;
-  border-color: rgba(236, 72, 153, 0.24) !important;
+    radial-gradient(circle at 28% 20%, rgba(255, 255, 255, 0.9), transparent 34%),
+    linear-gradient(135deg, rgba(255, 194, 227, 0.5), rgba(253, 233, 244, 0.38)),
+    rgba(255, 236, 245, 0.46) !important;
+  border-color: rgba(236, 72, 153, 0.18) !important;
 }
 
 .bubble-wrap--theme-sweet .part-text {
@@ -846,10 +846,10 @@ function normalizeAgentType(raw?: string) {
 .bubble-wrap--theme-sweet .part-thinking,
 .bubble-wrap--theme-sweet .part-tool-result,
 .bubble-wrap--theme-sweet .part-plan {
-  background: rgba(255, 238, 246, 0.52);
-  border-color: rgba(236, 72, 153, 0.18);
-  color: rgba(145, 52, 97, 0.9);
-  box-shadow: inset 0 0 18rpx rgba(255, 255, 255, 0.28);
+  background: rgba(255, 240, 248, 0.34);
+  border-color: rgba(236, 72, 153, 0.14);
+  color: rgba(145, 52, 97, 0.84);
+  box-shadow: inset 0 0 16rpx rgba(255, 255, 255, 0.2);
 }
 
 .bubble-wrap--theme-sweet .thinking-hd__label,
@@ -858,7 +858,7 @@ function normalizeAgentType(raw?: string) {
 .bubble-wrap--theme-sweet .tool-result-hd__label,
 .bubble-wrap--theme-sweet .plan-hd__label,
 .bubble-wrap--theme-sweet .plan-step__text {
-  color: rgba(145, 52, 97, 0.9);
+  color: rgba(145, 52, 97, 0.84);
 }
 
 .bubble-wrap--theme-sweet .dot {
@@ -867,8 +867,8 @@ function normalizeAgentType(raw?: string) {
 }
 
 .bubble-wrap--theme-sweet .action-btn {
-  background: rgba(255, 255, 255, 0.42);
-  border: 1rpx solid rgba(236, 72, 153, 0.14);
+  background: rgba(255, 255, 255, 0.3);
+  border: 1rpx solid rgba(236, 72, 153, 0.12);
 }
 
 .bubble-wrap--theme-sweet :deep(.tool-group__summary),
@@ -879,12 +879,12 @@ function normalizeAgentType(raw?: string) {
 .bubble-wrap--theme-sweet :deep(.ask-question-result__state),
 .bubble-wrap--theme-sweet :deep(.ask-question-answer) {
   background:
-    radial-gradient(circle at 20% 16%, rgba(255, 255, 255, 0.84), transparent 28%),
-    linear-gradient(135deg, rgba(255, 214, 236, 0.44), rgba(255, 255, 255, 0.34)),
-    rgba(255, 247, 251, 0.58) !important;
-  border-color: rgba(236, 72, 153, 0.16) !important;
+    radial-gradient(circle at 20% 16%, rgba(255, 255, 255, 0.78), transparent 28%),
+    linear-gradient(135deg, rgba(255, 221, 239, 0.28), rgba(255, 255, 255, 0.2)),
+    rgba(255, 247, 251, 0.42) !important;
+  border-color: rgba(236, 72, 153, 0.14) !important;
   color: var(--message-sweet-text) !important;
-  box-shadow: inset 0 0 18rpx rgba(255, 255, 255, 0.26) !important;
+  box-shadow: inset 0 0 18rpx rgba(255, 255, 255, 0.18) !important;
 }
 
 .bubble-wrap--theme-sweet :deep(.tool-group__label),

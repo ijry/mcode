@@ -1,10 +1,22 @@
 <template>
   <view v-if="enabled" :class="['sweet-bubbles', `sweet-bubbles--${phase}`]" aria-hidden="true">
     <view
-      v-for="bubble in bubbles"
+      v-for="bubble in largeBubbles"
       :key="bubble.id"
-      class="sweet-bubbles__item"
+      class="sweet-bubbles__item sweet-bubbles__item--large"
       :style="bubble.style"
+    ></view>
+    <view
+      v-for="bubble in smallBubbles"
+      :key="bubble.id"
+      class="sweet-bubbles__item sweet-bubbles__item--small"
+      :style="bubble.style"
+    ></view>
+    <view
+      v-for="sparkle in sparkles"
+      :key="sparkle.id"
+      class="sweet-bubbles__sparkle"
+      :style="sparkle.style"
     ></view>
     <view class="sweet-bubbles__glow sweet-bubbles__glow--left"></view>
     <view class="sweet-bubbles__glow sweet-bubbles__glow--right"></view>
@@ -23,32 +35,100 @@ const props = withDefaults(defineProps<{
   phase: "idle",
 })
 
-const bubbles = computed(() =>
-  Array.from({ length: 12 }, (_, index) => {
-    const phase = props.phase || "idle"
-    const size = 74 + (index % 4) * 28
+const currentPhase = computed(() => props.phase || "idle")
+
+function resolveLargeBubbleOpacity() {
+  if (currentPhase.value === "streaming") {
+    return 0.34
+  }
+  if (currentPhase.value === "ramp") {
+    return 0.3
+  }
+  if (currentPhase.value === "settle") {
+    return 0.28
+  }
+  return 0.26
+}
+
+function resolveSmallBubbleOpacity() {
+  if (currentPhase.value === "streaming") {
+    return 0.26
+  }
+  if (currentPhase.value === "ramp") {
+    return 0.23
+  }
+  if (currentPhase.value === "settle") {
+    return 0.21
+  }
+  return 0.2
+}
+
+const largeBubbles = computed(() =>
+  Array.from({ length: 10 }, (_, index) => {
+    const size = 92 + (index % 4) * 32
     const duration =
-      phase === "streaming" ? 8.8 : phase === "ramp" ? 10.2 : phase === "settle" ? 11.6 : 13.5
-    const left = (index * 8.1 + (index % 3) * 2.4) % 94
-    const delay = (index % 5) * -1.3
-    const opacity =
-      phase === "streaming" ? 0.48 : phase === "ramp" ? 0.4 : phase === "settle" ? 0.34 : 0.28
-    const hue = index % 3 === 0 ? "rgba(255, 182, 221, 0.9)" : index % 3 === 1 ? "rgba(255, 226, 245, 0.88)" : "rgba(250, 198, 255, 0.86)"
+      currentPhase.value === "streaming"
+        ? 9.2
+        : currentPhase.value === "ramp"
+          ? 10.4
+          : currentPhase.value === "settle"
+            ? 11.8
+            : 13.8
+    const hue =
+      index % 3 === 0
+        ? "rgba(255, 194, 224, 0.82)"
+        : index % 3 === 1
+          ? "rgba(255, 233, 245, 0.78)"
+          : "rgba(248, 206, 255, 0.74)"
 
     return {
-      id: `sweet-bubble-${index}`,
+      id: `sweet-large-${index}`,
       style: {
-        left: `${left}%`,
+        left: `${(index * 9.4 + (index % 3) * 3.2) % 96}%`,
         width: `${size}rpx`,
         height: `${size}rpx`,
-        bottom: `${-8 - (index % 4) * 14}%`,
-        opacity,
+        bottom: `${-10 - (index % 4) * 12}%`,
+        opacity: resolveLargeBubbleOpacity(),
         animationDuration: `${duration}s`,
-        animationDelay: `${delay}s`,
-        background: `radial-gradient(circle at 32% 28%, rgba(255,255,255,0.92) 0, rgba(255,255,255,0.42) 18%, ${hue} 58%, rgba(255,255,255,0.06) 100%)`,
+        animationDelay: `${(index % 5) * -1.4}s`,
+        background: `radial-gradient(circle at 32% 26%, rgba(255,255,255,0.96) 0, rgba(255,255,255,0.58) 16%, ${hue} 62%, rgba(255,255,255,0.04) 100%)`,
       },
     }
   })
+)
+
+const smallBubbles = computed(() =>
+  Array.from({ length: 14 }, (_, index) => {
+    const size = 30 + (index % 5) * 12
+    const hue =
+      index % 2 === 0 ? "rgba(255, 238, 246, 0.78)" : "rgba(254, 211, 238, 0.72)"
+
+    return {
+      id: `sweet-small-${index}`,
+      style: {
+        left: `${(index * 6.7 + (index % 4) * 5.1) % 98}%`,
+        width: `${size}rpx`,
+        height: `${size}rpx`,
+        bottom: `${-6 - (index % 3) * 11}%`,
+        opacity: resolveSmallBubbleOpacity(),
+        animationDuration: `${11.6 + (index % 4) * 1.1}s`,
+        animationDelay: `${(index % 6) * -1.05}s`,
+        background: `radial-gradient(circle at 34% 28%, rgba(255,255,255,0.9) 0, ${hue} 58%, rgba(255,255,255,0.02) 100%)`,
+      },
+    }
+  })
+)
+
+const sparkles = computed(() =>
+  Array.from({ length: 8 }, (_, index) => ({
+    id: `sweet-sparkle-${index}`,
+    style: {
+      left: `${(index * 11.8 + (index % 2) * 8.4) % 92}%`,
+      top: `${14 + (index % 4) * 16}%`,
+      animationDelay: `${index * -0.85}s`,
+      opacity: currentPhase.value === "streaming" ? 0.7 : currentPhase.value === "ramp" ? 0.62 : 0.52,
+    },
+  }))
 )
 </script>
 
@@ -63,11 +143,33 @@ const bubbles = computed(() =>
 .sweet-bubbles__item {
   position: absolute;
   border-radius: 999rpx;
-  box-shadow:
-    inset -10rpx -12rpx 20rpx rgba(255, 255, 255, 0.24),
-    inset 10rpx 12rpx 18rpx rgba(255, 255, 255, 0.42),
-    0 18rpx 44rpx rgba(236, 72, 153, 0.14);
   animation: sweetBubbleFloat linear infinite;
+  will-change: transform, opacity;
+}
+
+.sweet-bubbles__item--large {
+  box-shadow:
+    inset -12rpx -14rpx 22rpx rgba(255, 255, 255, 0.2),
+    inset 12rpx 14rpx 24rpx rgba(255, 255, 255, 0.52),
+    0 22rpx 56rpx rgba(236, 72, 153, 0.12);
+}
+
+.sweet-bubbles__item--small {
+  filter: blur(0.5rpx);
+  box-shadow:
+    inset 0 0 16rpx rgba(255, 255, 255, 0.42),
+    0 10rpx 28rpx rgba(244, 114, 182, 0.08);
+}
+
+.sweet-bubbles__sparkle {
+  position: absolute;
+  width: 16rpx;
+  height: 16rpx;
+  border-radius: 999rpx;
+  background:
+    radial-gradient(circle, rgba(255, 255, 255, 0.96) 0, rgba(255, 240, 250, 0.12) 72%, transparent 100%);
+  box-shadow: 0 0 18rpx rgba(255, 255, 255, 0.44);
+  animation: sweetBubbleSparkle 4.8s ease-in-out infinite;
   will-change: transform, opacity;
 }
 
@@ -116,6 +218,17 @@ const bubbles = computed(() =>
   }
   to {
     transform: translate3d(-10rpx, -92vh, 0) scale(0.98);
+  }
+}
+
+@keyframes sweetBubbleSparkle {
+  0%, 100% {
+    transform: scale(0.72);
+    opacity: 0.42;
+  }
+  50% {
+    transform: scale(1);
+    opacity: 0.82;
   }
 }
 </style>

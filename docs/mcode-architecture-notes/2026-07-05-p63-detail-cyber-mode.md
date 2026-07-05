@@ -38,7 +38,8 @@
 - `matrix` 主题：整页切换为黑底绿字的终端风格，navbar、tabs、消息气泡、composer、配置面板和底部抽屉都会使用暗色 terminal surface。
 - `matrix` 消息区使用低 alpha 的 terminal glass surface：assistant/user 气泡约 0.56/0.60，thinking/tool/code 等内部块同步降低不透明度；消息正文绿字约 0.88 alpha，thinking/tool 黄字约 0.90 alpha，让数字雨和网格背景能穿透消息内容区。
 - `matrix` 数字雨使用更密集的 DOM 列阵。`idle` 降低透明度，`ramp` / `streaming` 提升亮度和速度。
-- `sweet` 主题：整页切换为奶油粉到淡莓紫的渐变背景，叠加低频漂浮泡泡与柔光斑。消息气泡、面板和输入区使用白粉玻璃感表面，正文为深莓色，避免可爱主题变成低对比度粉雾。
+- `sweet` 主题：整页切换为奶油粉到淡莓紫的渐变背景，叠加大泡泡、小泡泡、少量星点高光与柔光斑。消息气泡、面板和输入区使用更低 alpha 的 jelly glass surface，正文为深莓色，避免可爱主题变成低对比度粉雾。
+- `sweet` 消息区让背景继续穿透内容区：外层 assistant/user 气泡、输入托盘和面板比普通玻璃卡片更透明，thinking/tool/plan 等内部块再额外降低一档不透明度。
 - `idle` 阶段保持弱化待机效果。
 - `thinking`、`running_tool`、`waiting_permission`、`waiting_question` 等阶段进入 `ramp`，页面高亮和扫描感增强。
 - 有实时 `liveMessage` 时进入 `streaming`。`matrix` 主题下，活动 pane 内最新 assistant 流式文本段会先显示绿色 0/1 解码覆盖层，再逐步收敛成真实消息；`sweet` 主题只保留背景与面板氛围变化，不做文字乱码解码。
@@ -60,7 +61,8 @@
 - 原生端复刻时保留相同的详情页主题枚举和四阶段状态机：`default`、`matrix`、`sweet` 以及 `idle`、`ramp`、`streaming`、`settle`。
 - 炫酷模式应放在会话详情页控制器/页面层实现，不要侵入消息模型、协议模型或本地数据库。
 - `matrix` 的绿色数字雨建议作为整页 atmosphere 层实现；实时解码动画只绑定当前活动会话 pane 的 assistant 最新流式文本段。
-- `sweet` 建议使用低频泡泡和柔光氛围，不要使用持续高频抖动或大面积粒子效果；在移动端优先保证输入区、消息区和顶部导航的可读性。
+- `sweet` 建议使用低频泡泡、少量星点高光和柔光氛围，不要使用持续高频抖动或大面积粒子效果；在移动端优先保证输入区、消息区和顶部导航的可读性。
+- `sweet` 原生端复刻时，前景控件建议统一为果冻胶囊语言，消息外层卡片与内部 thinking/tool/plan 卡片使用两级透明度，避免可爱背景被厚重白底完全挡住。
 - 原生端需要显式覆盖导航栏、tab strip、输入框、消息气泡和底部抽屉的浅色背景，不能只叠加绿色文字。
 - 原生端需要把系统状态栏背景、导航安全区背景、导航内容区背景和导航占位高度视为同一个 chrome 区域。炫酷模式开启时全部使用 `#000000`，状态栏图标使用 light 样式；退出页面或关闭模式时恢复主题默认导航栏/页面背景。
 - PWA/standalone 端没有任意颜色的状态栏 API，只能使用 Apple meta 暴露的 `default`、`black`、`black-translucent` 模式。MCode 使用 `black` 保持 viewport 布局不变，同时让系统状态栏为黑色；不要在现有页面壳层上切到 `black-translucent`，除非同步重构所有自定义导航和底部 fixed 区域的 safe-area 计算。
