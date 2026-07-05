@@ -1,4 +1,5 @@
 import type { RelaySessionInfo } from "@/services/gateway"
+import { normalizeConnectionHostModelId } from "@/services/connectionHostCatalog"
 
 export type ConnectionTargetAgent = "codeg" | "opencode" | "mcode-desktop"
 export type ConnectionRouteMode = "direct" | "gateway"
@@ -26,6 +27,7 @@ export interface ConnectionRecordV2 {
   pairSecret?: string
   gatewaySession?: RelaySessionInfo | null
   targetProfile?: ConnectionTargetProfile | null
+  hostModelId?: string
 }
 
 const TARGET_AGENTS = new Set<ConnectionTargetAgent>(["codeg", "opencode", "mcode-desktop"])
@@ -102,6 +104,7 @@ export function normalizeConnectionRecordV2(input: Record<string, unknown>): Con
   const pairSecret = pickString(input.pairSecret) || undefined
   const gatewaySession = normalizeRelaySessionInfo(input.gatewaySession)
   const targetProfile = normalizePairTargetProfile(input.targetProfile)
+  const hostModelId = normalizeConnectionHostModelId(input.hostModelId)
 
   if (routeMode === "direct") {
     if (!directBaseUrl) return null
@@ -114,6 +117,7 @@ export function normalizeConnectionRecordV2(input: Record<string, unknown>): Con
       directBaseUrl,
       ...(directToken ? { directToken } : {}),
       ...(targetProfile ? { targetProfile } : {}),
+      ...(hostModelId ? { hostModelId } : {}),
     }
   }
 
@@ -131,6 +135,7 @@ export function normalizeConnectionRecordV2(input: Record<string, unknown>): Con
     ...(pairSecret ? { pairSecret } : {}),
     ...(gatewaySession ? { gatewaySession } : {}),
     ...(targetProfile ? { targetProfile } : {}),
+    ...(hostModelId ? { hostModelId } : {}),
   }
 }
 

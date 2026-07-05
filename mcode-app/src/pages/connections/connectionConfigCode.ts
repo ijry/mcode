@@ -25,6 +25,7 @@ export interface ConfigCodePayloadV2 {
   pairSecret?: string
   gatewaySession?: RelaySessionInfo
   targetProfile?: ConnectionTargetProfile
+  hostModelId?: string
 }
 
 export function buildConnectionConfigCode(connection: ConfigCodeConnection): string {
@@ -75,6 +76,7 @@ function buildConnectionConfigPayload(connection: ConfigCodeConnection): ConfigC
     ...(normalized.pairSecret ? { pairSecret: normalized.pairSecret } : {}),
     ...(gatewaySession ? { gatewaySession } : {}),
     ...(normalized.targetProfile ? { targetProfile: normalized.targetProfile } : {}),
+    ...(normalized.hostModelId ? { hostModelId: normalized.hostModelId } : {}),
   }
 }
 
