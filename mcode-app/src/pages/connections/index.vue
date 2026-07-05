@@ -61,20 +61,33 @@
           :style="upThemeCardStyle"
           @click="openConnectionDetail(conn)"
         >
-          <view
-            class="connection-card__icon"
-            :class="getConnectionIconClass(conn)"
-          >
-            <u-icon
-              :name="conn.routeMode === 'direct' ? 'wifi' : 'cloud'"
-              size="24"
-              :color="getConnectionIconColor(conn)"
-            ></u-icon>
+          <view class="connection-card__host-visual">
+            <image
+              :key="getConnectionHostImageKey(conn)"
+              class="connection-card__host-image"
+              :src="getConnectionHostImage(conn)"
+              mode="aspectFit"
+              @error="handleConnectionHostImageError(conn)"
+            />
+            <view class="connection-card__host-tag">
+              <text>{{ getConnectionHost(conn).kindLabel }}</text>
+            </view>
           </view>
 
           <view class="connection-card__body">
             <view class="connection-card__head">
-              <text class="connection-card__name">{{ conn.name }}</text>
+              <view class="connection-card__identity">
+                <view class="connection-card__host-row">
+                  <image
+                    v-if="getConnectionHost(conn).logo"
+                    class="connection-card__host-logo"
+                    :src="getConnectionHost(conn).logo"
+                    mode="aspectFit"
+                  />
+                  <text class="connection-card__host-name">{{ getConnectionHost(conn).displayName }}</text>
+                </view>
+                <text class="connection-card__name">{{ conn.name }}</text>
+              </view>
               <view
                 class="connection-card__status"
                 :class="getConnectionStatusClass(conn)"
@@ -243,6 +256,20 @@
               <u-input v-model="form.name" placeholder="请输入连接名称"></u-input>
             </u-form-item>
 
+            <u-form-item label="电脑/主机型号" prop="hostModelId">
+              <view class="connections-sheet__host-field" @click="showHostPicker = true">
+                <view class="connections-sheet__host-copy">
+                  <text class="connections-sheet__host-title">
+                    {{ getSelectedHostPresentation().displayName }}
+                  </text>
+                  <text class="connections-sheet__host-subtitle">
+                    {{ getSelectedHostPresentation().kindLabel }}
+                  </text>
+                </view>
+                <u-icon name="arrow-right" size="14" color="#c7c7cc"></u-icon>
+              </view>
+            </u-form-item>
+
             <u-form-item label="连接方式" prop="routeMode" required>
               <u-radio-group :modelValue="form.routeMode" placement="row" @change="handleRouteModeChange">
                 <u-radio name="direct" label="直连"></u-radio>
@@ -383,6 +410,11 @@
       </view>
     </u-popup>
 
+    <ConnectionHostPicker
+      v-model:show="showHostPicker"
+      v-model="form.hostModelId"
+    />
+
     <IosAddToHomePrompt />
   </view>
 </template>
@@ -393,8 +425,10 @@ import { onShow } from "@dcloudio/uni-app"
 import { createGateway } from "@/services/gateway"
 import type { RelaySessionInfo } from "@/services/gateway"
 import { buildWebSocketProtocols } from "@/services/gateway/wsProtocol"
+import ConnectionHostPicker from "./components/ConnectionHostPicker.vue"
 import { buildConnectionConfigCode, parseConnectionConfigCodeToConnection } from "./connectionConfigCode"
 import { assertPairTargetAgentMatchesSelection } from "@/services/connectionPairValidation"
+import { DEFAULT_CONNECTION_HOST_MODEL_ID } from "@/services/connectionHostCatalog"
 import {
   readStoredConnections,
   type ConnectionContext,
@@ -414,6 +448,7 @@ import {
 } from "@/services/connectionSchema"
 import {
   getConnectionCapabilityChips,
+  getConnectionHostPresentation,
   getConnectionSubtitle,
 } from "./connectionPresentation"
 import {
@@ -425,6 +460,7 @@ import { openGuardedExternalUrl } from "@/services/externalLinkGuard"
 declare const plus: any
 
 const DEPLOYMENT_GUIDE_URL = "https://pan.quark.cn/s/0008015b1d33"
+const HOST_FALLBACK_IMAGE = "/static/connection-hosts/other-computer.svg"
 const OFFICIAL_GATEWAY_BASE_URL = normalizeBaseUrl(
   String(import.meta.env.VITE_MCODE_OFFICIAL_GATEWAY_BASE_URL || "https://mcode-relay.lingyun.net")
 )
@@ -448,11 +484,13 @@ const scanImporting = ref(false)
 let scanReturnFallbackTimer: ReturnType<typeof setTimeout> | null = null
 const showActionSheet = ref(false)
 const showConfigCodePopup = ref(false)
+const showHostPicker = ref(false)
 const currentConnectionIndex = ref(-1)
 const editingConnectionKey = ref("")
 const configCodeValue = ref("")
 const configCodeConnectionName = ref("")
 const configCodeConnectionMeta = ref("")
+const hostImageErrorMap = ref<Record<string, boolean>>({})
 const connectedMap = ref<Record<string, boolean>>({})
 const onlineMap = ref<Record<string, boolean>>({})
 type ConnectionHealthState = "idle" | "online" | "reconnecting" | "error"
@@ -477,6 +515,7 @@ const form = ref({
   name: "",
   routeMode: "direct" as ConnectionRouteMode,
   targetAgent: "codeg" as ConnectionTargetAgent,
+  hostModelId: DEFAULT_CONNECTION_HOST_MODEL_ID,
   directBaseUrl: "",
   directToken: "",
   gatewayProvider: "official" as ConnectionGatewayProvider,
@@ -525,6 +564,32 @@ function getConnectionBadgeText(conn: ConnectionItem) {
   return "未连接"
 }
 
+function getSelectedHostPresentation() {
+  return getConnectionHostPresentation({ hostModelId: form.value.hostModelId })
+}
+
+function getConnectionHost(conn: ConnectionItem) {
+  return getConnectionHostPresentation({ hostModelId: conn.hostModelId })
+}
+
+function getConnectionHostImage(conn: ConnectionItem) {
+  const key = getConnectionHostImageKey(conn)
+  if (hostImageErrorMap.value[key]) return HOST_FALLBACK_IMAGE
+  return getConnectionHost(conn).image || HOST_FALLBACK_IMAGE
+}
+
+function handleConnectionHostImageError(conn: ConnectionItem) {
+  const key = getConnectionHostImageKey(conn)
+  hostImageErrorMap.value = {
+    ...hostImageErrorMap.value,
+    [key]: true,
+  }
+}
+
+function getConnectionHostImageKey(conn: ConnectionItem) {
+  return `${connectionKey(conn)}:${getConnectionHost(conn).id}`
+}
+
 function getConnectionHealthDetail(conn: ConnectionItem) {
   const health = getConnectionHealth(conn)
   if (health.state === "online" || health.state === "idle") return ""
@@ -569,15 +634,6 @@ function getConnectionCardClass(conn: ConnectionItem) {
   }
 }
 
-function getConnectionIconClass(conn: ConnectionItem) {
-  const health = getConnectionHealth(conn)
-  return {
-    "connection-card__icon--online": health.state === "online",
-    "connection-card__icon--reconnecting": health.state === "reconnecting",
-    "connection-card__icon--error": health.state === "error",
-  }
-}
-
 function getConnectionStatusClass(conn: ConnectionItem) {
   const health = getConnectionHealth(conn)
   return {
@@ -585,14 +641,6 @@ function getConnectionStatusClass(conn: ConnectionItem) {
     "connection-card__status--reconnecting": health.state === "reconnecting",
     "connection-card__status--error": health.state === "error",
   }
-}
-
-function getConnectionIconColor(conn: ConnectionItem) {
-  const health = getConnectionHealth(conn)
-  if (health.state === "online") return "#007aff"
-  if (health.state === "reconnecting") return "#fa8c16"
-  if (health.state === "error") return "#fa3534"
-  return "#8e8e93"
 }
 
 onMounted(() => {
@@ -687,6 +735,7 @@ async function submitConnection() {
         routeMode: "direct",
         directBaseUrl: normalizeBaseUrl(form.value.directBaseUrl),
         directToken: form.value.directToken,
+        hostModelId: form.value.hostModelId,
       })
 
       await assertConnectionReachable(newConnection)
@@ -734,6 +783,7 @@ async function submitConnection() {
         pairCode: form.value.pairCode,
         pairSecret: form.value.pairSecret,
         gatewaySession: session,
+        hostModelId: form.value.hostModelId,
       })
 
       await assertConnectionReachable(newConnection)
@@ -1040,6 +1090,7 @@ function editConnection(conn: ConnectionItem, index: number) {
   form.value.name = conn.name
   form.value.routeMode = conn.routeMode
   form.value.targetAgent = conn.targetAgent
+  form.value.hostModelId = conn.hostModelId || DEFAULT_CONNECTION_HOST_MODEL_ID
 
   if (conn.routeMode === "direct") {
     form.value.directBaseUrl = conn.directBaseUrl || ""
@@ -1091,6 +1142,7 @@ function resetForm() {
     name: "",
     routeMode: "direct",
     targetAgent: "codeg",
+    hostModelId: DEFAULT_CONNECTION_HOST_MODEL_ID,
     directBaseUrl: "",
     directToken: "",
     gatewayProvider: "official",
@@ -1917,27 +1969,41 @@ function persistConnectedMap() {
   box-shadow: 0 18rpx 42rpx rgba(250, 53, 52, 0.08);
 }
 
-.connection-card__icon {
-  width: 88rpx;
-  height: 88rpx;
+.connection-card__host-visual {
+  position: relative;
+  width: 132rpx;
+  height: 132rpx;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 26rpx;
-  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
+  overflow: hidden;
+  border-radius: 30rpx;
+  border: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 74%, var(--up-primary, #2979ff) 26%);
+  background:
+    radial-gradient(circle at 28% 22%, rgba(255, 255, 255, 0.92), transparent 36%),
+    linear-gradient(145deg, var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6)), var(--up-card-bg-color, #ffffff));
 }
 
-.connection-card__icon--online {
-  background: color-mix(in srgb, var(--up-primary, #2979ff) 12%, var(--up-card-bg-color, #ffffff) 88%);
+.connection-card__host-image {
+  width: 108rpx;
+  height: 88rpx;
 }
 
-.connection-card__icon--reconnecting {
-  background: color-mix(in srgb, var(--up-warning, #f9ae3d) 16%, var(--up-card-bg-color, #ffffff) 84%);
-}
-
-.connection-card__icon--error {
-  background: color-mix(in srgb, var(--up-error, #fa3534) 12%, var(--up-card-bg-color, #ffffff) 88%);
+.connection-card__host-tag {
+  position: absolute;
+  left: 12rpx;
+  right: 12rpx;
+  bottom: 10rpx;
+  display: flex;
+  justify-content: center;
+  padding: 4rpx 8rpx;
+  border-radius: 999rpx;
+  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 88%, var(--up-primary, #2979ff) 12%);
+  color: var(--up-content-color, #606266);
+  font-size: 18rpx;
+  font-weight: 700;
+  line-height: 1.2;
 }
 
 .connection-card__body {
@@ -1950,16 +2016,48 @@ function persistConnectedMap() {
 
 .connection-card__head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 12rpx;
   min-width: 0;
 }
 
-.connection-card__name {
+.connection-card__identity {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+}
+
+.connection-card__host-row {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  min-width: 0;
+}
+
+.connection-card__host-logo {
+  width: 30rpx;
+  height: 30rpx;
+  flex-shrink: 0;
+  border-radius: 8rpx;
+}
+
+.connection-card__host-name {
+  flex: 1;
+  min-width: 0;
   font-size: 30rpx;
-  font-weight: 700;
+  font-weight: 800;
   color: var(--up-main-color, #303133);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.connection-card__name {
+  font-size: 22rpx;
+  font-weight: 600;
+  color: var(--up-tips-color, #909193);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2278,6 +2376,39 @@ function persistConnectedMap() {
 .connections-sheet__form,
 .connections-sheet__scan {
   padding-bottom: 8rpx;
+}
+
+.connections-sheet__host-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+  width: 100%;
+  padding: 18rpx 20rpx;
+  border-radius: 22rpx;
+  border: 1rpx solid var(--up-border-color, #dadbde);
+  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
+}
+
+.connections-sheet__host-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+  min-width: 0;
+}
+
+.connections-sheet__host-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 26rpx;
+  font-weight: 700;
+  color: var(--up-main-color, #303133);
+}
+
+.connections-sheet__host-subtitle {
+  font-size: 22rpx;
+  color: var(--up-tips-color, #909193);
 }
 
 .connections-sheet__scan-panel {

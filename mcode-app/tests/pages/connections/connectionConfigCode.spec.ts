@@ -147,4 +147,42 @@ describe("connection config code", () => {
 
     expect(() => parseConnectionConfigCodeToConnection(code)).toThrow("配置码缺少网关凭据")
   })
+
+  it("round-trips host model ids through config codes", () => {
+    const code = buildConnectionConfigCode({
+      version: 2,
+      name: "Cloud Agent",
+      targetAgent: "codeg",
+      routeMode: "gateway",
+      gatewayProvider: "official",
+      gatewayBaseUrl: "https://relay.example.com/",
+      pairCode: "AWS-1234",
+      pairSecret: "pair-secret",
+      hostModelId: "aws-ec2",
+    } as any)
+
+    expect(decodeConnectionConfigCode(code)).toMatchObject({
+      version: 2,
+      name: "Cloud Agent",
+      hostModelId: "aws-ec2",
+    })
+    expect(parseConnectionConfigCodeToConnection(code)).toMatchObject({
+      routeMode: "gateway",
+      hostModelId: "aws-ec2",
+    })
+  })
+
+  it("drops unknown host model ids from imported config codes", () => {
+    const code = encodePayload({
+      version: 2,
+      name: "Unknown Visual",
+      targetAgent: "codeg",
+      routeMode: "direct",
+      directBaseUrl: "http://host",
+      directToken: "direct-token",
+      hostModelId: "unknown-host",
+    })
+
+    expect(parseConnectionConfigCodeToConnection(code)).not.toHaveProperty("hostModelId")
+  })
 })

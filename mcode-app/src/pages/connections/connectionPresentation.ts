@@ -1,4 +1,8 @@
 import type { ConnectionRecordV2 } from "@/services/connectionSchema"
+import {
+  getConnectionHostModel,
+  type ConnectionHostKind,
+} from "@/services/connectionHostCatalog"
 import { getDesktopCapabilityLabels } from "@/agents/mcode-desktop/capabilities"
 
 export function getConnectionTargetLabel(
@@ -24,6 +28,41 @@ export function getConnectionProviderLabel(
     return "MCode 官方网关"
   }
   return ""
+}
+
+export interface ConnectionHostPresentation {
+  id: string
+  brand: string
+  model: string
+  displayName: string
+  kind: ConnectionHostKind
+  kindLabel: string
+  image: string
+  logo?: string
+}
+
+export function getConnectionHostPresentation(
+  connection: Partial<Pick<ConnectionRecordV2, "hostModelId">>
+): ConnectionHostPresentation {
+  const model = getConnectionHostModel(connection.hostModelId)
+  return {
+    id: model.id,
+    brand: model.brand,
+    model: model.model,
+    displayName: model.displayName,
+    kind: model.kind,
+    kindLabel: getConnectionHostKindLabel(model.kind),
+    image: model.image,
+    ...(model.logo ? { logo: model.logo } : {}),
+  }
+}
+
+export function getConnectionHostKindLabel(kind: ConnectionHostKind): string {
+  if (kind === "laptop") return "笔记本"
+  if (kind === "desktop") return "台式机"
+  if (kind === "mini-pc") return "Mini PC"
+  if (kind === "cloud-server") return "云服务器"
+  return "电脑"
 }
 
 export function getConnectionSubtitle(

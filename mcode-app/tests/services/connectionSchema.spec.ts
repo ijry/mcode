@@ -63,4 +63,47 @@ describe("connectionSchema", () => {
 
     expect(withId.id).toMatch(/^conn_/)
   })
+
+  it("preserves valid host model ids and drops unknown host model ids", () => {
+    expect(
+      normalizeConnectionRecordV2({
+        version: 2,
+        name: "Office Mac",
+        targetAgent: "codeg",
+        routeMode: "direct",
+        directBaseUrl: "http://127.0.0.1:3089",
+        hostModelId: "apple-macbook-air",
+      })?.hostModelId
+    ).toBe("apple-macbook-air")
+
+    expect(
+      normalizeConnectionRecordV2({
+        version: 2,
+        name: "Unknown Box",
+        targetAgent: "codeg",
+        routeMode: "direct",
+        directBaseUrl: "http://127.0.0.1:3089",
+        hostModelId: "not-a-real-host",
+      })
+    ).not.toHaveProperty("hostModelId")
+  })
+
+  it("does not include host type in connection identity keys", () => {
+    const mac = buildConnectionRecordKey({
+      targetAgent: "codeg",
+      routeMode: "direct",
+      directBaseUrl: "http://127.0.0.1:3089",
+      hostModelId: "apple-macbook-air",
+    } as ConnectionRecordV2)
+
+    const ec2 = buildConnectionRecordKey({
+      targetAgent: "codeg",
+      routeMode: "direct",
+      directBaseUrl: "http://127.0.0.1:3089",
+      hostModelId: "aws-ec2",
+    } as ConnectionRecordV2)
+
+    expect(mac).toBe("codeg::direct::http://127.0.0.1:3089")
+    expect(ec2).toBe(mac)
+  })
 })
