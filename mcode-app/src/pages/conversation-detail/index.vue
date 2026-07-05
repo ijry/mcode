@@ -20,6 +20,7 @@
         <view v-if="showDetailBackgroundImage" class="detail-atmosphere__background-scrim"></view>
         <ConversationDetailCyberRain :enabled="detailTheme === 'matrix'" :phase="cyberEffectPhase" />
         <ConversationDetailSweetBubbles :enabled="detailTheme === 'sweet'" :phase="cyberEffectPhase" />
+        <ConversationDetailSummerAtmosphere :enabled="detailTheme === 'summer'" :phase="cyberEffectPhase" />
         <view class="detail-atmosphere__blob detail-atmosphere__blob--primary"></view>
         <view class="detail-atmosphere__blob detail-atmosphere__blob--secondary"></view>
         <view class="detail-atmosphere__blob detail-atmosphere__blob--accent"></view>
@@ -1135,6 +1136,7 @@ import MessageBubble from "@/components/MessageBubble.vue"
 import ConversationDetailBody from "./ConversationDetailBody.vue"
 import ConversationDetailCyberRain from "./ConversationDetailCyberRain.vue"
 import ConversationDetailSweetBubbles from "./ConversationDetailSweetBubbles.vue"
+import ConversationDetailSummerAtmosphere from "./ConversationDetailSummerAtmosphere.vue"
 import ConversationDetailInteractivePane from "./ConversationDetailInteractivePane.vue"
 import {
   buildDetailShellTabs,
@@ -1352,6 +1354,13 @@ const detailThemePageStyle = computed(() => {
       color: "#7a284f",
     }
   }
+  if (detailTheme.value === "summer") {
+    return {
+      background: "linear-gradient(180deg, #8de8ff 0%, #55d3ff 36%, #2fb2df 55%, #ffd67f 55%, #efb95a 100%)",
+      backgroundColor: "#87e2ff",
+      color: "#0b6580",
+    }
+  }
   return {}
 })
 const upThemeCardStyle = computed(() => currentInstance?.proxy?.upThemeCardStyle || {})
@@ -1363,6 +1372,8 @@ const pageThemeClasses = computed(() => [
   detailTheme.value === "matrix" && `page--cyber-${cyberEffectPhase.value}`,
   detailTheme.value === "sweet" && "page--sweet",
   detailTheme.value === "sweet" && `page--sweet-${cyberEffectPhase.value}`,
+  detailTheme.value === "summer" && "page--summer",
+  detailTheme.value === "summer" && `page--summer-${cyberEffectPhase.value}`,
 ].filter(Boolean))
 
 const INITIAL_TURN_BATCH = 20
@@ -1601,6 +1612,15 @@ const detailTabsBarThemeStyle = computed(() => {
       backgroundColor: "rgba(255, 245, 251, 0.74)",
       borderColor: "rgba(236, 72, 153, 0.18)",
       boxShadow: "0 0 26rpx rgba(244, 114, 182, 0.14)",
+      backdropFilter: "blur(10rpx)",
+    }
+  }
+  if (detailTheme.value === "summer") {
+    return {
+      background: "rgba(232, 250, 255, 0.84)",
+      backgroundColor: "rgba(232, 250, 255, 0.84)",
+      borderColor: "rgba(10, 153, 186, 0.16)",
+      boxShadow: "0 0 26rpx rgba(11, 101, 128, 0.12)",
       backdropFilter: "blur(10rpx)",
     }
   }
@@ -2101,6 +2121,8 @@ const navbarStatusBarBgColor = computed(() =>
     ? "#000000"
     : detailTheme.value === "sweet"
       ? "#fff1f8"
+      : detailTheme.value === "summer"
+        ? "#e8faff"
       : upThemeVar("--up-card-bg-color", "#ffffff")
 )
 const navbarBgColor = computed(() => navbarStatusBarBgColor.value)
@@ -2109,6 +2131,8 @@ const navbarIconColor = computed(() =>
     ? "#8dffb4"
     : detailTheme.value === "sweet"
       ? "#d9468f"
+      : detailTheme.value === "summer"
+        ? "#0b6580"
       : upThemeVar("--up-content-color", "#303133")
 )
 const navbarFrontColor = computed(() =>
@@ -2126,6 +2150,8 @@ const detailTabsActiveStyle = computed(() => ({
       ? "#d8ffe4"
       : detailTheme.value === "sweet"
         ? "#be185d"
+        : detailTheme.value === "summer"
+          ? "#0f7a92"
         : "#ffffff",
   fontWeight: detailTheme.value === "default" ? 500 : 700,
 }))
@@ -2135,6 +2161,8 @@ const detailTabsInactiveStyle = computed(() => ({
       ? "#73c989"
       : detailTheme.value === "sweet"
         ? "#db2777"
+        : detailTheme.value === "summer"
+          ? "#0d7493"
         : upThemeVar("--up-content-color", "#606266"),
 }))
 
@@ -2164,6 +2192,8 @@ function syncDetailNativeStatusBar() {
     ? "#000000"
     : detailTheme.value === "sweet"
       ? "#fff6fb"
+      : detailTheme.value === "summer"
+        ? "#87e2ff"
       : upThemeVar("--up-page-bg-color", backgroundColor) || backgroundColor
   const frontColor = navbarFrontColor.value === "#ffffff" ? "#ffffff" : "#000000"
 

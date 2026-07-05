@@ -15,8 +15,9 @@ describe("detailCyberMode", () => {
   it("normalizes stored toggle snapshots and menu actions", () => {
     expect(DETAIL_THEME_STORAGE_KEY).toBe("mcode_detail_theme_v1")
     expect(DETAIL_CYBER_MODE_STORAGE_KEY).toBe("mcode_detail_cyber_mode_v1")
-    expect(DETAIL_THEME_OPTIONS).toHaveLength(3)
+    expect(DETAIL_THEME_OPTIONS).toHaveLength(4)
     expect(normalizeDetailThemeStorage("sweet")).toBe("sweet")
+    expect(normalizeDetailThemeStorage("summer")).toBe("summer")
     expect(normalizeDetailThemeStorage('{"theme":"matrix"}')).toBe("matrix")
     expect(normalizeDetailThemeStorage('{"enabled":true}')).toBe("matrix")
     expect(normalizeDetailThemeStorage("garbage")).toBe("default")
@@ -28,6 +29,13 @@ describe("detailCyberMode", () => {
       "default",
       "matrix",
       "sweet",
+      "summer",
+    ])
+    expect(buildDetailThemeMenuActions("summer").map((item) => item.id)).toEqual([
+      "default",
+      "matrix",
+      "sweet",
+      "summer",
     ])
     expect(buildCyberModeMenuAction(false)).toEqual({
       name: "微黑暗帝国",
@@ -50,6 +58,10 @@ describe("detailCyberMode", () => {
     })).toBe(false)
     expect(shouldShowDetailBackgroundImage({
       detailTheme: "sweet",
+      detailBackgroundImageUrl: "file://bg.png",
+    })).toBe(false)
+    expect(shouldShowDetailBackgroundImage({
+      detailTheme: "summer",
       detailBackgroundImageUrl: "file://bg.png",
     })).toBe(false)
 
@@ -81,6 +93,13 @@ describe("detailCyberMode", () => {
       lastStreamEndedAt: 1_000,
       now: 1_600,
     })).toBe("settle")
+    expect(deriveCyberEffectPhase({
+      detailTheme: "summer",
+      runtimeStatus: "thinking",
+      hasLiveMessage: false,
+      lastStreamEndedAt: 0,
+      now: 100,
+    })).toBe("ramp")
   })
 
   it("keeps decode text length stable while revealing the prefix first", () => {

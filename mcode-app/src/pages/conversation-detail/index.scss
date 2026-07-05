@@ -123,6 +123,100 @@
   box-shadow: inset 0 0 16rpx rgba(255, 255, 255, 0.32);
 }
 
+.page--summer {
+  position: relative;
+  background:
+    radial-gradient(circle at 22% 10%, rgba(255, 255, 255, 0.34) 0, transparent 16%),
+    radial-gradient(circle at 78% 18%, rgba(255, 245, 220, 0.22) 0, transparent 18%),
+    linear-gradient(180deg, #8de8ff 0%, #55d3ff 36%, #2fb2df 55%, #ffd67f 55%, #efb95a 100%) !important;
+  background-color: #87e2ff !important;
+  color: #0b6580;
+}
+
+.page--summer::before,
+.page--summer::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 33;
+}
+
+.page--summer::before {
+  background:
+    radial-gradient(circle at 18% 12%, rgba(255, 255, 255, 0.4) 0, transparent 12%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.18) 0, transparent 28%, rgba(255, 244, 212, 0.12) 100%);
+  opacity: 0.84;
+}
+
+.page--summer::after {
+  background:
+    linear-gradient(180deg, rgba(8, 145, 178, 0.08) 0, transparent 36%, rgba(255, 255, 255, 0.1) 100%);
+  opacity: 0.72;
+}
+
+.page--summer .detail-container,
+.page--summer .detail-shell__swiper,
+.page--summer .detail-shell__swiper-item,
+.page--summer .detail-shell__page {
+  background: transparent !important;
+}
+
+.page--summer .detail-statusbar-fill,
+.page--summer :deep(.detail-navbar-shell),
+.page--summer :deep(.detail-navbar-shell .u-navbar__placeholder),
+.page--summer :deep(.detail-navbar-shell .u-navbar--fixed),
+.page--summer :deep(.detail-navbar-shell .u-status-bar),
+.page--summer :deep(.detail-navbar-shell .u-navbar__content) {
+  background: rgba(232, 250, 255, 0.76) !important;
+  background-color: rgba(232, 250, 255, 0.76) !important;
+  box-shadow: 0 12rpx 28rpx rgba(11, 101, 128, 0.08);
+  backdrop-filter: blur(16rpx);
+}
+
+.page--summer .detail-navbar__title,
+.page--summer .detail-navbar__subtitle,
+.page--summer .detail-tab-pill__title,
+.page--summer .input-status-row__text,
+.page--summer .stats-text,
+.page--summer .history-status__text {
+  color: #0b6580 !important;
+  text-shadow: 0 0 10rpx rgba(255, 255, 255, 0.26);
+}
+
+.page--summer .detail-tabs-bar {
+  background: rgba(233, 249, 255, 0.62) !important;
+  border-top-color: rgba(10, 153, 186, 0.12) !important;
+  border-bottom-color: rgba(10, 153, 186, 0.1) !important;
+  box-shadow: 0 14rpx 32rpx rgba(11, 101, 128, 0.12);
+  backdrop-filter: blur(14rpx);
+}
+
+.page--summer .detail-tab-pill {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.54), rgba(225, 249, 255, 0.34));
+  border-color: rgba(10, 153, 186, 0.14);
+  box-shadow: inset 0 0 18rpx rgba(255, 255, 255, 0.3);
+}
+
+.page--summer .detail-tab-pill--active {
+  background: linear-gradient(135deg, rgba(255, 178, 191, 0.9), rgba(255, 238, 241, 0.92)) !important;
+  border-color: rgba(244, 63, 94, 0.24);
+  box-shadow:
+    0 0 22rpx rgba(244, 63, 94, 0.16),
+    inset 0 0 18rpx rgba(255, 255, 255, 0.38);
+}
+
+.page--summer .detail-tab-pill__dot {
+  background: #fb7185;
+  box-shadow: 0 0 12rpx rgba(244, 63, 94, 0.44);
+}
+
+.page--summer .detail-navbar__logo--fallback {
+  background: rgba(255, 255, 255, 0.42);
+  border: 1rpx solid rgba(10, 153, 186, 0.16);
+  box-shadow: inset 0 0 16rpx rgba(255, 255, 255, 0.28);
+}
+
 .page--sweet .detail-dropdown-menu,
 .page--sweet .plan-drawer,
 :deep(.detail-interactive-pane--theme-sweet .input-wrap),
@@ -171,6 +265,54 @@
   box-shadow:
     0 0 24rpx rgba(244, 114, 182, 0.2),
     inset 0 0 18rpx rgba(255, 255, 255, 0.34);
+}
+
+.page--summer .detail-dropdown-menu,
+.page--summer .plan-drawer,
+:deep(.detail-interactive-pane--theme-summer .input-wrap),
+:deep(.detail-interactive-pane--theme-summer .input-status-wrap),
+:deep(.detail-interactive-pane--theme-summer .input-box),
+:deep(.detail-interactive-pane--theme-summer .tool-toggle-btn),
+:deep(.detail-interactive-pane--theme-summer .input-tool-btn__icon),
+:deep(.detail-interactive-pane--theme-summer .composer-panel),
+:deep(.detail-interactive-pane--theme-summer .slash-panel),
+:deep(.detail-interactive-pane--theme-summer .mention-panel),
+:deep(.detail-interactive-pane--theme-summer .attachments-preview),
+:deep(.detail-interactive-pane--theme-summer .upload-queue),
+:deep(.detail-interactive-pane--theme-summer .pending-response-card),
+:deep(.detail-interactive-pane--theme-summer .permission-card),
+:deep(.detail-interactive-pane--theme-summer .ask-question-card),
+:deep(.detail-interactive-pane--theme-summer .queue-item),
+:deep(.detail-interactive-pane--theme-summer .shared-queue-item),
+:deep(.detail-interactive-pane--theme-summer .shared-queue-bar),
+:deep(.detail-interactive-pane--theme-summer .queue-bar) {
+  background: rgba(240, 252, 255, 0.42) !important;
+  border-color: rgba(11, 122, 146, 0.16) !important;
+  color: #0b6580 !important;
+  box-shadow: 0 16rpx 34rpx rgba(11, 101, 128, 0.12) !important;
+  backdrop-filter: blur(14rpx);
+}
+
+:deep(.detail-interactive-pane--theme-summer .input-box) {
+  background: rgba(255, 255, 255, 0.34) !important;
+  border: 1rpx solid rgba(10, 153, 186, 0.16);
+  box-shadow: inset 0 0 18rpx rgba(255, 255, 255, 0.26);
+}
+
+:deep(.detail-interactive-pane--theme-summer .composer-textarea),
+:deep(.detail-interactive-pane--theme-summer .u-textarea),
+:deep(.detail-interactive-pane--theme-summer .u-textarea__field),
+:deep(.detail-interactive-pane--theme-summer textarea),
+:deep(.detail-interactive-pane--theme-summer .uni-textarea-textarea) {
+  color: #0b6580 !important;
+  caret-color: #fb7185;
+}
+
+:deep(.detail-interactive-pane--theme-summer .send-btn) {
+  background: linear-gradient(180deg, #ff8da1 0%, #f43f5e 100%) !important;
+  box-shadow:
+    0 0 26rpx rgba(244, 63, 94, 0.24),
+    inset 0 0 18rpx rgba(255, 255, 255, 0.28);
 }
 
 .page--cyber .detail-navbar__title,

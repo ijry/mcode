@@ -1,7 +1,7 @@
 export const DETAIL_THEME_STORAGE_KEY = "mcode_detail_theme_v1"
 export const DETAIL_CYBER_MODE_STORAGE_KEY = "mcode_detail_cyber_mode_v1"
 
-export type DetailThemeId = "default" | "matrix" | "sweet"
+export type DetailThemeId = "default" | "matrix" | "sweet" | "summer"
 export type CyberEffectPhase = "idle" | "ramp" | "streaming" | "settle"
 
 export interface DetailThemeOption {
@@ -17,6 +17,7 @@ export const DETAIL_THEME_OPTIONS: DetailThemeOption[] = [
   { id: "default", name: "默认主题", color: "#2979ff" },
   { id: "matrix", name: "微黑暗帝国", color: "#22c55e" },
   { id: "sweet", name: "甜心泡泡", color: "#ec4899" },
+  { id: "summer", name: "西瓜海浪", color: "#06b6d4" },
 ]
 
 export function normalizeDetailThemeStorage(raw: unknown): DetailThemeId {
@@ -70,7 +71,7 @@ export function normalizeDetailThemeStorage(raw: unknown): DetailThemeId {
 }
 
 export function isExperimentalDetailTheme(theme: DetailThemeId) {
-  return theme === "matrix" || theme === "sweet"
+  return theme === "matrix" || theme === "sweet" || theme === "summer"
 }
 
 export function isMatrixDetailTheme(theme: DetailThemeId) {
@@ -160,5 +161,5 @@ export function buildCyberModeMenuAction(enabled: boolean) {
 }
 
 function isDetailThemeId(value: unknown): value is DetailThemeId {
-  return value === "default" || value === "matrix" || value === "sweet"
+  return value === "default" || value === "matrix" || value === "sweet" || value === "summer"
 }

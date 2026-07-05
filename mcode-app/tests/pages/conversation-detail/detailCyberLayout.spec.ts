@@ -12,6 +12,8 @@ describe("detailCyberLayout", () => {
     expect(source).toContain(':enabled="detailTheme === \'matrix\'"')
     expect(source).toContain("<ConversationDetailSweetBubbles")
     expect(source).toContain(':enabled="detailTheme === \'sweet\'"')
+    expect(source).toContain("<ConversationDetailSummerAtmosphere")
+    expect(source).toContain(':enabled="detailTheme === \'summer\'"')
     expect(source).toContain(':phase="cyberEffectPhase"')
   })
 
@@ -55,11 +57,13 @@ describe("detailCyberLayout", () => {
 
     expect(styles).toContain(".page--cyber")
     expect(styles).toContain(".page--sweet")
+    expect(styles).toContain(".page--summer")
     expect(styles).toContain("#000000")
     expect(styles).toContain(".page--cyber::before")
     expect(styles).toContain(".page--cyber::after")
     expect(styles).toContain(".page--sweet::before")
     expect(styles).toContain(":deep(.detail-interactive-pane--theme-sweet .input-wrap)")
+    expect(styles).toContain(":deep(.detail-interactive-pane--theme-summer .input-wrap)")
     expect(styles).toContain(":deep(.detail-interactive-pane--cyber .bubble--assistant)")
     expect(styles).toContain(":deep(.detail-interactive-pane--cyber .part-thinking)")
     expect(styles).toContain(":deep(.detail-interactive-pane--cyber .input-wrap)")

@@ -8,6 +8,7 @@
       detailTheme === 'matrix' && cyberActive && 'bubble-wrap--cyber-active',
       detailTheme === 'matrix' && `bubble-wrap--cyber-${cyberEffectPhase || 'idle'}`,
       detailTheme === 'sweet' && `bubble-wrap--sweet-${cyberEffectPhase || 'idle'}`,
+      detailTheme === 'summer' && `bubble-wrap--summer-${cyberEffectPhase || 'idle'}`,
     ]"
   >
     <!-- 头像 -->
@@ -906,6 +907,109 @@ function normalizeAgentType(raw?: string) {
 .bubble-wrap--theme-sweet :deep(.ask-question-answer__empty),
 .bubble-wrap--theme-sweet :deep(.code-text) {
   color: var(--message-sweet-text) !important;
+}
+
+.bubble-wrap--theme-summer {
+  --message-summer-text: rgba(8, 85, 109, 0.9);
+  --message-summer-border: rgba(14, 136, 165, 0.2);
+  --message-summer-subtle: rgba(11, 122, 146, 0.82);
+}
+
+.bubble-wrap--theme-summer .bubble {
+  position: relative;
+  overflow: hidden;
+  border-radius: 28rpx;
+  border: 1rpx solid var(--message-summer-border) !important;
+  background:
+    radial-gradient(circle at 24% 18%, rgba(255, 255, 255, 0.88), transparent 32%),
+    linear-gradient(135deg, rgba(202, 244, 255, 0.34), rgba(255, 255, 255, 0.22)),
+    rgba(239, 252, 255, 0.38) !important;
+  color: var(--message-summer-text) !important;
+  box-shadow:
+    inset 0 0 20rpx rgba(255, 255, 255, 0.24),
+    0 16rpx 30rpx rgba(11, 101, 128, 0.1) !important;
+  backdrop-filter: blur(14rpx);
+}
+
+.bubble-wrap--theme-summer .bubble--user {
+  background:
+    radial-gradient(circle at 28% 20%, rgba(255, 255, 255, 0.88), transparent 30%),
+    linear-gradient(135deg, rgba(255, 222, 191, 0.44), rgba(255, 149, 169, 0.2)),
+    rgba(255, 247, 232, 0.42) !important;
+  border-color: rgba(244, 63, 94, 0.16) !important;
+}
+
+.bubble-wrap--theme-summer .part-text {
+  color: var(--message-summer-text);
+
+  :deep(*) {
+    color: var(--message-summer-text) !important;
+  }
+}
+
+.bubble-wrap--theme-summer .part-thinking,
+.bubble-wrap--theme-summer .part-tool-result,
+.bubble-wrap--theme-summer .part-plan {
+  background: rgba(237, 250, 255, 0.28);
+  border-color: rgba(14, 136, 165, 0.14);
+  color: rgba(8, 85, 109, 0.86);
+  box-shadow: inset 0 0 16rpx rgba(255, 255, 255, 0.18);
+}
+
+.bubble-wrap--theme-summer .thinking-hd__label,
+.bubble-wrap--theme-summer .thinking-hd__text,
+.bubble-wrap--theme-summer .tool-result__text,
+.bubble-wrap--theme-summer .tool-result-hd__label,
+.bubble-wrap--theme-summer .plan-hd__label,
+.bubble-wrap--theme-summer .plan-step__text {
+  color: rgba(8, 85, 109, 0.86);
+}
+
+.bubble-wrap--theme-summer .dot {
+  background-color: #fb7185;
+  box-shadow: 0 0 12rpx rgba(244, 63, 94, 0.42);
+}
+
+.bubble-wrap--theme-summer .action-btn {
+  background: rgba(255, 255, 255, 0.24);
+  border: 1rpx solid rgba(14, 136, 165, 0.12);
+}
+
+.bubble-wrap--theme-summer :deep(.tool-group__summary),
+.bubble-wrap--theme-summer :deep(.tool-block),
+.bubble-wrap--theme-summer :deep(.goal-card),
+.bubble-wrap--theme-summer :deep(.goal-card__body),
+.bubble-wrap--theme-summer :deep(.ask-question-result),
+.bubble-wrap--theme-summer :deep(.ask-question-result__state),
+.bubble-wrap--theme-summer :deep(.ask-question-answer) {
+  background:
+    radial-gradient(circle at 20% 16%, rgba(255, 255, 255, 0.76), transparent 28%),
+    linear-gradient(135deg, rgba(210, 244, 255, 0.28), rgba(255, 255, 255, 0.18)),
+    rgba(236, 251, 255, 0.34) !important;
+  border-color: rgba(14, 136, 165, 0.14) !important;
+  color: var(--message-summer-text) !important;
+  box-shadow: inset 0 0 18rpx rgba(255, 255, 255, 0.16) !important;
+}
+
+.bubble-wrap--theme-summer :deep(.tool-group__label),
+.bubble-wrap--theme-summer :deep(.tool-name),
+.bubble-wrap--theme-summer :deep(.section-label),
+.bubble-wrap--theme-summer :deep(.goal-card__title),
+.bubble-wrap--theme-summer :deep(.goal-card__chip),
+.bubble-wrap--theme-summer :deep(.goal-card__label),
+.bubble-wrap--theme-summer :deep(.goal-card__objective),
+.bubble-wrap--theme-summer :deep(.goal-card__thinking),
+.bubble-wrap--theme-summer :deep(.goal-card__result),
+.bubble-wrap--theme-summer :deep(.goal-card__plan),
+.bubble-wrap--theme-summer :deep(.goal-card__meta),
+.bubble-wrap--theme-summer :deep(.goal-card__markdown),
+.bubble-wrap--theme-summer :deep(.ask-question-result__title),
+.bubble-wrap--theme-summer :deep(.ask-question-result__subtitle),
+.bubble-wrap--theme-summer :deep(.ask-question-answer__header),
+.bubble-wrap--theme-summer :deep(.ask-question-answer__question),
+.bubble-wrap--theme-summer :deep(.ask-question-answer__empty),
+.bubble-wrap--theme-summer :deep(.code-text) {
+  color: var(--message-summer-text) !important;
 }
 
 @keyframes cyberTextGlitch {
