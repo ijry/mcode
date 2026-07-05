@@ -243,6 +243,20 @@
               <u-input v-model="form.name" placeholder="请输入连接名称"></u-input>
             </u-form-item>
 
+            <u-form-item label="电脑/主机型号" prop="hostModelId">
+              <view class="connections-sheet__host-field" @click="showHostPicker = true">
+                <view class="connections-sheet__host-copy">
+                  <text class="connections-sheet__host-title">
+                    {{ getSelectedHostPresentation().displayName }}
+                  </text>
+                  <text class="connections-sheet__host-subtitle">
+                    {{ getSelectedHostPresentation().kindLabel }}
+                  </text>
+                </view>
+                <u-icon name="arrow-right" size="14" color="#c7c7cc"></u-icon>
+              </view>
+            </u-form-item>
+
             <u-form-item label="连接方式" prop="routeMode" required>
               <u-radio-group :modelValue="form.routeMode" placement="row" @change="handleRouteModeChange">
                 <u-radio name="direct" label="直连"></u-radio>
@@ -383,6 +397,11 @@
       </view>
     </u-popup>
 
+    <ConnectionHostPicker
+      v-model:show="showHostPicker"
+      v-model="form.hostModelId"
+    />
+
     <IosAddToHomePrompt />
   </view>
 </template>
@@ -393,8 +412,10 @@ import { onShow } from "@dcloudio/uni-app"
 import { createGateway } from "@/services/gateway"
 import type { RelaySessionInfo } from "@/services/gateway"
 import { buildWebSocketProtocols } from "@/services/gateway/wsProtocol"
+import ConnectionHostPicker from "./components/ConnectionHostPicker.vue"
 import { buildConnectionConfigCode, parseConnectionConfigCodeToConnection } from "./connectionConfigCode"
 import { assertPairTargetAgentMatchesSelection } from "@/services/connectionPairValidation"
+import { DEFAULT_CONNECTION_HOST_MODEL_ID } from "@/services/connectionHostCatalog"
 import {
   readStoredConnections,
   type ConnectionContext,
@@ -414,6 +435,7 @@ import {
 } from "@/services/connectionSchema"
 import {
   getConnectionCapabilityChips,
+  getConnectionHostPresentation,
   getConnectionSubtitle,
 } from "./connectionPresentation"
 import {
@@ -448,6 +470,7 @@ const scanImporting = ref(false)
 let scanReturnFallbackTimer: ReturnType<typeof setTimeout> | null = null
 const showActionSheet = ref(false)
 const showConfigCodePopup = ref(false)
+const showHostPicker = ref(false)
 const currentConnectionIndex = ref(-1)
 const editingConnectionKey = ref("")
 const configCodeValue = ref("")
@@ -477,6 +500,7 @@ const form = ref({
   name: "",
   routeMode: "direct" as ConnectionRouteMode,
   targetAgent: "codeg" as ConnectionTargetAgent,
+  hostModelId: DEFAULT_CONNECTION_HOST_MODEL_ID,
   directBaseUrl: "",
   directToken: "",
   gatewayProvider: "official" as ConnectionGatewayProvider,
@@ -523,6 +547,10 @@ function getConnectionBadgeText(conn: ConnectionItem) {
   if (health.state === "reconnecting") return "重连中"
   if (health.state === "error") return "连接异常"
   return "未连接"
+}
+
+function getSelectedHostPresentation() {
+  return getConnectionHostPresentation({ hostModelId: form.value.hostModelId })
 }
 
 function getConnectionHealthDetail(conn: ConnectionItem) {
@@ -687,6 +715,7 @@ async function submitConnection() {
         routeMode: "direct",
         directBaseUrl: normalizeBaseUrl(form.value.directBaseUrl),
         directToken: form.value.directToken,
+        hostModelId: form.value.hostModelId,
       })
 
       await assertConnectionReachable(newConnection)
@@ -734,6 +763,7 @@ async function submitConnection() {
         pairCode: form.value.pairCode,
         pairSecret: form.value.pairSecret,
         gatewaySession: session,
+        hostModelId: form.value.hostModelId,
       })
 
       await assertConnectionReachable(newConnection)
@@ -1040,6 +1070,7 @@ function editConnection(conn: ConnectionItem, index: number) {
   form.value.name = conn.name
   form.value.routeMode = conn.routeMode
   form.value.targetAgent = conn.targetAgent
+  form.value.hostModelId = conn.hostModelId || DEFAULT_CONNECTION_HOST_MODEL_ID
 
   if (conn.routeMode === "direct") {
     form.value.directBaseUrl = conn.directBaseUrl || ""
@@ -1091,6 +1122,7 @@ function resetForm() {
     name: "",
     routeMode: "direct",
     targetAgent: "codeg",
+    hostModelId: DEFAULT_CONNECTION_HOST_MODEL_ID,
     directBaseUrl: "",
     directToken: "",
     gatewayProvider: "official",
@@ -2278,6 +2310,39 @@ function persistConnectedMap() {
 .connections-sheet__form,
 .connections-sheet__scan {
   padding-bottom: 8rpx;
+}
+
+.connections-sheet__host-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+  width: 100%;
+  padding: 18rpx 20rpx;
+  border-radius: 22rpx;
+  border: 1rpx solid var(--up-border-color, #dadbde);
+  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
+}
+
+.connections-sheet__host-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+  min-width: 0;
+}
+
+.connections-sheet__host-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 26rpx;
+  font-weight: 700;
+  color: var(--up-main-color, #303133);
+}
+
+.connections-sheet__host-subtitle {
+  font-size: 22rpx;
+  color: var(--up-tips-color, #909193);
 }
 
 .connections-sheet__scan-panel {
