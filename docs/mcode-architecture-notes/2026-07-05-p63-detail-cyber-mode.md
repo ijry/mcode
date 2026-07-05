@@ -45,6 +45,7 @@
 - `idle` 阶段保持弱化待机效果。
 - `thinking`、`running_tool`、`waiting_permission`、`waiting_question` 等阶段进入 `ramp`，页面高亮和扫描感增强。
 - 有实时 `liveMessage` 时进入 `streaming`。`matrix` 主题下，活动 pane 内最新 assistant 流式文本段会先显示绿色 0/1 解码覆盖层，再逐步收敛成真实消息；`sweet` 与 `summer` 主题只保留背景与面板氛围变化，不做文字乱码解码。
+- `matrix` 解码覆盖层在同一段文本停止增长后，会在 streaming 阶段内自行收敛到完整文本，不要求等待消息状态切到非 `streaming` 才露出最后几个字。
 - 流式结束后的短暂窗口进入 `settle`，随后回落到普通待机氛围。
 - 只读时间线和非活动 tab 只保留整页氛围，不运行强解码动画，避免多实例同时高频重绘。
 - `matrix` 顶部导航和手机状态栏统一为纯黑背景，状态栏图标切换为浅色；`sweet` 统一为浅粉玻璃背景和深色状态栏图标；`summer` 统一为浅海水玻璃背景和深色状态栏图标；默认主题保持当前 uview 主题色。

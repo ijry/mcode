@@ -200,6 +200,7 @@ import { computed, onBeforeUnmount, ref, watch } from "vue"
 import type { ContentPart, GoalDisplayPart, MessageTurn, ToolCall } from "@/types/acp"
 import {
   buildCyberDecodeText,
+  deriveCyberDecodeRevealProgress,
   type CyberEffectPhase,
   type DetailThemeId,
 } from "@/pages/conversation-detail/detailCyberMode"
@@ -275,12 +276,12 @@ const showCyberDecodeOverlay = computed(() =>
     props.message.status === "streaming"
   )
 )
-const cyberRevealProgress = computed(() => {
-  const phase = props.cyberEffectPhase || "idle"
-  const base = phase === "streaming" ? 0.18 : 0.12
-  const step = phase === "streaming" ? 0.06 : 0.04
-  return Math.min(0.92, base + cyberTick.value * step)
-})
+const cyberRevealProgress = computed(() =>
+  deriveCyberDecodeRevealProgress({
+    phase: props.cyberEffectPhase || "idle",
+    tick: cyberTick.value,
+  })
+)
 const textSignature = computed(() =>
   (props.message.content || [])
     .filter((part) => part.type === "text")

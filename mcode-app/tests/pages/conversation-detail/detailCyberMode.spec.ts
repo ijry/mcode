@@ -5,6 +5,7 @@ import {
   buildCyberDecodeText,
   buildCyberModeMenuAction,
   buildDetailThemeMenuActions,
+  deriveCyberDecodeRevealProgress,
   deriveCyberEffectPhase,
   normalizeDetailThemeStorage,
   normalizeCyberModeStorage,
@@ -111,5 +112,16 @@ describe("detailCyberMode", () => {
     expect(late).toHaveLength(text.length)
     expect(late.startsWith("hello")).toBe(true)
     expect(late).not.toBe(text)
+  })
+
+  it("lets matrix decode fully converge before streaming status flips", () => {
+    const text = "hello world"
+    const progress = deriveCyberDecodeRevealProgress({
+      phase: "streaming",
+      tick: 14,
+    })
+
+    expect(progress).toBe(1)
+    expect(buildCyberDecodeText({ text, progress, tick: 7 })).toBe(text)
   })
 })

@@ -125,6 +125,17 @@ export function deriveCyberEffectPhase(input: {
   return "idle"
 }
 
+export function deriveCyberDecodeRevealProgress(input: {
+  phase?: CyberEffectPhase
+  tick: number
+}) {
+  const phase = input.phase || "idle"
+  const base = phase === "streaming" ? 0.18 : 0.12
+  const step = phase === "streaming" ? 0.06 : 0.04
+  const tick = Math.max(0, Number(input.tick || 0))
+  return Math.max(0, Math.min(1, base + tick * step))
+}
+
 export function buildCyberDecodeText(input: {
   text: string
   progress: number
