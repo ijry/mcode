@@ -119,38 +119,43 @@
                   :style="upThemeCardStyle"
                   @click="openLiveSession(card, group.key)"
                 >
-                  <view
-                    :class="[
-                      'agent-logo',
-                      agentLogoClass(card.agentType),
-                      agentLogoPath(card.agentType) && 'agent-logo--real',
-                    ]"
-                  >
-                    <image
-                      v-if="agentLogoPath(card.agentType)"
-                      class="agent-logo__img"
-                      :src="agentLogoPath(card.agentType)"
-                      mode="aspectFit"
-                    />
-                    <text v-else class="agent-logo__text">{{ agentLogoText(card.agentType) }}</text>
-                  </view>
-
-                  <view class="live-card__body">
-                    <text class="live-card__project-title u-line-1">{{ card.projectName }}</text>
-                    <text class="live-card__session-name u-line-1">{{ card.title || "未命名会话" }}</text>
-                    <text
-                      v-if="card.livePreviewText"
-                      class="live-card__preview u-line-1"
+                  <view class="live-card__main">
+                    <view
+                      :class="[
+                        'agent-logo',
+                        agentLogoClass(card.agentType),
+                        agentLogoPath(card.agentType) && 'agent-logo--real',
+                      ]"
                     >
-                      {{ card.livePreviewText }}
-                    </text>
+                      <image
+                        v-if="agentLogoPath(card.agentType)"
+                        class="agent-logo__img"
+                        :src="agentLogoPath(card.agentType)"
+                        mode="aspectFit"
+                      />
+                      <text v-else class="agent-logo__text">{{ agentLogoText(card.agentType) }}</text>
+                    </view>
+
+                    <view class="live-card__body">
+                      <text class="live-card__project-title u-line-1">{{ card.projectName }}</text>
+                      <text class="live-card__session-name u-line-1">{{ card.title || "未命名会话" }}</text>
+                    </view>
+
+                    <view class="live-card__side">
+                      <view :class="['status-chip', `status-chip--${statusClass(card.displayStatus)}` ]">
+                        <text class="status-chip__text">{{ statusLabel(card.displayStatus) }}</text>
+                      </view>
+                      <text class="live-card__stamp">{{ formatTime(card.updatedAt) }}</text>
+                    </view>
                   </view>
 
-                  <view class="live-card__side">
-                    <view :class="['status-chip', `status-chip--${statusClass(card.displayStatus)}` ]">
-                      <text class="status-chip__text">{{ statusLabel(card.displayStatus) }}</text>
+                  <view v-if="card.livePreviewText" class="live-card__preview-row">
+                    <MarqueeText class="live-card__preview" :text="card.livePreviewText" />
+                    <view class="live-card__dots">
+                      <text class="live-card__dot"></text>
+                      <text class="live-card__dot"></text>
+                      <text class="live-card__dot"></text>
                     </view>
-                    <text class="live-card__stamp">{{ formatTime(card.updatedAt) }}</text>
                   </view>
                 </view>
 
@@ -516,6 +521,7 @@ import { useAuthStore } from "@/stores/auth"
 import { useConversationRuntimeStore } from "@/stores/conversationRuntime"
 import { acpApi } from "@/api/acp"
 import RemoteDirectoryBrowser from "@/components/remote/RemoteDirectoryBrowser.vue"
+import MarqueeText from "@/components/MarqueeText.vue"
 import { resolveOverviewCardDisplayStatus } from "@/pages/conversations/conversationOverviewPresentation"
 import {
   resolveConversationLivePreviewText,
@@ -739,17 +745,19 @@ const filteredConnectionGroups = computed<DisplayConnectionGroup[]>(() => {
   const kw = searchKeyword.value.trim().toLowerCase()
   const groups = connectionGroups.value.map((group) => ({
     ...group,
-    cards: group.cards.map((card) => {
-      const runtimeSession = runtime.sessions.get(card.conversationId || 0)
-      const displayStatus = resolveOverviewCardDisplayStatus(card.status, runtimeSession?.status)
-      return {
-        ...card,
-        displayStatus,
-        livePreviewText: livePreviewEnabled.value
-          ? resolveConversationLivePreviewText(runtimeSession)
-          : "",
-      }
-    }),
+    cards: sortLiveSessionCardsByRunning(
+      group.cards.map((card) => {
+        const runtimeSession = runtime.sessions.get(card.conversationId || 0)
+        const displayStatus = resolveOverviewCardDisplayStatus(card.status, runtimeSession?.status)
+        return {
+          ...card,
+          displayStatus,
+          livePreviewText: livePreviewEnabled.value
+            ? resolveConversationLivePreviewText(runtimeSession)
+            : "",
+        }
+      })
+    ),
   }))
   if (!kw) return groups
   return groups
@@ -2035,6 +2043,20 @@ function statusLabel(status: string): string {
   return "空闲"
 }
 
+function sortLiveSessionCardsByRunning(
+  cards: DisplayLiveSessionCard[]
+): DisplayLiveSessionCard[] {
+  return cards
+    .map((card, index) => ({ card, index }))
+    .sort((a, b) => {
+      const aRunning = statusClass(a.card.displayStatus) === "running" ? 0 : 1
+      const bRunning = statusClass(b.card.displayStatus) === "running" ? 0 : 1
+      if (aRunning !== bRunning) return aRunning - bRunning
+      return a.index - b.index
+    })
+    .map((item) => item.card)
+}
+
 function statusClass(status: string): string {
   if (status === "in_progress") return "running"
   if (status === "completed") return "completed"
@@ -2947,8 +2969,8 @@ function formatTime(time?: string): string {
 
 .live-card {
   display: flex;
-  align-items: flex-start;
-  gap: 18rpx;
+  flex-direction: column;
+  gap: 14rpx;
   padding: 24rpx 22rpx;
   border-radius: 32rpx;
   background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 45%, transparent) !important;
@@ -2958,6 +2980,19 @@ function formatTime(time?: string): string {
   box-shadow: 0 8rpx 32rpx rgba(31, 38, 135, 0.07) !important;
   overflow: hidden;
   transition: transform 0.15s ease;
+}
+
+.live-card__main {
+  display: flex;
+  align-items: flex-start;
+  gap: 18rpx;
+  width: 100%;
+}
+
+.live-card--history {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 18rpx;
 }
 
 .live-card:active {
@@ -3014,7 +3049,7 @@ function formatTime(time?: string): string {
 
 .live-card__project-title {
   display: block;
-  font-size: 34rpx;
+  font-size: 30rpx;
   font-weight: 700;
   color: var(--up-main-color, #303133);
   line-height: 1.25;
@@ -3023,17 +3058,66 @@ function formatTime(time?: string): string {
 .live-card__session-name {
   display: block;
   margin-top: 8rpx;
-  font-size: 28rpx;
+  font-size: 25rpx;
   color: color-mix(in srgb, var(--up-content-color, #606266) 80%, transparent);
   line-height: 1.3;
 }
 
+.live-card__preview-row {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10rpx 16rpx;
+  border-radius: 16rpx;
+  background: color-mix(in srgb, var(--up-primary, #2f7cf6) 8%, transparent);
+}
+
 .live-card__preview {
-  display: block;
-  margin-top: 6rpx;
-  font-size: 22rpx;
+  flex: 1;
+  min-width: 0;
+  font-size: 20rpx;
+  font-weight: 600;
   line-height: 1.35;
-  color: var(--up-tips-color, #909193);
+  color: var(--up-primary, #2f7cf6);
+}
+
+.live-card__dots {
+  display: flex;
+  align-items: center;
+  gap: 6rpx;
+  flex-shrink: 0;
+}
+
+.live-card__dot {
+  width: 8rpx;
+  height: 8rpx;
+  border-radius: 999rpx;
+  background: var(--up-primary, #2f7cf6);
+  opacity: 0.35;
+  animation: livePreviewDot 1.2s ease-in-out infinite;
+}
+
+.live-card__dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.live-card__dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes livePreviewDot {
+  0%,
+  60%,
+  100% {
+    opacity: 0.35;
+    transform: scale(1);
+  }
+  30% {
+    opacity: 1;
+    transform: scale(1.35);
+  }
 }
 
 .live-card__side {
