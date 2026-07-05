@@ -41,7 +41,8 @@
             />
           </view>
 
-          <view v-if="showBottomGeneratingIndicator" class="bottom-generating">
+          <!-- 生成中胶囊暂时隐藏，活动反馈改由主会话输入区状态条承接。 -->
+          <view v-if="false && showBottomGeneratingIndicator" class="bottom-generating">
             <view class="bottom-generating__orb">
               <view class="bottom-generating__ring"></view>
               <view class="bottom-generating__dot"></view>

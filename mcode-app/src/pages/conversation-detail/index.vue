@@ -24,7 +24,16 @@
         <view class="detail-atmosphere__blob detail-atmosphere__blob--accent"></view>
       </view>
 
+      <view
+        class="detail-statusbar-fill"
+        :class="cyberModeEnabled && 'detail-statusbar-fill--cyber'"
+        :style="detailStatusBarFillStyle"
+        aria-hidden="true"
+      ></view>
+
       <up-navbar
+        :customClass="detailNavbarCustomClass"
+        :style="detailNavbarShellStyle"
         :autoBack="false"
         :fixed="true"
         :placeholder="true"
@@ -1032,6 +1041,7 @@ import { acpApi } from "@/api/acp"
 import { createGateway } from "@/services/gateway"
 import { getDirectToken } from "@/services/gateway/directTokenStore"
 import { toErrorMessage } from "@/services/gateway/error"
+import { syncIosStandaloneStatusBar } from "@/services/iosStandaloneStatusBar"
 import { ensureConversationSchema } from "@/services/db/migrations"
 import {
   countConversationTurns,
@@ -1572,6 +1582,23 @@ const detailTabsBarStyle = computed(() => ({
   ...buildTopOffsetStyle(getNavbarHeight()),
   borderRadius: "0",
 }))
+const detailNavbarCustomClass = computed(() =>
+  cyberModeEnabled.value ? "detail-navbar-shell detail-navbar-shell--cyber" : "detail-navbar-shell"
+)
+const detailNavbarShellStyle = computed(() => ({
+  "--detail-navbar-bg-color": navbarBgColor.value,
+  "--detail-navbar-status-bg-color": navbarStatusBarBgColor.value,
+}))
+const detailStatusBarFillStyle = computed(() => {
+  const statusBarHeight = getStatusBarHeight()
+  const height = statusBarHeight > 0 ? `${statusBarHeight}px` : "env(safe-area-inset-top)"
+  return {
+    height,
+    minHeight: height,
+    background: navbarStatusBarBgColor.value,
+    backgroundColor: navbarStatusBarBgColor.value,
+  }
+})
 const detailShellViewportStyle = computed(() => {
   const height = resolveDetailShellViewportHeight({
     windowHeight: getViewportHeight(),
@@ -1833,15 +1860,19 @@ function getDetailViewportHeight() {
   return Math.max(0, getViewportHeight() - getNavbarHeight())
 }
 
-function getNavbarHeight() {
-  const menuButtonRect = typeof uni.getMenuButtonBoundingClientRect === "function"
-    ? uni.getMenuButtonBoundingClientRect()
-    : null
-  const statusBarHeight = Number(
+function getStatusBarHeight() {
+  return Number(
     (typeof uni.getWindowInfo === "function" ? uni.getWindowInfo()?.statusBarHeight : 0)
       || uni.getSystemInfoSync?.()?.statusBarHeight
       || 0
   )
+}
+
+function getNavbarHeight() {
+  const menuButtonRect = typeof uni.getMenuButtonBoundingClientRect === "function"
+    ? uni.getMenuButtonBoundingClientRect()
+    : null
+  const statusBarHeight = getStatusBarHeight()
   if (menuButtonRect?.height && menuButtonRect?.top) {
     const verticalGap = Math.max(0, menuButtonRect.top - statusBarHeight)
     return statusBarHeight + verticalGap * 2 + menuButtonRect.height
@@ -2039,6 +2070,9 @@ const navbarStatusBarBgColor = computed(() =>
   cyberModeEnabled.value ? "#000000" : upThemeVar("--up-card-bg-color", "#ffffff")
 )
 const navbarBgColor = computed(() => navbarStatusBarBgColor.value)
+const navbarFrontColor = computed(() =>
+  cyberModeEnabled.value || isDarkReadableBackground(navbarBgColor.value) ? "#ffffff" : "#000000"
+)
 const detailTabsItemStyle = {
   paddingLeft: "0px",
   paddingRight: "0px",
@@ -2053,6 +2087,14 @@ const detailTabsInactiveStyle = computed(() => ({
   color: cyberModeEnabled.value ? "#73c989" : upThemeVar("--up-content-color", "#606266"),
 }))
 
+watch(
+  () => [navbarBgColor.value, navbarStatusBarBgColor.value, navbarFrontColor.value] as const,
+  () => {
+    syncDetailNativeStatusBar()
+  },
+  { immediate: true }
+)
+
 const slashCommands = ref<SlashCommandItem[]>([])
 
 const slashState = computed(() => resolveSlashState(inputText.value || ""))
@@ -2062,6 +2104,80 @@ const filteredSlashCommands = computed(() =>
 
 function getSlashCommandDesc(item: SlashCommandItem) {
   return slashCommandDescription(item)
+}
+
+function syncDetailNativeStatusBar() {
+  const backgroundColor = navbarBgColor.value || "#ffffff"
+  const statusBarBackgroundColor = navbarStatusBarBgColor.value || backgroundColor
+  const pageBackgroundColor = cyberModeEnabled.value
+    ? "#000000"
+    : upThemeVar("--up-page-bg-color", backgroundColor) || backgroundColor
+  const frontColor = navbarFrontColor.value === "#ffffff" ? "#ffffff" : "#000000"
+
+  try {
+    const result = uni.setNavigationBarColor?.({
+      frontColor,
+      backgroundColor: statusBarBackgroundColor,
+      animation: { duration: 0, timingFunc: "linear" },
+    })
+    result && typeof (result as Promise<unknown>).catch === "function" && (result as Promise<unknown>).catch(() => {})
+  } catch {}
+
+  try {
+    const result = (uni as any).setBackgroundColor?.({
+      backgroundColor: pageBackgroundColor,
+      backgroundColorTop: statusBarBackgroundColor,
+      backgroundColorBottom: pageBackgroundColor,
+    })
+    result && typeof (result as Promise<unknown>).catch === "function" && (result as Promise<unknown>).catch(() => {})
+  } catch {}
+
+  syncIosStandaloneStatusBar({
+    cyberModeEnabled: cyberModeEnabled.value,
+    statusBarBackgroundColor: statusBarBackgroundColor,
+    pageBackgroundColor,
+  })
+
+  try {
+    const nativeNavigator = (globalThis as any).plus?.navigator
+    nativeNavigator?.setStatusBarBackground?.(statusBarBackgroundColor)
+    nativeNavigator?.setStatusBarStyle?.(frontColor === "#ffffff" ? "light" : "dark")
+  } catch {}
+}
+
+function isDarkReadableBackground(color: string) {
+  const rgb = parseColorToRgb(color)
+  if (!rgb) return false
+  const [r, g, b] = rgb.map((value) => {
+    const normalized = value / 255
+    return normalized <= 0.03928
+      ? normalized / 12.92
+      : Math.pow((normalized + 0.055) / 1.055, 2.4)
+  })
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.42
+}
+
+function parseColorToRgb(color: string): [number, number, number] | null {
+  const value = String(color || "").trim()
+  const hexMatch = value.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i)
+  if (hexMatch) {
+    const hex = hexMatch[1].length === 3
+      ? hexMatch[1].split("").map((char) => `${char}${char}`).join("")
+      : hexMatch[1]
+    return [
+      parseInt(hex.slice(0, 2), 16),
+      parseInt(hex.slice(2, 4), 16),
+      parseInt(hex.slice(4, 6), 16),
+    ]
+  }
+
+  const rgbMatch = value.match(/^rgba?\((\d+),\s*(\d+),\s*(\d+)/i)
+  if (!rgbMatch) return null
+  return [
+    Number(rgbMatch[1]),
+    Number(rgbMatch[2]),
+    Number(rgbMatch[3]),
+  ]
 }
 
 const planStatusFilter = ref<PlanTaskFilter>("all")
@@ -2722,6 +2838,7 @@ onLoad((options: any) => {
 
 onShow(() => {
   restoreCyberModePreference()
+  syncDetailNativeStatusBar()
   if (!hasLoadedOnce.value || !conversationId.value || loading.value) return
   if (!needsResumeRefresh.value) return
   needsResumeRefresh.value = false
@@ -2767,6 +2884,7 @@ onUnload(() => {
     markConversationListDirty()
     runtime.clearSession(conversationId.value)
   }
+  currentInstance?.proxy?.upApplyNativeThemeUI?.()
 })
 
 function handleBackNavigation() {

@@ -3,7 +3,8 @@
     class="detail-body"
     :class="[
       cyberModeEnabled && 'detail-body--cyber',
-      cyberModeEnabled && `detail-body--${cyberEffectPhase || 'idle'}`,
+      cyberModeEnabled && cyberActive && 'detail-body--cyber-active',
+      cyberModeEnabled && cyberActive && `detail-body--${cyberEffectPhase || 'idle'}`,
     ]"
   >
     <slot name="history"></slot>
@@ -25,7 +26,9 @@
     <view class="composer-safe-area"></view>
     <view class="composer-stack">
       <view :class="['input-status-wrap', translucentMessageList && 'input-status-wrap--translucent']">
-        <slot name="status"></slot>
+        <view class="input-status-wrap__content">
+          <slot name="status"></slot>
+        </view>
       </view>
       <view
         :class="['input-wrap', translucentMessageList && 'input-wrap--translucent']"
@@ -52,6 +55,7 @@ const props = defineProps<{
   upperThreshold?: number
   cyberModeEnabled?: boolean
   cyberEffectPhase?: CyberEffectPhase
+  cyberActive?: boolean
 }>()
 
 const resolvedInputWrapStyle = computed(() =>
@@ -117,21 +121,121 @@ const emit = defineEmits<{
 }
 
 .input-status-wrap {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
   width: auto;
   max-width: 100%;
-  padding: 10rpx 14rpx;
+  padding: 2rpx;
   border-radius: 999rpx;
-  background: color-mix(in srgb, var(--up-page-bg-color, var(--up-bg-color, #f5f6f8)) 90%, transparent 10%);
-  border: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 36%, transparent 64%);
-  box-shadow: 0 8rpx 18rpx rgba(15, 23, 42, 0.025);
+  background: transparent;
+  border: 0;
+  box-shadow: 0 8rpx 20rpx rgba(15, 23, 42, 0.04);
   backdrop-filter: blur(16rpx);
   box-sizing: border-box;
 }
 
+.input-status-wrap::before,
+.input-status-wrap::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+}
+
+.input-status-wrap::before {
+  inset: -42rpx;
+  z-index: 0;
+  background:
+    conic-gradient(
+      from 0deg,
+      transparent 0deg,
+      color-mix(in srgb, var(--up-primary, #2979ff) 18%, transparent 82%) 48deg,
+      color-mix(in srgb, var(--up-primary, #2979ff) 74%, transparent 26%) 86deg,
+      transparent 130deg,
+      transparent 210deg,
+      color-mix(in srgb, var(--up-success, #19be6b) 46%, transparent 54%) 262deg,
+      transparent 318deg,
+      transparent 360deg
+    );
+  opacity: 0.72;
+}
+
+.input-status-wrap::after {
+  inset: 2rpx;
+  z-index: 0;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--up-page-bg-color, var(--up-bg-color, #f5f6f8)) 90%, transparent 10%);
+  border: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 42%, transparent 58%);
+  box-shadow: inset 0 0 10rpx color-mix(in srgb, var(--up-primary, #2979ff) 7%, transparent 93%);
+  backdrop-filter: blur(16rpx);
+}
+
+.input-status-wrap__content {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  max-width: 100%;
+  min-height: 30rpx;
+  padding: 8rpx 12rpx;
+  border-radius: inherit;
+  box-sizing: border-box;
+}
+
 .input-status-wrap--translucent {
-  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 38%, transparent 62%);
-  border: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 34%, transparent 66%);
   backdrop-filter: blur(10rpx);
+}
+
+.input-status-wrap--translucent::after {
+  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 38%, transparent 62%);
+  border-color: color-mix(in srgb, var(--up-border-color, #dadbde) 34%, transparent 66%);
+  backdrop-filter: blur(10rpx);
+}
+
+.detail-body--cyber .input-status-wrap {
+  box-shadow: 0 0 0 1rpx rgba(0, 255, 65, 0.08), 0 0 28rpx rgba(0, 255, 65, 0.1);
+}
+
+.detail-body--cyber-active .input-status-wrap::before {
+  background:
+    conic-gradient(
+      from 0deg,
+      transparent 0deg,
+      rgba(0, 255, 65, 0.12) 34deg,
+      rgba(141, 255, 180, 0.98) 72deg,
+      transparent 118deg,
+      transparent 194deg,
+      rgba(0, 255, 65, 0.5) 244deg,
+      rgba(186, 255, 200, 0.9) 284deg,
+      transparent 330deg,
+      transparent 360deg
+    );
+  opacity: 0.95;
+  animation: inputStatusLedSpin 1.55s linear infinite;
+}
+
+.detail-body--cyber:not(.detail-body--cyber-active) .input-status-wrap::before {
+  transform: rotate(72deg);
+}
+
+.detail-body--cyber .input-status-wrap::after {
+  background:
+    linear-gradient(90deg, rgba(0, 255, 65, 0.035) 1rpx, transparent 1rpx),
+    rgba(0, 15, 5, 0.92);
+  background-size: 28rpx 28rpx, auto;
+  border-color: rgba(0, 255, 65, 0.24);
+  box-shadow: inset 0 0 18rpx rgba(0, 255, 65, 0.08);
+}
+
+.detail-body--cyber-active.detail-body--ramp .input-status-wrap::before,
+.detail-body--cyber-active.detail-body--streaming .input-status-wrap::before {
+  animation-duration: 0.95s;
+}
+
+@keyframes inputStatusLedSpin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .input-wrap {

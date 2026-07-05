@@ -276,10 +276,18 @@ describe("ConversationDetailBody", () => {
       path.resolve(__dirname, "../../../src/pages/conversation-detail/index.vue"),
       "utf8"
     )
+    const html = fs.readFileSync(
+      path.resolve(__dirname, "../../../index.html"),
+      "utf8"
+    )
 
     expect(source).toContain(':statusBarBgColor="navbarStatusBarBgColor"')
     expect(source).toContain('cyberModeEnabled.value ? "#000000" : upThemeVar("--up-card-bg-color", "#ffffff")')
     expect(source).toContain("const navbarBgColor = computed(() => navbarStatusBarBgColor.value)")
+    expect(source).toContain('height = statusBarHeight > 0 ? `${statusBarHeight}px` : "env(safe-area-inset-top)"')
+    expect(source).toContain("syncIosStandaloneStatusBar({")
+    expect(html).toContain('<meta name="apple-mobile-web-app-status-bar-style" content="black" />')
+    expect(html).toContain('<meta name="theme-color" content="#f3f4f6" />')
   })
 
   it("does not add safe-area padding to the bottom scroll anchor", () => {

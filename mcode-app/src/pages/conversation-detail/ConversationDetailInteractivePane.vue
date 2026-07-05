@@ -3,7 +3,8 @@
     :class="[
       'detail-interactive-pane',
       cyberModeEnabled && 'detail-interactive-pane--cyber',
-      cyberModeEnabled && `detail-interactive-pane--${cyberEffectPhase || 'idle'}`,
+      cyberModeEnabled && active && 'detail-interactive-pane--cyber-active',
+      cyberModeEnabled && active && `detail-interactive-pane--${cyberEffectPhase || 'idle'}`,
     ]"
   >
   <ConversationDetailBody
@@ -16,7 +17,8 @@
     :message-scroll-with-animation="messageScrollWithAnimation"
     :upper-threshold="120"
     :cyber-mode-enabled="cyberModeEnabled"
-    :cyber-effect-phase="cyberEffectPhase"
+    :cyber-effect-phase="active ? cyberEffectPhase : 'idle'"
+    :cyber-active="Boolean(cyberModeEnabled && active)"
     @message-scroll="handleMessageListScroll"
     @message-scroll-upper="handleMessageListScrollUpper"
   >
@@ -68,8 +70,8 @@
           :agent-type="normalizedAgentType"
           :showRegenerate="index === renderMessageItems.length - 1 && item.message.role === 'assistant'"
           :translucent="translucentMessageList"
-          :cyber-mode-enabled="Boolean(cyberModeEnabled && active)"
-          :cyber-effect-phase="cyberEffectPhase || 'idle'"
+          :cyber-mode-enabled="Boolean(cyberModeEnabled)"
+          :cyber-effect-phase="active ? (cyberEffectPhase || 'idle') : 'idle'"
           :cyber-active="Boolean(cyberModeEnabled && active)"
           @regenerate="regenerateLastMessage"
         />
@@ -82,8 +84,9 @@
         </text>
       </view>
 
+      <!-- 生成中胶囊暂时隐藏，活动反馈改由输入区上方状态条承接。 -->
       <view
-        v-if="showBottomGeneratingIndicator"
+        v-if="false && showBottomGeneratingIndicator"
         :class="[
           'bottom-generating',
           translucentMessageList && 'bottom-generating--translucent',
@@ -2556,6 +2559,11 @@ function showSharedLiveBlockedToast() {
   height: 100%;
   min-height: 100%;
   overflow: hidden;
+}
+
+.detail-interactive-pane--cyber:not(.detail-interactive-pane--cyber-active) :deep(*) {
+  animation: none !important;
+  transition: none !important;
 }
 
 .input-tool-btn--text {

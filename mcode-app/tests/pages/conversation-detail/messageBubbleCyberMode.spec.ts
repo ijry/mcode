@@ -30,8 +30,10 @@ describe("messageBubbleCyberMode", () => {
       "utf8"
     )
 
-    expect(interactive).toContain(':cyber-mode-enabled="Boolean(cyberModeEnabled && active)"')
-    expect(interactive).toContain(`:cyber-effect-phase="cyberEffectPhase || 'idle'"`)
+    expect(interactive).toContain(':cyber-mode-enabled="cyberModeEnabled"')
+    expect(interactive).toContain(`:cyber-effect-phase="active ? cyberEffectPhase : 'idle'"`)
+    expect(interactive).toContain(':cyber-mode-enabled="Boolean(cyberModeEnabled)"')
+    expect(interactive).toContain(`:cyber-effect-phase="active ? (cyberEffectPhase || 'idle') : 'idle'"`)
     expect(interactive).toContain(':cyber-active="Boolean(cyberModeEnabled && active)"')
     expect(readonly).toContain(':cyber-mode-enabled="cyberModeEnabled"')
     expect(readonly).toContain(':cyber-active="false"')

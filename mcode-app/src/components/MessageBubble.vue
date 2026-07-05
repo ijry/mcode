@@ -4,6 +4,7 @@
       'bubble-wrap',
       `bubble-wrap--${message.role}`,
       cyberModeEnabled && 'bubble-wrap--cyber',
+      cyberModeEnabled && cyberActive && 'bubble-wrap--cyber-active',
       cyberModeEnabled && `bubble-wrap--cyber-${cyberEffectPhase || 'idle'}`,
     ]"
   >
@@ -521,6 +522,9 @@ function normalizeAgentType(raw?: string) {
 }
 
 .bubble-wrap--cyber {
+  --message-cyber-text: rgba(186, 255, 200, 0.88);
+  --message-cyber-border: rgba(0, 255, 65, 0.36);
+  --message-cyber-panel: rgba(0, 13, 4, 0.56);
   font-family: "Courier New", monospace;
 }
 
@@ -532,10 +536,19 @@ function normalizeAgentType(raw?: string) {
   position: relative;
   overflow: hidden;
   border-radius: 10rpx;
-  border: 1rpx solid rgba(0, 255, 65, 0.24);
-  background: rgba(0, 13, 4, 0.9);
-  color: #baffc8;
-  box-shadow: inset 0 0 28rpx rgba(0, 255, 65, 0.06), 0 0 20rpx rgba(0, 255, 65, 0.08);
+  border: 1rpx solid var(--message-cyber-border) !important;
+  background:
+    linear-gradient(90deg, rgba(0, 255, 65, 0.045) 1rpx, transparent 1rpx),
+    linear-gradient(180deg, rgba(0, 255, 65, 0.035) 1rpx, transparent 1rpx),
+    radial-gradient(circle at 18% 0, rgba(134, 255, 168, 0.16), transparent 36%),
+    var(--message-cyber-panel) !important;
+  background-size: 42rpx 42rpx, 42rpx 42rpx, auto, auto;
+  color: var(--message-cyber-text) !important;
+  box-shadow:
+    inset 0 0 30rpx rgba(0, 255, 65, 0.1),
+    0 0 0 1rpx rgba(0, 255, 65, 0.12),
+    0 0 24rpx rgba(0, 255, 65, 0.16),
+    0 16rpx 34rpx rgba(0, 0, 0, 0.26) !important;
 }
 
 .bubble-wrap--cyber .bubble::before {
@@ -549,24 +562,59 @@ function normalizeAgentType(raw?: string) {
   opacity: 0.62;
 }
 
+.bubble-wrap--cyber .bubble::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(
+      180deg,
+      rgba(186, 255, 200, 0.055) 0,
+      rgba(186, 255, 200, 0.055) 1rpx,
+      transparent 1rpx,
+      transparent 8rpx
+    ),
+    linear-gradient(115deg, transparent 0, rgba(0, 255, 65, 0.08) 46%, transparent 68%);
+  opacity: 0.58;
+}
+
 .bubble-wrap--cyber .bubble--assistant {
   background:
-    linear-gradient(135deg, rgba(0, 255, 65, 0.08), transparent 34%),
-    rgba(0, 13, 4, 0.92);
+    linear-gradient(90deg, rgba(0, 255, 65, 0.045) 1rpx, transparent 1rpx),
+    linear-gradient(180deg, rgba(0, 255, 65, 0.035) 1rpx, transparent 1rpx),
+    linear-gradient(135deg, rgba(0, 255, 65, 0.12), transparent 38%),
+    rgba(0, 13, 4, 0.56) !important;
+  background-size: 42rpx 42rpx, 42rpx 42rpx, auto, auto;
   border-top-left-radius: 4rpx;
 }
 
 .bubble-wrap--cyber .bubble--user {
   background:
-    linear-gradient(135deg, rgba(124, 255, 158, 0.16), transparent 42%),
-    rgba(0, 58, 18, 0.9);
-  border-color: rgba(137, 255, 168, 0.34);
+    linear-gradient(90deg, rgba(150, 255, 174, 0.06) 1rpx, transparent 1rpx),
+    linear-gradient(180deg, rgba(150, 255, 174, 0.045) 1rpx, transparent 1rpx),
+    linear-gradient(135deg, rgba(124, 255, 158, 0.22), transparent 44%),
+    rgba(0, 58, 18, 0.6) !important;
+  background-size: 42rpx 42rpx, 42rpx 42rpx, auto, auto;
+  border-color: rgba(137, 255, 168, 0.42) !important;
   border-top-right-radius: 4rpx;
 }
 
 .bubble-wrap--cyber .bubble--assistant-translucent,
 .bubble-wrap--cyber .bubble--user-translucent {
   backdrop-filter: blur(3rpx);
+}
+
+.bubble-wrap--cyber:not(.bubble-wrap--cyber-active),
+.bubble-wrap--cyber:not(.bubble-wrap--cyber-active) * {
+  animation: none !important;
+}
+
+.bubble-wrap--cyber .part-wrap,
+.bubble-wrap--cyber .typing-dots,
+.bubble-wrap--cyber .bubble-error {
+  position: relative;
+  z-index: 1;
 }
 
 /* ===== 内容区块 ===== */
@@ -625,8 +673,9 @@ function normalizeAgentType(raw?: string) {
 }
 
 .part-text__cyber-real {
-  opacity: 0.26;
-  filter: saturate(0.82);
+  opacity: 0;
+  visibility: hidden;
+  filter: none;
 }
 
 .part-text__cyber-overlay {
@@ -638,38 +687,56 @@ function normalizeAgentType(raw?: string) {
   font-size: 13px;
   line-height: 1.2;
   font-family: "Courier New", monospace;
-  color: #8dffb4;
+  color: rgba(141, 255, 180, 0.92);
   text-shadow: 0 0 12rpx rgba(0, 255, 65, 0.58), 0 0 28rpx rgba(0, 255, 65, 0.18);
   pointer-events: none;
   animation: cyberTextGlitch 0.18s steps(2) infinite;
 }
 
 .bubble-wrap--cyber .part-text {
-  color: #baffc8;
+  color: var(--message-cyber-text);
 
   :deep(*) {
-    color: #baffc8 !important;
+    color: var(--message-cyber-text) !important;
+  }
+
+  :deep(code),
+  :deep(pre) {
+    background: rgba(0, 32, 12, 0.42) !important;
+    border-color: rgba(0, 255, 65, 0.18) !important;
+    color: rgba(216, 255, 228, 0.9) !important;
   }
 }
 
 .bubble-wrap--cyber .part-text__cyber {
   padding: 8rpx 10rpx;
   border-radius: 8rpx;
-  background: rgba(0, 28, 10, 0.46);
+  background: rgba(0, 28, 10, 0.14);
   border-left: 2rpx solid rgba(0, 255, 65, 0.64);
   box-shadow: inset 0 0 18rpx rgba(0, 255, 65, 0.08);
 }
 
 .bubble-wrap--cyber .part-text__cyber-real {
-  opacity: 0.18;
+  opacity: 0;
 }
 
-.bubble-wrap--cyber .part-thinking,
+.bubble-wrap--cyber .part-text__cyber-overlay {
+  inset: 8rpx 10rpx;
+}
+
+.bubble-wrap--cyber .part-thinking {
+  background: rgba(24, 17, 0, 0.24);
+  border-color: rgba(255, 186, 73, 0.26);
+  color: rgba(255, 228, 168, 0.9);
+  backdrop-filter: blur(2rpx);
+  box-shadow: inset 0 0 18rpx rgba(255, 173, 51, 0.06);
+}
+
 .bubble-wrap--cyber .part-tool-result,
 .bubble-wrap--cyber .part-plan {
-  background: rgba(24, 17, 0, 0.86);
-  border-color: rgba(255, 186, 73, 0.42);
-  color: #ffe4a8;
+  background: rgba(24, 17, 0, 0.38);
+  border-color: rgba(255, 186, 73, 0.34);
+  color: rgba(255, 228, 168, 0.9);
 }
 
 .bubble-wrap--cyber .thinking-hd__label,
@@ -678,7 +745,7 @@ function normalizeAgentType(raw?: string) {
 .bubble-wrap--cyber .tool-result-hd__label,
 .bubble-wrap--cyber .plan-hd__label,
 .bubble-wrap--cyber .plan-step__text {
-  color: #ffe4a8;
+  color: rgba(255, 228, 168, 0.9);
 }
 
 .bubble-wrap--cyber .dot {
@@ -687,8 +754,53 @@ function normalizeAgentType(raw?: string) {
 }
 
 .bubble-wrap--cyber .action-btn {
-  background: rgba(0, 22, 8, 0.88);
+  background: rgba(0, 22, 8, 0.52);
   border: 1rpx solid rgba(0, 255, 65, 0.18);
+}
+
+.bubble-wrap--cyber :deep(.tool-group__summary),
+.bubble-wrap--cyber :deep(.tool-block),
+.bubble-wrap--cyber :deep(.goal-card),
+.bubble-wrap--cyber :deep(.goal-card__body),
+.bubble-wrap--cyber :deep(.ask-question-result),
+.bubble-wrap--cyber :deep(.ask-question-result__state),
+.bubble-wrap--cyber :deep(.ask-question-answer) {
+  background:
+    linear-gradient(135deg, rgba(0, 255, 65, 0.08), transparent 44%),
+    rgba(0, 20, 7, 0.54) !important;
+  border-color: rgba(0, 255, 65, 0.26) !important;
+  color: var(--message-cyber-text) !important;
+  box-shadow: inset 0 0 20rpx rgba(0, 255, 65, 0.07) !important;
+}
+
+.bubble-wrap--cyber :deep(.tool-group__label),
+.bubble-wrap--cyber :deep(.tool-name),
+.bubble-wrap--cyber :deep(.section-label),
+.bubble-wrap--cyber :deep(.goal-card__title),
+.bubble-wrap--cyber :deep(.goal-card__chip),
+.bubble-wrap--cyber :deep(.goal-card__label),
+.bubble-wrap--cyber :deep(.goal-card__objective),
+.bubble-wrap--cyber :deep(.goal-card__thinking),
+.bubble-wrap--cyber :deep(.goal-card__result),
+.bubble-wrap--cyber :deep(.goal-card__plan),
+.bubble-wrap--cyber :deep(.goal-card__meta),
+.bubble-wrap--cyber :deep(.goal-card__markdown),
+.bubble-wrap--cyber :deep(.ask-question-result__title),
+.bubble-wrap--cyber :deep(.ask-question-result__subtitle),
+.bubble-wrap--cyber :deep(.ask-question-answer__header),
+.bubble-wrap--cyber :deep(.ask-question-answer__question),
+.bubble-wrap--cyber :deep(.ask-question-answer__empty) {
+  color: var(--message-cyber-text) !important;
+  text-shadow: 0 0 10rpx rgba(0, 255, 65, 0.24);
+}
+
+.bubble-wrap--cyber :deep(.code-block) {
+  background: rgba(0, 8, 3, 0.62) !important;
+  border-color: rgba(0, 255, 65, 0.2) !important;
+}
+
+.bubble-wrap--cyber :deep(.code-text) {
+  color: rgba(216, 255, 228, 0.9) !important;
 }
 
 @keyframes cyberTextGlitch {

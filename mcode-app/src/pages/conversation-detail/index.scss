@@ -70,8 +70,8 @@
   border-color: rgba(102, 255, 166, 0.18);
 }
 
-.page--cyber-streaming .detail-body--cyber .input-status-wrap,
-.page--cyber-ramp .detail-body--cyber .input-status-wrap {
+.page--cyber-streaming .detail-body--cyber-active .input-status-wrap,
+.page--cyber-ramp .detail-body--cyber-active .input-status-wrap {
   animation: cyberScanPulse 1.8s ease-in-out infinite;
 }
 
@@ -129,6 +129,16 @@
 .page--cyber .detail-shell__swiper-item,
 .page--cyber .detail-shell__page {
   background: transparent !important;
+}
+
+.page--cyber .detail-statusbar-fill,
+.page--cyber :deep(.detail-navbar-shell),
+.page--cyber :deep(.detail-navbar-shell .u-navbar__placeholder),
+.page--cyber :deep(.detail-navbar-shell .u-navbar--fixed),
+.page--cyber :deep(.detail-navbar-shell .u-status-bar),
+.page--cyber :deep(.detail-navbar-shell .u-navbar__content) {
+  background: #000000 !important;
+  background-color: #000000 !important;
 }
 
 .page--cyber .detail-atmosphere {
@@ -232,22 +242,25 @@
 
 :deep(.detail-interactive-pane--cyber .bubble--assistant),
 :deep(.readonly-pane--cyber .bubble--assistant) {
-  background: rgba(0, 13, 4, 0.9) !important;
-  border: 1rpx solid rgba(0, 255, 65, 0.24) !important;
-  box-shadow: inset 0 0 28rpx rgba(0, 255, 65, 0.06), 0 0 20rpx rgba(0, 255, 65, 0.08) !important;
+  background: rgba(0, 13, 4, 0.56) !important;
+  border: 1rpx solid rgba(0, 255, 65, 0.22) !important;
+  box-shadow: inset 0 0 24rpx rgba(0, 255, 65, 0.05), 0 0 18rpx rgba(0, 255, 65, 0.06) !important;
 }
 
 :deep(.detail-interactive-pane--cyber .bubble--user),
 :deep(.readonly-pane--cyber .bubble--user) {
-  background: rgba(0, 62, 20, 0.88) !important;
-  border: 1rpx solid rgba(137, 255, 168, 0.32) !important;
-  box-shadow: inset 0 0 22rpx rgba(0, 255, 65, 0.08), 0 0 20rpx rgba(0, 255, 65, 0.1) !important;
+  background: rgba(0, 62, 20, 0.6) !important;
+  border: 1rpx solid rgba(137, 255, 168, 0.3) !important;
+  box-shadow: inset 0 0 20rpx rgba(0, 255, 65, 0.06), 0 0 18rpx rgba(0, 255, 65, 0.08) !important;
 }
 
 :deep(.detail-interactive-pane--cyber .part-text),
 :deep(.readonly-pane--cyber .part-text),
 :deep(.detail-interactive-pane--cyber .tool-result__text),
-:deep(.detail-interactive-pane--cyber .plan-step__text),
+:deep(.detail-interactive-pane--cyber .plan-step__text) {
+  color: rgba(186, 255, 200, 0.88) !important;
+}
+
 :deep(.detail-interactive-pane--cyber .composer-config-row__label),
 :deep(.detail-interactive-pane--cyber .composer-config-row__value),
 :deep(.detail-interactive-pane--cyber .composer-panel__section-title),
@@ -260,14 +273,22 @@
 :deep(.detail-interactive-pane--cyber .part-tool-result),
 :deep(.detail-interactive-pane--cyber .part-plan),
 :deep(.readonly-pane--cyber .part-plan) {
-  background: rgba(24, 17, 0, 0.88) !important;
-  border-color: rgba(255, 186, 73, 0.42) !important;
-  color: #ffe4a8 !important;
+  background: rgba(24, 17, 0, 0.38) !important;
+  border-color: rgba(255, 186, 73, 0.34) !important;
+  color: rgba(255, 228, 168, 0.9) !important;
   box-shadow: inset 0 0 22rpx rgba(255, 173, 51, 0.08);
 }
 
-.page--cyber-ramp :deep(.detail-interactive-pane--cyber .input-status-wrap),
-.page--cyber-streaming :deep(.detail-interactive-pane--cyber .input-status-wrap) {
+:deep(.detail-interactive-pane--cyber .part-thinking),
+:deep(.readonly-pane--cyber .part-thinking) {
+  background: rgba(24, 17, 0, 0.24) !important;
+  border-color: rgba(255, 186, 73, 0.26) !important;
+  backdrop-filter: blur(2rpx);
+  box-shadow: inset 0 0 18rpx rgba(255, 173, 51, 0.06) !important;
+}
+
+.page--cyber-ramp :deep(.detail-interactive-pane--cyber-active .input-status-wrap),
+.page--cyber-streaming :deep(.detail-interactive-pane--cyber-active .input-status-wrap) {
   animation: cyberScanPulse 1.12s ease-in-out infinite;
 }
 
@@ -355,6 +376,33 @@
   width: 220rpx;
   height: 220rpx;
   background: color-mix(in srgb, var(--up-primary, #2979ff) 14%, transparent 86%);
+}
+
+.detail-statusbar-fill {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 25;
+  pointer-events: none;
+  transform: translateZ(0);
+}
+
+:deep(.detail-navbar-shell),
+:deep(.detail-navbar-shell .u-navbar__placeholder),
+:deep(.detail-navbar-shell .u-navbar--fixed),
+:deep(.detail-navbar-shell .u-navbar__content) {
+  background: var(--detail-navbar-bg-color, var(--up-card-bg-color, #ffffff)) !important;
+  background-color: var(--detail-navbar-bg-color, var(--up-card-bg-color, #ffffff)) !important;
+}
+
+:deep(.detail-navbar-shell .u-status-bar) {
+  background: var(--detail-navbar-status-bg-color, var(--detail-navbar-bg-color, var(--up-card-bg-color, #ffffff))) !important;
+  background-color: var(--detail-navbar-status-bg-color, var(--detail-navbar-bg-color, var(--up-card-bg-color, #ffffff))) !important;
+}
+
+:deep(.detail-navbar-shell .u-navbar--fixed) {
+  z-index: 26 !important;
 }
 
 .detail-navbar {
