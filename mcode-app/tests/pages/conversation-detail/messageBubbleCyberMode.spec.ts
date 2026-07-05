@@ -8,10 +8,11 @@ describe("messageBubbleCyberMode", () => {
       "utf8"
     )
 
-    expect(source).toContain("cyberModeEnabled?: boolean")
+    expect(source).toContain("detailTheme?: DetailThemeId")
     expect(source).toContain("cyberEffectPhase?: CyberEffectPhase")
     expect(source).toContain("cyberActive?: boolean")
     expect(source).toContain("bubble-wrap--cyber")
+    expect(source).toContain("bubble-wrap--theme-sweet")
     expect(source).toContain("latestCyberTextPartIndex")
     expect(source).toContain("index === latestCyberTextPartIndex.value")
     expect(source).toContain("buildCyberDecodeText")
@@ -30,12 +31,12 @@ describe("messageBubbleCyberMode", () => {
       "utf8"
     )
 
-    expect(interactive).toContain(':cyber-mode-enabled="cyberModeEnabled"')
+    expect(interactive).toContain(':detail-theme="detailTheme"')
     expect(interactive).toContain(`:cyber-effect-phase="active ? cyberEffectPhase : 'idle'"`)
-    expect(interactive).toContain(':cyber-mode-enabled="Boolean(cyberModeEnabled)"')
+    expect(interactive).toContain(':detail-theme="detailTheme"')
     expect(interactive).toContain(`:cyber-effect-phase="active ? (cyberEffectPhase || 'idle') : 'idle'"`)
-    expect(interactive).toContain(':cyber-active="Boolean(cyberModeEnabled && active)"')
-    expect(readonly).toContain(':cyber-mode-enabled="cyberModeEnabled"')
+    expect(interactive).toContain(':cyber-active="Boolean(detailTheme === \'matrix\' && active)"')
+    expect(readonly).toContain(':detail-theme="detailTheme"')
     expect(readonly).toContain(':cyber-active="false"')
   })
 })

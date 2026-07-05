@@ -2,9 +2,11 @@
   <view
     :class="[
       'detail-interactive-pane',
-      cyberModeEnabled && 'detail-interactive-pane--cyber',
-      cyberModeEnabled && active && 'detail-interactive-pane--cyber-active',
-      cyberModeEnabled && active && `detail-interactive-pane--${cyberEffectPhase || 'idle'}`,
+      detailTheme !== 'default' && `detail-interactive-pane--theme-${detailTheme}`,
+      detailTheme === 'matrix' && 'detail-interactive-pane--cyber',
+      detailTheme === 'matrix' && active && 'detail-interactive-pane--cyber-active',
+      detailTheme === 'matrix' && active && `detail-interactive-pane--${cyberEffectPhase || 'idle'}`,
+      detailTheme === 'sweet' && `detail-interactive-pane--sweet-${cyberEffectPhase || 'idle'}`,
     ]"
   >
   <ConversationDetailBody
@@ -16,9 +18,9 @@
     :message-scroll-into-view="messageScrollIntoView"
     :message-scroll-with-animation="messageScrollWithAnimation"
     :upper-threshold="120"
-    :cyber-mode-enabled="cyberModeEnabled"
+    :detail-theme="detailTheme"
     :cyber-effect-phase="active ? cyberEffectPhase : 'idle'"
-    :cyber-active="Boolean(cyberModeEnabled && active)"
+    :cyber-active="Boolean(detailTheme === 'matrix' && active)"
     @message-scroll="handleMessageListScroll"
     @message-scroll-upper="handleMessageListScrollUpper"
   >
@@ -70,9 +72,9 @@
           :agent-type="normalizedAgentType"
           :showRegenerate="index === renderMessageItems.length - 1 && item.message.role === 'assistant'"
           :translucent="translucentMessageList"
-          :cyber-mode-enabled="Boolean(cyberModeEnabled)"
+          :detail-theme="detailTheme"
           :cyber-effect-phase="active ? (cyberEffectPhase || 'idle') : 'idle'"
-          :cyber-active="Boolean(cyberModeEnabled && active)"
+          :cyber-active="Boolean(detailTheme === 'matrix' && active)"
           @regenerate="regenerateLastMessage"
         />
       </view>
@@ -836,7 +838,7 @@ import { getRemoteProjectFileTree, type ProjectFileNode } from "@/services/proje
 import { loadRemoteProjectConversations } from "@/services/projectSessions"
 import type { AgentOptionsSnapshot, PendingQuestionState, PermissionRequest, QuestionAnswer } from "@/types/acp"
 import ConversationDetailBody from "./ConversationDetailBody.vue"
-import type { CyberEffectPhase } from "./detailCyberMode"
+import type { CyberEffectPhase, DetailThemeId } from "./detailCyberMode"
 import { buildRenderMessageItems } from "./detailMessagePresentation"
 import {
   firstString,
@@ -959,7 +961,7 @@ const props = defineProps<{
   translucentMessageList?: boolean
   slashCommands?: SlashCommandItem[]
   uploadTarget?: { url: string; header: Record<string, string> } | null
-  cyberModeEnabled?: boolean
+  detailTheme?: DetailThemeId
   cyberEffectPhase?: CyberEffectPhase
 }>()
 
@@ -974,7 +976,7 @@ const upThemeVar = (varName: string, fallbackColor?: string) =>
   currentInstance?.proxy?.upThemeVar?.(varName, fallbackColor) ?? (fallbackColor || "")
 const upThemeCardStyle = computed(() => currentInstance?.proxy?.upThemeCardStyle || {})
 const cyberPanelStyle = computed(() =>
-  props.cyberModeEnabled
+  props.detailTheme === "matrix"
     ? {
         background: "rgba(0, 12, 4, 0.98)",
         backgroundColor: "rgba(0, 12, 4, 0.98)",

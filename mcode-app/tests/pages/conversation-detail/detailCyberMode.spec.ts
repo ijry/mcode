@@ -1,62 +1,81 @@
 import {
+  DETAIL_THEME_OPTIONS,
+  DETAIL_THEME_STORAGE_KEY,
   DETAIL_CYBER_MODE_STORAGE_KEY,
   buildCyberDecodeText,
   buildCyberModeMenuAction,
+  buildDetailThemeMenuActions,
   deriveCyberEffectPhase,
+  normalizeDetailThemeStorage,
   normalizeCyberModeStorage,
   shouldShowDetailBackgroundImage,
 } from "@/pages/conversation-detail/detailCyberMode"
 
 describe("detailCyberMode", () => {
   it("normalizes stored toggle snapshots and menu actions", () => {
+    expect(DETAIL_THEME_STORAGE_KEY).toBe("mcode_detail_theme_v1")
     expect(DETAIL_CYBER_MODE_STORAGE_KEY).toBe("mcode_detail_cyber_mode_v1")
+    expect(DETAIL_THEME_OPTIONS).toHaveLength(3)
+    expect(normalizeDetailThemeStorage("sweet")).toBe("sweet")
+    expect(normalizeDetailThemeStorage('{"theme":"matrix"}')).toBe("matrix")
+    expect(normalizeDetailThemeStorage('{"enabled":true}')).toBe("matrix")
+    expect(normalizeDetailThemeStorage("garbage")).toBe("default")
     expect(normalizeCyberModeStorage(true)).toBe(true)
     expect(normalizeCyberModeStorage('{"enabled":true}')).toBe(true)
     expect(normalizeCyberModeStorage('{"enabled":false}')).toBe(false)
     expect(normalizeCyberModeStorage("garbage")).toBe(false)
+    expect(buildDetailThemeMenuActions("sweet").map((item) => item.id)).toEqual([
+      "default",
+      "matrix",
+      "sweet",
+    ])
     expect(buildCyberModeMenuAction(false)).toEqual({
-      name: "炫酷模式",
+      name: "微黑暗帝国",
       color: "#22c55e",
     })
     expect(buildCyberModeMenuAction(true)).toEqual({
-      name: "关闭炫酷模式",
+      name: "关闭微黑暗帝国",
       color: "#19be6b",
     })
   })
 
   it("derives phases and background precedence", () => {
     expect(shouldShowDetailBackgroundImage({
-      cyberModeEnabled: false,
+      detailTheme: "default",
       detailBackgroundImageUrl: "file://bg.png",
     })).toBe(true)
     expect(shouldShowDetailBackgroundImage({
-      cyberModeEnabled: true,
+      detailTheme: "matrix",
+      detailBackgroundImageUrl: "file://bg.png",
+    })).toBe(false)
+    expect(shouldShowDetailBackgroundImage({
+      detailTheme: "sweet",
       detailBackgroundImageUrl: "file://bg.png",
     })).toBe(false)
 
     expect(deriveCyberEffectPhase({
-      cyberModeEnabled: true,
+      detailTheme: "matrix",
       runtimeStatus: "idle",
       hasLiveMessage: false,
       lastStreamEndedAt: 0,
       now: 100,
     })).toBe("idle")
     expect(deriveCyberEffectPhase({
-      cyberModeEnabled: true,
+      detailTheme: "sweet",
       runtimeStatus: "thinking",
       hasLiveMessage: false,
       lastStreamEndedAt: 0,
       now: 100,
     })).toBe("ramp")
     expect(deriveCyberEffectPhase({
-      cyberModeEnabled: true,
+      detailTheme: "matrix",
       runtimeStatus: "thinking",
       hasLiveMessage: true,
       lastStreamEndedAt: 0,
       now: 100,
     })).toBe("streaming")
     expect(deriveCyberEffectPhase({
-      cyberModeEnabled: true,
+      detailTheme: "sweet",
       runtimeStatus: "idle",
       hasLiveMessage: false,
       lastStreamEndedAt: 1_000,

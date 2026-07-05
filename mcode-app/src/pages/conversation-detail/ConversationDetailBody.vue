@@ -2,9 +2,11 @@
   <view
     class="detail-body"
     :class="[
-      cyberModeEnabled && 'detail-body--cyber',
-      cyberModeEnabled && cyberActive && 'detail-body--cyber-active',
-      cyberModeEnabled && cyberActive && `detail-body--${cyberEffectPhase || 'idle'}`,
+      detailTheme !== 'default' && `detail-body--theme-${detailTheme}`,
+      detailTheme === 'matrix' && 'detail-body--cyber',
+      detailTheme === 'matrix' && cyberActive && 'detail-body--cyber-active',
+      detailTheme === 'matrix' && cyberActive && `detail-body--${cyberEffectPhase || 'idle'}`,
+      detailTheme === 'sweet' && `detail-body--sweet-${cyberEffectPhase || 'idle'}`,
     ]"
   >
     <slot name="history"></slot>
@@ -42,7 +44,7 @@
 
 <script setup lang="ts">
 import { computed, type StyleValue } from "vue"
-import type { CyberEffectPhase } from "./detailCyberMode"
+import type { CyberEffectPhase, DetailThemeId } from "./detailCyberMode"
 
 const props = defineProps<{
   messageListPageStyle?: StyleValue
@@ -53,7 +55,7 @@ const props = defineProps<{
   messageScrollIntoView?: string
   messageScrollWithAnimation?: boolean
   upperThreshold?: number
-  cyberModeEnabled?: boolean
+  detailTheme?: DetailThemeId
   cyberEffectPhase?: CyberEffectPhase
   cyberActive?: boolean
 }>()

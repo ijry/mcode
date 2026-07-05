@@ -1,8 +1,8 @@
 <template>
   <view
     class="page"
-    :class="[cyberModeEnabled && 'page--cyber', cyberModeEnabled && `page--cyber-${cyberEffectPhase}`]"
-    :style="[upThemeVars, upThemePageStyle, cyberPageStyle]"
+    :class="pageThemeClasses"
+    :style="[upThemeVars, upThemePageStyle, detailThemePageStyle]"
   >
     <view v-if="!conversationId" class="empty-container">
       <up-empty mode="data" text="会话不存在"></up-empty>
@@ -18,7 +18,8 @@
           @error="handleDetailBackgroundLoadError"
         />
         <view v-if="showDetailBackgroundImage" class="detail-atmosphere__background-scrim"></view>
-        <ConversationDetailCyberRain :enabled="cyberModeEnabled" :phase="cyberEffectPhase" />
+        <ConversationDetailCyberRain :enabled="detailTheme === 'matrix'" :phase="cyberEffectPhase" />
+        <ConversationDetailSweetBubbles :enabled="detailTheme === 'sweet'" :phase="cyberEffectPhase" />
         <view class="detail-atmosphere__blob detail-atmosphere__blob--primary"></view>
         <view class="detail-atmosphere__blob detail-atmosphere__blob--secondary"></view>
         <view class="detail-atmosphere__blob detail-atmosphere__blob--accent"></view>
@@ -26,7 +27,7 @@
 
       <view
         class="detail-statusbar-fill"
-        :class="cyberModeEnabled && 'detail-statusbar-fill--cyber'"
+        :class="detailTheme !== 'default' && `detail-statusbar-fill--${detailTheme}`"
         :style="detailStatusBarFillStyle"
         aria-hidden="true"
       ></view>
@@ -42,7 +43,7 @@
         height="45px"
         :bgColor="navbarBgColor"
         :statusBarBgColor="navbarStatusBarBgColor"
-        :leftIconColor="cyberModeEnabled ? '#8dffb4' : upThemeVar('--up-content-color', '#303133')"
+        :leftIconColor="navbarIconColor"
         @leftClick="handleBackNavigation"
       >
         <template #center>
@@ -69,7 +70,7 @@
             <up-icon
               name="more-dot-fill"
               size="18"
-              :color="cyberModeEnabled ? '#8dffb4' : upThemeVar('--up-content-color', '#303133')"
+              :color="navbarIconColor"
             ></up-icon>
           </view>
         </template>
@@ -159,7 +160,7 @@
               v-if="false && isActiveDetailTabPage(index)"
               :message-list-page-style="messageListPageStyle"
               :message-list-content-style="messageListContentStyle"
-              :input-wrap-style="cyberModeEnabled ? undefined : upThemeCardStyle"
+              :input-wrap-style="detailTheme === 'default' ? upThemeCardStyle : undefined"
               :translucent-message-list="hasDetailBackgroundImage"
               :message-scroll-top="messageScrollTop"
               :message-scroll-into-view="messageScrollIntoView"
@@ -935,11 +936,11 @@
               :active="isActiveDetailTabPage(index)"
               :message-list-page-style="messageListPageStyle"
               :message-list-content-style="messageListContentStyle"
-              :input-wrap-style="cyberModeEnabled ? undefined : upThemeCardStyle"
+              :input-wrap-style="detailTheme === 'default' ? upThemeCardStyle : undefined"
               :translucent-message-list="hasDetailBackgroundImage"
               :slash-commands="slashCommands"
               :upload-target="detailUploadTarget"
-              :cyber-mode-enabled="cyberModeEnabled"
+              :detail-theme="detailTheme"
               :cyber-effect-phase="cyberEffectPhase"
               @layout-change="measureMessageListHeight"
             />
@@ -1133,6 +1134,7 @@ import type { RemoteInstanceDescriptor } from "@/services/realtime/types"
 import MessageBubble from "@/components/MessageBubble.vue"
 import ConversationDetailBody from "./ConversationDetailBody.vue"
 import ConversationDetailCyberRain from "./ConversationDetailCyberRain.vue"
+import ConversationDetailSweetBubbles from "./ConversationDetailSweetBubbles.vue"
 import ConversationDetailInteractivePane from "./ConversationDetailInteractivePane.vue"
 import {
   buildDetailShellTabs,
@@ -1152,10 +1154,12 @@ import {
 } from "./detailMessagePresentation"
 import {
   DETAIL_CYBER_MODE_STORAGE_KEY,
-  buildCyberModeMenuAction,
+  DETAIL_THEME_STORAGE_KEY,
+  buildDetailThemeMenuActions,
   deriveCyberEffectPhase,
-  normalizeCyberModeStorage,
+  normalizeDetailThemeStorage,
   shouldShowDetailBackgroundImage,
+  type DetailThemeId,
   type CyberEffectPhase,
 } from "./detailCyberMode"
 import {
@@ -1333,18 +1337,33 @@ const runtime = useConversationRuntimeStore()
 const currentInstance = getCurrentInstance()
 const upThemeVars = computed(() => currentInstance?.proxy?.upThemeVars || {})
 const upThemePageStyle = computed(() => currentInstance?.proxy?.upThemePageStyle || {})
-const cyberPageStyle = computed(() =>
-  cyberModeEnabled.value
-    ? {
-        background: "#000000",
-        backgroundColor: "#000000",
-        color: "#baffc8",
-      }
-    : {}
-)
+const detailThemePageStyle = computed(() => {
+  if (detailTheme.value === "matrix") {
+    return {
+      background: "#000000",
+      backgroundColor: "#000000",
+      color: "#baffc8",
+    }
+  }
+  if (detailTheme.value === "sweet") {
+    return {
+      background: "linear-gradient(180deg, #fff6fb 0%, #ffe8f3 52%, #fce7ff 100%)",
+      backgroundColor: "#fff6fb",
+      color: "#7a284f",
+    }
+  }
+  return {}
+})
 const upThemeCardStyle = computed(() => currentInstance?.proxy?.upThemeCardStyle || {})
 const upThemeVar = (varName: string, fallbackColor?: string) =>
   currentInstance?.proxy?.upThemeVar?.(varName, fallbackColor) ?? (fallbackColor || "")
+const pageThemeClasses = computed(() => [
+  detailTheme.value !== "default" && `page--theme-${detailTheme.value}`,
+  detailTheme.value === "matrix" && "page--cyber",
+  detailTheme.value === "matrix" && `page--cyber-${cyberEffectPhase.value}`,
+  detailTheme.value === "sweet" && "page--sweet",
+  detailTheme.value === "sweet" && `page--sweet-${cyberEffectPhase.value}`,
+].filter(Boolean))
 
 const INITIAL_TURN_BATCH = 20
 const INITIAL_TURN_EXPAND_BATCH = 30
@@ -1383,7 +1402,7 @@ const bridgeHealth = ref<RealtimeBridgeHealth | null>(null)
 const bridgeRecoveredAt = ref(0)
 const conversationTitle = ref("未命名会话")
 const detailBackgroundImageUrl = ref("")
-const cyberModeEnabled = ref(false)
+const detailTheme = ref<DetailThemeId>("default")
 const lastCyberStreamEndedAt = ref(0)
 const inputText = ref("")
 const composerCursor = ref<number | null>(null)
@@ -1568,12 +1587,21 @@ const messageListContentStyle = computed(() =>
   buildMessageListContentStyle(effectiveBottomComposerHeight.value)
 )
 const detailTabsBarThemeStyle = computed(() => {
-  if (cyberModeEnabled.value) {
+  if (detailTheme.value === "matrix") {
     return {
       background: "rgba(0, 12, 4, 0.96)",
       backgroundColor: "rgba(0, 12, 4, 0.96)",
       borderColor: "rgba(0, 255, 65, 0.26)",
       boxShadow: "0 0 24rpx rgba(0, 255, 65, 0.14)",
+    }
+  }
+  if (detailTheme.value === "sweet") {
+    return {
+      background: "rgba(255, 245, 251, 0.74)",
+      backgroundColor: "rgba(255, 245, 251, 0.74)",
+      borderColor: "rgba(236, 72, 153, 0.18)",
+      boxShadow: "0 0 26rpx rgba(244, 114, 182, 0.14)",
+      backdropFilter: "blur(10rpx)",
     }
   }
   return hasDetailBackgroundImage.value ? {} : upThemeCardStyle.value
@@ -1583,7 +1611,9 @@ const detailTabsBarStyle = computed(() => ({
   borderRadius: "0",
 }))
 const detailNavbarCustomClass = computed(() =>
-  cyberModeEnabled.value ? "detail-navbar-shell detail-navbar-shell--cyber" : "detail-navbar-shell"
+  detailTheme.value === "default"
+    ? "detail-navbar-shell"
+    : `detail-navbar-shell detail-navbar-shell--${detailTheme.value}`
 )
 const detailNavbarShellStyle = computed(() => ({
   "--detail-navbar-bg-color": navbarBgColor.value,
@@ -1660,7 +1690,7 @@ const DETAIL_CONVERSATION_STATUS_ACTIONS = [
 const detailMoreActions = computed(() => [
   { name: "模型供应商", color: "#2979ff" },
   { name: "文件夹管理", color: "#2979ff" },
-  buildCyberModeMenuAction(cyberModeEnabled.value),
+  { name: "详情页主题", color: "#ec4899" },
   { name: "背景图自定义", color: "#8b5cf6" },
   { name: "重命名", color: "#2979ff" },
   { name: "更改状态", color: "#2979ff" },
@@ -1668,7 +1698,7 @@ const detailMoreActions = computed(() => [
 ])
 const showDetailBackgroundImage = computed(() =>
   shouldShowDetailBackgroundImage({
-    cyberModeEnabled: cyberModeEnabled.value,
+    detailTheme: detailTheme.value,
     detailBackgroundImageUrl: detailBackgroundImageUrl.value,
   })
 )
@@ -1710,7 +1740,7 @@ const runtimeStatus = computed<string>(() => {
 })
 const cyberEffectPhase = computed<CyberEffectPhase>(() =>
   deriveCyberEffectPhase({
-    cyberModeEnabled: cyberModeEnabled.value,
+    detailTheme: detailTheme.value,
     runtimeStatus: runtimeStatus.value,
     hasLiveMessage: Boolean(
       session.value?.liveMessage && !session.value?.liveMessage?.isPlaceholderThinking
@@ -2067,11 +2097,22 @@ const detailShellTabs = computed<DetailShellTabItem[]>(() =>
 )
 
 const navbarStatusBarBgColor = computed(() =>
-  cyberModeEnabled.value ? "#000000" : upThemeVar("--up-card-bg-color", "#ffffff")
+  detailTheme.value === "matrix"
+    ? "#000000"
+    : detailTheme.value === "sweet"
+      ? "#fff1f8"
+      : upThemeVar("--up-card-bg-color", "#ffffff")
 )
 const navbarBgColor = computed(() => navbarStatusBarBgColor.value)
+const navbarIconColor = computed(() =>
+  detailTheme.value === "matrix"
+    ? "#8dffb4"
+    : detailTheme.value === "sweet"
+      ? "#d9468f"
+      : upThemeVar("--up-content-color", "#303133")
+)
 const navbarFrontColor = computed(() =>
-  cyberModeEnabled.value || isDarkReadableBackground(navbarBgColor.value) ? "#ffffff" : "#000000"
+  detailTheme.value === "matrix" || isDarkReadableBackground(navbarBgColor.value) ? "#ffffff" : "#000000"
 )
 const detailTabsItemStyle = {
   paddingLeft: "0px",
@@ -2080,11 +2121,21 @@ const detailTabsItemStyle = {
   borderRadius: "999px",
 }
 const detailTabsActiveStyle = computed(() => ({
-  color: cyberModeEnabled.value ? "#d8ffe4" : "#ffffff",
-  fontWeight: cyberModeEnabled.value ? 700 : 500,
+  color:
+    detailTheme.value === "matrix"
+      ? "#d8ffe4"
+      : detailTheme.value === "sweet"
+        ? "#be185d"
+        : "#ffffff",
+  fontWeight: detailTheme.value === "default" ? 500 : 700,
 }))
 const detailTabsInactiveStyle = computed(() => ({
-  color: cyberModeEnabled.value ? "#73c989" : upThemeVar("--up-content-color", "#606266"),
+  color:
+    detailTheme.value === "matrix"
+      ? "#73c989"
+      : detailTheme.value === "sweet"
+        ? "#db2777"
+        : upThemeVar("--up-content-color", "#606266"),
 }))
 
 watch(
@@ -2109,9 +2160,11 @@ function getSlashCommandDesc(item: SlashCommandItem) {
 function syncDetailNativeStatusBar() {
   const backgroundColor = navbarBgColor.value || "#ffffff"
   const statusBarBackgroundColor = navbarStatusBarBgColor.value || backgroundColor
-  const pageBackgroundColor = cyberModeEnabled.value
+  const pageBackgroundColor = detailTheme.value === "matrix"
     ? "#000000"
-    : upThemeVar("--up-page-bg-color", backgroundColor) || backgroundColor
+    : detailTheme.value === "sweet"
+      ? "#fff6fb"
+      : upThemeVar("--up-page-bg-color", backgroundColor) || backgroundColor
   const frontColor = navbarFrontColor.value === "#ffffff" ? "#ffffff" : "#000000"
 
   try {
@@ -2133,7 +2186,7 @@ function syncDetailNativeStatusBar() {
   } catch {}
 
   syncIosStandaloneStatusBar({
-    cyberModeEnabled: cyberModeEnabled.value,
+    cyberModeEnabled: detailTheme.value === "matrix",
     statusBarBackgroundColor: statusBarBackgroundColor,
     pageBackgroundColor,
   })
@@ -2906,8 +2959,8 @@ function handleDetailMoreMenuClick(action: string) {
     openDetailModelProvidersPage()
   } else if (action === "文件夹管理") {
     openDetailProjectsPage()
-  } else if (action === "炫酷模式" || action === "关闭炫酷模式") {
-    toggleCyberModeFromMenu()
+  } else if (action === "详情页主题") {
+    openDetailThemePicker()
   } else if (action === "背景图自定义") {
     openDetailBackgroundPicker()
   } else if (action === "重命名") {
@@ -2958,6 +3011,22 @@ function openDetailBackgroundPicker() {
       if (result.tapIndex === 1) {
         clearConversationDetailBackgroundImage(true)
       }
+    },
+  })
+}
+
+function openDetailThemePicker() {
+  const actions = buildDetailThemeMenuActions(detailTheme.value)
+  uni.showActionSheet({
+    itemList: actions.map((item) => item.name),
+    success: (result) => {
+      const target = actions[result.tapIndex]
+      if (!target || target.id === detailTheme.value) return
+      persistDetailThemePreference(target.id)
+      uni.showToast({
+        title: `${target.name.replace(" · 当前", "")}已启用`,
+        icon: "none",
+      })
     },
   })
 }
@@ -4246,31 +4315,35 @@ function persistDetailRuntimeState() {
 
 function restoreCyberModePreference() {
   try {
-    cyberModeEnabled.value = normalizeCyberModeStorage(
+    const storedTheme = normalizeDetailThemeStorage(
+      uni.getStorageSync(DETAIL_THEME_STORAGE_KEY)
+    )
+    if (storedTheme !== "default") {
+      detailTheme.value = storedTheme
+      return
+    }
+
+    const migratedTheme = normalizeDetailThemeStorage(
       uni.getStorageSync(DETAIL_CYBER_MODE_STORAGE_KEY)
     )
+    detailTheme.value = migratedTheme
+    if (migratedTheme !== "default") {
+      uni.setStorageSync(DETAIL_THEME_STORAGE_KEY, JSON.stringify({ theme: migratedTheme }))
+    }
   } catch (error) {
     console.warn("restore cyber mode preference skipped", error)
-    cyberModeEnabled.value = false
+    detailTheme.value = "default"
   }
 }
 
-function persistCyberModePreference(enabled: boolean) {
-  cyberModeEnabled.value = enabled
+function persistDetailThemePreference(theme: DetailThemeId) {
+  detailTheme.value = theme
   try {
-    uni.setStorageSync(DETAIL_CYBER_MODE_STORAGE_KEY, JSON.stringify({ enabled }))
+    uni.setStorageSync(DETAIL_THEME_STORAGE_KEY, JSON.stringify({ theme }))
+    uni.setStorageSync(DETAIL_CYBER_MODE_STORAGE_KEY, JSON.stringify({ enabled: theme === "matrix" }))
   } catch (error) {
     console.warn("persist cyber mode preference skipped", error)
   }
-}
-
-function toggleCyberModeFromMenu() {
-  const nextEnabled = !cyberModeEnabled.value
-  persistCyberModePreference(nextEnabled)
-  uni.showToast({
-    title: nextEnabled ? "炫酷模式已开启" : "炫酷模式已关闭",
-    icon: "none",
-  })
 }
 
 function restoreHistoryCursorFromCache(

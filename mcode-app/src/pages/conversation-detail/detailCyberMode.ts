@@ -1,12 +1,36 @@
+export const DETAIL_THEME_STORAGE_KEY = "mcode_detail_theme_v1"
 export const DETAIL_CYBER_MODE_STORAGE_KEY = "mcode_detail_cyber_mode_v1"
 
+export type DetailThemeId = "default" | "matrix" | "sweet"
 export type CyberEffectPhase = "idle" | "ramp" | "streaming" | "settle"
+
+export interface DetailThemeOption {
+  id: DetailThemeId
+  name: string
+  color: string
+}
 
 const DEFAULT_GLYPHS = "0101010110010110<>/|[]{}"
 const SETTLE_WINDOW_MS = 1_200
 
-export function normalizeCyberModeStorage(raw: unknown): boolean {
-  if (raw === true || raw === "true" || raw === 1 || raw === "1") return true
+export const DETAIL_THEME_OPTIONS: DetailThemeOption[] = [
+  { id: "default", name: "默认主题", color: "#2979ff" },
+  { id: "matrix", name: "微黑暗帝国", color: "#22c55e" },
+  { id: "sweet", name: "甜心泡泡", color: "#ec4899" },
+]
+
+export function normalizeDetailThemeStorage(raw: unknown): DetailThemeId {
+  if (isDetailThemeId(raw)) return raw
+
+  if (
+    raw === true ||
+    raw === "true" ||
+    raw === 1 ||
+    raw === "1"
+  ) {
+    return "matrix"
+  }
+
   if (
     raw === false ||
     raw === "false" ||
@@ -15,50 +39,71 @@ export function normalizeCyberModeStorage(raw: unknown): boolean {
     raw == null ||
     raw === ""
   ) {
-    return false
+    return "default"
   }
 
   if (typeof raw === "string") {
     try {
       const parsed = JSON.parse(raw)
-      return normalizeCyberModeStorage(
-        parsed && typeof parsed === "object" && "enabled" in parsed
-          ? (parsed as { enabled?: unknown }).enabled
-          : parsed
+      return normalizeDetailThemeStorage(
+        parsed && typeof parsed === "object" && "theme" in parsed
+          ? (parsed as { theme?: unknown }).theme
+          : parsed && typeof parsed === "object" && "enabled" in parsed
+            ? ((parsed as { enabled?: unknown }).enabled ? "matrix" : "default")
+            : parsed
       )
     } catch {
-      return false
+      return "default"
     }
   }
 
-  if (typeof raw === "object" && raw && "enabled" in raw) {
-    return Boolean((raw as { enabled?: unknown }).enabled)
+  if (typeof raw === "object" && raw) {
+    if ("theme" in raw) {
+      return normalizeDetailThemeStorage((raw as { theme?: unknown }).theme)
+    }
+    if ("enabled" in raw) {
+      return (raw as { enabled?: unknown }).enabled ? "matrix" : "default"
+    }
   }
 
-  return false
+  return "default"
 }
 
-export function buildCyberModeMenuAction(enabled: boolean) {
-  return enabled
-    ? { name: "关闭炫酷模式", color: "#19be6b" }
-    : { name: "炫酷模式", color: "#22c55e" }
+export function isExperimentalDetailTheme(theme: DetailThemeId) {
+  return theme === "matrix" || theme === "sweet"
+}
+
+export function isMatrixDetailTheme(theme: DetailThemeId) {
+  return theme === "matrix"
+}
+
+export function isSweetDetailTheme(theme: DetailThemeId) {
+  return theme === "sweet"
+}
+
+export function buildDetailThemeMenuActions(activeTheme: DetailThemeId) {
+  return DETAIL_THEME_OPTIONS.map((item) => ({
+    ...item,
+    active: item.id === activeTheme,
+    name: item.id === activeTheme ? `${item.name} · 当前` : item.name,
+  }))
 }
 
 export function shouldShowDetailBackgroundImage(input: {
-  cyberModeEnabled: boolean
+  detailTheme: DetailThemeId
   detailBackgroundImageUrl: string
 }) {
-  return !input.cyberModeEnabled && String(input.detailBackgroundImageUrl || "").trim().length > 0
+  return input.detailTheme === "default" && String(input.detailBackgroundImageUrl || "").trim().length > 0
 }
 
 export function deriveCyberEffectPhase(input: {
-  cyberModeEnabled: boolean
+  detailTheme: DetailThemeId
   runtimeStatus: string
   hasLiveMessage: boolean
   lastStreamEndedAt: number
   now: number
 }): CyberEffectPhase {
-  if (!input.cyberModeEnabled) return "idle"
+  if (!isExperimentalDetailTheme(input.detailTheme)) return "idle"
   if (input.hasLiveMessage) return "streaming"
 
   const status = String(input.runtimeStatus || "idle")
@@ -102,4 +147,18 @@ export function buildCyberDecodeText(input: {
       return glyphs[glyphIndex]
     })
     .join("")
+}
+
+export function normalizeCyberModeStorage(raw: unknown): boolean {
+  return normalizeDetailThemeStorage(raw) === "matrix"
+}
+
+export function buildCyberModeMenuAction(enabled: boolean) {
+  return enabled
+    ? { name: "关闭微黑暗帝国", color: "#19be6b" }
+    : { name: "微黑暗帝国", color: "#22c55e" }
+}
+
+function isDetailThemeId(value: unknown): value is DetailThemeId {
+  return value === "default" || value === "matrix" || value === "sweet"
 }

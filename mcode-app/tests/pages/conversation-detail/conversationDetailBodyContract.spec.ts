@@ -160,20 +160,22 @@ describe("ConversationDetailBody", () => {
     expect(source).toContain("closeConversationTab({")
   })
 
-  it("restores and forwards the global cyber mode from the detail more menu", () => {
+  it("restores and forwards the detail theme from the detail more menu", () => {
     const source = fs.readFileSync(
       path.resolve(__dirname, "../../../src/pages/conversation-detail/index.vue"),
       "utf8"
     )
 
+    expect(source).toContain("DETAIL_THEME_STORAGE_KEY")
     expect(source).toContain("DETAIL_CYBER_MODE_STORAGE_KEY")
-    expect(source).toContain("buildCyberModeMenuAction(cyberModeEnabled.value)")
-    expect(source).toContain('action === "炫酷模式" || action === "关闭炫酷模式"')
-    expect(source).toContain('title: nextEnabled ? "炫酷模式已开启" : "炫酷模式已关闭"')
+    expect(source).toContain("buildDetailThemeMenuActions(detailTheme.value)")
+    expect(source).toContain('else if (action === "详情页主题")')
+    expect(source).toContain('title: `${target.name.replace(" · 当前", "")}已启用`')
     expect(source).toContain("restoreCyberModePreference()")
     expect(source).toContain("shouldShowDetailBackgroundImage")
     expect(source).toContain("showDetailBackgroundImage")
     expect(source).toContain("page--cyber")
+    expect(source).toContain("page--sweet")
   })
 
   it("uses lighter translucent content surfaces over custom backgrounds", () => {
@@ -282,7 +284,8 @@ describe("ConversationDetailBody", () => {
     )
 
     expect(source).toContain(':statusBarBgColor="navbarStatusBarBgColor"')
-    expect(source).toContain('cyberModeEnabled.value ? "#000000" : upThemeVar("--up-card-bg-color", "#ffffff")')
+    expect(source).toContain('detailTheme.value === "matrix"')
+    expect(source).toContain('detailTheme.value === "sweet"')
     expect(source).toContain("const navbarBgColor = computed(() => navbarStatusBarBgColor.value)")
     expect(source).toContain('height = statusBarHeight > 0 ? `${statusBarHeight}px` : "env(safe-area-inset-top)"')
     expect(source).toContain("syncIosStandaloneStatusBar({")

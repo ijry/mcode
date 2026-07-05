@@ -3,9 +3,11 @@
     :class="[
       'bubble-wrap',
       `bubble-wrap--${message.role}`,
-      cyberModeEnabled && 'bubble-wrap--cyber',
-      cyberModeEnabled && cyberActive && 'bubble-wrap--cyber-active',
-      cyberModeEnabled && `bubble-wrap--cyber-${cyberEffectPhase || 'idle'}`,
+      detailTheme !== 'default' && `bubble-wrap--theme-${detailTheme}`,
+      detailTheme === 'matrix' && 'bubble-wrap--cyber',
+      detailTheme === 'matrix' && cyberActive && 'bubble-wrap--cyber-active',
+      detailTheme === 'matrix' && `bubble-wrap--cyber-${cyberEffectPhase || 'idle'}`,
+      detailTheme === 'sweet' && `bubble-wrap--sweet-${cyberEffectPhase || 'idle'}`,
     ]"
   >
     <!-- 头像 -->
@@ -198,6 +200,7 @@ import type { ContentPart, GoalDisplayPart, MessageTurn, ToolCall } from "@/type
 import {
   buildCyberDecodeText,
   type CyberEffectPhase,
+  type DetailThemeId,
 } from "@/pages/conversation-detail/detailCyberMode"
 import { buildGoalDisplayParts } from "@/services/conversation/goalToolCall"
 import GoalToolCallBlock from "./GoalToolCallBlock.vue"
@@ -209,7 +212,7 @@ const props = defineProps<{
   agentType?: string
   showRegenerate?: boolean
   translucent?: boolean
-  cyberModeEnabled?: boolean
+  detailTheme?: DetailThemeId
   cyberEffectPhase?: CyberEffectPhase
   cyberActive?: boolean
 }>()
@@ -264,7 +267,7 @@ const isCyberStreamingPhase = computed(() => {
 })
 const showCyberDecodeOverlay = computed(() =>
   Boolean(
-    props.cyberModeEnabled &&
+    props.detailTheme === "matrix" &&
     props.cyberActive &&
     isCyberStreamingPhase.value &&
     props.message.role === "assistant" &&
@@ -801,6 +804,108 @@ function normalizeAgentType(raw?: string) {
 
 .bubble-wrap--cyber :deep(.code-text) {
   color: rgba(216, 255, 228, 0.9) !important;
+}
+
+.bubble-wrap--theme-sweet {
+  --message-sweet-text: rgba(122, 40, 79, 0.9);
+  --message-sweet-border: rgba(236, 72, 153, 0.18);
+}
+
+.bubble-wrap--theme-sweet .bubble {
+  position: relative;
+  overflow: hidden;
+  border-radius: 24rpx;
+  border: 1rpx solid var(--message-sweet-border) !important;
+  background:
+    radial-gradient(circle at 24% 18%, rgba(255, 255, 255, 0.92), transparent 32%),
+    linear-gradient(135deg, rgba(255, 214, 236, 0.52), rgba(255, 255, 255, 0.38)),
+    rgba(255, 248, 252, 0.54) !important;
+  color: var(--message-sweet-text) !important;
+  box-shadow:
+    inset 0 0 22rpx rgba(255, 255, 255, 0.34),
+    0 18rpx 34rpx rgba(244, 114, 182, 0.12) !important;
+  backdrop-filter: blur(12rpx);
+}
+
+.bubble-wrap--theme-sweet .bubble--user {
+  background:
+    radial-gradient(circle at 28% 20%, rgba(255, 255, 255, 0.94), transparent 34%),
+    linear-gradient(135deg, rgba(255, 191, 226, 0.74), rgba(253, 224, 241, 0.64)),
+    rgba(255, 236, 245, 0.6) !important;
+  border-color: rgba(236, 72, 153, 0.24) !important;
+}
+
+.bubble-wrap--theme-sweet .part-text {
+  color: var(--message-sweet-text);
+
+  :deep(*) {
+    color: var(--message-sweet-text) !important;
+  }
+}
+
+.bubble-wrap--theme-sweet .part-thinking,
+.bubble-wrap--theme-sweet .part-tool-result,
+.bubble-wrap--theme-sweet .part-plan {
+  background: rgba(255, 238, 246, 0.52);
+  border-color: rgba(236, 72, 153, 0.18);
+  color: rgba(145, 52, 97, 0.9);
+  box-shadow: inset 0 0 18rpx rgba(255, 255, 255, 0.28);
+}
+
+.bubble-wrap--theme-sweet .thinking-hd__label,
+.bubble-wrap--theme-sweet .thinking-hd__text,
+.bubble-wrap--theme-sweet .tool-result__text,
+.bubble-wrap--theme-sweet .tool-result-hd__label,
+.bubble-wrap--theme-sweet .plan-hd__label,
+.bubble-wrap--theme-sweet .plan-step__text {
+  color: rgba(145, 52, 97, 0.9);
+}
+
+.bubble-wrap--theme-sweet .dot {
+  background-color: #f472b6;
+  box-shadow: 0 0 12rpx rgba(244, 114, 182, 0.54);
+}
+
+.bubble-wrap--theme-sweet .action-btn {
+  background: rgba(255, 255, 255, 0.42);
+  border: 1rpx solid rgba(236, 72, 153, 0.14);
+}
+
+.bubble-wrap--theme-sweet :deep(.tool-group__summary),
+.bubble-wrap--theme-sweet :deep(.tool-block),
+.bubble-wrap--theme-sweet :deep(.goal-card),
+.bubble-wrap--theme-sweet :deep(.goal-card__body),
+.bubble-wrap--theme-sweet :deep(.ask-question-result),
+.bubble-wrap--theme-sweet :deep(.ask-question-result__state),
+.bubble-wrap--theme-sweet :deep(.ask-question-answer) {
+  background:
+    radial-gradient(circle at 20% 16%, rgba(255, 255, 255, 0.84), transparent 28%),
+    linear-gradient(135deg, rgba(255, 214, 236, 0.44), rgba(255, 255, 255, 0.34)),
+    rgba(255, 247, 251, 0.58) !important;
+  border-color: rgba(236, 72, 153, 0.16) !important;
+  color: var(--message-sweet-text) !important;
+  box-shadow: inset 0 0 18rpx rgba(255, 255, 255, 0.26) !important;
+}
+
+.bubble-wrap--theme-sweet :deep(.tool-group__label),
+.bubble-wrap--theme-sweet :deep(.tool-name),
+.bubble-wrap--theme-sweet :deep(.section-label),
+.bubble-wrap--theme-sweet :deep(.goal-card__title),
+.bubble-wrap--theme-sweet :deep(.goal-card__chip),
+.bubble-wrap--theme-sweet :deep(.goal-card__label),
+.bubble-wrap--theme-sweet :deep(.goal-card__objective),
+.bubble-wrap--theme-sweet :deep(.goal-card__thinking),
+.bubble-wrap--theme-sweet :deep(.goal-card__result),
+.bubble-wrap--theme-sweet :deep(.goal-card__plan),
+.bubble-wrap--theme-sweet :deep(.goal-card__meta),
+.bubble-wrap--theme-sweet :deep(.goal-card__markdown),
+.bubble-wrap--theme-sweet :deep(.ask-question-result__title),
+.bubble-wrap--theme-sweet :deep(.ask-question-result__subtitle),
+.bubble-wrap--theme-sweet :deep(.ask-question-answer__header),
+.bubble-wrap--theme-sweet :deep(.ask-question-answer__question),
+.bubble-wrap--theme-sweet :deep(.ask-question-answer__empty),
+.bubble-wrap--theme-sweet :deep(.code-text) {
+  color: var(--message-sweet-text) !important;
 }
 
 @keyframes cyberTextGlitch {

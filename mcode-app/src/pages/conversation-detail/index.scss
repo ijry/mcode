@@ -19,6 +19,143 @@
     linear-gradient(180deg, #03130a 0%, #010a05 52%, #000603 100%);
 }
 
+.page--sweet {
+  position: relative;
+  background:
+    radial-gradient(circle at 18% 14%, rgba(255, 214, 236, 0.72) 0, transparent 28%),
+    radial-gradient(circle at 82% 18%, rgba(252, 205, 255, 0.58) 0, transparent 26%),
+    radial-gradient(circle at 50% 100%, rgba(255, 201, 221, 0.42) 0, transparent 34%),
+    linear-gradient(180deg, #fff8fc 0%, #ffeef7 48%, #fde7ff 100%) !important;
+  background-color: #fff7fb !important;
+  color: #7a284f;
+}
+
+.page--sweet::before,
+.page--sweet::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 33;
+}
+
+.page--sweet::before {
+  background:
+    radial-gradient(circle at 22% 26%, rgba(255, 255, 255, 0.72) 0, transparent 14%),
+    radial-gradient(circle at 78% 22%, rgba(255, 255, 255, 0.62) 0, transparent 12%),
+    radial-gradient(circle at 68% 78%, rgba(255, 255, 255, 0.56) 0, transparent 10%);
+  opacity: 0.7;
+}
+
+.page--sweet::after {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.24) 0, transparent 26%, rgba(255, 214, 236, 0.18) 100%);
+  opacity: 0.66;
+}
+
+.page--sweet .detail-container,
+.page--sweet .detail-shell__swiper,
+.page--sweet .detail-shell__swiper-item,
+.page--sweet .detail-shell__page {
+  background: transparent !important;
+}
+
+.page--sweet .detail-statusbar-fill,
+.page--sweet :deep(.detail-navbar-shell),
+.page--sweet :deep(.detail-navbar-shell .u-navbar__placeholder),
+.page--sweet :deep(.detail-navbar-shell .u-navbar--fixed),
+.page--sweet :deep(.detail-navbar-shell .u-status-bar),
+.page--sweet :deep(.detail-navbar-shell .u-navbar__content) {
+  background: rgba(255, 246, 251, 0.92) !important;
+  background-color: rgba(255, 246, 251, 0.92) !important;
+  backdrop-filter: blur(12rpx);
+}
+
+.page--sweet .detail-navbar__title,
+.page--sweet .detail-navbar__subtitle,
+.page--sweet .detail-tab-pill__title,
+.page--sweet .input-status-row__text,
+.page--sweet .stats-text,
+.page--sweet .history-status__text {
+  color: #b83280 !important;
+  text-shadow: 0 0 10rpx rgba(255, 255, 255, 0.32);
+}
+
+.page--sweet .detail-tabs-bar {
+  background: rgba(255, 244, 250, 0.78) !important;
+  border-top-color: rgba(236, 72, 153, 0.16) !important;
+  border-bottom-color: rgba(236, 72, 153, 0.14) !important;
+  box-shadow: 0 0 0 1rpx rgba(236, 72, 153, 0.08), 0 14rpx 32rpx rgba(244, 114, 182, 0.14);
+  backdrop-filter: blur(12rpx);
+}
+
+.page--sweet .detail-tab-pill {
+  background: rgba(255, 255, 255, 0.52);
+  border-color: rgba(236, 72, 153, 0.16);
+  box-shadow: inset 0 0 18rpx rgba(255, 255, 255, 0.28);
+}
+
+.page--sweet .detail-tab-pill--active {
+  background: linear-gradient(135deg, rgba(255, 181, 219, 0.86), rgba(255, 234, 246, 0.94)) !important;
+  border-color: rgba(236, 72, 153, 0.32);
+  box-shadow: 0 0 26rpx rgba(244, 114, 182, 0.18), inset 0 0 18rpx rgba(255, 255, 255, 0.3);
+}
+
+.page--sweet .detail-tab-pill__dot {
+  background: #f472b6;
+  box-shadow: 0 0 12rpx rgba(244, 114, 182, 0.54);
+}
+
+.page--sweet .detail-navbar__logo--fallback {
+  background: rgba(255, 255, 255, 0.52);
+  border: 1rpx solid rgba(236, 72, 153, 0.22);
+}
+
+.page--sweet .detail-dropdown-menu,
+.page--sweet .plan-drawer,
+:deep(.detail-interactive-pane--theme-sweet .input-wrap),
+:deep(.detail-interactive-pane--theme-sweet .input-status-wrap),
+:deep(.detail-interactive-pane--theme-sweet .input-box),
+:deep(.detail-interactive-pane--theme-sweet .tool-toggle-btn),
+:deep(.detail-interactive-pane--theme-sweet .input-tool-btn__icon),
+:deep(.detail-interactive-pane--theme-sweet .composer-panel),
+:deep(.detail-interactive-pane--theme-sweet .slash-panel),
+:deep(.detail-interactive-pane--theme-sweet .mention-panel),
+:deep(.detail-interactive-pane--theme-sweet .attachments-preview),
+:deep(.detail-interactive-pane--theme-sweet .upload-queue),
+:deep(.detail-interactive-pane--theme-sweet .pending-response-card),
+:deep(.detail-interactive-pane--theme-sweet .permission-card),
+:deep(.detail-interactive-pane--theme-sweet .ask-question-card),
+:deep(.detail-interactive-pane--theme-sweet .queue-item),
+:deep(.detail-interactive-pane--theme-sweet .shared-queue-item),
+:deep(.detail-interactive-pane--theme-sweet .shared-queue-bar),
+:deep(.detail-interactive-pane--theme-sweet .queue-bar) {
+  background: rgba(255, 250, 253, 0.58) !important;
+  border-color: rgba(236, 72, 153, 0.18) !important;
+  color: #8d295d !important;
+  box-shadow: 0 0 0 1rpx rgba(236, 72, 153, 0.06), 0 18rpx 40rpx rgba(244, 114, 182, 0.14) !important;
+  backdrop-filter: blur(14rpx);
+}
+
+:deep(.detail-interactive-pane--theme-sweet .input-box) {
+  background: rgba(255, 255, 255, 0.42) !important;
+  border: 1rpx solid rgba(244, 114, 182, 0.22);
+}
+
+:deep(.detail-interactive-pane--theme-sweet .composer-textarea),
+:deep(.detail-interactive-pane--theme-sweet .u-textarea),
+:deep(.detail-interactive-pane--theme-sweet .u-textarea__field),
+:deep(.detail-interactive-pane--theme-sweet textarea),
+:deep(.detail-interactive-pane--theme-sweet .uni-textarea-textarea) {
+  color: #7a284f !important;
+  caret-color: #ec4899;
+}
+
+:deep(.detail-interactive-pane--theme-sweet .send-btn) {
+  background: radial-gradient(circle at 38% 28%, #ffd0e8 0, #f472b6 48%, #db2777 100%) !important;
+  box-shadow: 0 0 26rpx rgba(244, 114, 182, 0.26), inset 0 0 18rpx rgba(255, 255, 255, 0.28);
+}
+
 .page--cyber .detail-navbar__title,
 .page--cyber .detail-navbar__subtitle,
 .page--cyber .detail-tab-pill__title,

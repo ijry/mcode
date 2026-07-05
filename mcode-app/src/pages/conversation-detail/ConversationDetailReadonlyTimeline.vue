@@ -2,8 +2,10 @@
   <view
     :class="[
       'readonly-pane',
-      cyberModeEnabled && 'readonly-pane--cyber',
-      cyberModeEnabled && `readonly-pane--${cyberEffectPhase || 'idle'}`,
+      detailTheme !== 'default' && `readonly-pane--theme-${detailTheme}`,
+      detailTheme === 'matrix' && 'readonly-pane--cyber',
+      detailTheme === 'matrix' && `readonly-pane--${cyberEffectPhase || 'idle'}`,
+      detailTheme === 'sweet' && `readonly-pane--sweet-${cyberEffectPhase || 'idle'}`,
     ]"
     :style="messageListPageStyle"
   >
@@ -35,7 +37,7 @@
               :message="item.message"
               :agent-type="agentType"
               :showRegenerate="false"
-              :cyber-mode-enabled="cyberModeEnabled"
+              :detail-theme="detailTheme"
               :cyber-effect-phase="cyberEffectPhase || 'idle'"
               :cyber-active="false"
             />
@@ -70,7 +72,7 @@ import { computed, type StyleValue } from "vue"
 import MessageBubble from "@/components/MessageBubble.vue"
 import { useConversationRuntimeStore } from "@/stores/conversationRuntime"
 import { buildRenderMessageItems } from "./detailMessagePresentation"
-import type { CyberEffectPhase } from "./detailCyberMode"
+import type { CyberEffectPhase, DetailThemeId } from "./detailCyberMode"
 import { formatTokenCountK } from "./detailRuntimePresentation"
 import {
   bottomGeneratingText as resolveBottomGeneratingText,
@@ -84,7 +86,7 @@ const props = defineProps<{
   agentType?: string
   messageListPageStyle?: StyleValue
   messageListContentStyle?: StyleValue
-  cyberModeEnabled?: boolean
+  detailTheme?: DetailThemeId
   cyberEffectPhase?: CyberEffectPhase
 }>()
 
