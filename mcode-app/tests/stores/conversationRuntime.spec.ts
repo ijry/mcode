@@ -126,6 +126,25 @@ describe('conversationRuntime ACP error handling', () => {
     ])
   })
 
+  it("releases preview-owned sessions without requiring backend disconnect", () => {
+    const sync = require("@/services/conversation/conversationSyncService")
+    const manager = require("@/services/conversation/connectionSessionManager")
+    const hot = require("@/services/conversation/hotConversationCoordinator")
+    const store = useConversationRuntimeStore()
+    const session = store.getOrCreateSession(77)
+    session.connectionId = "conn-preview"
+    session.instanceKey = "test-instance"
+    session.status = "thinking"
+
+    expect(store.releasePreviewSession(77)).toBe(true)
+
+    expect(sync.detachConversationRealtime).toHaveBeenCalledWith(77)
+    expect(sync.unbindConversationEventHandler).toHaveBeenCalledWith(77)
+    expect(manager.connectionSessionManager.clearConversation).toHaveBeenCalledWith(77)
+    expect(hot.releaseHotConversation).toHaveBeenCalledWith(77)
+    expect(store.sessions.has(77)).toBe(false)
+  })
+
   it('still clears stale errors on ordinary idle transitions', () => {
     const { store, session } = prepareSession('connected', 'stale error')
 
