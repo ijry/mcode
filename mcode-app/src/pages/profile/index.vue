@@ -49,6 +49,28 @@
     </view>
 
     <view class="section">
+      <view class="section-title">会话设置</view>
+      <view class="menu-list" :style="upThemeCardStyle">
+        <view class="menu-item">
+          <view class="menu-left menu-left--column">
+            <view class="menu-row-title">
+              <u-icon name="chat" size="22" :color="upThemeVar('--up-primary', '#2979ff')"></u-icon>
+              <text class="menu-text">会话列表实时消息流</text>
+            </view>
+            <text class="menu-desc">
+              开启后会为进行中的会话建立实时订阅，显示一行生成内容；可能增加网络、电量和性能开销。
+            </text>
+          </view>
+          <switch
+            :checked="conversationListLiveStreamEnabled"
+            color="#2979ff"
+            @change="handleConversationListLiveStreamChange"
+          />
+        </view>
+      </view>
+    </view>
+
+    <view class="section">
       <view class="section-title">连接管理</view>
       <view class="menu-list" :style="upThemeCardStyle">
         <view class="menu-item" @click="goToConnections">
@@ -146,11 +168,16 @@ import {
   inspectClearableCache,
   type CacheInventoryItem,
 } from "@/services/cache/cacheManager"
+import {
+  readConversationListLiveStreamEnabled,
+  writeConversationListLiveStreamEnabled,
+} from "@/services/conversation/conversationListLiveStreamPreference"
 
 const petStore = usePetStore()
 const account = useAccountStore()
 const version = ref("1.0.0")
 const themePreference = ref<ThemePreference>("system")
+const conversationListLiveStreamEnabled = ref(false)
 const showThemeSheet = ref(false)
 const showPetPanel = ref(false)
 const achievementEntry = ref<AchievementEntrySummary>({
@@ -204,6 +231,7 @@ const showAchievementEntry = computed(() => isLoggedIn.value && loggedInUserId.v
 
 onMounted(async () => {
   loadThemePreference()
+  loadConversationListLiveStreamPreference()
 })
 
 watch(showAchievementEntry, (enabled) => {
@@ -216,6 +244,19 @@ watch(showAchievementEntry, (enabled) => {
 
 function loadThemePreference() {
   themePreference.value = getCurrentThemePreference()
+}
+
+function loadConversationListLiveStreamPreference() {
+  conversationListLiveStreamEnabled.value = readConversationListLiveStreamEnabled()
+}
+
+function handleConversationListLiveStreamChange(event: { detail?: { value?: boolean } }) {
+  const enabled = writeConversationListLiveStreamEnabled(Boolean(event?.detail?.value))
+  conversationListLiveStreamEnabled.value = enabled
+  uni.showToast({
+    title: enabled ? "会话列表实时消息流已开启" : "会话列表实时消息流已关闭",
+    icon: "none",
+  })
 }
 
 function normalizeUserId(value: unknown) {
@@ -572,6 +613,18 @@ function logout() {
   gap: 20rpx;
 }
 
+.menu-left--column {
+  align-items: flex-start;
+  flex: 1;
+  min-width: 0;
+}
+
+.menu-row-title {
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+}
+
 .menu-right {
   display: flex;
   align-items: center;
@@ -592,6 +645,14 @@ function logout() {
 .menu-value {
   font-size: 28rpx;
   color: var(--up-content-color, #606266);
+}
+
+.menu-desc {
+  margin-top: 10rpx;
+  padding-left: 64rpx;
+  font-size: 24rpx;
+  line-height: 1.45;
+  color: var(--up-tips-color, #909193);
 }
 
 .logout-container {
