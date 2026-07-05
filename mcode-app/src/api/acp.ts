@@ -1089,6 +1089,11 @@ class AcpApiClient {
             name: firstString(record.title, record.name),
             input: parseJsonRecord(record.raw_input) ?? {},
             status: mapToolCallStatus(firstString(record.status)),
+            output:
+              firstString(record.content) ||
+              firstString(record.raw_output) ||
+              undefined,
+            error: extractErrorText(record.raw_output),
             kind: firstString(record.kind),
             content: firstString(record.content),
             rawInput: firstString(record.raw_input),

@@ -142,6 +142,50 @@ describe('conversationRuntime ACP error handling', () => {
     expect(session.inputErrorMessage).toBeNull()
   })
 
+  it('preserves completed goal tool calls from the initial realtime event', () => {
+    const { store, session } = prepareSession()
+    const output = JSON.stringify({
+      goal: {
+        objective: 'Ship mobile goal card',
+        status: 'complete',
+        tokensUsed: 1200,
+      },
+    })
+
+    store.handleEvent({
+      type: 'tool_call',
+      connectionId: 'conn-1',
+      data: {
+        id: 'codex-goal-1',
+        name: 'Goal updated (complete): Ship mobile goal card',
+        input: {
+          status: 'complete',
+          objective: 'Ship mobile goal card',
+        },
+        status: 'completed',
+        rawOutput: output,
+      },
+    } as any)
+
+    expect(session.liveMessage?.content).toEqual([
+      {
+        type: 'tool_call',
+        tool_call: {
+          id: 'codex-goal-1',
+          name: 'Goal updated (complete): Ship mobile goal card',
+          input: {
+            status: 'complete',
+            objective: 'Ship mobile goal card',
+          },
+          status: 'completed',
+          output,
+          rawOutput: output,
+          error: undefined,
+        },
+      },
+    ])
+  })
+
   it('clears pending permission when another device resolves it', () => {
     const { store, session } = prepareSession()
 

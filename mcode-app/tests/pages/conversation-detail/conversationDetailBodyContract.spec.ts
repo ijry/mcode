@@ -204,6 +204,23 @@ describe("ConversationDetailBody", () => {
     expect(bubbleSource).not.toContain("backdrop-filter: blur(0.1625rem)")
   })
 
+  it("renders Codex goal tool calls before generic tool grouping", () => {
+    const bubbleSource = fs.readFileSync(
+      path.resolve(__dirname, "../../../src/components/MessageBubble.vue"),
+      "utf8"
+    )
+
+    expect(bubbleSource).toContain("import GoalToolCallBlock from \"./GoalToolCallBlock.vue\"")
+    expect(bubbleSource).toContain("buildGoalDisplayParts")
+    expect(bubbleSource).toContain(
+      "buildGoalDisplayParts(props.message.content || [], isStreaming.value)"
+    )
+    expect(bubbleSource).toContain("part.type === 'goal_run'")
+    expect(bubbleSource.indexOf("part.type === 'goal_run'")).toBeLessThan(
+      bubbleSource.indexOf("part.type === 'tool_call_group'")
+    )
+  })
+
   it("does not replay cached config into a live session when the connection attaches", () => {
     const source = fs.readFileSync(
       path.resolve(__dirname, "../../../src/pages/conversation-detail/index.vue"),

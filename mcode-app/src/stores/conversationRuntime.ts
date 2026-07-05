@@ -464,6 +464,9 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         session.apiRetry = null
         session.pendingPermission = null
         session.pendingQuestion = null
+        const output = firstString(event.data.output, event.data.rawOutput) || undefined
+        const rawOutput = firstString(event.data.rawOutput) || undefined
+        const error = firstString(event.data.error) || undefined
         const currentLiveMessage = session.liveMessage?.isPlaceholderThinking
           ? clearPlaceholderLiveMessage(session) ?? createLiveMessage()
           : session.liveMessage ?? createLiveMessage()
@@ -478,7 +481,10 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
                 id: event.data.id,
                 name: event.data.name,
                 input: event.data.input,
-                status: "running",
+                status: event.data.status || "running",
+                output,
+                rawOutput,
+                error,
               },
             },
           ],

@@ -50,7 +50,18 @@ export interface ToolCall {
   status?: "running" | "completed" | "error"
   output?: string
   error?: string
+  rawOutput?: string
 }
+
+export interface GoalRunContentPart {
+  type: "goal_run"
+  start: ToolCall
+  end?: ToolCall | null
+  items: ContentPart[]
+  isRunning: boolean
+}
+
+export type GoalDisplayPart = ContentPart | GoalRunContentPart
 
 export interface ToolResult {
   tool_call_id: string
@@ -235,6 +246,10 @@ export interface ToolCallEvent {
   id: string
   name: string
   input: Record<string, any>
+  status?: "running" | "completed" | "error"
+  output?: string
+  error?: string
+  rawOutput?: string
 }
 
 export interface ToolCallUpdateEvent {

@@ -79,6 +79,17 @@
             </view>
           </view>
 
+          <!-- Codex /goal 生命周期：优先渲染为目标卡，避免被普通工具组折叠 -->
+          <view v-else-if="part.type === 'goal_run'" class="part-tool">
+            <GoalToolCallBlock
+              :start="part.start"
+              :end="part.end"
+              :items="part.items"
+              :isRunning="part.isRunning"
+              :translucent="translucent"
+            />
+          </view>
+
           <!-- P48 工具调用：分组调用使用紧凑中性 summary pill -->
           <view v-else-if="part.type === 'tool_call_group'" class="part-tool">
             <ToolCallGroupBlock
@@ -182,11 +193,13 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue"
-import type { ContentPart, MessageTurn, ToolCall } from "@/types/acp"
+import type { ContentPart, GoalDisplayPart, MessageTurn, ToolCall } from "@/types/acp"
 import {
   buildCyberDecodeText,
   type CyberEffectPhase,
 } from "@/pages/conversation-detail/detailCyberMode"
+import { buildGoalDisplayParts } from "@/services/conversation/goalToolCall"
+import GoalToolCallBlock from "./GoalToolCallBlock.vue"
 import ToolCallBlock from "./ToolCallBlock.vue"
 import ToolCallGroupBlock from "./ToolCallGroupBlock.vue"
 
@@ -204,7 +217,7 @@ const emit = defineEmits<{
   regenerate: []
 }>()
 
-type DisplayPart = ContentPart | {
+type DisplayPart = GoalDisplayPart | {
   type: "tool_call_group"
   tool_calls?: ToolCall[]
 }
@@ -222,7 +235,8 @@ const displayParts = computed<DisplayPart[]>(() => {
     pendingToolCalls = []
   }
 
-  for (const part of props.message.content || []) {
+  const goalDisplayParts = buildGoalDisplayParts(props.message.content || [], isStreaming.value)
+  for (const part of goalDisplayParts) {
     if (part.type === "tool_call" && part.tool_call) {
       pendingToolCalls.push(part.tool_call)
       continue

@@ -317,8 +317,9 @@ function normalizeContentPart(raw: any): ContentPart | null {
             ? raw.tool_call.input
             : {},
         status: raw.tool_call.status,
-        output: firstString(raw.tool_call.output) || undefined,
+        output: firstString(raw.tool_call.output, raw.tool_call.rawOutput) || undefined,
         error: firstString(raw.tool_call.error) || undefined,
+        rawOutput: firstString(raw.tool_call.rawOutput) || undefined,
       },
     }
   }

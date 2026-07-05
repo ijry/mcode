@@ -148,8 +148,9 @@ function normalizeContentPart(raw: any): ContentPart | null {
           ? raw.tool_call.input
           : {},
         status: raw.tool_call.status,
-        output: firstString(raw.tool_call.output),
+        output: firstString(raw.tool_call.output, raw.tool_call.rawOutput),
         error: firstString(raw.tool_call.error),
+        rawOutput: firstString(raw.tool_call.rawOutput),
       },
     }
   }
