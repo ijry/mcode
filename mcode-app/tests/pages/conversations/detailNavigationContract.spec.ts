@@ -30,11 +30,11 @@ describe("conversation detail navigation contract", () => {
   })
 
   it("ensures a missing remote tab before opening from the project sessions list", () => {
-    const source = read("../../../src/pages/sessions/index.vue")
+    const source = read("../../../src/pages/project-detail/components/ProjectSessionsPanel.vue")
     const block = extractFunctionBlock(
       source,
       "async function openConversation(item: RemoteConversationRecord) {",
-      "\nfunction retryLoadPage() {"
+      "\nfunction statusText(status: string) {"
     )
 
     expect(source).toContain('import { ensureConversationTab } from "@/services/conversation/pcTabSyncService"')
