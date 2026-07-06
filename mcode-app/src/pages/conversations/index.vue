@@ -299,6 +299,20 @@
       </view>
     </view>
 
+    <view v-if="selectionMode" class="bulk-action-bar" :style="upThemeCardStyle">
+      <view class="bulk-action-bar__summary">
+        <text class="bulk-action-bar__title">已选择 {{ selectedBulkCount }} 个会话</text>
+        <text class="bulk-action-bar__hint">将向所有勾选会话发送同一条内容</text>
+      </view>
+      <up-button
+        type="primary"
+        size="small"
+        shape="circle"
+        :disabled="selectedBulkCount === 0"
+        @click="openBulkSendDialog"
+      >批量发送</up-button>
+    </view>
+
     <!-- 创建会话底部弹层 -->
     <up-popup v-model:show="showCreateDialog" mode="bottom" :round="28">
       <view class="create-sheet" :style="upThemeCardStyle">
@@ -420,6 +434,58 @@
           @click="confirmCreate"
           customStyle="margin-top:16rpx"
         >创建会话</up-button>
+
+        <view class="safe-bottom"></view>
+      </view>
+    </up-popup>
+
+    <up-popup v-model:show="showBulkSendDialog" mode="bottom" :round="28" @close="closeBulkSendDialog">
+      <view class="bulk-send-sheet" :style="upThemeCardStyle">
+        <view class="create-sheet__hd">
+          <text class="create-sheet__title">批量发送</text>
+          <view class="create-sheet__close" @click="closeBulkSendDialog">
+            <up-icon name="close" size="20" :color="upThemeVar('--up-tips-color', '#909193')"></up-icon>
+          </view>
+        </view>
+
+        <view class="bulk-send-warning">
+          <up-icon name="info-circle" size="18" :color="upThemeVar('--up-primary', '#2979ff')"></up-icon>
+          <text class="bulk-send-warning__text">本次将会一键将内容发送给所有勾选的会话</text>
+        </view>
+
+        <view class="bulk-send-targets">
+          <text class="bulk-send-targets__title">目标会话 {{ selectedBulkCount }} 个</text>
+          <text class="bulk-send-targets__hint u-line-2">{{ selectedBulkSummary }}</text>
+        </view>
+
+        <view class="form-group">
+          <text class="form-label">快捷输入</text>
+          <view class="bulk-quick-row">
+            <view class="bulk-quick-chip" @click="applyBulkQuickText(BULK_SEND_QUICK_TEXT)">
+              <text class="bulk-quick-chip__text">{{ BULK_SEND_QUICK_TEXT }}</text>
+            </view>
+          </view>
+        </view>
+
+        <view class="form-group">
+          <text class="form-label">发送内容</text>
+          <up-textarea
+            v-model="bulkSendText"
+            placeholder="请输入要发送给所有勾选会话的内容"
+            autoHeight
+            count
+            :maxlength="1200"
+          ></up-textarea>
+        </view>
+
+        <up-button
+          type="primary"
+          :loading="bulkSending"
+          :disabled="bulkSendSubmitDisabled"
+          shape="circle"
+          @click="confirmBulkSend"
+          customStyle="margin-top:16rpx"
+        >确认批量发送</up-button>
 
         <view class="safe-bottom"></view>
       </view>
@@ -783,6 +849,10 @@ const projects = ref<Project[]>([])
 const connectionGroups = ref<ConnectionGroup[]>([])
 const selectionMode = ref(false)
 const selectedConversationMap = ref<Record<string, BulkSelectionItem>>({})
+const showBulkSendDialog = ref(false)
+const bulkSendText = ref("")
+const bulkSending = ref(false)
+const BULK_SEND_QUICK_TEXT = "继续"
 
 
 const filteredConnectionGroups = computed<DisplayConnectionGroup[]>(() => {
@@ -838,6 +908,20 @@ const selectedBulkItems = computed<BulkSelectionItem[]>(() =>
 )
 
 const selectedBulkCount = computed(() => selectedBulkItems.value.length)
+
+const selectedBulkSummary = computed(() => {
+  const names = selectedBulkItems.value
+    .slice(0, 3)
+    .map((item) => item.title || `会话 #${item.conversationId}`)
+  const extra = selectedBulkCount.value - names.length
+  return extra > 0 ? `${names.join("、")} 等 ${selectedBulkCount.value} 个会话` : names.join("、")
+})
+
+const bulkSendSubmitDisabled = computed(() =>
+  bulkSending.value ||
+  selectedBulkCount.value === 0 ||
+  bulkSendText.value.trim().length === 0
+)
 
 const selectedConnectionGroup = computed(() =>
   connectionGroups.value.find((group) => group.key === selectedConnectionKey.value)
@@ -2334,6 +2418,24 @@ function exitSelectionMode() {
   clearConversationSelection()
 }
 
+function openBulkSendDialog() {
+  if (selectedBulkCount.value === 0) {
+    uni.showToast({ title: "请先勾选会话", icon: "none" })
+    return
+  }
+  bulkSendText.value = ""
+  showBulkSendDialog.value = true
+}
+
+function closeBulkSendDialog() {
+  if (bulkSending.value) return
+  showBulkSendDialog.value = false
+}
+
+function applyBulkQuickText(text: string) {
+  bulkSendText.value = text
+}
+
 function handleLiveCardClick(card: LiveSessionCard, groupKey: string) {
   if (selectionMode.value) {
     toggleConversationSelection(card, groupKey)
@@ -2766,6 +2868,110 @@ async function confirmCreate() {
   } finally {
     creating.value = false
   }
+}
+
+async function confirmBulkSend() {
+  if (bulkSendSubmitDisabled.value) return
+  const text = bulkSendText.value.trim()
+  const items = [...selectedBulkItems.value]
+  if (!text || items.length === 0) return
+
+  bulkSending.value = true
+  let successCount = 0
+  let failureCount = 0
+
+  try {
+    for (const item of items) {
+      try {
+        await sendBulkSelectionItem(item, text)
+        successCount += 1
+      } catch (error) {
+        failureCount += 1
+        console.warn("[conversation-list-bulk-send] item failed", {
+          conversationId: item.conversationId,
+          connectionKey: item.connectionKey,
+          error,
+        })
+      }
+    }
+
+    if (successCount > 0) {
+      showBulkSendDialog.value = false
+      exitSelectionMode()
+      markConversationListDirty()
+      await loadOverviewData({ force: true })
+      await refreshActiveSessionTabBadge()
+    }
+
+    const title = failureCount > 0
+      ? `已发送 ${successCount} 个，失败 ${failureCount} 个`
+      : `已发送 ${successCount} 个会话`
+    uni.showToast({
+      title,
+      icon: successCount > 0 ? "success" : "none",
+      duration: 3000,
+    })
+  } finally {
+    bulkSending.value = false
+  }
+}
+
+async function sendBulkSelectionItem(item: BulkSelectionItem, text: string) {
+  const conn = findConnectedConnectionByKey(item.connectionKey)
+  if (!conn) {
+    throw new Error("连接不存在或已断开")
+  }
+
+  const gateway = await createConnectionGateway(conn)
+  syncAuthToConnection(conn)
+  const instanceKey = gateway.getRemoteInstanceDescriptor().instanceKey
+
+  await ensureConversationTab({
+    instanceKey,
+    gateway,
+    folderId: item.folderId,
+    conversationId: item.conversationId,
+    agentType: item.agentType,
+    activation: "preserve",
+    origin: "mcode-mobile-bulk-send",
+  })
+
+  const connectionId = await ensureBulkSendConnection(item, instanceKey)
+  if (!connectionId) {
+    throw new Error("未连接到代理")
+  }
+
+  await gateway.call("acp_prompt", {
+    connectionId,
+    blocks: [{ type: "text", text }],
+    folderId: item.folderId,
+    conversationId: item.conversationId,
+  })
+}
+
+async function ensureBulkSendConnection(
+  item: BulkSelectionItem,
+  instanceKey: string
+): Promise<string> {
+  const managedConnectionId =
+    runtime.getManagedConversation(item.conversationId)?.connectionId ||
+    runtime.sessions.get(item.conversationId)?.connectionId ||
+    ""
+  if (managedConnectionId) return managedConnectionId
+
+  const recovered = await runtime.connect(
+    item.conversationId,
+    normalizeAgentType(item.agentType),
+    undefined,
+    undefined,
+    runtime.sessions.get(item.conversationId)?.lastAppliedSeq,
+    instanceKey
+  )
+  return firstString(
+    recovered?.id,
+    runtime.getManagedConversation(item.conversationId)?.connectionId,
+    runtime.sessions.get(item.conversationId)?.connectionId
+  )
 }
 
 function showConversationMenu(conv: Conversation) {
@@ -3699,6 +3905,110 @@ function formatTime(time?: string): string {
 
 
 /* ===== 创建弹层 ===== */
+.bulk-action-bar {
+  position: fixed;
+  left: 24rpx;
+  right: 24rpx;
+  bottom: calc(24rpx + env(safe-area-inset-bottom));
+  z-index: 30;
+  padding: 18rpx 18rpx;
+  border-radius: 28rpx;
+  background: var(--up-card-bg-color, #ffffff) !important;
+  border: 1rpx solid var(--up-border-color, #dadbde);
+  box-shadow: 0 18rpx 52rpx rgba(15, 23, 42, 0.16) !important;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18rpx;
+}
+
+.bulk-action-bar__summary {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+}
+
+.bulk-action-bar__title {
+  font-size: 26rpx;
+  font-weight: 700;
+  color: var(--up-main-color, #303133);
+}
+
+.bulk-action-bar__hint {
+  font-size: 22rpx;
+  color: var(--up-tips-color, #909193);
+}
+
+.bulk-send-sheet {
+  padding: 36rpx 20rpx 0;
+  background-color: var(--up-card-bg-color, #ffffff);
+  border-radius: 28rpx 28rpx 0 0;
+}
+
+.bulk-send-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 12rpx;
+  padding: 18rpx 20rpx;
+  border-radius: 22rpx;
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 9%, var(--up-card-bg-color, #ffffff) 91%);
+  border: 1rpx solid color-mix(in srgb, var(--up-primary, #2979ff) 20%, var(--up-border-color, #dadbde) 80%);
+  margin-bottom: 24rpx;
+}
+
+.bulk-send-warning__text {
+  flex: 1;
+  min-width: 0;
+  font-size: 24rpx;
+  line-height: 1.45;
+  color: var(--up-main-color, #303133);
+}
+
+.bulk-send-targets {
+  margin-bottom: 24rpx;
+  padding: 0 4rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+
+.bulk-send-targets__title {
+  font-size: 26rpx;
+  font-weight: 700;
+  color: var(--up-main-color, #303133);
+}
+
+.bulk-send-targets__hint {
+  font-size: 22rpx;
+  line-height: 1.4;
+  color: var(--up-content-color, #606266);
+}
+
+.bulk-quick-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
+}
+
+.bulk-quick-chip {
+  min-height: 52rpx;
+  padding: 0 24rpx;
+  border-radius: 999rpx;
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 10%, var(--up-card-bg-color, #ffffff) 90%);
+  border: 1rpx solid color-mix(in srgb, var(--up-primary, #2979ff) 26%, var(--up-border-color, #dadbde) 74%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.bulk-quick-chip__text {
+  font-size: 24rpx;
+  font-weight: 700;
+  color: var(--up-primary, #2979ff);
+}
+
 .create-sheet {
   padding: 36rpx 20rpx 0;
   background-color: var(--up-card-bg-color, #ffffff);

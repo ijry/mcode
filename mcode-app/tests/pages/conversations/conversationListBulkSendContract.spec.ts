@@ -49,4 +49,56 @@ describe("P67 conversation list bulk send contract", () => {
     expect(block.indexOf("toggleConversationSelection(card, groupKey)"))
       .toBeLessThan(block.indexOf("openLiveSession(card, groupKey)"))
   })
+
+  it("renders the bulk-send popup with warning copy and quick continue input", () => {
+    const source = read("../../../src/pages/conversations/index.vue")
+
+    expect(source).toContain('v-model:show="showBulkSendDialog"')
+    expect(source).toContain("批量发送")
+    expect(source).toContain("本次将会一键将内容发送给所有勾选的会话")
+    expect(source).toContain('const BULK_SEND_QUICK_TEXT = "继续"')
+    expect(source).toContain('@click="applyBulkQuickText(BULK_SEND_QUICK_TEXT)"')
+    expect(source).toContain('v-model="bulkSendText"')
+    expect(source).toContain(':disabled="bulkSendSubmitDisabled"')
+    expect(source).toContain('@click="confirmBulkSend"')
+  })
+
+  it("bulk sends selected cards through the existing ACP prompt pipeline", () => {
+    const source = read("../../../src/pages/conversations/index.vue")
+    const confirmBlock = extractBlock(
+      source,
+      "async function confirmBulkSend() {",
+      "\nasync function sendBulkSelectionItem("
+    )
+    const sendBlock = extractBlock(
+      source,
+      "async function sendBulkSelectionItem(",
+      "\nasync function ensureBulkSendConnection("
+    )
+    const ensureBlock = extractBlock(
+      source,
+      "async function ensureBulkSendConnection(",
+      "\nfunction showConversationMenu("
+    )
+
+    expect(confirmBlock).toContain("for (const item of items)")
+    expect(confirmBlock).toContain("await sendBulkSelectionItem(item, text)")
+    expect(confirmBlock).toContain("await loadOverviewData({ force: true })")
+    expect(confirmBlock).toContain("await refreshActiveSessionTabBadge()")
+
+    expect(sendBlock).toContain("const conn = findConnectedConnectionByKey(item.connectionKey)")
+    expect(sendBlock).toContain("syncAuthToConnection(conn)")
+    expect(sendBlock).toContain("await ensureConversationTab({")
+    expect(sendBlock).toContain('activation: "preserve"')
+    expect(sendBlock).toContain('origin: "mcode-mobile-bulk-send"')
+    expect(sendBlock).toContain("await ensureBulkSendConnection(item, instanceKey)")
+    expect(sendBlock).toContain('await gateway.call("acp_prompt", {')
+    expect(sendBlock).toContain('blocks: [{ type: "text", text }]')
+    expect(sendBlock).toContain("folderId: item.folderId")
+    expect(sendBlock).toContain("conversationId: item.conversationId")
+
+    expect(ensureBlock).toContain("runtime.getManagedConversation(item.conversationId)?.connectionId")
+    expect(ensureBlock).toContain("await runtime.connect(")
+    expect(ensureBlock).toContain("runtime.sessions.get(item.conversationId)?.lastAppliedSeq")
+  })
 })
