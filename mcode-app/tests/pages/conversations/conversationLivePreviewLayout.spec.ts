@@ -30,4 +30,14 @@ describe("conversation live preview layout contract", () => {
     expect(source).toContain("textWidth <= wrapWidth + 1")
     expect(source).toContain("animationDuration")
   })
+
+  it("keeps marquee typography stable after switching into scrolling mode", () => {
+    const source = read("../../../src/components/MarqueeText.vue")
+    const trackStyle = source.slice(source.indexOf(".marquee__track {"), source.indexOf(".marquee__track--scroll {"))
+
+    expect(trackStyle).toContain("font-size: inherit;")
+    expect(trackStyle).toContain("font-weight: inherit;")
+    expect(trackStyle).toContain("line-height: inherit;")
+    expect(trackStyle).toContain("color: inherit;")
+  })
 })

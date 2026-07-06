@@ -123,6 +123,10 @@ onMounted(() => {
   display: inline-flex;
   align-items: center;
   white-space: nowrap;
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
   will-change: transform;
 }
 
