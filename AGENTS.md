@@ -18,6 +18,11 @@
 - The note should describe the architecture, protocol/data-flow changes, UI behavior, compatibility considerations, and native iOS/Android replication guidance.
 - Keep notes concise but concrete enough that an AI agent can reimplement the same behavior in native clients without reading the full web/uni-app implementation.
 
+## Implementation Plan 执行方式
+
+- 执行 implementation plan 时默认且仅使用 Inline Execution。
+- 不要询问 Subagent-Driven，也不要因计划执行要求创建隔离 worktree，除非用户明确要求。
+
 ## 对接 xycloud
 
 - 当我说"对接 xycloud"时，指的是对接位于 `../.././xystack/back-end/xycloud` 的 xycloud 后端源码。
