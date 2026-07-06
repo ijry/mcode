@@ -11,8 +11,21 @@
         <up-status-bar></up-status-bar>
         <view class="conversations-header">
           <text class="conversations-header__title">会话</text>
-          <view class="conversations-header__action" @click="createConversation()">
-            <up-icon name="plus" size="20" :color="upThemeVar('--up-primary', '#2f7cf6')"></up-icon>
+          <view class="conversations-header__actions">
+            <view
+              v-if="showSelectionEntry"
+              class="conversations-header__select"
+              @click="toggleSelectionMode"
+            >
+              <text class="conversations-header__select-text">{{ selectionMode ? "取消" : "选择" }}</text>
+            </view>
+            <view
+              v-if="!selectionMode"
+              class="conversations-header__action"
+              @click="createConversation()"
+            >
+              <up-icon name="plus" size="20" :color="upThemeVar('--up-primary', '#2f7cf6')"></up-icon>
+            </view>
           </view>
         </view>
 
@@ -115,10 +128,29 @@
                 <view
                   v-for="card in group.cards"
                   :key="`${group.key}-${card.tabId}`"
-                  class="live-card"
+                  :class="[
+                    'live-card',
+                    selectionMode && isSelectableLiveCard(card) && 'live-card--selecting',
+                    isConversationSelected(card, group.key) && 'live-card--selected',
+                  ]"
                   :style="upThemeCardStyle"
-                  @click="openLiveSession(card, group.key)"
+                  @click="handleLiveCardClick(card, group.key)"
                 >
+                  <view
+                    v-if="selectionMode && isSelectableLiveCard(card)"
+                    :class="[
+                      'bulk-select-check',
+                      isConversationSelected(card, group.key) && 'bulk-select-check--active',
+                    ]"
+                    @click.stop="toggleConversationSelection(card, group.key)"
+                  >
+                    <up-icon
+                      v-if="isConversationSelected(card, group.key)"
+                      name="checkmark"
+                      size="14"
+                      color="#ffffff"
+                    ></up-icon>
+                  </view>
                   <view class="live-card__main">
                     <view
                       :class="[
@@ -737,8 +769,20 @@ interface ConnectionGroup extends ConnectionConversationSnapshot {
   cards: LiveSessionCard[]
 }
 
+interface BulkSelectionItem {
+  key: string
+  connectionKey: string
+  conversationId: number
+  folderId: number
+  agentType: string
+  title: string
+  projectName: string
+}
+
 const projects = ref<Project[]>([])
 const connectionGroups = ref<ConnectionGroup[]>([])
+const selectionMode = ref(false)
+const selectedConversationMap = ref<Record<string, BulkSelectionItem>>({})
 
 
 const filteredConnectionGroups = computed<DisplayConnectionGroup[]>(() => {
@@ -781,6 +825,19 @@ const filteredConnectionGroups = computed<DisplayConnectionGroup[]>(() => {
         group.baseUrl.toLowerCase().includes(kw)
     )
 })
+
+const showSelectionEntry = computed(() => {
+  if (showHistoryPanel.value) return false
+  return filteredConnectionGroups.value.some((group) =>
+    group.cards.some((card) => isSelectableLiveCard(card))
+  )
+})
+
+const selectedBulkItems = computed<BulkSelectionItem[]>(() =>
+  Object.values(selectedConversationMap.value)
+)
+
+const selectedBulkCount = computed(() => selectedBulkItems.value.length)
 
 const selectedConnectionGroup = computed(() =>
   connectionGroups.value.find((group) => group.key === selectedConnectionKey.value)
@@ -841,6 +898,36 @@ watch(
   () => buildLivePreviewRuntimeSignature(),
   () => {
     scheduleLivePreviewReconcile()
+  }
+)
+
+watch(
+  () =>
+    filteredConnectionGroups.value
+      .flatMap((group) =>
+        group.cards
+          .filter((card) => isSelectableLiveCard(card))
+          .map((card) => buildBulkSelectionKey(group.key, Number(card.conversationId || 0)))
+      )
+      .join("|"),
+  () => {
+    const available = new Set(
+      filteredConnectionGroups.value.flatMap((group) =>
+        group.cards
+          .filter((card) => isSelectableLiveCard(card))
+          .map((card) => buildBulkSelectionKey(group.key, Number(card.conversationId || 0)))
+      )
+    )
+    const next: Record<string, BulkSelectionItem> = {}
+    for (const item of selectedBulkItems.value) {
+      if (available.has(item.key)) {
+        next[item.key] = item
+      }
+    }
+    selectedConversationMap.value = next
+    if (!showSelectionEntry.value) {
+      exitSelectionMode()
+    }
   }
 )
 
@@ -2183,7 +2270,80 @@ function goToConnections() {
   uni.switchTab({ url: "/pages/connections/index" })
 }
 
+function buildBulkSelectionKey(connectionKeyValue: string, conversationId: number): string {
+  return `${connectionKeyValue}:${conversationId}`
+}
+
+function isSelectableLiveCard(card: LiveSessionCard): boolean {
+  return Number(card.conversationId || 0) > 0
+}
+
+function buildBulkSelectionItem(
+  card: LiveSessionCard,
+  connectionKeyValue: string
+): BulkSelectionItem | null {
+  const conversationId = Number(card.conversationId || 0)
+  if (!connectionKeyValue || conversationId <= 0) return null
+  return {
+    key: buildBulkSelectionKey(connectionKeyValue, conversationId),
+    connectionKey: connectionKeyValue,
+    conversationId,
+    folderId: Number(card.folderId || 0),
+    agentType: normalizeAgentType(card.agentType),
+    title: card.title || "未命名会话",
+    projectName: card.projectName || "未命名项目",
+  }
+}
+
+function isConversationSelected(
+  card: LiveSessionCard,
+  connectionKeyValue: string
+): boolean {
+  const conversationId = Number(card.conversationId || 0)
+  if (!connectionKeyValue || conversationId <= 0) return false
+  return Boolean(selectedConversationMap.value[
+    buildBulkSelectionKey(connectionKeyValue, conversationId)
+  ])
+}
+
+function toggleConversationSelection(card: LiveSessionCard, connectionKeyValue: string) {
+  const item = buildBulkSelectionItem(card, connectionKeyValue)
+  if (!item) return
+  const next = { ...selectedConversationMap.value }
+  if (next[item.key]) {
+    delete next[item.key]
+  } else {
+    next[item.key] = item
+  }
+  selectedConversationMap.value = next
+}
+
+function clearConversationSelection() {
+  selectedConversationMap.value = {}
+}
+
+function toggleSelectionMode() {
+  selectionMode.value = !selectionMode.value
+  if (!selectionMode.value) {
+    clearConversationSelection()
+  }
+}
+
+function exitSelectionMode() {
+  selectionMode.value = false
+  clearConversationSelection()
+}
+
+function handleLiveCardClick(card: LiveSessionCard, groupKey: string) {
+  if (selectionMode.value) {
+    toggleConversationSelection(card, groupKey)
+    return
+  }
+  openLiveSession(card, groupKey)
+}
+
 function openHistoryPanel(group: ConnectionGroup) {
+  exitSelectionMode()
   historyGroupKey.value = group.key
   historyGroupTitle.value = group.name
   projects.value = group.projects
@@ -2782,6 +2942,31 @@ function formatTime(time?: string): string {
   color: var(--up-main-color, #191c1e);
 }
 
+.conversations-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  flex-shrink: 0;
+}
+
+.conversations-header__select {
+  min-width: 84rpx;
+  height: 56rpx;
+  padding: 0 18rpx;
+  border-radius: 999rpx;
+  background: color-mix(in srgb, var(--up-primary, #2f7cf6) 10%, var(--up-card-bg-color, #ffffff) 90%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.conversations-header__select-text {
+  font-size: 24rpx;
+  line-height: 1;
+  font-weight: 700;
+  color: var(--up-primary, #2f7cf6);
+}
+
 .conversations-header__action {
   width: 64rpx;
   height: 64rpx;
@@ -2997,6 +3182,36 @@ function formatTime(time?: string): string {
 
 .live-card:active {
   transform: scale(0.98);
+}
+
+.live-card--selecting {
+  padding-left: 86rpx;
+}
+
+.live-card--selected {
+  border-color: color-mix(in srgb, var(--up-primary, #2979ff) 58%, var(--up-border-color, #dadbde) 42%);
+  box-shadow: 0 10rpx 36rpx color-mix(in srgb, var(--up-primary, #2979ff) 16%, transparent) !important;
+}
+
+.bulk-select-check {
+  position: absolute;
+  left: 24rpx;
+  top: 50%;
+  width: 42rpx;
+  height: 42rpx;
+  border-radius: 999rpx;
+  transform: translateY(-50%);
+  border: 2rpx solid var(--up-border-color, #dadbde);
+  background: var(--up-card-bg-color, #ffffff);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+}
+
+.bulk-select-check--active {
+  border-color: var(--up-primary, #2979ff);
+  background: var(--up-primary, #2979ff);
 }
 
 .agent-logo {
