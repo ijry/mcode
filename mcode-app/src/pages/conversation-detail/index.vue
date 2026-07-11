@@ -150,7 +150,7 @@
       >
         <swiper-item
           v-for="(tab, index) in detailShellTabs"
-          :key="tab.tabId || tab.conversationId || index"
+          :key="resolveDetailShellTabKey(tab)"
           class="detail-shell__swiper-item"
         >
           <view
@@ -1144,6 +1144,8 @@ import {
   resolveMountedDetailConversationIds,
   resolveDetailTabChangeIndex,
   resolveDetailTabCloseTarget,
+  resolveDetailShellTabKey,
+  resolveDetailActiveTabIndex,
   type DetailShellTabItem,
 } from "./detailTabsPresentation"
 import {
@@ -2730,10 +2732,11 @@ function reconcileDetailShellFromOpenedTabs(options: { loadConversation?: boolea
     handleBackNavigation()
     return
   }
-  const currentConversationIndex = findDetailShellTabIndex(conversationId.value)
-  const nextIndex = currentConversationIndex >= 0
-    ? currentConversationIndex
-    : 0
+  const nextIndex = resolveDetailActiveTabIndex({
+    tabs: detailShellTabs.value,
+    preferredConversationId: conversationId.value,
+    currentIndex: activeDetailTabIndex.value,
+  })
   syncDetailTabSelection(nextIndex)
   const nextTab = detailShellTabs.value[nextIndex]
   if (!nextTab) return
@@ -3370,10 +3373,11 @@ watch(
   () => {
     if (detailShellTabs.value.length === 0) return
     mountAllDetailTabs()
-    const safeIndex = Math.min(
-      Math.max(0, activeDetailTabIndex.value),
-      detailShellTabs.value.length - 1,
-    )
+    const safeIndex = resolveDetailActiveTabIndex({
+      tabs: detailShellTabs.value,
+      preferredConversationId: conversationId.value,
+      currentIndex: activeDetailTabIndex.value,
+    })
     syncDetailTabSelection(safeIndex)
     ensureMountedDetailTabRuntimes()
   },

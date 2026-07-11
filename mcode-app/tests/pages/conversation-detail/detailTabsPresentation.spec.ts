@@ -3,6 +3,8 @@ import {
   resolveMountedDetailConversationIds,
   resolveDetailTabChangeIndex,
   resolveDetailTabCloseTarget,
+  resolveDetailShellTabKey,
+  resolveDetailActiveTabIndex,
 } from "@/pages/conversation-detail/detailTabsPresentation"
 
 describe("detailTabsPresentation", () => {
@@ -176,5 +178,63 @@ describe("detailTabsPresentation", () => {
       mountedConversationIds: [88, 99, 101],
       tabs,
     })).sort()).toEqual([88, 99])
+  })
+
+  it("keys swiper pages by conversation id so rewritten remote tab ids stay stable", () => {
+    expect(resolveDetailShellTabKey({
+      tabId: 3,
+      folderId: 2,
+      conversationId: 99,
+    })).toBe("conversation:99")
+
+    // After save_opened_tabs CAS rewrite, the same conversation gets a new row id.
+    expect(resolveDetailShellTabKey({
+      tabId: 41,
+      folderId: 2,
+      conversationId: 99,
+    })).toBe("conversation:99")
+  })
+
+  it("restores the active tab by preferred conversation id instead of falling back to index 0", () => {
+    const tabs = buildDetailShellTabs({
+      openedTabs: [
+        {
+          id: 3,
+          folder_id: 2,
+          conversation_id: 88,
+          agent_type: "claude_code",
+          position: 0,
+          is_active: true,
+          is_pinned: false,
+        },
+        {
+          id: 9,
+          folder_id: 2,
+          conversation_id: 99,
+          agent_type: "codex",
+          position: 1,
+          is_active: false,
+          is_pinned: false,
+        },
+      ],
+    })
+
+    expect(resolveDetailActiveTabIndex({
+      tabs,
+      preferredConversationId: 99,
+      currentIndex: 0,
+    })).toBe(1)
+
+    expect(resolveDetailActiveTabIndex({
+      tabs,
+      preferredConversationId: 0,
+      currentIndex: 1,
+    })).toBe(1)
+
+    expect(resolveDetailActiveTabIndex({
+      tabs,
+      preferredConversationId: 404,
+      currentIndex: 7,
+    })).toBe(1)
   })
 })

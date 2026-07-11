@@ -115,6 +115,9 @@ describe("ConversationDetailBody", () => {
     expect(source).toContain(':folder-id="tab.folderId"')
     expect(source).toContain(':active="isActiveDetailTabPage(index)"')
     expect(source).toContain("function mountAllDetailTabs()")
+    expect(source).toContain(':key="resolveDetailShellTabKey(tab)"')
+    expect(source).toContain("resolveDetailActiveTabIndex({")
+    expect(source).not.toContain(':key="tab.tabId || tab.conversationId || index"')
     expect(source).not.toContain("<ConversationDetailReadonlyTimeline")
   })
 

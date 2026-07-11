@@ -110,3 +110,38 @@ export function resolveDetailTabCloseTarget(
   if (closedIndex - 1 >= 0) return closedIndex - 1
   return -1
 }
+
+// Swiper/page identity must follow conversation identity, not remote tab row
+// ids. save_opened_tabs rewrites auto-increment id values on every CAS save,
+// so keying by tabId remounts the whole detail page and often resets the
+// active page to index 0 after send/sync.
+export function resolveDetailShellTabKey(
+  tab: Pick<DetailShellTabItem, "conversationId" | "folderId" | "tabId"> | null | undefined,
+): string {
+  const conversationId = Number(tab?.conversationId || 0)
+  if (conversationId > 0) return `conversation:${conversationId}`
+  const folderId = Number(tab?.folderId || 0)
+  const tabId = Number(tab?.tabId || 0)
+  return `tab:${folderId}:${tabId}`
+}
+
+export function resolveDetailActiveTabIndex(input: {
+  tabs: DetailShellTabItem[]
+  preferredConversationId?: number
+  currentIndex?: number
+}): number {
+  const tabs = Array.isArray(input.tabs) ? input.tabs : []
+  if (tabs.length === 0) return 0
+
+  const preferredConversationId = Number(input.preferredConversationId || 0)
+  if (preferredConversationId > 0) {
+    const preferredIndex = tabs.findIndex(
+      (tab) => Number(tab.conversationId || 0) === preferredConversationId
+    )
+    if (preferredIndex >= 0) return preferredIndex
+  }
+
+  const currentIndex = Number(input.currentIndex || 0)
+  if (!Number.isFinite(currentIndex)) return 0
+  return Math.min(Math.max(0, currentIndex), tabs.length - 1)
+}
