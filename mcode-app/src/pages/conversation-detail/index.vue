@@ -2732,6 +2732,29 @@ function reconcileDetailShellFromOpenedTabs(options: { loadConversation?: boolea
     handleBackNavigation()
     return
   }
+  // 当前已在某个会话时，若它仍存在于新的 tab 列表里，就固定停在当前会话，
+  // 只更新选中态，绝不因远端（如桌面端新建会话）推送的 active 标志或列表顺序
+  // 变化而自动切换、重载页面。跨设备的 opened-tabs 广播不应把用户正在看的会话
+  // 挤走。只有当前会话不在列表中、或本地尚无当前会话时，才走 index 回退选择。
+  const currentConversationId = Number(conversationId.value || 0)
+  if (currentConversationId > 0) {
+    const currentIndex = detailShellTabs.value.findIndex(
+      (tab) => Number(tab.conversationId || 0) === currentConversationId
+    )
+    if (currentIndex >= 0) {
+      syncDetailTabSelection(currentIndex)
+      return
+    }
+    // 当前会话已不在新的 tab 列表里（例如桌面端停止/结束回合后把该会话移出它自己
+    // 的 opened-tabs，跨设备同步过来）。事件驱动路径（opened-tabs 广播）绝不能因此
+    // 自动切换到别的会话并 loadConversation —— 那正是“PC 点停止导致本端详情页意外
+    // 刷新、tab 跳回第一个”的根因。此时保持当前视图不动，只有冷启动水合
+    // （loadConversation === false，仅选中不重载）才允许走 index 回退选择。
+    if (options.loadConversation !== false) {
+      return
+    }
+  }
+
   const nextIndex = resolveDetailActiveTabIndex({
     tabs: detailShellTabs.value,
     preferredConversationId: conversationId.value,
@@ -3373,11 +3396,29 @@ watch(
   () => {
     if (detailShellTabs.value.length === 0) return
     mountAllDetailTabs()
-    const safeIndex = resolveDetailActiveTabIndex({
-      tabs: detailShellTabs.value,
-      preferredConversationId: conversationId.value,
-      currentIndex: activeDetailTabIndex.value,
-    })
+    // 优先固定在当前会话所在的 tab；只有当前会话不在列表里（或本地尚无当前会话）
+    // 时才走 index 回退。这样远端（如 PC 停止后把会话移出其 opened-tabs）导致的
+    // 列表顺序/成员变化不会把选中态挤到别的 tab。
+    const currentConversationId = Number(conversationId.value || 0)
+    const currentIndex =
+      currentConversationId > 0
+        ? detailShellTabs.value.findIndex(
+            (tab) => Number(tab.conversationId || 0) === currentConversationId
+          )
+        : -1
+    if (currentConversationId > 0 && currentIndex < 0) {
+      // 当前会话已不在列表中：保持现有选中态不动，不因远端变化跳 tab。
+      ensureMountedDetailTabRuntimes()
+      return
+    }
+    const safeIndex =
+      currentIndex >= 0
+        ? currentIndex
+        : resolveDetailActiveTabIndex({
+            tabs: detailShellTabs.value,
+            preferredConversationId: conversationId.value,
+            currentIndex: activeDetailTabIndex.value,
+          })
     syncDetailTabSelection(safeIndex)
     ensureMountedDetailTabRuntimes()
   },

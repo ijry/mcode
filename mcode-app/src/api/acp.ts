@@ -1123,6 +1123,15 @@ class AcpApiClient {
             images: Array.isArray(record.images) ? record.images : undefined,
           },
         }
+      case "user_message":
+        return {
+          connectionId,
+          type: "user_message",
+          data: {
+            messageId: firstString(record.message_id, record.messageId),
+            blocks: Array.isArray(record.blocks) ? record.blocks : [],
+          },
+        }
       case "status_changed":
         return {
           connectionId,

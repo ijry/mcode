@@ -168,6 +168,7 @@ export interface EventEnvelope {
     | "tool_call"
     | "tool_call_update"
     | "status_changed"
+    | "user_message"
     | "turn_complete"
     | "turn_cancel_requested"
     | "turn_cancelled"

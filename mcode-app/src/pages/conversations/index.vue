@@ -746,6 +746,8 @@ let createAgentListToken = 0
 let disposeOverviewInvalidation: (() => void) | null = null
 const disposeOpenedTabsChangedMap = new Map<string, () => void>()
 const disposeActiveSessionsChangedMap = new Map<string, () => void>()
+const activeSessionsRefreshTimerMap = new Map<string, ReturnType<typeof setTimeout>>()
+const ACTIVE_SESSIONS_REFRESH_DEBOUNCE_MS = 400
 let activeCreateRequestId = ""
 let activeCreateRequestFingerprint = ""
 let activeCreateConversationId = 0
@@ -1465,6 +1467,8 @@ onUnload(() => {
   disposeOpenedTabsChangedMap.clear()
   disposeActiveSessionsChangedMap.forEach((dispose) => dispose())
   disposeActiveSessionsChangedMap.clear()
+  activeSessionsRefreshTimerMap.forEach((timer) => clearTimeout(timer))
+  activeSessionsRefreshTimerMap.clear()
   if (livePreviewReconcileTimer) {
     clearTimeout(livePreviewReconcileTimer)
     livePreviewReconcileTimer = null
@@ -1885,6 +1889,51 @@ async function refreshConnectionGroupFromLocalCache(instanceKey: string) {
   )
 }
 
+// pet://sessions 到达时对该 instance 的会话列表做一次去抖远端刷新。远端数据
+// 对"刚变活跃"和"刚跑完"两种情况都是权威的：跑完的会话会带上正确终态并从
+// active 列表消失，因此无需在本地拼状态。pet://sessions 由后端去重、仅在
+// 成员/状态变化时才发（不含流式增量），配合去抖足以避免频繁全量拉取。
+function scheduleActiveSessionsOverviewRefresh(instanceKey: string) {
+  if (!instanceKey) return
+  const existing = activeSessionsRefreshTimerMap.get(instanceKey)
+  if (existing) {
+    clearTimeout(existing)
+  }
+  const timer = setTimeout(() => {
+    activeSessionsRefreshTimerMap.delete(instanceKey)
+    void refreshOverviewFromRemoteByInstance(instanceKey)
+  }, ACTIVE_SESSIONS_REFRESH_DEBOUNCE_MS)
+  activeSessionsRefreshTimerMap.set(instanceKey, timer)
+}
+
+async function refreshOverviewFromRemoteByInstance(instanceKey: string) {
+  const descriptor = getRegisteredRemoteInstanceDescriptor(instanceKey)
+  if (!descriptor) return
+
+  const mappedConnKey = instanceConnectionKeyMap.get(instanceKey) || ""
+  if (!mappedConnKey) return
+  const conn = findConnectedConnectionByKey(mappedConnKey)
+  if (!conn) return
+
+  const connKey = connectionKey(conn)
+  const folders = connectionFolderSnapshotMap.get(connKey)
+  const tabs = connectionTabSnapshotMap.get(connKey)
+  if (!folders || !tabs) return
+
+  try {
+    const gateway = await createConnectionGateway(conn)
+    await scheduleOverviewConversationRefresh({
+      conn,
+      gateway,
+      instanceKey,
+      folders,
+      tabs,
+    })
+  } catch (error) {
+    console.warn("refresh overview from pet://sessions skipped:", error)
+  }
+}
+
 async function scheduleOverviewConversationRefresh(input: {
   conn: ConnectionItem
   gateway: CodegGateway
@@ -1995,6 +2044,10 @@ function ensureActiveSessionsSubscription(instanceKey: string) {
   const unsubscribe = acpApi.subscribeGlobalEvent("pet://sessions", (payload) => {
     activeSessionBadgeCountMap.set(instanceKey, getOngoingActiveSessionCount(payload))
     void applyConversationTabBarBadge(sumActiveSessionBadgeCounts())
+    // pet://sessions 会在会话成员/状态变化（开始、等待、结束、报错）时由后端去重
+    // 后下发，正好作为会话列表刷新的触发点。用去抖的远端刷新拉取该 instance 的
+    // 权威会话状态：刚跑完而从活跃列表消失的会话会带回正确终态，无需本地拼状态。
+    scheduleActiveSessionsOverviewRefresh(instanceKey)
   }, instanceKey)
   disposeActiveSessionsChangedMap.set(instanceKey, unsubscribe)
 }

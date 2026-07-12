@@ -85,6 +85,8 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         lastCompletedTurnAt: 0,
         externalTurnBackfillInFlight: false,
         externalTurnBackfillLastAttemptAt: 0,
+        externalTurnBackfilled: false,
+        externalTurnBackfillAttempts: 0,
         stats: {
           inputTokens: 0,
           outputTokens: 0,
@@ -295,6 +297,22 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     }
 
     applySnapshotInFlightUserTurnId(session, snapshot)
+    // 冷启动 mid-turn attach：快照里的 pending_user_message 带着外部 prompt 的
+    // 正文，合成为用户轮次，这样打开进行中的会话不必全量拉取即可看到 prompt。
+    const pendingUserMessage = firstObject(
+      snapshot.pending_user_message,
+      snapshot.pendingUserMessage
+    )
+    if (pendingUserMessage) {
+      applyRealtimeUserMessage(session, {
+        messageId: firstString(
+          pendingUserMessage.message_id,
+          pendingUserMessage.messageId,
+          pendingUserMessage.id
+        ),
+        blocks: pendingUserMessage.blocks,
+      })
+    }
     const normalizedLiveMessage = mapSnapshotLiveMessage(snapshot, session.liveMessage)
     const shouldIgnoreSnapshotLiveMessage =
       normalizedLiveMessage != null &&
@@ -342,6 +360,8 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     markCompleteTurnHandled(session, completeTurnKey)
     session.externalTurnBackfillInFlight = false
     session.externalTurnBackfillLastAttemptAt = 0
+    session.externalTurnBackfilled = false
+    session.externalTurnBackfillAttempts = 0
     const hadOptimisticTurns = session.optimisticTurns.length > 0
     const completedTurns = session.optimisticTurns.map(cloneMessageTurn)
     const completionLiveMessage = resolveCompletionLiveMessage(session, eventData)
@@ -456,6 +476,13 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
           event.data.contentType
         )
         maybeBackfillExternalUserTurn(session, "stream_batch")
+        break
+
+      case "user_message":
+        // 桌面端/其他设备实时发出的用户提问。后端广播它，好让本机在实时阶段
+        // 直接合成用户轮次，而不必全量拉取 get_folder_conversation。发送方自己
+        // 已经加了 optimistic 轮次，会通过 messageId 去重忽略这条回声。
+        applyRealtimeUserMessage(session, event.data)
         break
 
       case "tool_call": {
@@ -639,6 +666,8 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         session.status = session.connectionId ? "connected" : "idle"
         session.inputErrorMessage = null
         session.apiRetry = null
+        session.externalTurnBackfilled = false
+        session.externalTurnBackfillAttempts = 0
         releaseHotConversation(session.conversationId)
         syncManagedSendPermission(session.conversationId)
         break
@@ -743,6 +772,8 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         session.lastAppliedSeq = null
         session.lastCompletedTurnKey = null
         session.lastCompletedTurnAt = 0
+        session.externalTurnBackfilled = false
+        session.externalTurnBackfillAttempts = 0
       }
 
       if (!managed && discoveredConnectionId) {
@@ -843,6 +874,10 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       session.inFlightUserTurnId = null
       session.lastCompletedTurnKey = null
       session.lastCompletedTurnAt = 0
+      session.externalTurnBackfillInFlight = false
+      session.externalTurnBackfillLastAttemptAt = 0
+      session.externalTurnBackfilled = false
+      session.externalTurnBackfillAttempts = 0
     }
   }
 
@@ -896,6 +931,8 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       session.lastCompletedTurnAt = 0
       session.externalTurnBackfillInFlight = false
       session.externalTurnBackfillLastAttemptAt = 0
+      session.externalTurnBackfilled = false
+      session.externalTurnBackfillAttempts = 0
       session.status = session.connectionId ? "connected" : "idle"
     }
   }
@@ -1040,6 +1077,8 @@ interface RuntimeSession {
   lastCompletedTurnAt: number
   externalTurnBackfillInFlight: boolean
   externalTurnBackfillLastAttemptAt: number
+  externalTurnBackfilled: boolean
+  externalTurnBackfillAttempts: number
   stats: SessionStats
 }
 
@@ -1279,6 +1318,78 @@ function sharedPromptPriorityText(priorityTier?: string | null) {
   return "普通优先级"
 }
 
+// 桌面端/其他设备实时发送的用户 prompt 通过 UserMessage 事件广播给 viewer，
+// 这里把它合成为一条本地用户轮次并按 message_id 去重（发送端自己已有 optimistic
+// 轮次，会忽略这条 echo）。这样实时阶段无需全量拉取 get_folder_conversation 即可
+// 显示外部 prompt。
+function applyRealtimeUserMessage(session: RuntimeSession, eventData: any) {
+  const messageId = firstString(eventData?.messageId, eventData?.message_id)
+  if (!messageId) return
+
+  // 发送端的 optimistic 轮次：若文本一致则视为同一条，忽略 echo。
+  if (session.optimisticTurns.length > 0) return
+
+  const content = mapUserMessageBlocksToContent(eventData?.blocks)
+  if (content.length === 0) return
+
+  // 去重：既按 message_id，也按内容签名。maybeBackfillExternalUserTurn 全量拉取
+  // 后会把 localTurns 换成 DB 持久 id（与实时 message_id 不一致）。若仅按 id 判断，
+  // 后端重播（重连 / replay）的同一条 user_message 会被再次合成，导致 localTurns
+  // 单调增长、内存暴涨（带 base64 图片时尤甚），最终把 Safari WebContent 进程撑爆
+  // 触发“重复出现问题”。内容签名能跨 id 命中同一条 prompt，杜绝重复插入。
+  const contentSignature = buildUserTurnContentSignature(content)
+  const alreadyPresent = session.localTurns.some(
+    (turn) =>
+      turn.role === "user" &&
+      (turn.id === messageId ||
+        buildUserTurnContentSignature(turn.content) === contentSignature)
+  )
+  if (alreadyPresent) return
+
+  const turn: MessageTurn = {
+    id: messageId,
+    role: "user",
+    content,
+    timestamp: firstNumber(eventData?.timestamp) || Date.now(),
+    status: "completed",
+  }
+  session.localTurns = dedupeTurnsByRoleAndId([...session.localTurns, turn])
+  session.inFlightUserTurnId = messageId
+}
+
+function buildUserTurnContentSignature(content: ContentPart[] | undefined): string {
+  if (!Array.isArray(content)) return ""
+  return content
+    .map((part) => {
+      if (part.type === "text") return `text:${part.text || ""}`
+      if (part.type === "image") return `image:${part.image?.url || ""}`
+      return part.type || ""
+    })
+    .join("\n")
+}
+
+function mapUserMessageBlocksToContent(blocks: unknown): ContentPart[] {
+  if (!Array.isArray(blocks)) return []
+  const parts: ContentPart[] = []
+  for (const block of blocks) {
+    if (!block || typeof block !== "object") continue
+    const record = block as Record<string, unknown>
+    const type = firstString(record.type, record.kind)
+    if (type === "text") {
+      const text = firstString(record.text)
+      if (text) parts.push({ type: "text", text })
+    } else if (type === "image") {
+      const data = firstString(record.data)
+      const mimeType = firstString(record.mime_type, record.mimeType) || "image/png"
+      if (data) {
+        const url = data.startsWith("data:") ? data : `data:${mimeType};base64,${data}`
+        parts.push({ type: "image", image: { url } })
+      }
+    }
+  }
+  return parts
+}
+
 function buildAssistantTurn(
   session: RuntimeSession,
   liveMessage: LiveMessage,
@@ -1297,6 +1408,11 @@ function buildAssistantTurn(
 }
 
 const COMPLETE_TURN_DUPLICATE_WINDOW_MS = 3000
+
+// 单个回合内 external-user backfill（全量拉取）的最大尝试次数。正常路径首次即
+// capture 成功并 latch 守卫，这个上限只在 captured 长期判不出来（旧后端）时兜底，
+// 防止流式期间无限全量拉取拖垮客户端。回合边界会重置计数。
+const MAX_EXTERNAL_TURN_BACKFILL_ATTEMPTS = 4
 
 function buildCompleteTurnKey(session: RuntimeSession, eventData?: any) {
   const explicitTurnId = firstString(
@@ -1609,6 +1725,21 @@ function maybeBackfillExternalUserTurn(
 ) {
   if (session.optimisticTurns.length > 0) return
 
+  // 实时传输期间只补齐一次外部用户轮次：一旦当前进行中的回合已补齐过远端
+  // 详情，就不再重复拉取全量历史。回合边界（turn_complete / turn_cancelled /
+  // 缓存清理）会重置该守卫，让下一个回合可以再补齐一次。
+  //
+  // 例外：本地消息为空时（观察者/新设备打开进行中的会话）必须先同步一次历史，
+  // 否则用户看不到任何历史消息，因此此时不受守卫拦截。
+  if (session.externalTurnBackfilled && session.localTurns.length > 0) return
+
+  // 硬上限：即使 captured 一直判不出来（如旧后端既不回报 in-flight 用户轮次 id，
+  // 也不落地用户轮次），也不能整段流式期间每 1.5s 无限全量拉取 —— 那会持续吃
+  // CPU/内存/带宽，把 Safari WebContent 进程拖垮触发“重复出现问题”。达到上限后
+  // 停止本回合的补齐；回合边界（turn_complete / turn_cancelled / disconnect /
+  // connect 重绑 / 缓存清理）会重置计数，让下一个回合重新获得配额。
+  if (session.externalTurnBackfillAttempts >= MAX_EXTERNAL_TURN_BACKFILL_ATTEMPTS) return
+
   const hasInFlightRemoteTurn =
     session.liveMessage != null ||
     session.pendingPermission != null ||
@@ -1625,17 +1756,48 @@ function maybeBackfillExternalUserTurn(
 
   session.externalTurnBackfillInFlight = true
   session.externalTurnBackfillLastAttemptAt = now
+  session.externalTurnBackfillAttempts += 1
+  const userTurnCountBefore = session.localTurns.filter(
+    (turn) => turn.role === "user"
+  ).length
   void (async () => {
     try {
       const replayDetail = await calibrateAfterReplayGap(session.conversationId)
       applyConversationDetailStatsToSession(session, replayDetail)
-      session.localTurns = await reloadLocalTurns(session)
+      const reloaded = await reloadLocalTurns(session)
+      const reloadedUserTurnCount = reloaded.filter(
+        (turn) => turn.role === "user"
+      ).length
+      // 仅在本地轮次确有变化时才重新赋值，避免流式期间整表 re-render 引起
+      // 的列表闪烁与滚动跳动。
+      if (!areLocalTurnsEquivalent(session.localTurns, reloaded)) {
+        session.localTurns = reloaded
+      }
+      // 捕获到外部用户轮次后即认为本回合补齐完成，停止后续的流式全量刷新：
+      // 后端已回报 in-flight 用户轮次 id，或本地已多出一条用户轮次。
+      const captured =
+        Boolean(session.inFlightUserTurnId) ||
+        reloadedUserTurnCount > userTurnCountBefore
+      if (captured) {
+        session.externalTurnBackfilled = true
+      }
     } catch (error) {
       console.warn(`external-user backfill skipped (${reason})`, error)
     } finally {
       session.externalTurnBackfillInFlight = false
     }
   })()
+}
+
+function areLocalTurnsEquivalent(a: MessageTurn[], b: MessageTurn[]) {
+  if (a === b) return true
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].id !== b[i].id) return false
+    if (a[i].status !== b[i].status) return false
+    if (a[i].timestamp !== b[i].timestamp) return false
+  }
+  return true
 }
 
 function applySnapshotInFlightUserTurnId(session: RuntimeSession, snapshot: any) {
