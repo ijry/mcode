@@ -102,6 +102,32 @@ describe('conversationRuntime ACP error handling', () => {
     return { store, session }
   }
 
+  function buildPersistedUserTurn(id: string, text: string, conversationId = 1) {
+    return {
+      id,
+      conversationId,
+      instanceKey: 'test-instance',
+      dedupeKey: `remote:${id}`,
+      role: 'user',
+      createdAt: 100,
+      seq: 100,
+      sortKey: 100,
+      status: 'completed',
+      version: 1,
+      parts: [
+        {
+          id: `${id}:0`,
+          turnId: id,
+          conversationId,
+          partIndex: 0,
+          type: 'text',
+          payloadJson: JSON.stringify({ text }),
+          updatedAt: 100,
+        },
+      ],
+    }
+  }
+
   it('reuses an existing managed connection without entering connecting', async () => {
     const manager = require('@/services/conversation/connectionSessionManager')
     const sync = require('@/services/conversation/conversationSyncService')
@@ -1359,6 +1385,344 @@ describe('conversationRuntime ACP error handling', () => {
       expect(sync.calibrateAfterTurnComplete).toHaveBeenCalledTimes(1)
     } finally {
       warnSpy.mockRestore()
+    }
+  })
+
+  it('stops streaming external-user backfill after the running turn is captured once', async () => {
+    const sync = require('@/services/conversation/conversationSyncService')
+    const repo = require('@/services/db/repositories/conversationRepository')
+    const store = useConversationRuntimeStore()
+    const session = store.getOrCreateSession(1)
+    session.connectionId = 'conn-1'
+    session.instanceKey = 'test-instance'
+    session.status = 'connected'
+
+    sync.calibrateAfterReplayGap.mockResolvedValue({
+      in_flight_user_turn_id: 'ext-user-1',
+    })
+    // 补齐一次后本地已有历史消息，守卫方可停止后续的流式全量刷新。
+    repo.getNewestTurns.mockReturnValue([
+      buildPersistedUserTurn('ext-user-1', 'external question'),
+    ])
+
+    try {
+      // 观察者视角：其他设备发起的回合，本地没有 optimistic 用户轮次。
+      store.handleEvent({
+        type: 'stream_batch',
+        connectionId: 'conn-1',
+        data: { delta: 'external reply', contentType: 'text' },
+      } as any)
+
+      for (let i = 0; i < 10 && sync.calibrateAfterReplayGap.mock.calls.length === 0; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      }
+      // 让 backfill 的 promise 链完成，捕获外部用户轮次。
+      await new Promise((resolve) => setTimeout(resolve, 0))
+
+      expect(sync.calibrateAfterReplayGap).toHaveBeenCalledTimes(1)
+      expect(session.externalTurnBackfilled).toBe(true)
+
+      // 绕过 1.5s 节流后，流式仍在进行，但不应再触发全量历史刷新。
+      session.externalTurnBackfillLastAttemptAt = 0
+      store.handleEvent({
+        type: 'stream_batch',
+        connectionId: 'conn-1',
+        data: { delta: ' more text', contentType: 'text' },
+      } as any)
+      await new Promise((resolve) => setTimeout(resolve, 0))
+
+      expect(sync.calibrateAfterReplayGap).toHaveBeenCalledTimes(1)
+    } finally {
+      sync.calibrateAfterReplayGap.mockReset()
+      repo.getNewestTurns.mockReturnValue([])
+    }
+  })
+
+  it('keeps syncing history while streaming when local messages are still empty', async () => {
+    const sync = require('@/services/conversation/conversationSyncService')
+    const repo = require('@/services/db/repositories/conversationRepository')
+    const store = useConversationRuntimeStore()
+    const session = store.getOrCreateSession(1)
+    session.connectionId = 'conn-1'
+    session.instanceKey = 'test-instance'
+    session.status = 'connected'
+
+    // 远端详情不回报 in-flight 用户轮次，且本地仍拉不到历史（返回空）。
+    sync.calibrateAfterReplayGap.mockResolvedValue({})
+    repo.getNewestTurns.mockReturnValue([])
+
+    try {
+      store.handleEvent({
+        type: 'stream_batch',
+        connectionId: 'conn-1',
+        data: { delta: 'external reply', contentType: 'text' },
+      } as any)
+      for (let i = 0; i < 10 && sync.calibrateAfterReplayGap.mock.calls.length === 0; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0))
+
+      expect(sync.calibrateAfterReplayGap).toHaveBeenCalledTimes(1)
+      // 本地消息为空时，即使已尝试过也不锁死守卫，需要再拉一次历史。
+      expect(session.externalTurnBackfilled).toBe(false)
+
+      session.externalTurnBackfillLastAttemptAt = 0
+      store.handleEvent({
+        type: 'stream_batch',
+        connectionId: 'conn-1',
+        data: { delta: ' more text', contentType: 'text' },
+      } as any)
+      for (let i = 0; i < 10 && sync.calibrateAfterReplayGap.mock.calls.length < 2; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      }
+
+      expect(sync.calibrateAfterReplayGap).toHaveBeenCalledTimes(2)
+    } finally {
+      sync.calibrateAfterReplayGap.mockReset()
+      repo.getNewestTurns.mockReturnValue([])
+    }
+  })
+
+  it('allows one more external-user backfill after a turn boundary resets the guard', async () => {
+    const sync = require('@/services/conversation/conversationSyncService')
+    const repo = require('@/services/db/repositories/conversationRepository')
+    const store = useConversationRuntimeStore()
+    const session = store.getOrCreateSession(1)
+    session.connectionId = 'conn-1'
+    session.instanceKey = 'test-instance'
+    session.status = 'connected'
+
+    sync.calibrateAfterReplayGap.mockResolvedValue({
+      in_flight_user_turn_id: 'ext-user-1',
+    })
+    // 每次补齐后本地都有历史消息，避免"本地为空必须继续同步"覆盖回合守卫。
+    repo.getNewestTurns.mockReturnValue([
+      buildPersistedUserTurn('ext-user-1', 'external question'),
+    ])
+
+    try {
+      store.handleEvent({
+        type: 'stream_batch',
+        connectionId: 'conn-1',
+        data: { delta: 'external reply', contentType: 'text' },
+      } as any)
+      for (let i = 0; i < 10 && sync.calibrateAfterReplayGap.mock.calls.length === 0; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(sync.calibrateAfterReplayGap).toHaveBeenCalledTimes(1)
+      expect(session.externalTurnBackfilled).toBe(true)
+
+      // 回合被取消属于回合边界，应重置守卫，让下一个回合可再补齐一次。
+      store.handleEvent({
+        type: 'turn_cancelled',
+        connectionId: 'conn-1',
+        data: {},
+      } as any)
+      expect(session.externalTurnBackfilled).toBe(false)
+
+      session.externalTurnBackfillLastAttemptAt = 0
+      store.handleEvent({
+        type: 'stream_batch',
+        connectionId: 'conn-1',
+        data: { delta: 'next external reply', contentType: 'text' },
+      } as any)
+      for (let i = 0; i < 10 && sync.calibrateAfterReplayGap.mock.calls.length < 2; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      }
+
+      expect(sync.calibrateAfterReplayGap).toHaveBeenCalledTimes(2)
+    } finally {
+      sync.calibrateAfterReplayGap.mockReset()
+      repo.getNewestTurns.mockReturnValue([])
+    }
+  })
+
+  it('synthesizes an external user turn from a realtime user_message event', () => {
+    const { store, session } = prepareSession()
+
+    store.handleEvent({
+      type: 'user_message',
+      connectionId: 'conn-1',
+      data: {
+        messageId: 'ext-msg-1',
+        blocks: [{ type: 'text', text: 'external prompt' }],
+      },
+    } as any)
+
+    const userTurns = session.localTurns.filter((turn) => turn.role === 'user')
+    expect(userTurns).toHaveLength(1)
+    expect(userTurns[0].id).toBe('ext-msg-1')
+    expect(userTurns[0].content).toEqual([{ type: 'text', text: 'external prompt' }])
+    expect(session.inFlightUserTurnId).toBe('ext-msg-1')
+  })
+
+  it('dedupes a repeated user_message with the same message id', () => {
+    const { store, session } = prepareSession()
+
+    const event = {
+      type: 'user_message',
+      connectionId: 'conn-1',
+      data: {
+        messageId: 'ext-msg-dup',
+        blocks: [{ type: 'text', text: 'external prompt' }],
+      },
+    } as any
+    store.handleEvent(event)
+    store.handleEvent(event)
+
+    expect(session.localTurns.filter((turn) => turn.role === 'user')).toHaveLength(1)
+  })
+
+  it('ignores the user_message echo when the sender has an optimistic turn', () => {
+    const { store, session } = prepareSession()
+    store.addOptimisticUserMessage(1, 'my own prompt')
+
+    store.handleEvent({
+      type: 'user_message',
+      connectionId: 'conn-1',
+      data: {
+        messageId: 'ext-msg-echo',
+        blocks: [{ type: 'text', text: 'my own prompt' }],
+      },
+    } as any)
+
+    expect(session.localTurns.filter((turn) => turn.role === 'user')).toHaveLength(0)
+  })
+
+  it('does not re-synthesize the same prompt when a backfill re-keyed it with a persisted id', () => {
+    const { store, session } = prepareSession()
+
+    // 后端重播的实时事件用 message_id 作 id。
+    store.handleEvent({
+      type: 'user_message',
+      connectionId: 'conn-1',
+      data: {
+        messageId: 'ext-msg-1',
+        blocks: [{ type: 'text', text: 'external prompt' }],
+      },
+    } as any)
+    expect(session.localTurns.filter((turn) => turn.role === 'user')).toHaveLength(1)
+
+    // 模拟 maybeBackfillExternalUserTurn 全量拉取后，用 DB 持久 id 换掉了本地轮次
+    // （id 与实时 message_id 不一致，但内容相同）。
+    session.localTurns = [
+      {
+        id: 'db-persisted-42',
+        role: 'user',
+        content: [{ type: 'text', text: 'external prompt' }],
+        timestamp: 100,
+        status: 'completed',
+      },
+    ] as any
+
+    // 后端重播同一条 user_message：仅按 id 判断会漏判，内容签名应命中并跳过，
+    // 否则 localTurns 会无限增长、撑爆内存。
+    store.handleEvent({
+      type: 'user_message',
+      connectionId: 'conn-1',
+      data: {
+        messageId: 'ext-msg-1',
+        blocks: [{ type: 'text', text: 'external prompt' }],
+      },
+    } as any)
+
+    expect(session.localTurns.filter((turn) => turn.role === 'user')).toHaveLength(1)
+  })
+
+  it('stops streaming external-user backfill after the attempt cap even when nothing is captured', async () => {
+    const sync = require('@/services/conversation/conversationSyncService')
+    const repo = require('@/services/db/repositories/conversationRepository')
+    const store = useConversationRuntimeStore()
+    const session = store.getOrCreateSession(1)
+    session.connectionId = 'conn-1'
+    session.instanceKey = 'test-instance'
+    session.status = 'connected'
+
+    // 旧后端：既不回报 in-flight 用户轮次 id，也拉不到任何历史（始终为空）。
+    // captured 永远判不出来，只有硬上限能止住无限全量拉取。
+    sync.calibrateAfterReplayGap.mockResolvedValue({})
+    repo.getNewestTurns.mockReturnValue([])
+
+    try {
+      for (let attempt = 0; attempt < 8; attempt++) {
+        session.externalTurnBackfillLastAttemptAt = 0
+        store.handleEvent({
+          type: 'stream_batch',
+          connectionId: 'conn-1',
+          data: { delta: `chunk ${attempt}`, contentType: 'text' },
+        } as any)
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      }
+
+      // 达到硬上限后，即便绕过 1.5s 节流、流式仍在进行，也不再触发全量拉取。
+      const callsAtCap = sync.calibrateAfterReplayGap.mock.calls.length
+      expect(callsAtCap).toBeGreaterThan(0)
+      expect(callsAtCap).toBeLessThanOrEqual(5)
+
+      session.externalTurnBackfillLastAttemptAt = 0
+      store.handleEvent({
+        type: 'stream_batch',
+        connectionId: 'conn-1',
+        data: { delta: 'after cap', contentType: 'text' },
+      } as any)
+      await new Promise((resolve) => setTimeout(resolve, 0))
+
+      expect(sync.calibrateAfterReplayGap.mock.calls.length).toBe(callsAtCap)
+    } finally {
+      sync.calibrateAfterReplayGap.mockReset()
+      repo.getNewestTurns.mockReturnValue([])
+    }
+  })
+
+  it('restores the external-user backfill quota after a turn boundary', async () => {
+    const sync = require('@/services/conversation/conversationSyncService')
+    const repo = require('@/services/db/repositories/conversationRepository')
+    const store = useConversationRuntimeStore()
+    const session = store.getOrCreateSession(1)
+    session.connectionId = 'conn-1'
+    session.instanceKey = 'test-instance'
+    session.status = 'connected'
+
+    sync.calibrateAfterReplayGap.mockResolvedValue({})
+    repo.getNewestTurns.mockReturnValue([])
+
+    try {
+      for (let attempt = 0; attempt < 8; attempt++) {
+        session.externalTurnBackfillLastAttemptAt = 0
+        store.handleEvent({
+          type: 'stream_batch',
+          connectionId: 'conn-1',
+          data: { delta: `chunk ${attempt}`, contentType: 'text' },
+        } as any)
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      }
+      const callsAtCap = sync.calibrateAfterReplayGap.mock.calls.length
+
+      // 回合边界重置配额，下一个回合可以再补齐。
+      store.handleEvent({
+        type: 'turn_cancelled',
+        connectionId: 'conn-1',
+        data: {},
+      } as any)
+      expect(session.externalTurnBackfillAttempts).toBe(0)
+
+      session.status = 'connected'
+      session.externalTurnBackfillLastAttemptAt = 0
+      store.handleEvent({
+        type: 'stream_batch',
+        connectionId: 'conn-1',
+        data: { delta: 'next turn', contentType: 'text' },
+      } as any)
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      await new Promise((resolve) => setTimeout(resolve, 0))
+
+      expect(sync.calibrateAfterReplayGap.mock.calls.length).toBe(callsAtCap + 1)
+    } finally {
+      sync.calibrateAfterReplayGap.mockReset()
+      repo.getNewestTurns.mockReturnValue([])
     }
   })
 })
