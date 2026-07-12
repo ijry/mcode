@@ -746,6 +746,8 @@ let createAgentListToken = 0
 let disposeOverviewInvalidation: (() => void) | null = null
 const disposeOpenedTabsChangedMap = new Map<string, () => void>()
 const disposeActiveSessionsChangedMap = new Map<string, () => void>()
+const activeSessionsRefreshTimerMap = new Map<string, ReturnType<typeof setTimeout>>()
+const ACTIVE_SESSIONS_REFRESH_DEBOUNCE_MS = 400
 let activeCreateRequestId = ""
 let activeCreateRequestFingerprint = ""
 let activeCreateConversationId = 0
@@ -1465,6 +1467,8 @@ onUnload(() => {
   disposeOpenedTabsChangedMap.clear()
   disposeActiveSessionsChangedMap.forEach((dispose) => dispose())
   disposeActiveSessionsChangedMap.clear()
+  activeSessionsRefreshTimerMap.forEach((timer) => clearTimeout(timer))
+  activeSessionsRefreshTimerMap.clear()
   if (livePreviewReconcileTimer) {
     clearTimeout(livePreviewReconcileTimer)
     livePreviewReconcileTimer = null
@@ -1885,6 +1889,46 @@ async function refreshConnectionGroupFromLocalCache(instanceKey: string) {
   )
 }
 
+function scheduleActiveSessionsOverviewRefresh(instanceKey: string) {
+  if (!instanceKey) return
+  const existing = activeSessionsRefreshTimerMap.get(instanceKey)
+  if (existing) {
+    clearTimeout(existing)
+  }
+  const timer = setTimeout(() => {
+    activeSessionsRefreshTimerMap.delete(instanceKey)
+    void refreshOverviewFromRemoteByInstance(instanceKey)
+  }, ACTIVE_SESSIONS_REFRESH_DEBOUNCE_MS)
+  activeSessionsRefreshTimerMap.set(instanceKey, timer)
+}
+
+async function refreshOverviewFromRemoteByInstance(instanceKey: string) {
+  if (!getRegisteredRemoteInstanceDescriptor(instanceKey)) return
+
+  const mappedConnKey = instanceConnectionKeyMap.get(instanceKey) || ""
+  if (!mappedConnKey) return
+  const conn = findConnectedConnectionByKey(mappedConnKey)
+  if (!conn) return
+
+  const connKey = connectionKey(conn)
+  const folders = connectionFolderSnapshotMap.get(connKey)
+  const tabs = connectionTabSnapshotMap.get(connKey)
+  if (!folders || !tabs) return
+
+  try {
+    const gateway = await createConnectionGateway(conn)
+    await scheduleOverviewConversationRefresh({
+      conn,
+      gateway,
+      instanceKey,
+      folders,
+      tabs,
+    })
+  } catch (error) {
+    console.warn("refresh overview from pet://sessions skipped:", error)
+  }
+}
+
 async function scheduleOverviewConversationRefresh(input: {
   conn: ConnectionItem
   gateway: CodegGateway
@@ -1995,6 +2039,7 @@ function ensureActiveSessionsSubscription(instanceKey: string) {
   const unsubscribe = acpApi.subscribeGlobalEvent("pet://sessions", (payload) => {
     activeSessionBadgeCountMap.set(instanceKey, getOngoingActiveSessionCount(payload))
     void applyConversationTabBarBadge(sumActiveSessionBadgeCounts())
+    scheduleActiveSessionsOverviewRefresh(instanceKey)
   }, instanceKey)
   disposeActiveSessionsChangedMap.set(instanceKey, unsubscribe)
 }
