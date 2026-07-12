@@ -60,6 +60,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
 
   // 连接状态映射 connectionId -> ConnectionInfo
   const connections = ref<Map<string, ConnectionInfo>>(new Map())
+  const inFlightConnects = new Map<number, Promise<ConnectionInfo>>()
 
   /**
    * 获取或创建会话运行时
@@ -688,6 +689,75 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     sinceSeq?: number,
     instanceKey?: string
   ) {
+    const existingManaged = connectionSessionManager.getByConversationId(conversationId)
+    if (existingManaged?.connectionId) {
+      return bindManagedConnection(conversationId, existingManaged, sinceSeq)
+    }
+
+    const existingInFlight = inFlightConnects.get(conversationId)
+    if (existingInFlight) {
+      return existingInFlight
+    }
+
+    const promise = connectFreshConversation(
+      conversationId,
+      agentType,
+      workingDir,
+      sessionId,
+      sinceSeq,
+      instanceKey
+    )
+    inFlightConnects.set(conversationId, promise)
+    try {
+      return await promise
+    } finally {
+      if (inFlightConnects.get(conversationId) === promise) {
+        inFlightConnects.delete(conversationId)
+      }
+    }
+  }
+
+  async function bindManagedConnection(
+    conversationId: number,
+    managed: NonNullable<ReturnType<typeof connectionSessionManager.getByConversationId>>,
+    sinceSeq?: number
+  ) {
+    const session = getOrCreateSession(conversationId)
+    session.connectionId = managed.connectionId
+    session.instanceKey = managed.instanceKey
+    connections.value.set(managed.connectionId, managed.connection)
+    if (
+      session.status === "idle" ||
+      session.status === "connecting" ||
+      session.status === "error"
+    ) {
+      session.status = "connected"
+    }
+    session.inputErrorMessage = null
+    session.apiRetry = null
+    syncManagedSendPermission(conversationId)
+
+    bindConversationEventHandler(conversationId, (event) => {
+      handleEventForConversation(conversationId, event)
+    })
+    await attachConversationRealtime({
+      conversationId,
+      instanceKey: managed.instanceKey,
+      connectionId: managed.connectionId,
+      sinceSeq,
+    })
+
+    return managed.connection
+  }
+
+  async function connectFreshConversation(
+    conversationId: number,
+    agentType: string,
+    workingDir?: string,
+    sessionId?: string,
+    sinceSeq?: number,
+    instanceKey?: string
+  ) {
     const session = getOrCreateSession(conversationId)
     session.status = "connecting"
     touchHotConversation(conversationId)
@@ -793,25 +863,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         })
       }
 
-    session.connectionId = managed.connectionId
-    session.instanceKey = managed.instanceKey
-      connections.value.set(managed.connectionId, managed.connection)
-      session.status = "connected"
-      session.inputErrorMessage = null
-      session.apiRetry = null
-      syncManagedSendPermission(conversationId)
-
-      bindConversationEventHandler(conversationId, (event) => {
-        handleEventForConversation(conversationId, event)
-      })
-      await attachConversationRealtime({
-        conversationId,
-        instanceKey: managed.instanceKey,
-        connectionId: managed.connectionId,
-        sinceSeq,
-      })
-
-      return managed.connection
+      return await bindManagedConnection(conversationId, managed, sinceSeq)
     } catch (error) {
       session.status = "error"
       session.inputErrorMessage = error instanceof Error && error.message.trim()

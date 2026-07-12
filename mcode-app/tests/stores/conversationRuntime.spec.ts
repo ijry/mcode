@@ -10,7 +10,10 @@ jest.mock('@/stores/auth', () => ({
 }))
 
 jest.mock('@/api/acp', () => ({
-  acpApi: {},
+  acpApi: {
+    acpFindConnectionForConversation: jest.fn(),
+    acpGetSessionSnapshotByConversation: jest.fn(),
+  },
 }))
 
 jest.mock('@/services/conversation/connectionSessionManager', () => ({
@@ -64,6 +67,30 @@ describe('conversationRuntime ACP error handling', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     jest.clearAllMocks()
+    const acp = require('@/api/acp')
+    const manager = require('@/services/conversation/connectionSessionManager')
+    acp.acpApi.acpFindConnectionForConversation.mockResolvedValue(null)
+    acp.acpApi.acpGetSessionSnapshotByConversation.mockResolvedValue(null)
+    manager.connectionSessionManager.getByConversationId.mockReturnValue(null)
+    manager.connectionSessionManager.connectConversation.mockResolvedValue({
+      conversationId: 1,
+      instanceKey: 'test-instance',
+      connectionId: 'conn-new',
+      connection: {
+        id: 'conn-new',
+        agentType: 'claude_code',
+        sessionId: 'sess-new',
+        status: 'connected',
+        capabilities: [],
+      },
+      externalId: 'sess-new',
+      status: 'connected',
+      role: 'owner',
+      sharedLive: true,
+      detachOnly: true,
+      allowSend: true,
+      lastTouchedAt: Date.now(),
+    })
   })
 
   function prepareSession(status: 'idle' | 'connected' | 'error' = 'connected', error: string | null = null) {
@@ -74,6 +101,123 @@ describe('conversationRuntime ACP error handling', () => {
     session.inputErrorMessage = error
     return { store, session }
   }
+
+  it('reuses an existing managed connection without entering connecting', async () => {
+    const manager = require('@/services/conversation/connectionSessionManager')
+    const sync = require('@/services/conversation/conversationSyncService')
+    const store = useConversationRuntimeStore()
+    const session = store.getOrCreateSession(1)
+    session.status = 'connected'
+    const managed = {
+      conversationId: 1,
+      instanceKey: 'test-instance',
+      connectionId: 'conn-existing',
+      connection: {
+        id: 'conn-existing',
+        agentType: 'claude_code',
+        sessionId: 'sess-existing',
+        status: 'connected',
+        capabilities: [],
+      },
+      externalId: 'sess-existing',
+      status: 'connected',
+      role: 'owner',
+      sharedLive: true,
+      detachOnly: true,
+      allowSend: true,
+      lastTouchedAt: Date.now(),
+    }
+    manager.connectionSessionManager.getByConversationId.mockReturnValue(managed)
+
+    const connectingStatuses: string[] = []
+    const connectPromise = store.connect(1, 'claude_code')
+    connectingStatuses.push(session.status)
+    const result = await connectPromise
+
+    expect(result.id).toBe('conn-existing')
+    expect(connectingStatuses).toEqual(['connected'])
+    expect(session.connectionId).toBe('conn-existing')
+    expect(session.status).toBe('connected')
+    expect(manager.connectionSessionManager.connectConversation).not.toHaveBeenCalled()
+    expect(sync.attachConversationRealtime).toHaveBeenCalledWith({
+      conversationId: 1,
+      instanceKey: 'test-instance',
+      connectionId: 'conn-existing',
+      sinceSeq: undefined,
+    })
+  })
+
+  it('dedupes concurrent connect calls for the same conversation', async () => {
+    const manager = require('@/services/conversation/connectionSessionManager')
+    const store = useConversationRuntimeStore()
+    manager.connectionSessionManager.connectConversation.mockImplementation(() =>
+      new Promise((resolve) => {
+        setTimeout(() => {
+          resolve({
+            conversationId: 1,
+            instanceKey: 'test-instance',
+            connectionId: 'conn-shared',
+            connection: {
+              id: 'conn-shared',
+              agentType: 'claude_code',
+              sessionId: 'sess-shared',
+              status: 'connected',
+              capabilities: [],
+            },
+            externalId: 'sess-shared',
+            status: 'connected',
+            role: 'owner',
+            sharedLive: true,
+            detachOnly: true,
+            allowSend: true,
+            lastTouchedAt: Date.now(),
+          })
+        }, 0)
+      })
+    )
+
+    const first = store.connect(1, 'claude_code')
+    const second = store.connect(1, 'claude_code')
+    const [firstResult, secondResult] = await Promise.all([first, second])
+
+    expect(manager.connectionSessionManager.connectConversation).toHaveBeenCalledTimes(1)
+    expect(firstResult.id).toBe('conn-shared')
+    expect(secondResult.id).toBe('conn-shared')
+    expect(store.getOrCreateSession(1).connectionId).toBe('conn-shared')
+  })
+
+  it('clears the in-flight connect guard after a failed attempt', async () => {
+    const manager = require('@/services/conversation/connectionSessionManager')
+    const store = useConversationRuntimeStore()
+    manager.connectionSessionManager.connectConversation
+      .mockRejectedValueOnce(new Error('first failed'))
+      .mockResolvedValueOnce({
+        conversationId: 1,
+        instanceKey: 'test-instance',
+        connectionId: 'conn-retry',
+        connection: {
+          id: 'conn-retry',
+          agentType: 'claude_code',
+          sessionId: 'sess-retry',
+          status: 'connected',
+          capabilities: [],
+        },
+        externalId: 'sess-retry',
+        status: 'connected',
+        role: 'owner',
+        sharedLive: true,
+        detachOnly: true,
+        allowSend: true,
+        lastTouchedAt: Date.now(),
+      })
+
+    await expect(store.connect(1, 'claude_code')).rejects.toThrow('first failed')
+    const result = await store.connect(1, 'claude_code')
+
+    expect(result.id).toBe('conn-retry')
+    expect(manager.connectionSessionManager.connectConversation).toHaveBeenCalledTimes(2)
+    expect(store.getOrCreateSession(1).status).toBe('connected')
+  })
 
   it('preserves terminal ACP errors across the follow-up idle status change', () => {
     const { store, session } = prepareSession()
