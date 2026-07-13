@@ -27,7 +27,7 @@
     <template #history>
       <view v-if="historyStatusText" class="history-status">
         <up-loading-icon
-          v-if="loadingOlder"
+          v-if="historyStatusBusy"
           mode="circle"
           size="16"
           :color="upThemeVar('--up-tips-color', '#909193')"
@@ -1028,6 +1028,7 @@ const pageScrollTop = ref(0)
 const lastMeasuredScrollTop = ref(0)
 const anchorMessageId = ref("")
 const loadingOlder = ref(false)
+const initialHistoryLoading = ref(false)
 const hasMoreHistory = ref(false)
 const oldestLoadedCursor = ref<HistoryPageCursor | null>(null)
 const questionSubmitting = ref(false)
@@ -1040,6 +1041,9 @@ const planStatusFilter = ref<PlanTaskFilter>("all")
 let syncedHistoryConversationId = 0
 let syncedHistoryLocalTurnCount = -1
 let historySyncToken = 0
+let initialHistoryLoadingConversationId = 0
+let initialHistoryLoadingToken = 0
+let initialHistoryResolvedConversationId = 0
 let preservingHistoryAnchor = false
 let detailAgentProbeToken = 0
 let detailProjectEntriesToken = 0
@@ -1236,8 +1240,10 @@ const questionSubmitReady = computed(() => {
   const pending = pendingQuestionCard.value
   return Boolean(pending && pending.questions.length > 0 && questionAnsweredCount.value === pending.questions.length)
 })
+const historyStatusBusy = computed(() => loadingOlder.value || initialHistoryLoading.value)
 const historyStatusText = computed(() => {
   if (loadingOlder.value) return "历史加载中..."
+  if (messages.value.length > 0 && initialHistoryLoading.value) return "初始历史加载中..."
   if (messages.value.length > 0 && hasMoreHistory.value) return "上滑加载更早消息"
   if (messages.value.length > 0 && !hasMoreHistory.value) return "没有更多历史了"
   return ""
@@ -1359,6 +1365,14 @@ watch(
   ([conversationId, agentType]) => {
     if (!conversationId || !agentType) return
     void loadDetailAgentConfig()
+  },
+  { immediate: true }
+)
+
+watch(
+  () => Number(props.conversationId || 0),
+  (conversationId) => {
+    resetInitialHistoryLoading(conversationId)
   },
   { immediate: true }
 )
@@ -1821,6 +1835,33 @@ function handleScrollToBottomFab() {
   scrollToBottom(true)
 }
 
+function beginInitialHistoryLoading(conversationId: number, token: number) {
+  if (!conversationId || initialHistoryResolvedConversationId === conversationId) return
+  initialHistoryLoadingConversationId = conversationId
+  initialHistoryLoadingToken = token
+  initialHistoryLoading.value = true
+}
+
+function finishInitialHistoryLoading(conversationId: number, token: number) {
+  if (
+    Number(props.conversationId || 0) !== conversationId ||
+    initialHistoryLoadingConversationId !== conversationId ||
+    initialHistoryLoadingToken !== token
+  ) {
+    return
+  }
+
+  initialHistoryResolvedConversationId = conversationId
+  initialHistoryLoading.value = false
+}
+
+function resetInitialHistoryLoading(conversationId: number) {
+  initialHistoryLoadingConversationId = conversationId
+  initialHistoryLoadingToken = 0
+  initialHistoryResolvedConversationId = 0
+  initialHistoryLoading.value = false
+}
+
 async function ensureHistoryCursorFromLoadedMessages(force = false) {
   const targetConversationId = Number(props.conversationId || 0)
   const loadedTurnCount = session.value.localTurns.length
@@ -1829,6 +1870,7 @@ async function ensureHistoryCursorFromLoadedMessages(force = false) {
     hasMoreHistory.value = false
     syncedHistoryConversationId = targetConversationId
     syncedHistoryLocalTurnCount = loadedTurnCount
+    resetInitialHistoryLoading(targetConversationId)
     return
   }
 
@@ -1841,6 +1883,7 @@ async function ensureHistoryCursorFromLoadedMessages(force = false) {
   }
 
   const token = ++historySyncToken
+  beginInitialHistoryLoading(targetConversationId, token)
   try {
     const [totalTurnCount, newestTurns] = await Promise.all([
       countConversationTurns(targetConversationId),
@@ -1854,10 +1897,12 @@ async function ensureHistoryCursorFromLoadedMessages(force = false) {
     syncedHistoryLocalTurnCount = loadedTurnCount
   } catch (error) {
     console.warn("sync history cursor skipped", error)
-    if (token === historySyncToken) {
+    if (token === historySyncToken && Number(props.conversationId || 0) === targetConversationId) {
       oldestLoadedCursor.value = null
       hasMoreHistory.value = false
     }
+  } finally {
+    finishInitialHistoryLoading(targetConversationId, token)
   }
 }
 
