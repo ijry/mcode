@@ -376,6 +376,22 @@ describe("ConversationDetailBody", () => {
     expect(source).toContain("runtimeSession.localTurns = [")
   })
 
+  it("keeps initial history loading feedback per interactive pane", () => {
+    const source = fs.readFileSync(
+      path.resolve(__dirname, "../../../src/pages/conversation-detail/ConversationDetailInteractivePane.vue"),
+      "utf8"
+    )
+
+    expect(source).toContain("const initialHistoryLoading = ref(false)")
+    expect(source).toContain("const historyStatusBusy = computed(() =>")
+    expect(source).toContain('v-if="historyStatusBusy"')
+    expect(source).toMatch(/if \(loadingOlder\.value\) return "历史加载中\.\.\."/)
+    expect(source).toMatch(/if \(messages\.value\.length > 0 && initialHistoryLoading\.value\) return "初始历史加载中\.\.\."/)
+    expect(source).toContain("function beginInitialHistoryLoading(conversationId: number, token: number)")
+    expect(source).toContain("function finishInitialHistoryLoading(conversationId: number, token: number)")
+    expect(source).toMatch(/const token = \+\+historySyncToken[\s\S]*beginInitialHistoryLoading\(targetConversationId, token\)[\s\S]*finally \{[\s\S]*finishInitialHistoryLoading\(targetConversationId, token\)/)
+  })
+
   it("opens the plan drawer from the interactive pane status pill", () => {
     const source = fs.readFileSync(
       path.resolve(__dirname, "../../../src/pages/conversation-detail/ConversationDetailInteractivePane.vue"),
