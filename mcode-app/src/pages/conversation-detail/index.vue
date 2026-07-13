@@ -1146,6 +1146,7 @@ import {
   resolveDetailTabCloseTarget,
   resolveDetailShellTabKey,
   resolveDetailActiveTabIndex,
+  shouldDeferDetailTabSwitch,
   type DetailShellTabItem,
 } from "./detailTabsPresentation"
 import {
@@ -2658,17 +2659,18 @@ async function switchToDetailTab(
   const safeIndex = Number(index)
   const tab = detailShellTabs.value[safeIndex]
   if (!tab) return
+  if (shouldDeferDetailTabSwitch({
+    targetTab: tab,
+    currentConversationId: conversationId.value,
+    isSwitching: detailSwitching,
+    isLoading: loading.value,
+  })) {
+    queueDetailTabSwitch(safeIndex, options)
+    return
+  }
   markDetailTabMounted(safeIndex)
   captureActiveDetailLocalState()
   syncDetailTabSelection(safeIndex)
-  if (detailSwitching) {
-    queueDetailTabSwitch(safeIndex, options)
-    return
-  }
-  if (loading.value && tab.conversationId !== conversationId.value) {
-    queueDetailTabSwitch(safeIndex, options)
-    return
-  }
   if (tab.conversationId === conversationId.value && tab.folderId === folderId.value) {
     restoreDetailLocalState(tab)
     if (options.syncRemote !== false) {

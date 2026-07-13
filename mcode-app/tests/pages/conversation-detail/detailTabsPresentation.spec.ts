@@ -5,6 +5,7 @@ import {
   resolveDetailTabCloseTarget,
   resolveDetailShellTabKey,
   resolveDetailActiveTabIndex,
+  shouldDeferDetailTabSwitch,
 } from "@/pages/conversation-detail/detailTabsPresentation"
 
 describe("detailTabsPresentation", () => {
@@ -150,6 +151,34 @@ describe("detailTabsPresentation", () => {
     expect(resolveDetailTabChangeIndex({ conversationId: 89 }, tabs)).toBe(1)
   })
 
+  it("prefers stable conversation identity over a stale tab event index", () => {
+    const tabs = buildDetailShellTabs({
+      openedTabs: [
+        {
+          id: 100,
+          folder_id: 2,
+          conversation_id: 99,
+          agent_type: "codex",
+          position: 0,
+          is_active: true,
+          is_pinned: false,
+        },
+        {
+          id: 99,
+          folder_id: 2,
+          conversation_id: 88,
+          agent_type: "claude_code",
+          position: 1,
+          is_active: false,
+          is_pinned: false,
+        },
+      ],
+    })
+
+    expect(resolveDetailTabChangeIndex({ index: 0, conversationId: 88 }, tabs)).toBe(1)
+    expect(resolveDetailTabChangeIndex({ current: 0, conversation_id: 88 }, tabs)).toBe(1)
+  })
+
   it("keeps visited conversation ids mounted until their tabs disappear", () => {
     const tabs = buildDetailShellTabs({
       openedTabs: [
@@ -236,5 +265,35 @@ describe("detailTabsPresentation", () => {
       preferredConversationId: 404,
       currentIndex: 7,
     })).toBe(1)
+  })
+
+  it("defers tab selection while the shell cannot switch conversation identity", () => {
+    const targetTab = {
+      tabId: 9,
+      folderId: 2,
+      conversationId: 99,
+      agentType: "codex",
+      title: "next",
+      active: false,
+      position: 1,
+    }
+
+    expect(shouldDeferDetailTabSwitch({
+      targetTab,
+      currentConversationId: 88,
+      isLoading: true,
+    })).toBe(true)
+
+    expect(shouldDeferDetailTabSwitch({
+      targetTab,
+      currentConversationId: 99,
+      isLoading: true,
+    })).toBe(false)
+
+    expect(shouldDeferDetailTabSwitch({
+      targetTab,
+      currentConversationId: 88,
+      isSwitching: true,
+    })).toBe(true)
   })
 })

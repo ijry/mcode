@@ -57,17 +57,17 @@ export function resolveDetailTabChangeIndex(
   if (!payload || typeof payload !== "object") return -1
 
   const record = payload as Record<string, unknown>
+  const conversationValue = record.conversationId ?? record.conversation_id
+  const conversationId = Number(conversationValue || 0)
+  if (conversationId > 0) {
+    return tabs.findIndex((tab) => Number(tab.conversationId || 0) === conversationId)
+  }
+
   const directValue = record.index ?? record.current ?? record.name
   if (typeof directValue === "number" && Number.isFinite(directValue)) return directValue
   if (typeof directValue === "string" && directValue.trim()) {
     const parsed = Number(directValue)
     if (Number.isFinite(parsed)) return parsed
-  }
-
-  const conversationValue = record.conversationId ?? record.conversation_id
-  const conversationId = Number(conversationValue || 0)
-  if (conversationId > 0) {
-    return tabs.findIndex((tab) => Number(tab.conversationId || 0) === conversationId)
   }
 
   const tabValue = record.tabId
@@ -144,4 +144,17 @@ export function resolveDetailActiveTabIndex(input: {
   const currentIndex = Number(input.currentIndex || 0)
   if (!Number.isFinite(currentIndex)) return 0
   return Math.min(Math.max(0, currentIndex), tabs.length - 1)
+}
+
+export function shouldDeferDetailTabSwitch(input: {
+  targetTab?: Pick<DetailShellTabItem, "conversationId"> | null
+  currentConversationId?: number
+  isSwitching?: boolean
+  isLoading?: boolean
+}): boolean {
+  if (input.isSwitching) return true
+  if (!input.isLoading) return false
+  const targetConversationId = Number(input.targetTab?.conversationId || 0)
+  const currentConversationId = Number(input.currentConversationId || 0)
+  return targetConversationId > 0 && targetConversationId !== currentConversationId
 }
