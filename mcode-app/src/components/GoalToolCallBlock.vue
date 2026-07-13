@@ -1,5 +1,12 @@
 <template>
-  <view :class="['goal-card', `goal-card--${tone}`, translucent && 'goal-card--translucent']">
+  <view
+    :class="[
+      'goal-card',
+      `goal-card--${tone}`,
+      expanded && 'goal-card--expanded',
+      translucent && 'goal-card--translucent',
+    ]"
+  >
     <view class="goal-card__summary" @click="toggleExpanded">
       <view :class="['goal-card__dot', isRunning && 'goal-card__dot--running']"></view>
       <view class="goal-card__main">
@@ -77,6 +84,11 @@
 
       <view v-if="errorText" class="goal-card__error">
         <text>{{ errorText }}</text>
+      </view>
+
+      <view class="goal-card__collapse" @click.stop="collapseExpanded">
+        <text class="goal-card__collapse-text">收起</text>
+        <up-icon name="arrow-up" size="12" :color="iconColor"></up-icon>
       </view>
     </view>
   </view>
@@ -171,6 +183,10 @@ function toggleExpanded() {
   expanded.value = !expanded.value
 }
 
+function collapseExpanded() {
+  expanded.value = false
+}
+
 function normalizeStatus(status: string | null): string | null {
   if (!status) return null
   return status.toLowerCase().replace(/[\s-]+/g, "_")
@@ -222,6 +238,7 @@ function formatDuration(seconds: number | null): string | null {
   background: color-mix(in srgb, var(--up-primary, #2979ff) 10%, var(--up-card-bg-color, #ffffff) 90%);
   border: 1rpx solid color-mix(in srgb, var(--up-primary, #2979ff) 24%, var(--up-border-color, #dadbde) 76%);
   overflow: hidden;
+  transition: border-radius 0.16s ease;
 
   &--complete {
     background: color-mix(in srgb, var(--up-success, #19be6b) 10%, var(--up-card-bg-color, #ffffff) 90%);
@@ -237,6 +254,11 @@ function formatDuration(seconds: number | null): string | null {
     background: color-mix(in srgb, var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6)) 74%, var(--up-card-bg-color, #ffffff) 26%);
     border-color: var(--up-border-color, #dadbde);
   }
+}
+
+.goal-card--expanded {
+  border-radius: 24rpx;
+  overflow: visible;
 }
 
 .goal-card--translucent {
@@ -366,6 +388,31 @@ function formatDuration(seconds: number | null): string | null {
   color: var(--up-error, #fa3534);
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.goal-card__collapse {
+  min-height: 44rpx;
+  padding: 0 18rpx;
+  border-radius: 999rpx;
+  border: 1rpx solid color-mix(in srgb, var(--up-primary, #2979ff) 24%, var(--up-border-color, #dadbde) 76%);
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 8%, var(--up-card-bg-color, #ffffff) 92%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  gap: 6rpx;
+  box-sizing: border-box;
+
+  &:active {
+    opacity: 0.72;
+  }
+}
+
+.goal-card__collapse-text {
+  font-size: 22rpx;
+  line-height: 1;
+  font-weight: 600;
+  color: v-bind(iconColor);
 }
 
 @keyframes goalPulse {
