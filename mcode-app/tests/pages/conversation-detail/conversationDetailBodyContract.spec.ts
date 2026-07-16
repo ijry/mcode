@@ -63,6 +63,19 @@ describe("ConversationDetailBody", () => {
     expect(source).toContain("const DEFAULT_DETAIL_TOOLBAR_HEIGHT = 0")
   })
 
+  it("keeps bottom input tools evenly distributed", () => {
+    const source = fs.readFileSync(
+      path.resolve(__dirname, "../../../src/pages/conversation-detail/index.scss"),
+      "utf8"
+    )
+
+    const toolButtonBlock = source.match(/\.input-tool-btn\s*\{[^}]*\}/)?.[0] || ""
+    expect(toolButtonBlock).toContain("flex: 1;")
+    expect(toolButtonBlock).toContain("min-width: 0;")
+    expect(toolButtonBlock).not.toContain("flex: 0 0 72rpx;")
+    expect(toolButtonBlock).not.toContain("width: 72rpx;")
+  })
+
   it("keeps config and stop controls side by side in the interactive composer", () => {
     const source = fs.readFileSync(
       path.resolve(__dirname, "../../../src/pages/conversation-detail/ConversationDetailInteractivePane.vue"),
@@ -74,6 +87,18 @@ describe("ConversationDetailBody", () => {
     expect(source).toContain('<up-icon name="setting"')
     expect(source).toContain('class="input-tool-btn input-tool-btn--danger"')
     expect(source).toContain("function loadDetailAgentConfig()")
+  })
+
+  it("defers inactive pane project and config loading", () => {
+    const source = fs.readFileSync(
+      path.resolve(__dirname, "../../../src/pages/conversation-detail/ConversationDetailInteractivePane.vue"),
+      "utf8"
+    )
+
+    expect(source).toContain("[firstString(props.instanceKey), Number(props.folderId || 0), Boolean(props.active)]")
+    expect(source).toContain("if (!active) return")
+    expect(source).toContain("Boolean(props.active),")
+    expect(source).toContain("if (!conversationId || !agentType || !active) return")
   })
 
   it("wires composer mentions into the actual interactive composer", () => {
@@ -114,7 +139,7 @@ describe("ConversationDetailBody", () => {
     expect(source).toContain(':conversation-id="tab.conversationId"')
     expect(source).toContain(':folder-id="tab.folderId"')
     expect(source).toContain(':active="isActiveDetailTabPage(index)"')
-    expect(source).toContain("function mountAllDetailTabs()")
+    expect(source).toContain("function mountDetailTabWindow(index: number)")
     expect(source).toContain(':key="resolveDetailShellTabKey(tab)"')
     expect(source).toContain("resolveDetailActiveTabIndex({")
     expect(source).not.toContain(':key="tab.tabId || tab.conversationId || index"')
@@ -130,6 +155,15 @@ describe("ConversationDetailBody", () => {
     expect(source).toContain('activation: "preserve"')
     expect(source).not.toContain('activation: "allow"')
     expect(source).not.toContain("const remoteActiveIndex = detailShellTabs.value.findIndex((tab) => tab.active)")
+  })
+
+  it("updates tab selection before deferring heavy conversation loading", () => {
+    const source = fs.readFileSync(
+      path.resolve(__dirname, "../../../src/pages/conversation-detail/index.vue"),
+      "utf8"
+    )
+
+    expect(source).toMatch(/captureActiveDetailLocalState\(\)[\s\S]*syncDetailTabSelection\(safeIndex\)[\s\S]*if \(shouldDeferDetailTabSwitch/)
   })
 
   it("keeps custom detail backgrounds shared across opened tabs", () => {

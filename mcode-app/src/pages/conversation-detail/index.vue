@@ -1147,6 +1147,7 @@ import {
   resolveDetailShellTabKey,
   resolveDetailActiveTabIndex,
   shouldDeferDetailTabSwitch,
+  resolveDetailMountedWindowConversationIds,
   type DetailShellTabItem,
 } from "./detailTabsPresentation"
 import {
@@ -2321,17 +2322,10 @@ function pruneDetailLocalTabStates() {
   })
 }
 
-function mountAllDetailTabs() {
-  const nextMountedIds = new Set(mountedDetailConversationIds.value)
-  detailShellTabs.value.forEach((tab) => {
-    const conversationIdValue = Number(tab.conversationId || 0)
-    if (conversationIdValue > 0) {
-      nextMountedIds.add(conversationIdValue)
-    }
-  })
-  mountedDetailConversationIds.value = resolveMountedDetailConversationIds({
-    mountedConversationIds: nextMountedIds,
+function mountDetailTabWindow(index: number) {
+  mountedDetailConversationIds.value = resolveDetailMountedWindowConversationIds({
     tabs: detailShellTabs.value,
+    currentIndex: index,
   })
 }
 
@@ -2414,7 +2408,7 @@ function syncDetailTabSelection(index: number) {
     Math.max(0, Number(index || 0)),
     Math.max(0, detailShellTabs.value.length - 1),
   )
-  markDetailTabMounted(safeIndex)
+  mountDetailTabWindow(safeIndex)
   detailActiveTabIndex.value = safeIndex
   detailSwiperCurrent.value = safeIndex
 }
@@ -2659,6 +2653,8 @@ async function switchToDetailTab(
   const safeIndex = Number(index)
   const tab = detailShellTabs.value[safeIndex]
   if (!tab) return
+  captureActiveDetailLocalState()
+  syncDetailTabSelection(safeIndex)
   if (shouldDeferDetailTabSwitch({
     targetTab: tab,
     currentConversationId: conversationId.value,
@@ -2668,9 +2664,6 @@ async function switchToDetailTab(
     queueDetailTabSwitch(safeIndex, options)
     return
   }
-  markDetailTabMounted(safeIndex)
-  captureActiveDetailLocalState()
-  syncDetailTabSelection(safeIndex)
   if (tab.conversationId === conversationId.value && tab.folderId === folderId.value) {
     restoreDetailLocalState(tab)
     if (options.syncRemote !== false) {
@@ -3374,7 +3367,6 @@ watch(
   () => detailShellTabs.value.map((tab) => Number(tab.conversationId || 0)).join(","),
   () => {
     if (detailShellTabs.value.length === 0) return
-    mountAllDetailTabs()
     const safeIndex = resolveDetailActiveTabIndex({
       tabs: detailShellTabs.value,
       preferredConversationId: conversationId.value,

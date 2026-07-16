@@ -2881,15 +2881,13 @@
 .input-tool-row {
   display: flex;
   align-items: center;
-  justify-content: flex-start;
-  gap: 18rpx;
+  gap: 8rpx;
   margin-top: 10rpx;
 }
 
 .input-tool-btn {
-  flex: 0 0 72rpx;
-  width: 72rpx;
-  min-width: 72rpx;
+  flex: 1;
+  min-width: 0;
   height: 64rpx;
   padding: 0;
   border-radius: 20rpx;

@@ -1348,8 +1348,9 @@ watch(
 )
 
 watch(
-  () => [firstString(props.instanceKey), Number(props.folderId || 0)] as const,
-  () => {
+  () => [firstString(props.instanceKey), Number(props.folderId || 0), Boolean(props.active)] as const,
+  ([, , active]) => {
+    if (!active) return
     void loadDetailProjectEntries()
   },
   { immediate: true }
@@ -1361,9 +1362,10 @@ watch(
     normalizedAgentType.value,
     firstString(session.value.connectionId),
     detailProjectPath.value,
+    Boolean(props.active),
   ] as const,
-  ([conversationId, agentType]) => {
-    if (!conversationId || !agentType) return
+  ([conversationId, agentType, , , active]) => {
+    if (!conversationId || !agentType || !active) return
     void loadDetailAgentConfig()
   },
   { immediate: true }

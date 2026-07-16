@@ -1,5 +1,6 @@
 import {
   buildDetailShellTabs,
+  resolveDetailMountedWindowConversationIds,
   resolveMountedDetailConversationIds,
   resolveDetailTabChangeIndex,
   resolveDetailTabCloseTarget,
@@ -207,6 +208,59 @@ describe("detailTabsPresentation", () => {
       mountedConversationIds: [88, 99, 101],
       tabs,
     })).sort()).toEqual([88, 99])
+  })
+
+  it("mounts only the active detail tab and its neighbors for responsive swiping", () => {
+    const tabs = buildDetailShellTabs({
+      openedTabs: [
+        {
+          id: 3,
+          folder_id: 2,
+          conversation_id: 88,
+          agent_type: "claude_code",
+          position: 0,
+          is_active: false,
+          is_pinned: false,
+        },
+        {
+          id: 9,
+          folder_id: 2,
+          conversation_id: 99,
+          agent_type: "codex",
+          position: 1,
+          is_active: true,
+          is_pinned: false,
+        },
+        {
+          id: 10,
+          folder_id: 2,
+          conversation_id: 101,
+          agent_type: "codex",
+          position: 2,
+          is_active: false,
+          is_pinned: false,
+        },
+        {
+          id: 11,
+          folder_id: 2,
+          conversation_id: 102,
+          agent_type: "codex",
+          position: 3,
+          is_active: false,
+          is_pinned: false,
+        },
+      ],
+    })
+
+    expect(Array.from(resolveDetailMountedWindowConversationIds({
+      tabs,
+      currentIndex: 1,
+    })).sort((left, right) => left - right)).toEqual([88, 99, 101])
+
+    expect(Array.from(resolveDetailMountedWindowConversationIds({
+      tabs,
+      currentIndex: 0,
+    })).sort((left, right) => left - right)).toEqual([88, 99])
   })
 
   it("keys swiper pages by conversation id so rewritten remote tab ids stay stable", () => {

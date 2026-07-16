@@ -96,6 +96,26 @@ export function resolveMountedDetailConversationIds(input: {
   return nextMountedIds
 }
 
+export function resolveDetailMountedWindowConversationIds(input: {
+  tabs: DetailShellTabItem[]
+  currentIndex: number
+}): Set<number> {
+  const tabs = Array.isArray(input.tabs) ? input.tabs : []
+  if (tabs.length === 0) return new Set()
+  const currentIndex = Math.min(
+    Math.max(0, Number(input.currentIndex || 0)),
+    tabs.length - 1
+  )
+  const nextMountedIds = new Set<number>()
+  for (const index of [currentIndex - 1, currentIndex, currentIndex + 1]) {
+    const conversationId = Number(tabs[index]?.conversationId || 0)
+    if (conversationId > 0) {
+      nextMountedIds.add(conversationId)
+    }
+  }
+  return nextMountedIds
+}
+
 export function resolveDetailTabCloseTarget(
   activeIndex: number,
   closedIndex: number,
