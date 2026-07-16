@@ -1,6 +1,7 @@
 import type { ContentPart, LiveMessage } from "@/types/acp"
 
 export const CONVERSATION_LIST_LIVE_PREVIEW_LIMIT = 5
+export const CONVERSATION_LIST_LIVE_PREVIEW_TEXT_LIMIT = 180
 
 const LIVE_PREVIEW_STATUSES = new Set([
   "in_progress",
@@ -61,16 +62,23 @@ export function resolveConversationLivePreviewText(
   if (runningTool) return `正在调用工具：${runningTool}`
 
   const text = buildTextProjection(parts)
-  if (text) return text
+  if (text) return trimLivePreviewText(text)
 
   const thinking = buildThinkingProjection(parts)
-  if (thinking) return `思考：${thinking}`
+  if (thinking) return trimLivePreviewText(`思考：${thinking}`)
 
   if (liveMessage?.isPlaceholderThinking || session.status === "thinking") {
     return "思考中..."
   }
 
   return ""
+}
+
+export function trimLivePreviewText(text: string, limit = CONVERSATION_LIST_LIVE_PREVIEW_TEXT_LIMIT) {
+  const normalized = String(text || "").replace(/\s+/g, " ").trim()
+  const safeLimit = Math.max(16, Math.floor(limit))
+  if (normalized.length <= safeLimit) return normalized
+  return `...${normalized.slice(-(safeLimit - 3))}`
 }
 
 function findRunningTool(parts: ContentPart[]) {

@@ -969,12 +969,7 @@ watch(
 )
 
 watch(
-  () =>
-    filteredConnectionGroups.value
-      .flatMap((group) =>
-        group.cards.map((card) => `${group.key}:${card.conversationId || 0}:${card.displayStatus}`)
-      )
-      .join("|"),
+  () => buildLivePreviewCandidateSignature(),
   () => {
     scheduleLivePreviewReconcile()
   }
@@ -988,22 +983,9 @@ watch(
 )
 
 watch(
-  () =>
-    filteredConnectionGroups.value
-      .flatMap((group) =>
-        group.cards
-          .filter((card) => isSelectableLiveCard(card))
-          .map((card) => buildBulkSelectionKey(group.key, Number(card.conversationId || 0)))
-      )
-      .join("|"),
+  () => buildSelectableLiveCardSignature(),
   () => {
-    const available = new Set(
-      filteredConnectionGroups.value.flatMap((group) =>
-        group.cards
-          .filter((card) => isSelectableLiveCard(card))
-          .map((card) => buildBulkSelectionKey(group.key, Number(card.conversationId || 0)))
-      )
-    )
+    const available = new Set(getSelectableLiveCardKeys())
     const next: Record<string, BulkSelectionItem> = {}
     for (const item of selectedBulkItems.value) {
       if (available.has(item.key)) {
@@ -1521,13 +1503,7 @@ function scheduleLivePreviewReconcile() {
 }
 
 function getLivePreviewCandidates() {
-  return filteredConnectionGroups.value.flatMap((group) =>
-    group.cards.map((card) => ({
-      ...card,
-      groupKey: group.key,
-      instanceKey: connectionInstanceKeyMap.get(group.key) || "",
-    }))
-  )
+  return getDisplayCandidateCards()
 }
 
 async function reconcileLivePreviewSubscriptions() {
@@ -1633,6 +1609,50 @@ function buildLivePreviewRuntimeSignature() {
       session.pendingQuestion ? "question" : "",
     ].join(":"))
     .join("|")
+}
+
+function getDisplayCandidateCards() {
+  const kw = searchKeyword.value.trim().toLowerCase()
+  return connectionGroups.value.flatMap((group) =>
+    group.cards
+      .filter((card) => !kw || liveCardMatchesSearch(card, kw))
+      .map((card) => {
+        const runtimeSession = runtime.sessions.get(card.conversationId || 0)
+        return {
+          ...card,
+          groupKey: group.key,
+          instanceKey: connectionInstanceKeyMap.get(group.key) || "",
+          displayStatus: resolveOverviewCardDisplayStatus(card.status, runtimeSession?.status),
+        }
+      })
+  )
+}
+
+function liveCardMatchesSearch(card: LiveSessionCard, kw: string) {
+  return [
+    card.title || "",
+    card.projectName || "",
+    formatAgentType(card.agentType),
+  ]
+    .join(" ")
+    .toLowerCase()
+    .includes(kw)
+}
+
+function buildLivePreviewCandidateSignature() {
+  return getDisplayCandidateCards()
+    .map((card) => `${card.groupKey}:${card.conversationId || 0}:${card.displayStatus}`)
+    .join("|")
+}
+
+function getSelectableLiveCardKeys() {
+  return getDisplayCandidateCards()
+    .filter((card) => isSelectableLiveCard(card))
+    .map((card) => buildBulkSelectionKey(card.groupKey, Number(card.conversationId || 0)))
+}
+
+function buildSelectableLiveCardSignature() {
+  return getSelectableLiveCardKeys().join("|")
 }
 
 async function loadOverviewData(options?: { force?: boolean }) {
@@ -3009,7 +3029,7 @@ async function ensureBulkSendConnection(
     normalizeAgentType(item.agentType),
     undefined,
     undefined,
-    runtime.sessions.get(item.conversationId)?.lastAppliedSeq,
+    runtime.sessions.get(item.conversationId)?.lastAppliedSeq ?? undefined,
     instanceKey
   )
   return firstString(

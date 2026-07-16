@@ -1,7 +1,9 @@
 import {
   CONVERSATION_LIST_LIVE_PREVIEW_LIMIT,
+  CONVERSATION_LIST_LIVE_PREVIEW_TEXT_LIMIT,
   resolveConversationLivePreviewText,
   selectConversationLivePreviewIds,
+  trimLivePreviewText,
 } from "@/pages/conversations/conversationLivePreview"
 
 describe("conversationLivePreview", () => {
@@ -103,5 +105,25 @@ describe("conversationLivePreview", () => {
         content: [],
       },
     })).toBe("思考中...")
+  })
+
+  it("caps long streaming text to protect list rendering", () => {
+    const longText = `${"a".repeat(CONVERSATION_LIST_LIVE_PREVIEW_TEXT_LIMIT)}tail`
+
+    expect(trimLivePreviewText(longText)).toBe(
+      `...${longText.slice(-(CONVERSATION_LIST_LIVE_PREVIEW_TEXT_LIMIT - 3))}`
+    )
+
+    const preview = resolveConversationLivePreviewText({
+      status: "thinking",
+      liveMessage: {
+        role: "assistant",
+        isStreaming: true,
+        timestamp: 1,
+        content: [{ type: "text", text: longText }],
+      },
+    })
+    expect(preview.length).toBe(CONVERSATION_LIST_LIVE_PREVIEW_TEXT_LIMIT)
+    expect(preview.endsWith("tail")).toBe(true)
   })
 })
