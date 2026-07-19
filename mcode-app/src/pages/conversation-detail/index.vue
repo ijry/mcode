@@ -96,6 +96,7 @@
       </view>
 
       <view
+        v-if="shouldShowDetailTabsBar"
         :class="[
           'detail-tabs-bar',
           hasDetailBackgroundImage && 'detail-tabs-bar--translucent',
@@ -1064,11 +1065,20 @@ import { connectionSessionManager } from "@/services/conversation/connectionSess
 import { markConversationListDirty } from "@/services/conversation/conversationListRefresh"
 import { persistConversationDetailSnapshot } from "@/services/conversation/conversationDetailPersistence"
 import {
+  readDetailTabMultitaskMode,
+  type DetailTabMultitaskMode,
+} from "@/services/conversation/detailTabMultitaskPreference"
+import {
   closeConversationTab,
   ensureConversationTab,
   ensureConversationTabForPrompt,
   normalizeOpenedTabsList,
 } from "@/services/conversation/pcTabSyncService"
+import {
+  activateMobileDetailTab,
+  closeMobileDetailTab,
+  ensureMobileDetailTab,
+} from "@/services/conversation/mobileDetailTabs"
 import {
   applyOpenedTabsSnapshot,
   getOpenedTabsSnapshot,
@@ -1477,7 +1487,9 @@ const currentAgentType = ref("claude_code")
 const detailProjectEntries = ref<DetailProjectEntry[]>([])
 const detailTabsVersion = ref(0)
 const detailOpenedTabs = ref<OpenedTabItem[]>([])
+const detailMobileTabs = ref<OpenedTabItem[]>([])
 const detailTabsHydrated = ref(false)
+const detailTabMultitaskMode = ref<DetailTabMultitaskMode>("off")
 const detailActiveTabIndex = ref(0)
 const detailSwiperCurrent = ref(0)
 const mountedDetailConversationIds = ref<Set<number>>(new Set())
@@ -1588,7 +1600,7 @@ const sharedPromptQueueControlsEnabled = computed(() =>
 )
 const messageListPageStyle = computed(() => {
   const fallbackTopHeight =
-    Math.max(0, Number(tabsBarHeight.value || DEFAULT_DETAIL_TABS_BAR_HEIGHT)) +
+    Math.max(0, Number(effectiveDetailTabsBarHeight.value || 0)) +
     Math.max(0, Number(toolbarHeight.value || DEFAULT_DETAIL_TOOLBAR_HEIGHT))
   return buildMessageListPageStyle({
     viewportHeight: detailViewportHeight.value || getDetailViewportHeight(),
@@ -1673,7 +1685,7 @@ const detailUploadTarget = computed(() => {
   }
 })
 const connectingOperationBlockerStyle = computed(() =>
-  buildTopOffsetStyle(getNavbarHeight() + tabsBarHeight.value + toolbarHeight.value)
+  buildTopOffsetStyle(getNavbarHeight() + effectiveDetailTabsBarHeight.value + toolbarHeight.value)
 )
 const detailDropdownMaskStyle = computed(() => ({
   top: `${getNavbarHeight()}px`,
@@ -1681,7 +1693,7 @@ const detailDropdownMaskStyle = computed(() => ({
 const historyStatusStyle = computed(() =>
   buildHistoryStatusStyle({
     navbarHeight: getNavbarHeight(),
-    tabsBarHeight: tabsBarHeight.value,
+    tabsBarHeight: effectiveDetailTabsBarHeight.value,
     toolbarHeight: toolbarHeight.value,
   })
 )
@@ -2100,7 +2112,7 @@ const currentAgentLabel = computed(() => {
 })
 
 const fallbackDetailTabItem = computed<OpenedTabItem[]>(() => {
-  if (detailTabsHydrated.value || !conversationId.value || !folderId.value) {
+  if (!conversationId.value || !folderId.value) {
     return []
   }
   return [{
@@ -2114,9 +2126,26 @@ const fallbackDetailTabItem = computed<OpenedTabItem[]>(() => {
   }]
 })
 
+const detailTabsUsePcSync = computed(() => detailTabMultitaskMode.value === "pc")
+const detailTabsUseMobileLocal = computed(() => detailTabMultitaskMode.value === "mobile")
+const detailTabsEnabled = computed(() => detailTabMultitaskMode.value !== "off")
+const shouldShowDetailTabsBar = computed(() => detailTabsEnabled.value && detailShellTabs.value.length > 0)
+const effectiveDetailTabsBarHeight = computed(() =>
+  shouldShowDetailTabsBar.value ? tabsBarHeight.value : 0
+)
+const detailTabSourceItems = computed<OpenedTabItem[]>(() => {
+  if (detailTabsUsePcSync.value) {
+    return detailTabsHydrated.value ? detailOpenedTabs.value : fallbackDetailTabItem.value
+  }
+  if (detailTabsUseMobileLocal.value) {
+    return detailTabsHydrated.value ? detailMobileTabs.value : fallbackDetailTabItem.value
+  }
+  return fallbackDetailTabItem.value
+})
+
 const detailShellTabs = computed<DetailShellTabItem[]>(() =>
   buildDetailShellTabs({
-    openedTabs: detailTabsHydrated.value ? detailOpenedTabs.value : fallbackDetailTabItem.value,
+    openedTabs: detailTabSourceItems.value,
     titleByConversationId: detailTabTitleMap.value,
   })
 )
@@ -2581,7 +2610,50 @@ function applyDetailOpenedTabsState(input: {
   detailTabsHydrated.value = true
   pruneDetailLocalTabStates()
 }
+function applyDetailMobileTabsState(items: OpenedTabItem[]) {
+  detailMobileTabs.value = normalizeOpenedTabsList(items)
+  detailTabsVersion.value += 1
+  detailTabsHydrated.value = true
+  pruneDetailLocalTabStates()
+}
 
+function teardownDetailOpenedTabsSubscription() {
+  detailOpenedTabsUnsubscribe?.()
+  detailOpenedTabsUnsubscribe = null
+  detailOpenedTabsInstanceKey = ""
+}
+
+function syncDetailTabMultitaskMode() {
+  const nextMode = readDetailTabMultitaskMode()
+  const changed = nextMode !== detailTabMultitaskMode.value
+  detailTabMultitaskMode.value = nextMode
+  if (!detailTabsUsePcSync.value) {
+    teardownDetailOpenedTabsSubscription()
+  }
+  return changed
+}
+
+function initializeSingleDetailTabShell() {
+  teardownDetailOpenedTabsSubscription()
+  detailOpenedTabs.value = []
+  detailMobileTabs.value = []
+  detailTabsHydrated.value = true
+  syncDetailTabSelection(0)
+  mountDetailTabWindow(0)
+}
+
+async function initializeMobileDetailTabsShell(instanceKey: string) {
+  teardownDetailOpenedTabsSubscription()
+  const items = ensureMobileDetailTab({
+    instanceKey,
+    folderId: folderId.value,
+    conversationId: conversationId.value,
+    agentType: currentAgentType.value,
+  })
+  applyDetailMobileTabsState(items)
+  await refreshDetailTabTitles(instanceKey, items)
+  reconcileDetailShellFromOpenedTabs({ loadConversation: false })
+}
 async function refreshDetailTabTitles(
   instanceKey = resolveDetailInstanceKey(),
   items: OpenedTabItem[] = detailOpenedTabs.value
@@ -2611,6 +2683,11 @@ async function refreshDetailTabTitles(
 async function syncRemoteActiveDetailTab(tab: DetailShellTabItem) {
   const instanceKey = resolveDetailInstanceKey()
   if (!instanceKey) return
+  if (detailTabsUseMobileLocal.value) {
+    applyDetailMobileTabsState(activateMobileDetailTab(instanceKey, tab.conversationId))
+    return
+  }
+  if (!detailTabsUsePcSync.value) return
   const gateway = await getDetailGateway()
   const snapshot = await ensureConversationTab({
     instanceKey,
@@ -2767,6 +2844,7 @@ function reconcileDetailShellFromOpenedTabs(options: { loadConversation?: boolea
 }
 
 function ensureDetailOpenedTabsSubscription(instanceKey: string) {
+  if (!detailTabsUsePcSync.value) return
   if (!instanceKey || detailOpenedTabsInstanceKey === instanceKey) return
   detailOpenedTabsUnsubscribe?.()
   detailOpenedTabsInstanceKey = instanceKey
@@ -2801,9 +2879,18 @@ function ensureDetailOverviewInvalidationSubscription(instanceKey: string) {
 }
 
 async function initializeDetailTabsShell() {
+  syncDetailTabMultitaskMode()
   if (!conversationId.value || !folderId.value) return
   const instanceKey = resolveDetailInstanceKey()
   if (!instanceKey) return
+  if (!detailTabsEnabled.value) {
+    initializeSingleDetailTabShell()
+    return
+  }
+  if (detailTabsUseMobileLocal.value) {
+    await initializeMobileDetailTabsShell(instanceKey)
+    return
+  }
   ensureDetailOpenedTabsSubscription(instanceKey)
   ensureDetailOverviewInvalidationSubscription(instanceKey)
   void ensureGlobalConversationSync(instanceKey).catch((error) => {
@@ -2880,6 +2967,22 @@ async function handleCloseDetailTab(index: number) {
     : 0
   const instanceKey = resolveDetailInstanceKey()
   if (!instanceKey) return
+  if (detailTabsUseMobileLocal.value) {
+    const items = closeMobileDetailTab(instanceKey, tab.conversationId)
+    applyDetailMobileTabsState(items)
+    await refreshDetailTabTitles(instanceKey, items)
+    if (targetConversationId > 0) {
+      await switchToDetailConversation(targetConversationId)
+      return
+    }
+    if (!isClosingActiveTab) {
+      reconcileDetailShellFromOpenedTabs({ loadConversation: false })
+      return
+    }
+    handleBackNavigation()
+    return
+  }
+  if (!detailTabsUsePcSync.value) return
   try {
     const gateway = await getDetailGateway()
     const snapshot = await closeConversationTab({
@@ -2943,6 +3046,10 @@ onLoad((options: any) => {
 
 onShow(() => {
   restoreCyberModePreference()
+  const tabModeChanged = syncDetailTabMultitaskMode()
+  if (tabModeChanged && conversationId.value) {
+    void initializeDetailTabsShell()
+  }
   syncDetailNativeStatusBar()
   if (!hasLoadedOnce.value || !conversationId.value || loading.value) return
   if (!needsResumeRefresh.value) return
@@ -4626,7 +4733,7 @@ function measureMessageListHeight() {
   if (!instance) return
   const currentDetailViewportHeight = getDetailViewportHeight()
   detailViewportHeight.value = currentDetailViewportHeight
-  const fallbackTabsHeight = Math.max(0, Number(tabsBarHeight.value || 0))
+  const fallbackTabsHeight = Math.max(0, Number(effectiveDetailTabsBarHeight.value || 0))
   const fallbackToolbarHeight = Math.max(0, Number(toolbarHeight.value || 0))
   const fallbackTopHeight = fallbackTabsHeight + fallbackToolbarHeight
   const query = uni.createSelectorQuery().in(instance)
@@ -5276,6 +5383,7 @@ async function ensureConversationReadyForSend() {
 }
 
 async function ensurePcTabReadyForPrompt() {
+  if (!detailTabsUsePcSync.value) return
   if (!conversationId.value || !folderId.value) return
   try {
     const gateway = await getDetailGateway({ refreshAuth: true })
@@ -6244,3 +6352,4 @@ async function respondToPermission(optionId: string) {
 <style scoped lang="scss">
 @import "./index.scss";
 </style>
+

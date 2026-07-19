@@ -439,3 +439,24 @@ describe("ConversationDetailBody", () => {
     expect(source).toContain("taskStatusLabel(task.status)")
   })
 })
+
+describe("detail tab multitask mode contract", () => {
+  it("routes detail tabs by off, mobile-local, and pc-sync modes", () => {
+    const source = fs.readFileSync(
+      path.resolve(__dirname, "../../../src/pages/conversation-detail/index.vue"),
+      "utf8"
+    )
+
+    expect(source).toContain("readDetailTabMultitaskMode")
+    expect(source).toContain('detailTabMultitaskMode.value !== "off"')
+    expect(source).toContain("initializeSingleDetailTabShell")
+    expect(source).toContain("initializeMobileDetailTabsShell")
+    expect(source).toContain("ensureMobileDetailTab")
+    expect(source).toContain("activateMobileDetailTab")
+    expect(source).toContain("closeMobileDetailTab")
+    expect(source).toContain("if (!detailTabsUsePcSync.value) return")
+    expect(source.indexOf("if (detailTabsUseMobileLocal.value)")).toBeLessThan(
+      source.indexOf('gateway.call<unknown>("list_opened_tabs")')
+    )
+  })
+})

@@ -63,6 +63,13 @@
       }
     },
     {
+      "path": "pages/settings/index",
+      "style": {
+        "navigationBarTitleText": "设置",
+        "enablePullDownRefresh": false
+      }
+    },
+    {
       "path": "pages/profile/index",
       "style": {
         "navigationBarTitleText": "我的",
@@ -203,3 +210,4 @@
     "backgroundColor": "#f8f8f8"
   }
 }
+
