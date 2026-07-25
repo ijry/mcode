@@ -12,6 +12,8 @@ describe("settings page contract", () => {
     expect(source).toContain("TAB 多任务")
     expect(source).toContain("移动端自管")
     expect(source).toContain("同步 PC 端")
+    expect(source).toContain("实验性功能")
+    expect(source).toContain("实时信息流和同步 PC 端 TAB 仅供体验，不建议正式使用")
     expect(source).toContain("readConversationListLiveStreamEnabled")
     expect(source).toContain("readDetailTabMultitaskMode")
   })

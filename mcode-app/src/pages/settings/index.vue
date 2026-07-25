@@ -2,6 +2,20 @@
   <view class="page" :style="[upThemeVars, upThemePageStyle]">
     <view class="section">
       <view class="section-title">会话设置</view>
+      <view class="experimental-notice">
+        <u-icon
+          class="experimental-notice__icon"
+          name="info-circle"
+          size="20"
+          :color="upThemeVar('--up-warning', '#f9ae3d')"
+        ></u-icon>
+        <view class="experimental-notice__content">
+          <text class="experimental-notice__title">实验性功能</text>
+          <text class="experimental-notice__text">
+            实时信息流和同步 PC 端 TAB 仅供体验，不建议正式使用。
+          </text>
+        </view>
+      </view>
       <view class="menu-list" :style="upThemeCardStyle">
         <view class="menu-item">
           <view class="menu-left menu-left--column">
@@ -153,6 +167,44 @@ function saveDirect() {
   color: var(--up-content-color, #606266);
   padding: 20rpx 0 16rpx;
   font-weight: 500;
+}
+
+.experimental-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 16rpx;
+  margin-bottom: 16rpx;
+  padding: 22rpx 24rpx;
+  border: 1rpx solid color-mix(in srgb, var(--up-warning, #f9ae3d) 32%, var(--up-border-color, #dadbde) 68%);
+  border-radius: 22rpx;
+  background-color: color-mix(in srgb, var(--up-warning, #f9ae3d) 12%, var(--up-card-bg-color, #ffffff) 88%);
+}
+
+.experimental-notice__icon {
+  flex-shrink: 0;
+  margin-top: 2rpx;
+}
+
+.experimental-notice__content {
+  min-width: 0;
+}
+
+.experimental-notice__title,
+.experimental-notice__text {
+  display: block;
+}
+
+.experimental-notice__title {
+  font-size: 28rpx;
+  font-weight: 600;
+  color: var(--up-main-color, #303133);
+}
+
+.experimental-notice__text {
+  margin-top: 6rpx;
+  font-size: 24rpx;
+  line-height: 1.45;
+  color: var(--up-content-color, #606266);
 }
 
 .menu-list,
