@@ -45,6 +45,10 @@ type RelayRecoveryState = {
   recoveryMessage: string | null
 }
 
+type AcpRequestOptions = {
+  instanceKey?: string
+}
+
 /**
  * ACP API 客户端
  * 封装所有与 ACP 服务的通信
@@ -60,7 +64,11 @@ class AcpApiClient {
   private bridgeStates = new Map<string, BridgeState>()
   private relayRecoveryStates = new Map<string, RelayRecoveryState>()
   private replayMissCalibrationHook: ((instanceKey: string) => Promise<void> | void) | null = null
-  private requestHookForTest: ((endpoint: string, data: any) => any) | null = null
+  private requestHookForTest: ((
+    endpoint: string,
+    data: any,
+    options?: AcpRequestOptions
+  ) => any) | null = null
 
   constructor(baseUrl: string = "") {
     this.baseUrl = baseUrl
@@ -77,7 +85,8 @@ class AcpApiClient {
     workingDir?: string,
     sessionId?: string,
     preferredModeId?: string,
-    preferredConfigValues?: Record<string, string>
+    preferredConfigValues?: Record<string, string>,
+    options?: AcpRequestOptions
   ): Promise<ConnectionInfo> {
     const response = await this.request("/acp_connect", {
       agentType,
@@ -85,7 +94,7 @@ class AcpApiClient {
       sessionId,
       preferredModeId,
       preferredConfigValues,
-    })
+    }, options)
 
     if (typeof response === "string" && response.trim()) {
       return {
@@ -275,27 +284,34 @@ class AcpApiClient {
   /**
    * 获取会话快照
    */
-  async acpGetSessionSnapshot(connectionId: string): Promise<any> {
+  async acpGetSessionSnapshot(
+    connectionId: string,
+    options?: AcpRequestOptions
+  ): Promise<any> {
     return await this.request("/acp_get_session_snapshot", {
       connectionId,
       connection_id: connectionId,
-    })
+    }, options)
   }
 
   /**
    * 按会话获取会话快照
    */
-  async acpGetSessionSnapshotByConversation(conversationId: number): Promise<any> {
+  async acpGetSessionSnapshotByConversation(
+    conversationId: number,
+    options?: AcpRequestOptions
+  ): Promise<any> {
     return await this.request("/acp_get_session_snapshot_by_conversation", {
       conversationId,
       conversation_id: conversationId,
-    })
+    }, options)
   }
 
   async acpFindConnectionForConversation(
     conversationId: number,
     agentType: string,
-    sessionId?: string
+    sessionId?: string,
+    options?: AcpRequestOptions
   ): Promise<ConversationConnectionInfo | null> {
     return await this.request("/acp_find_connection_for_conversation", {
       conversationId,
@@ -304,7 +320,7 @@ class AcpApiClient {
       agent_type: agentType,
       sessionId,
       session_id: sessionId,
-    })
+    }, options)
   }
 
   /**
@@ -722,12 +738,18 @@ class AcpApiClient {
   /**
    * 通用请求方法
    */
-  private async request(endpoint: string, data: any): Promise<any> {
+  private async request(
+    endpoint: string,
+    data: any,
+    options: AcpRequestOptions = {}
+  ): Promise<any> {
     if (this.requestHookForTest) {
-      return await this.requestHookForTest(endpoint, data)
+      return await this.requestHookForTest(endpoint, data, options)
     }
     const auth = useAuthStore()
-    const gateway = auth.gateway()
+    const gateway = options.instanceKey
+      ? this.createGatewayForDescriptor(this.resolveDescriptor(options.instanceKey))
+      : auth.gateway()
     const command = String(endpoint || "").replace(/^\/+/, "")
     return gateway.call(command, data ?? {})
   }
@@ -937,7 +959,7 @@ class AcpApiClient {
   }
 
   __setRequestHookForTest(
-    hook: ((endpoint: string, data: any) => any) | null
+    hook: ((endpoint: string, data: any, options?: AcpRequestOptions) => any) | null
   ) {
     this.requestHookForTest = hook
   }

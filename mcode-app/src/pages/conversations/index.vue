@@ -734,6 +734,7 @@ let overviewLoadPromise: Promise<void> | null = null
 let lastOverviewLoadedAt = 0
 const historyLoadPromiseMap = new Map<string, Promise<void>>()
 const overviewRefreshPromiseMap = new Map<string, Promise<void>>()
+let overviewConnectionPreparePromise: Promise<void> | null = null
 const connectionFolderSnapshotMap = new Map<string, Project[]>()
 const connectionTabSnapshotMap = new Map<string, OpenedTabItem[]>()
 const instanceConnectionKeyMap = new Map<string, string>()
@@ -1463,6 +1464,8 @@ onUnload(() => {
 
 onHide(() => {
   livePreviewPageVisible.value = false
+  activeSessionsRefreshTimerMap.forEach((timer) => clearTimeout(timer))
+  activeSessionsRefreshTimerMap.clear()
   releaseAllLivePreviewOwnedSessions()
 })
 
@@ -1472,7 +1475,7 @@ onPullDownRefresh(() => {
     return
   }
 
-  loadOverviewData({ force: true }).finally(() => {
+  loadOverviewDataAfterConnectionPrepare({ force: true }).finally(() => {
     void refreshActiveSessionTabBadge()
     uni.stopPullDownRefresh()
   })
@@ -1482,9 +1485,12 @@ onShow(() => {
   livePreviewPageVisible.value = true
   livePreviewTransferredConversationIds.clear()
   loadConversationLivePreviewPreference()
-  scheduleLivePreviewReconcile()
   const shouldForceRefresh = consumeConversationListDirty()
-  void loadOverviewData(shouldForceRefresh ? { force: true } : undefined)
+  void loadOverviewDataAfterConnectionPrepare(
+    shouldForceRefresh ? { force: true } : undefined
+  ).finally(() => {
+    scheduleLivePreviewReconcile()
+  })
   void refreshActiveSessionTabBadge()
 })
 
@@ -1655,6 +1661,82 @@ function buildSelectableLiveCardSignature() {
   return getSelectableLiveCardKeys().join("|")
 }
 
+async function loadOverviewDataAfterConnectionPrepare(options?: { force?: boolean }) {
+  await prepareOverviewLinkedConnections()
+  return await loadOverviewData(options)
+}
+
+async function prepareOverviewLinkedConnections() {
+  if (overviewConnectionPreparePromise) {
+    return await overviewConnectionPreparePromise
+  }
+
+  overviewConnectionPreparePromise = prepareOverviewLinkedConnectionsInternal()
+  try {
+    await overviewConnectionPreparePromise
+  } finally {
+    overviewConnectionPreparePromise = null
+  }
+}
+
+async function prepareOverviewLinkedConnectionsInternal() {
+  const savedConnections = readStoredConnections()
+  if (!savedConnections.length) return
+
+  const connectedMap = readConnectedMap()
+  const prunedConnectedMap = pruneConnectedMapBySavedConnections(savedConnections, connectedMap)
+  const linkedConnections = savedConnections.filter((conn) =>
+    Boolean(prunedConnectedMap[connectionKey(conn)])
+  )
+  if (!linkedConnections.length) return
+
+  const results = await Promise.allSettled(
+    linkedConnections.map(async (conn) => {
+      const resolved = await resolveConnectionContext(conn)
+      const resolvedConnection = resolved.connection as ConnectionItem
+      const resolvedKey = connectionKey(resolvedConnection)
+      const descriptor = resolved.gateway.getRemoteInstanceDescriptor()
+      if (descriptor.instanceKey && resolvedKey) {
+        instanceConnectionKeyMap.set(descriptor.instanceKey, resolvedKey)
+        connectionInstanceKeyMap.set(resolvedKey, descriptor.instanceKey)
+      }
+    })
+  )
+  results.forEach((result, index) => {
+    if (result.status === "rejected") {
+      const failedConnection = linkedConnections[index]
+      console.warn("[conversations] prepare linked connection skipped", {
+        connection: failedConnection?.name,
+        key: failedConnection ? connectionKey(failedConnection) : "",
+        error: result.reason,
+      })
+    }
+  })
+}
+
+function pruneConnectedMapBySavedConnections(
+  savedConnections: ConnectionItem[],
+  connectedMap: Record<string, boolean>
+) {
+  const validKeys = new Set(savedConnections.map((conn) => connectionKey(conn)))
+  const next: Record<string, boolean> = {}
+  Object.entries(connectedMap || {}).forEach(([key, value]) => {
+    if (validKeys.has(key) && Boolean(value)) {
+      next[key] = true
+    }
+  })
+  if (JSON.stringify(next) !== JSON.stringify(connectedMap || {})) {
+    uni.setStorageSync("mcode_connected_map", next)
+  }
+  return next
+}
+
+function readConnectedMap(): Record<string, boolean> {
+  const raw = uni.getStorageSync("mcode_connected_map")
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {}
+  return raw as Record<string, boolean>
+}
+
 async function loadOverviewData(options?: { force?: boolean }) {
   const force = options?.force === true
   if (overviewLoadPromise) {
@@ -1690,7 +1772,7 @@ async function loadOverviewDataInternal() {
       void applyConversationTabBarBadge(0)
       return
     }
-    const connectedMap = (uni.getStorageSync("mcode_connected_map") || {}) as Record<string, boolean>
+    const connectedMap = readConnectedMap()
     const groups = await Promise.all(
       savedConnections.map(async (conn) => {
         if (!connectedMap[connectionKey(conn)]) {
@@ -1738,7 +1820,7 @@ async function loadOverviewDataInternal() {
 
 function getConnectedConnections(): ConnectionItem[] {
   const savedConnections = readStoredConnections()
-  const connectedMap = (uni.getStorageSync("mcode_connected_map") || {}) as Record<string, boolean>
+  const connectedMap = readConnectedMap()
   return savedConnections.filter((conn) => Boolean(connectedMap[connectionKey(conn)]))
 }
 
@@ -1911,6 +1993,7 @@ async function refreshConnectionGroupFromLocalCache(instanceKey: string) {
 
 function scheduleActiveSessionsOverviewRefresh(instanceKey: string) {
   if (!instanceKey) return
+  if (!livePreviewPageVisible.value) return
   const existing = activeSessionsRefreshTimerMap.get(instanceKey)
   if (existing) {
     clearTimeout(existing)
@@ -1923,6 +2006,7 @@ function scheduleActiveSessionsOverviewRefresh(instanceKey: string) {
 }
 
 async function refreshOverviewFromRemoteByInstance(instanceKey: string) {
+  if (!livePreviewPageVisible.value) return
   if (!getRegisteredRemoteInstanceDescriptor(instanceKey)) return
 
   const mappedConnKey = instanceConnectionKeyMap.get(instanceKey) || ""
@@ -2059,7 +2143,9 @@ function ensureActiveSessionsSubscription(instanceKey: string) {
   const unsubscribe = acpApi.subscribeGlobalEvent("pet://sessions", (payload) => {
     activeSessionBadgeCountMap.set(instanceKey, getOngoingActiveSessionCount(payload))
     void applyConversationTabBarBadge(sumActiveSessionBadgeCounts())
-    scheduleActiveSessionsOverviewRefresh(instanceKey)
+    if (livePreviewPageVisible.value) {
+      scheduleActiveSessionsOverviewRefresh(instanceKey)
+    }
   }, instanceKey)
   disposeActiveSessionsChangedMap.set(instanceKey, unsubscribe)
 }
@@ -2399,7 +2485,7 @@ function parseConversationId(input: unknown): number {
 }
 
 function loadData() {
-  return loadOverviewData({ force: true })
+  return loadOverviewDataAfterConnectionPrepare({ force: true })
 }
 
 
@@ -2758,9 +2844,12 @@ async function shouldSkipCreatePromptReplay(
   }
 
   try {
+    const instanceKey = gateway.getRemoteInstanceDescriptor().instanceKey
     const existingConnection = await acpApi.acpFindConnectionForConversation(
       conversationId,
-      agentType
+      agentType,
+      undefined,
+      instanceKey ? { instanceKey } : undefined
     )
     if (existingConnection?.connection_id) {
       return true

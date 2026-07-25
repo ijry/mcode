@@ -28,4 +28,24 @@ describe("acpApi find connection for conversation", () => {
       },
     }])
   })
+
+  it("keeps the requested remote instance with the ACP request", async () => {
+    const calls: Array<{ endpoint: string; data: any; options: any }> = []
+    acpApi.__setRequestHookForTest((endpoint, data, options) => {
+      calls.push({ endpoint, data, options })
+      return null
+    })
+
+    await acpApi.acpFindConnectionForConversation(
+      502,
+      "codex",
+      undefined,
+      { instanceKey: "instance-codex" }
+    )
+
+    expect(calls[0]).toEqual(expect.objectContaining({
+      endpoint: "/acp_find_connection_for_conversation",
+      options: { instanceKey: "instance-codex" },
+    }))
+  })
 })

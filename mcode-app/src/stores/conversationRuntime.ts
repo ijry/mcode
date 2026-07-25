@@ -798,12 +798,16 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         instanceKey ||
         managed?.instanceKey ||
         auth.currentRemoteInstance().instanceKey
+      const requestOptions = targetInstanceKey
+        ? { instanceKey: targetInstanceKey }
+        : undefined
       let discovered: ConversationConnectionInfo | null = null
       try {
         discovered = await acpApi.acpFindConnectionForConversation(
           conversationId,
           agentType,
-          sessionId
+          sessionId,
+          requestOptions
         )
       } catch (error) {
         console.warn("acp_find_connection_for_conversation failed", error)
@@ -864,7 +868,10 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       if (!managed) {
         let snapshot: any = null
         try {
-          snapshot = await acpApi.acpGetSessionSnapshotByConversation(conversationId)
+          snapshot = await acpApi.acpGetSessionSnapshotByConversation(
+            conversationId,
+            requestOptions
+          )
         } catch {}
         const snapshotConnectionId = firstString(snapshot?.connection_id, snapshot?.connectionId)
         if (snapshotConnectionId) {

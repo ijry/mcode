@@ -245,6 +245,33 @@ describe('conversationRuntime ACP error handling', () => {
     expect(store.getOrCreateSession(1).status).toBe('connected')
   })
 
+  it('routes fresh connect discovery through the provided instance key', async () => {
+    const acp = require('@/api/acp')
+    const manager = require('@/services/conversation/connectionSessionManager')
+    const store = useConversationRuntimeStore()
+
+    await store.connect(1, 'claude_code', undefined, 'sess-1', 88, 'instance-b')
+
+    expect(acp.acpApi.acpFindConnectionForConversation).toHaveBeenCalledWith(
+      1,
+      'claude_code',
+      'sess-1',
+      { instanceKey: 'instance-b' }
+    )
+    expect(acp.acpApi.acpGetSessionSnapshotByConversation).toHaveBeenCalledWith(
+      1,
+      { instanceKey: 'instance-b' }
+    )
+    expect(manager.connectionSessionManager.connectConversation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversationId: 1,
+        agentType: 'claude_code',
+        sessionId: 'sess-1',
+        instanceKey: 'instance-b',
+      })
+    )
+  })
+
   it('preserves terminal ACP errors across the follow-up idle status change', () => {
     const { store, session } = prepareSession()
 

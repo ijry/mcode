@@ -80,7 +80,10 @@ export const connectionSessionManager = {
     const connection = await acpApi.acpConnect(
       input.agentType,
       input.workingDir,
-      input.sessionId
+      input.sessionId,
+      undefined,
+      undefined,
+      { instanceKey }
     )
 
     const managed: ManagedConversationConnection = {
