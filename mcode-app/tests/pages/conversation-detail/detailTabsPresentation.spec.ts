@@ -1,4 +1,6 @@
 import {
+  buildDetailFallbackTab,
+  buildDetailTabsDiagnosticSnapshot,
   buildDetailShellTabs,
   resolveDetailMountedWindowConversationIds,
   resolveMountedDetailConversationIds,
@@ -10,6 +12,29 @@ import {
 } from "@/pages/conversation-detail/detailTabsPresentation"
 
 describe("detailTabsPresentation", () => {
+  it("builds an offline single-detail tab when the route has no folder id", () => {
+    expect(buildDetailFallbackTab({
+      conversationId: 612,
+      folderId: 0,
+      agentType: "codex",
+    })).toEqual({
+      id: 612,
+      folder_id: 0,
+      conversation_id: 612,
+      agent_type: "codex",
+      position: 0,
+      is_active: true,
+      is_pinned: false,
+    })
+  })
+
+  it("does not build an offline single-detail tab without a conversation id", () => {
+    expect(buildDetailFallbackTab({
+      conversationId: 0,
+      folderId: 0,
+    })).toBeNull()
+  })
+
   it("maps opened tabs into shell tabs ordered by position", () => {
     expect(buildDetailShellTabs({
       openedTabs: [
@@ -261,6 +286,37 @@ describe("detailTabsPresentation", () => {
       tabs,
       currentIndex: 0,
     })).sort((left, right) => left - right)).toEqual([88, 99])
+  })
+
+  it("reports when the routed conversation is absent from the synced shell", () => {
+    const tabs = buildDetailShellTabs({
+      openedTabs: [
+        {
+          id: 3,
+          folder_id: 2,
+          conversation_id: 88,
+          agent_type: "claude_code",
+          position: 0,
+          is_active: true,
+          is_pinned: false,
+        },
+      ],
+    })
+
+    expect(buildDetailTabsDiagnosticSnapshot({
+      currentConversationId: 99,
+      tabs,
+      mountedConversationIds: [88],
+      activeTabIndex: 0,
+    })).toEqual({
+      currentConversationId: 99,
+      shellConversationIds: [88],
+      mountedConversationIds: [88],
+      activeTabIndex: 0,
+      activeConversationId: 88,
+      currentConversationInShell: false,
+      currentConversationMounted: false,
+    })
   })
 
   it("keys swiper pages by conversation id so rewritten remote tab ids stay stable", () => {

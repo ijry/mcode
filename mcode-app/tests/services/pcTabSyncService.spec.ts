@@ -8,15 +8,52 @@ import {
   getOpenedTabsSnapshot,
   replaceOpenedTabsSnapshot,
 } from "@/services/conversation/openedTabsRealtimeCache"
+import { readDetailTabMultitaskMode } from "@/services/conversation/detailTabMultitaskPreference"
 
 jest.mock("@/services/conversation/openedTabsRealtimeCache", () => ({
   getOpenedTabsSnapshot: jest.fn(),
   replaceOpenedTabsSnapshot: jest.fn(),
 }))
 
+jest.mock("@/services/conversation/detailTabMultitaskPreference", () => ({
+  readDetailTabMultitaskMode: jest.fn(),
+}))
+
 describe("pcTabSyncService", () => {
   beforeEach(() => {
     jest.clearAllMocks()
+    ;(readDetailTabMultitaskMode as jest.Mock).mockReturnValue("pc")
+  })
+
+  it.each(["off", "mobile"])("does not access remote opened tabs in %s detail-tab mode", async (mode) => {
+    ;(readDetailTabMultitaskMode as jest.Mock).mockReturnValue(mode)
+    const gateway = {
+      call: jest.fn(),
+    }
+
+    const result = await ensureConversationTab({
+      instanceKey: "inst-a",
+      gateway: gateway as any,
+      folderId: 7,
+      conversationId: 99,
+      agentType: "codex",
+      origin: "mcode-mobile-open",
+    })
+
+    expect(result).toBeNull()
+    expect(gateway.call).not.toHaveBeenCalled()
+    expect(getOpenedTabsSnapshot).not.toHaveBeenCalled()
+
+    const closeResult = await closeConversationTab({
+      instanceKey: "inst-a",
+      gateway: gateway as any,
+      conversationId: 99,
+      origin: "mcode-mobile-close",
+    })
+
+    expect(closeResult).toBeNull()
+    expect(gateway.call).not.toHaveBeenCalled()
+    expect(getOpenedTabsSnapshot).not.toHaveBeenCalled()
   })
 
   it("appends a missing conversation tab and preserves current active tab by default", async () => {

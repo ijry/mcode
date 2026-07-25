@@ -57,8 +57,37 @@
         </view>
       </view>
 
-      <view v-else-if="renderMessageItems.length === 0" class="empty-messages">
-        <up-empty mode="message" text="开始新的对话吧"></up-empty>
+      <view
+        v-else-if="contentFallbackPresentation.code === 'loading'"
+        class="empty-messages empty-messages--loading"
+      >
+        <up-loading-icon
+          mode="circle"
+          size="24"
+          :color="upThemeVar('--up-primary', '#2979ff')"
+        ></up-loading-icon>
+        <text class="empty-messages__loading-text">正在加载会话内容...</text>
+      </view>
+
+      <view
+        v-else-if="contentFallbackPresentation.code === 'error'"
+        class="empty-messages empty-messages--fallback"
+      >
+        <up-icon
+          name="close-circle-fill"
+          size="32"
+          :color="upThemeVar('--up-error', '#fa3534')"
+        ></up-icon>
+        <text class="empty-messages__fallback-title">加载会话失败</text>
+        <text class="empty-messages__fallback-desc">{{ contentFallbackPresentation.message }}</text>
+        <view class="empty-messages__fallback-action" @click="emit('reload')">重新加载</view>
+      </view>
+
+      <view
+        v-else-if="contentFallbackPresentation.code === 'empty'"
+        class="empty-messages"
+      >
+        <up-empty mode="message" text="这是一个新会话，暂时还没有消息"></up-empty>
       </view>
 
       <view
@@ -923,6 +952,7 @@ import {
   resolveRenderAnchorId,
   type HistoryPageCursor,
 } from "./detailScrollState"
+import { resolveDetailContentFallbackPresentation } from "./detailContentFallbackPresentation"
 import {
   applySlashCommandText,
   filterSlashCommands,
@@ -964,10 +994,13 @@ const props = defineProps<{
   uploadTarget?: { url: string; header: Record<string, string> } | null
   detailTheme?: DetailThemeId
   cyberEffectPhase?: CyberEffectPhase
+  initialLoading?: boolean
+  loadErrorMessage?: string
 }>()
 
 const emit = defineEmits<{
   (event: "layout-change"): void
+  (event: "reload"): void
 }>()
 
 const auth = useAuthStore()
@@ -1099,6 +1132,14 @@ const isActiveWaitingRuntime = computed(() =>
 const showWaitingResponseState = computed(() =>
   renderMessageItems.value.length === 0 &&
   (isActiveWaitingRuntime.value || hasPendingInteraction.value)
+)
+const contentFallbackPresentation = computed(() =>
+  resolveDetailContentFallbackPresentation({
+    hasRenderedMessages: renderMessageItems.value.length > 0,
+    isWaitingForRuntime: showWaitingResponseState.value,
+    initialLoading: Boolean(props.initialLoading),
+    loadErrorMessage: props.loadErrorMessage,
+  })
 )
 const showBottomGeneratingIndicator = computed(() =>
   renderMessageItems.value.length > 0 &&

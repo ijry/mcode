@@ -142,7 +142,46 @@
         </up-tabs>
       </view>
 
+      <view
+        v-if="showDetailShellFallback"
+        class="detail-shell__placeholder"
+        :style="detailShellViewportStyle"
+      >
+        <view class="detail-shell__placeholder-card">
+          <template v-if="detailContentInitialLoading">
+            <up-loading-icon
+              mode="circle"
+              size="28"
+              :color="upThemeVar('--up-primary', '#2979ff')"
+            ></up-loading-icon>
+            <text class="detail-shell__placeholder-title">正在加载会话内容...</text>
+            <text class="detail-shell__placeholder-desc">请稍候，数据准备完成后会自动显示。</text>
+          </template>
+          <template v-else-if="detailLoadErrorMessage">
+            <up-icon
+              name="close-circle-fill"
+              size="32"
+              :color="upThemeVar('--up-error', '#fa3534')"
+            ></up-icon>
+            <text class="detail-shell__placeholder-title">加载会话失败</text>
+            <text class="detail-shell__placeholder-desc">{{ detailLoadErrorMessage }}</text>
+            <view class="detail-shell__placeholder-action" @click="reloadDetailContent">重新加载</view>
+          </template>
+          <template v-else>
+            <up-icon
+              name="info-circle"
+              size="32"
+              :color="upThemeVar('--up-tips-color', '#909193')"
+            ></up-icon>
+            <text class="detail-shell__placeholder-title">暂时无法显示会话内容</text>
+            <text class="detail-shell__placeholder-desc">会话页面尚未准备好，请重新加载。</text>
+            <view class="detail-shell__placeholder-action" @click="reloadDetailContent">重新加载</view>
+          </template>
+        </view>
+      </view>
+
       <swiper
+        v-else
         class="detail-shell__swiper"
         :style="detailShellViewportStyle"
         :current="detailSwiperCurrent"
@@ -944,7 +983,10 @@
               :upload-target="detailUploadTarget"
               :detail-theme="detailTheme"
               :cyber-effect-phase="cyberEffectPhase"
+              :initial-loading="isActiveDetailTabPage(index) && detailContentInitialLoading"
+              :load-error-message="isActiveDetailTabPage(index) ? detailLoadErrorMessage : ''"
               @layout-change="measureMessageListHeight"
+              @reload="reloadDetailContent"
             />
           </view>
         </swiper-item>
@@ -1149,6 +1191,8 @@ import ConversationDetailSweetBubbles from "./ConversationDetailSweetBubbles.vue
 import ConversationDetailSummerAtmosphere from "./ConversationDetailSummerAtmosphere.vue"
 import ConversationDetailInteractivePane from "./ConversationDetailInteractivePane.vue"
 import {
+  buildDetailFallbackTab,
+  buildDetailTabsDiagnosticSnapshot,
   buildDetailShellTabs,
   normalizeDetailTabTitleText,
   resolveMountedDetailConversationIds,
@@ -1160,6 +1204,7 @@ import {
   resolveDetailMountedWindowConversationIds,
   type DetailShellTabItem,
 } from "./detailTabsPresentation"
+import { isDetailDebugEnabled } from "./detailDebugPreference"
 import {
   createDetailTabState,
   type DetailTabState,
@@ -1413,6 +1458,8 @@ const quickReplyItems: QuickReplyItem[] = [
 ]
 
 const loading = ref(false)
+const preparingDetailContentConversationId = ref(0)
+const detailLoadError = ref<{ conversationId: number; message: string } | null>(null)
 const sending = ref(false)
 const stoppingSession = ref(false)
 const processingQueue = ref(false)
@@ -1522,12 +1569,45 @@ const connectingBackgroundConversationIds = new Set<number>()
 const detailTabStateMap = new Map<number, DetailTabState>()
 
 function detailDebugLog(stage: string, payload?: Record<string, unknown>) {
+  if (!isDetailDebugEnabled()) return
   if (!conversationId.value) return
   console.warn("[conversation-detail-debug]", {
     conversationId: conversationId.value,
     stage,
     ...(payload || {}),
   })
+}
+
+function getDetailOpenedTabConversationIds(items: OpenedTabItem[] = []) {
+  return Array.from(new Set(
+    items
+      .map((item) => Number(item.conversation_id || 0))
+      .filter((id) => id > 0)
+  )).sort((left, right) => left - right)
+}
+
+function getDetailTabsDiagnosticSnapshot() {
+  return buildDetailTabsDiagnosticSnapshot({
+    currentConversationId: conversationId.value,
+    tabs: detailShellTabs.value,
+    mountedConversationIds: mountedDetailConversationIds.value,
+    activeTabIndex: activeDetailTabIndex.value,
+  })
+}
+
+function detailTabsDebugLog(stage: string, payload?: Record<string, unknown>) {
+  // #ifdef H5
+  if (!isDetailDebugEnabled()) return
+  console.warn("[conversation-detail-tabs-debug]", {
+    stage,
+    multitaskMode: detailTabMultitaskMode.value,
+    tabsHydrated: detailTabsHydrated.value,
+    tabsVersion: detailTabsVersion.value,
+    subscribedInstanceKey: detailOpenedTabsInstanceKey || null,
+    ...getDetailTabsDiagnosticSnapshot(),
+    ...(payload || {}),
+  })
+  // #endif
 }
 
 function isCurrentDetailTarget(input: {
@@ -2112,18 +2192,12 @@ const currentAgentLabel = computed(() => {
 })
 
 const fallbackDetailTabItem = computed<OpenedTabItem[]>(() => {
-  if (!conversationId.value || !folderId.value) {
-    return []
-  }
-  return [{
-    id: conversationId.value,
-    folder_id: folderId.value,
-    conversation_id: conversationId.value,
-    agent_type: currentAgentType.value,
-    position: 0,
-    is_active: true,
-    is_pinned: false,
-  }]
+  const item = buildDetailFallbackTab({
+    conversationId: conversationId.value,
+    folderId: folderId.value,
+    agentType: currentAgentType.value,
+  })
+  return item ? [item] : []
 })
 
 const detailTabsUsePcSync = computed(() => detailTabMultitaskMode.value === "pc")
@@ -2149,6 +2223,20 @@ const detailShellTabs = computed<DetailShellTabItem[]>(() =>
     titleByConversationId: detailTabTitleMap.value,
   })
 )
+const detailLoadErrorMessage = computed(() => {
+  const failure = detailLoadError.value
+  if (failure?.conversationId !== Number(conversationId.value || 0)) return ""
+  return failure.message
+})
+const detailContentInitialLoading = computed(() => {
+  const targetConversationId = Number(conversationId.value || 0)
+  if (!targetConversationId) return false
+  return loading.value || preparingDetailContentConversationId.value === targetConversationId
+})
+const showDetailShellFallback = computed(() => {
+  const snapshot = getDetailTabsDiagnosticSnapshot()
+  return !snapshot.currentConversationInShell || !snapshot.currentConversationMounted
+})
 
 const navbarStatusBarBgColor = computed(() =>
   detailTheme.value === "matrix"
@@ -2603,12 +2691,50 @@ function applyDetailOpenedTabsState(input: {
   version: number
   items: OpenedTabItem[]
   origin?: string
+  source?: string
 }) {
-  replaceOpenedTabsSnapshot(input.instanceKey, input.version, input.items, input.origin || "server")
+  const normalizedItems = normalizeOpenedTabsList(input.items)
+  const previousOpenedConversationIds = getDetailOpenedTabConversationIds(detailOpenedTabs.value)
+  const before = getDetailTabsDiagnosticSnapshot()
+  const source = input.source || input.origin || "server"
+  const incomingConversationIds = getDetailOpenedTabConversationIds(normalizedItems)
+  detailTabsDebugLog("opened-tabs:apply", {
+    source,
+    instanceKey: input.instanceKey,
+    incomingVersion: Number(input.version || 0),
+    incomingOrigin: input.origin || "server",
+    incomingConversationIds,
+    previousOpenedConversationIds,
+    before,
+  })
+  replaceOpenedTabsSnapshot(input.instanceKey, input.version, normalizedItems, input.origin || "server")
   detailTabsVersion.value = Number(input.version || 0)
-  detailOpenedTabs.value = normalizeOpenedTabsList(input.items)
+  detailOpenedTabs.value = normalizedItems
   detailTabsHydrated.value = true
   pruneDetailLocalTabStates()
+  const after = getDetailTabsDiagnosticSnapshot()
+  detailTabsDebugLog("opened-tabs:applied", {
+    source,
+    instanceKey: input.instanceKey,
+    incomingVersion: Number(input.version || 0),
+    incomingOrigin: input.origin || "server",
+    incomingConversationIds,
+    previousOpenedConversationIds,
+    before,
+    after,
+    routedConversationDropped:
+      before.currentConversationInShell && !after.currentConversationInShell,
+  })
+  if (after.currentConversationId > 0 && !after.currentConversationInShell) {
+    detailTabsDebugLog("opened-tabs:routed-conversation-pruned", {
+      source,
+      instanceKey: input.instanceKey,
+      incomingVersion: Number(input.version || 0),
+      incomingOrigin: input.origin || "server",
+      incomingConversationIds,
+      previousOpenedConversationIds,
+    })
+  }
 }
 function applyDetailMobileTabsState(items: OpenedTabItem[]) {
   detailMobileTabs.value = normalizeOpenedTabsList(items)
@@ -2800,6 +2926,9 @@ async function switchToDetailConversation(
 function reconcileDetailShellFromOpenedTabs(options: { loadConversation?: boolean } = {}) {
   if (!detailTabsHydrated.value) return
   if (detailShellTabs.value.length === 0) {
+    detailTabsDebugLog("opened-tabs:reconcile-empty-shell", {
+      loadConversation: options.loadConversation,
+    })
     detailTabStateMap.clear()
     handleBackNavigation()
     return
@@ -2823,6 +2952,9 @@ function reconcileDetailShellFromOpenedTabs(options: { loadConversation?: boolea
     // 刷新、tab 跳回第一个”的根因。此时保持当前视图不动，只有冷启动水合
     // （loadConversation === false，仅选中不重载）才允许走 index 回退选择。
     if (options.loadConversation !== false) {
+      detailTabsDebugLog("opened-tabs:reconcile-routed-conversation-missing", {
+        loadConversation: options.loadConversation,
+      })
       return
     }
   }
@@ -2850,13 +2982,26 @@ function ensureDetailOpenedTabsSubscription(instanceKey: string) {
   detailOpenedTabsInstanceKey = instanceKey
   detailOpenedTabsUnsubscribe = acpApi.subscribeOpenedTabsChanged((payload) => {
     const snapshot = normalizeOpenedTabsChangedPayload(payload)
-    if (!snapshot) return
+    if (!snapshot) {
+      detailTabsDebugLog("opened-tabs:event-invalid", {
+        instanceKey,
+        payloadType: typeof payload,
+      })
+      return
+    }
+    detailTabsDebugLog("opened-tabs:event-received", {
+      instanceKey,
+      incomingVersion: snapshot.version,
+      incomingOrigin: snapshot.origin,
+      incomingConversationIds: getDetailOpenedTabConversationIds(snapshot.tabs),
+    })
     applyOpenedTabsSnapshot(instanceKey, snapshot)
     applyDetailOpenedTabsState({
       instanceKey,
       version: snapshot.version,
       items: snapshot.tabs,
       origin: snapshot.origin,
+      source: "opened-tabs-event",
     })
     void refreshDetailTabTitles(instanceKey, snapshot.tabs)
     reconcileDetailShellFromOpenedTabs()
@@ -2880,13 +3025,13 @@ function ensureDetailOverviewInvalidationSubscription(instanceKey: string) {
 
 async function initializeDetailTabsShell() {
   syncDetailTabMultitaskMode()
-  if (!conversationId.value || !folderId.value) return
-  const instanceKey = resolveDetailInstanceKey()
-  if (!instanceKey) return
+  if (!conversationId.value) return
   if (!detailTabsEnabled.value) {
     initializeSingleDetailTabShell()
     return
   }
+  const instanceKey = resolveDetailInstanceKey()
+  if (!instanceKey) return
   if (detailTabsUseMobileLocal.value) {
     await initializeMobileDetailTabsShell(instanceKey)
     return
@@ -2903,6 +3048,7 @@ async function initializeDetailTabsShell() {
       version: cachedSnapshot.version,
       items: cachedSnapshot.items,
       origin: "cache",
+      source: "cache-hydration",
     })
     reconcileDetailShellFromOpenedTabs({ loadConversation: false })
     void refreshDetailTabTitles(instanceKey, cachedSnapshot.items)
@@ -2911,11 +3057,17 @@ async function initializeDetailTabsShell() {
     const gateway = await getDetailGateway()
     const tabsRaw = await gateway.call<unknown>("list_opened_tabs")
     const snapshot = normalizeOpenedTabsResponse(instanceKey, tabsRaw)
+    detailTabsDebugLog("opened-tabs:remote-hydration-received", {
+      instanceKey,
+      incomingVersion: snapshot.version,
+      incomingConversationIds: getDetailOpenedTabConversationIds(snapshot.items),
+    })
     applyDetailOpenedTabsState({
       instanceKey,
       version: snapshot.version,
       items: snapshot.items,
       origin: "server",
+      source: "remote-hydration",
     })
     await refreshDetailTabTitles(instanceKey, snapshot.items)
     reconcileDetailShellFromOpenedTabs({ loadConversation: false })
@@ -3036,10 +3188,7 @@ onLoad((options: any) => {
   syncRouteAuthContext()
   applyDetailBackgroundFromStorage(conversationId.value)
   if (conversationId.value) {
-    void initializeDetailTabsShell().finally(() => {
-      void loadDetailProjectEntries()
-      void loadConversation()
-    })
+    reloadDetailContent()
   }
   hasLoadedOnce.value = true
 })
@@ -3509,6 +3658,7 @@ watch(
         : -1
     if (currentConversationId > 0 && currentIndex < 0) {
       // 当前会话已不在列表中：保持现有选中态不动，不因远端变化跳 tab。
+      detailTabsDebugLog("opened-tabs:watch-routed-conversation-missing")
       ensureMountedDetailTabRuntimes()
       return
     }
@@ -3849,6 +3999,10 @@ async function loadConversation() {
   const targetConversationId = Number(conversationId.value || 0)
   const targetFolderId = Number(folderId.value || 0)
   if (!targetConversationId) return
+  if (preparingDetailContentConversationId.value === targetConversationId) {
+    preparingDetailContentConversationId.value = 0
+  }
+  detailLoadError.value = null
   const loadToken = ++detailLoadSequence
   const instanceKey = resolveDetailInstanceKey()
   const isActiveLoad = () =>
@@ -4044,7 +4198,11 @@ async function loadConversation() {
 
   } catch (error) {
     if (isActiveLoad()) {
-      const message = toErrorMessage(error)
+      const message = toErrorMessage(error, "加载会话失败，请重新加载")
+      detailLoadError.value = {
+        conversationId: targetConversationId,
+        message,
+      }
       uni.showToast({ title: `加载失败: ${message}`, icon: "none", duration: 3000 })
     }
   } finally {
@@ -4056,6 +4214,16 @@ async function loadConversation() {
       drainPendingDetailTabSwitch({ syncRemote: false })
     }
   }
+}
+
+function reloadDetailContent() {
+  const targetConversationId = Number(conversationId.value || 0)
+  if (!targetConversationId || loading.value) return
+  preparingDetailContentConversationId.value = targetConversationId
+  void initializeDetailTabsShell().finally(() => {
+    void loadDetailProjectEntries()
+    void loadConversation()
+  })
 }
 
 function syncConversationTitle(title?: string | null) {

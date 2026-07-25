@@ -3,6 +3,7 @@ import {
   getOpenedTabsSnapshot,
   replaceOpenedTabsSnapshot,
 } from "@/services/conversation/openedTabsRealtimeCache"
+import { readDetailTabMultitaskMode } from "@/services/conversation/detailTabMultitaskPreference"
 import type { OpenedTabItem, OpenedTabsSnapshot } from "@/types/acp"
 
 type TabActivationMode = "allow" | "preserve"
@@ -27,6 +28,9 @@ interface SaveOpenedTabsResult {
 const MAX_SAVE_RETRIES = 2
 
 export async function ensureConversationTab(input: EnsureConversationTabInput) {
+  if (!shouldSyncPcOpenedTabs()) {
+    return null
+  }
   const instanceKey = String(input.instanceKey || "").trim()
   const folderId = Number(input.folderId || 0)
   const conversationId = Number(input.conversationId || 0)
@@ -80,6 +84,9 @@ export async function closeConversationTab(input: {
   conversationId: number
   origin?: string
 }) {
+  if (!shouldSyncPcOpenedTabs()) {
+    return null
+  }
   const instanceKey = String(input.instanceKey || "").trim()
   const conversationId = Number(input.conversationId || 0)
   if (!instanceKey || !conversationId) {
@@ -110,6 +117,10 @@ export async function closeConversationTab(input: {
     version: savedVersion || baseSnapshot.version + 1,
     items: savedItems,
   } satisfies OpenedTabsSnapshot
+}
+
+function shouldSyncPcOpenedTabs() {
+  return readDetailTabMultitaskMode() === "pc"
 }
 
 async function readOpenedTabsSnapshot(

@@ -426,6 +426,38 @@ describe("ConversationDetailBody", () => {
     expect(source).toMatch(/const token = \+\+historySyncToken[\s\S]*beginInitialHistoryLoading\(targetConversationId, token\)[\s\S]*finally \{[\s\S]*finishInitialHistoryLoading\(targetConversationId, token\)/)
   })
 
+  it("shows explicit loading, failure, and empty states for conversation content", () => {
+    const detailSource = fs.readFileSync(
+      path.resolve(__dirname, "../../../src/pages/conversation-detail/index.vue"),
+      "utf8"
+    )
+    const paneSource = fs.readFileSync(
+      path.resolve(__dirname, "../../../src/pages/conversation-detail/ConversationDetailInteractivePane.vue"),
+      "utf8"
+    )
+
+    expect(detailSource).toContain("buildDetailFallbackTab")
+    expect(detailSource).toContain("if (!conversationId.value) return")
+    const initializeShellSource = detailSource.slice(
+      detailSource.indexOf("async function initializeDetailTabsShell()"),
+      detailSource.indexOf("function handleDetailTabChange")
+    )
+    expect(initializeShellSource.indexOf("if (!detailTabsEnabled.value)")).toBeLessThan(
+      initializeShellSource.indexOf("const instanceKey = resolveDetailInstanceKey()")
+    )
+    expect(detailSource).toContain(':initial-loading="isActiveDetailTabPage(index) && detailContentInitialLoading"')
+    expect(detailSource).toContain('@reload="reloadDetailContent"')
+    expect(detailSource).toContain("暂时无法显示会话内容")
+    expect(detailSource).toContain("!snapshot.currentConversationInShell || !snapshot.currentConversationMounted")
+    expect(paneSource).toContain("resolveDetailContentFallbackPresentation")
+    expect(paneSource).toContain("initialLoading?: boolean")
+    expect(paneSource).toContain("loadErrorMessage?: string")
+    expect(paneSource).toContain('(event: "reload"): void')
+    expect(paneSource).toContain("正在加载会话内容...")
+    expect(paneSource).toContain("加载会话失败")
+    expect(paneSource).toContain("这是一个新会话，暂时还没有消息")
+  })
+
   it("opens the plan drawer from the interactive pane status pill", () => {
     const source = fs.readFileSync(
       path.resolve(__dirname, "../../../src/pages/conversation-detail/ConversationDetailInteractivePane.vue"),

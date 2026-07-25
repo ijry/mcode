@@ -10,6 +10,70 @@ export interface DetailShellTabItem {
   position: number
 }
 
+export interface DetailTabsDiagnosticSnapshot {
+  currentConversationId: number
+  shellConversationIds: number[]
+  mountedConversationIds: number[]
+  activeTabIndex: number
+  activeConversationId: number
+  currentConversationInShell: boolean
+  currentConversationMounted: boolean
+}
+
+export function buildDetailFallbackTab(input: {
+  conversationId?: number
+  folderId?: number
+  agentType?: string
+}): OpenedTabItem | null {
+  const conversationId = Number(input.conversationId || 0)
+  if (conversationId <= 0) return null
+
+  return {
+    id: conversationId,
+    folder_id: Number(input.folderId || 0),
+    conversation_id: conversationId,
+    agent_type: String(input.agentType || "claude_code"),
+    position: 0,
+    is_active: true,
+    is_pinned: false,
+  }
+}
+
+export function buildDetailTabsDiagnosticSnapshot(input: {
+  currentConversationId?: number
+  tabs?: DetailShellTabItem[]
+  mountedConversationIds?: Iterable<number>
+  activeTabIndex?: number
+}): DetailTabsDiagnosticSnapshot {
+  const tabs = Array.isArray(input.tabs) ? input.tabs : []
+  const currentConversationId = Number(input.currentConversationId || 0)
+  const shellConversationIds = tabs
+    .map((tab) => Number(tab.conversationId || 0))
+    .filter((conversationId) => conversationId > 0)
+  const mountedConversationIds = Array.from(input.mountedConversationIds || [])
+    .map((conversationId) => Number(conversationId || 0))
+    .filter((conversationId) => conversationId > 0)
+    .filter((conversationId, index, values) => values.indexOf(conversationId) === index)
+    .sort((left, right) => left - right)
+  const rawActiveTabIndex = Number(input.activeTabIndex || 0)
+  const activeTabIndex = Number.isFinite(rawActiveTabIndex)
+    ? Math.trunc(rawActiveTabIndex)
+    : 0
+  const activeConversationId = Number(tabs[activeTabIndex]?.conversationId || 0)
+
+  return {
+    currentConversationId,
+    shellConversationIds,
+    mountedConversationIds,
+    activeTabIndex,
+    activeConversationId,
+    currentConversationInShell:
+      currentConversationId > 0 && shellConversationIds.includes(currentConversationId),
+    currentConversationMounted:
+      currentConversationId > 0 && mountedConversationIds.includes(currentConversationId),
+  }
+}
+
 export function normalizeDetailTabTitleText(value?: string): string {
   const normalized = String(value || "")
     .replace(/[\r\n\t]+/g, " ")
