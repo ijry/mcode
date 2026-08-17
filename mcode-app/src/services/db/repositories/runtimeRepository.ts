@@ -5,7 +5,6 @@ export interface ConversationRuntimeRecord {
   instanceKey: string
   connectionId?: string | null
   liveMessageJson?: string | null
-  optimisticJson?: string | null
   draftQueueJson?: string | null
   attachmentsJson?: string | null
   scrollAnchor?: string | null
@@ -32,7 +31,6 @@ export async function getRuntime(instanceKey: string, conversationId: number) {
         instance_key as instanceKey,
         connection_id as connectionId,
         live_message_json as liveMessageJson,
-        optimistic_json as optimisticJson,
         draft_queue_json as draftQueueJson,
         attachments_json as attachmentsJson,
         scroll_anchor as scrollAnchor,
@@ -57,7 +55,6 @@ export async function saveRuntime(input: ConversationRuntimeRecord) {
         instance_key,
         connection_id,
         live_message_json,
-        optimistic_json,
         draft_queue_json,
         attachments_json,
         scroll_anchor,
@@ -65,11 +62,10 @@ export async function saveRuntime(input: ConversationRuntimeRecord) {
         last_applied_seq,
         last_snapshot_at,
         is_active
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(instance_key, conversation_id) DO UPDATE SET
         connection_id = excluded.connection_id,
         live_message_json = excluded.live_message_json,
-        optimistic_json = excluded.optimistic_json,
         draft_queue_json = excluded.draft_queue_json,
         attachments_json = excluded.attachments_json,
         scroll_anchor = excluded.scroll_anchor,
@@ -83,7 +79,6 @@ export async function saveRuntime(input: ConversationRuntimeRecord) {
       input.instanceKey,
       input.connectionId ?? null,
       input.liveMessageJson ?? null,
-      input.optimisticJson ?? null,
       input.draftQueueJson ?? null,
       input.attachmentsJson ?? null,
       input.scrollAnchor ?? null,
@@ -104,7 +99,6 @@ export async function saveDraftState(input: {
   attachmentsJson: string
   scrollAnchor?: string | null
   liveMessageJson?: string | null
-  optimisticJson?: string | null
   lastAppliedSeq?: number | null
   isActive?: boolean
 }) {
@@ -114,7 +108,6 @@ export async function saveDraftState(input: {
     instanceKey: input.instanceKey || current?.instanceKey || "",
     connectionId: input.connectionId ?? current?.connectionId ?? null,
     liveMessageJson: input.liveMessageJson ?? current?.liveMessageJson ?? null,
-    optimisticJson: input.optimisticJson ?? current?.optimisticJson ?? null,
     draftQueueJson: input.draftQueueJson,
     attachmentsJson: input.attachmentsJson,
     scrollAnchor: input.scrollAnchor ?? current?.scrollAnchor ?? null,

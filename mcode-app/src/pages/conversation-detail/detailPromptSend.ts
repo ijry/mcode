@@ -1,13 +1,9 @@
 import type { PromptInputBlock } from "@/types/acp"
 import type { ConnectionTargetAgent } from "@/services/connectionSchema"
-import type { QueuedDraft, UploadedAttachment } from "./detailDataNormalization"
-import { buildOptimisticText } from "./detailRuntimePresentation"
-import { buildDraftPromptBlocks, splitDraftAttachments } from "./detailDraftQueue"
+import type { QueuedDraft } from "./detailDataNormalization"
+import { buildDraftPromptBlocks } from "./detailDraftQueue"
 
 export interface DraftSendPayload {
-  imageAttachments: UploadedAttachment[]
-  fileAttachments: UploadedAttachment[]
-  optimisticText: string
   blocks: PromptInputBlock[]
 }
 
@@ -33,11 +29,7 @@ export function buildDraftSendPayload(
   draft: QueuedDraft,
   options: { targetAgent?: ConnectionTargetAgent | null } = {}
 ): DraftSendPayload {
-  const { imageAttachments, fileAttachments } = splitDraftAttachments(draft)
   return {
-    imageAttachments,
-    fileAttachments,
-    optimisticText: buildOptimisticText(draft.text, fileAttachments),
     blocks: buildDraftPromptBlocks(draft, options),
   }
 }
@@ -137,12 +129,4 @@ export function resolvePromptStartSnapshotOutcome(input: {
     return { started: true }
   }
   return resolvePromptStartTimeoutFailure(input.timeoutMessage)
-}
-
-export function findLatestOptimisticTurnId(source: Array<{ id?: string | null } | null | undefined>) {
-  for (let index = source.length - 1; index >= 0; index--) {
-    const id = source[index]?.id
-    if (typeof id === "string" && id) return id
-  }
-  return ""
 }

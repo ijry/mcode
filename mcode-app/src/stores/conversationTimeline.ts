@@ -1,6 +1,6 @@
 import type { LiveMessage, MessageTurn } from "@/types/acp"
 
-export type ConversationTimelineTurnPhase = "completed" | "optimistic" | "streaming"
+export type ConversationTimelineTurnPhase = "completed" | "streaming"
 
 export interface ConversationTimelineTurn {
   key: string
@@ -11,7 +11,6 @@ export interface ConversationTimelineTurn {
 interface BuildConversationTimelineInput {
   conversationId: number
   localTurns: MessageTurn[]
-  optimisticTurns: MessageTurn[]
   liveMessage: LiveMessage | null
   inFlightUserTurnId?: string | null
 }
@@ -29,11 +28,6 @@ export function buildConversationTimeline(
     turn,
     phase: "completed" as const,
   }))
-  const optimistic = input.optimisticTurns.map((turn, index) => ({
-    key: `optimistic-${input.conversationId}-${turn.id}-${index}`,
-    turn,
-    phase: "optimistic" as const,
-  }))
   const streaming = input.liveMessage
     ? [
         {
@@ -48,7 +42,7 @@ export function buildConversationTimeline(
     : []
 
   return dedupeEntriesByRoleAndId(
-    [...completed, ...optimistic, ...streaming],
+    [...completed, ...streaming],
     (entry) => entry.turn
   )
 }

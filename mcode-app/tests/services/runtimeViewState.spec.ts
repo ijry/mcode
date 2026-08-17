@@ -9,7 +9,6 @@ describe('hasRenderableRuntimeState', () => {
     expect(
       hasRenderableRuntimeState({
         localTurns: [],
-        optimisticTurns: [],
         liveMessage: null,
         pendingPermission: null,
       })
@@ -20,7 +19,6 @@ describe('hasRenderableRuntimeState', () => {
     expect(
       hasRenderableRuntimeState({
         localTurns: [{ id: 'turn-1' }],
-        optimisticTurns: [],
         liveMessage: null,
         pendingPermission: null,
       })
@@ -31,7 +29,6 @@ describe('hasRenderableRuntimeState', () => {
     expect(
       hasRenderableRuntimeState({
         localTurns: [],
-        optimisticTurns: [],
         liveMessage: { content: [] },
         pendingPermission: null,
       })
@@ -40,7 +37,6 @@ describe('hasRenderableRuntimeState', () => {
     expect(
       hasRenderableRuntimeState({
         localTurns: [],
-        optimisticTurns: [],
         liveMessage: null,
         pendingPermission: { id: 'perm-1' },
       })
@@ -53,27 +49,16 @@ describe('hasVolatileRuntimeState', () => {
     expect(
       hasVolatileRuntimeState({
         localTurns: [{ id: 'turn-1' }],
-        optimisticTurns: [],
         liveMessage: null,
         pendingPermission: null,
       })
     ).toBe(false)
   })
 
-  it('treats optimistic, live, and pending interaction state as volatile', () => {
+  it('treats live and pending interaction state as volatile', () => {
     expect(
       hasVolatileRuntimeState({
         localTurns: [{ id: 'turn-1' }],
-        optimisticTurns: [{ id: 'optimistic-1' }],
-        liveMessage: null,
-        pendingPermission: null,
-      })
-    ).toBe(true)
-
-    expect(
-      hasVolatileRuntimeState({
-        localTurns: [{ id: 'turn-1' }],
-        optimisticTurns: [],
         liveMessage: { content: [] },
         pendingPermission: null,
       })
@@ -82,7 +67,6 @@ describe('hasVolatileRuntimeState', () => {
     expect(
       hasVolatileRuntimeState({
         localTurns: [{ id: 'turn-1' }],
-        optimisticTurns: [],
         liveMessage: null,
         pendingPermission: null,
         pendingQuestion: { question_id: 'question-1' },

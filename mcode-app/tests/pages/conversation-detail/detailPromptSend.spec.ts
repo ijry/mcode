@@ -1,7 +1,6 @@
 import {
   buildDraftSendPayload,
   buildPromptStartWatchSignature,
-  findLatestOptimisticTurnId,
   isConnectionNotFoundError,
   isQueuedPromptResponse,
   resolvePromptStartSnapshotOutcome,
@@ -32,7 +31,7 @@ const draft = (patch: Partial<QueuedDraft> = {}): QueuedDraft => ({
 })
 
 describe("detailPromptSend", () => {
-  it("builds send payload from draft attachments and text", () => {
+  it("builds ACP prompt blocks from draft attachments and text", () => {
     expect(buildDraftSendPayload(draft({
       text: "hello",
       attachments: [
@@ -40,9 +39,6 @@ describe("detailPromptSend", () => {
         attachment("file", "a.txt"),
       ],
     }), { targetAgent: "codeg" })).toEqual({
-      imageAttachments: [attachment("image", "image.png")],
-      fileAttachments: [attachment("file", "a.txt")],
-      optimisticText: "hello\n\n已附文件：a.txt",
       blocks: [
         { type: "text", text: "hello" },
         {
@@ -228,14 +224,4 @@ describe("detailPromptSend", () => {
     })
   })
 
-  it("finds the latest optimistic turn id", () => {
-    expect(findLatestOptimisticTurnId([
-      null,
-      { id: "" },
-      { id: "turn-1" },
-      undefined,
-      { id: "turn-2" },
-    ])).toBe("turn-2")
-    expect(findLatestOptimisticTurnId([{ id: "" }, null])).toBe("")
-  })
 })

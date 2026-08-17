@@ -125,7 +125,7 @@ function isActiveRuntimeSession(session: RuntimeSessionLike) {
     session.status === "running_tool" ||
     session.status === "waiting_permission" ||
     session.status === "waiting_question" ||
-    session.optimisticTurns.length > 0 ||
+    Boolean(session.inFlightUserTurnId) ||
     Boolean(session.liveMessage)
   )
 }

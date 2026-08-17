@@ -648,6 +648,50 @@ describe("ConversationDetailBody", () => {
     expect(tabStateSource).not.toContain("hasMoreHistory");
   });
 
+  it("waits for the user-message event instead of inserting a local optimistic turn", () => {
+    const paneSource = fs.readFileSync(
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/ConversationDetailInteractivePane.vue",
+      ),
+      "utf8",
+    );
+    const pageSource = fs.readFileSync(
+      path.resolve(__dirname, "../../../src/pages/conversation-detail/index.vue"),
+      "utf8",
+    );
+    const runtimeSource = fs.readFileSync(
+      path.resolve(__dirname, "../../../src/stores/conversationRuntime.ts"),
+      "utf8",
+    );
+    const timelineSource = fs.readFileSync(
+      path.resolve(__dirname, "../../../src/stores/conversationTimeline.ts"),
+      "utf8",
+    );
+    const promptSendSource = fs.readFileSync(
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/detailPromptSend.ts",
+      ),
+      "utf8",
+    );
+
+    expect(paneSource).not.toContain("addOptimisticUserMessage");
+    expect(paneSource).not.toContain("removeOptimisticUserMessage");
+    expect(paneSource).not.toContain("findLatestOptimisticTurnId");
+    expect(pageSource).not.toContain("addOptimisticUserMessage");
+    expect(pageSource).not.toContain("removeOptimisticUserMessage");
+    expect(pageSource).not.toContain("findLatestOptimisticTurnId");
+    expect(pageSource).not.toContain("optimisticJson");
+    expect(runtimeSource).not.toContain("addOptimisticUserMessage");
+    expect(runtimeSource).not.toContain("removeOptimisticUserMessage");
+    expect(runtimeSource).not.toContain("optimisticTurns");
+    expect(timelineSource).not.toContain("optimisticTurns");
+    expect(timelineSource).not.toContain('"optimistic"');
+    expect(promptSendSource).not.toContain("optimisticText");
+    expect(promptSendSource).not.toContain("findLatestOptimisticTurnId");
+  });
+
   it("keeps initial history loading feedback per interactive pane", () => {
     const source = fs.readFileSync(
       path.resolve(

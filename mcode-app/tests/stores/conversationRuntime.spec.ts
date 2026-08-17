@@ -1557,6 +1557,7 @@ describe('conversationRuntime ACP error handling', () => {
       expect(sync.calibrateAfterReplayGap).toHaveBeenCalledTimes(1)
       // 本地消息为空时，即使已尝试过也不锁死守卫，需要再拉一次历史。
       expect(session.externalTurnBackfilled).toBe(false)
+      expect(session.inFlightUserTurnId).toBeNull()
 
       session.externalTurnBackfillLastAttemptAt = 0
       store.handleEvent({
@@ -1666,20 +1667,163 @@ describe('conversationRuntime ACP error handling', () => {
     expect(session.localTurns.filter((turn) => turn.role === 'user')).toHaveLength(1)
   })
 
-  it('ignores the user_message echo when the sender has an optimistic turn', () => {
+  it('keeps a new user_message when it repeats text from a completed earlier turn', () => {
     const { store, session } = prepareSession()
-    store.addOptimisticUserMessage(1, 'my own prompt')
+    session.localTurns = [
+      {
+        id: 'old-user',
+        role: 'user',
+        content: [{ type: 'text', text: '继续' }],
+        timestamp: 100,
+        status: 'completed',
+      },
+      {
+        id: 'old-assistant',
+        role: 'assistant',
+        content: [{ type: 'text', text: '上一轮已完成' }],
+        timestamp: 101,
+        status: 'completed',
+      },
+    ] as any
 
     store.handleEvent({
       type: 'user_message',
       connectionId: 'conn-1',
       data: {
-        messageId: 'ext-msg-echo',
-        blocks: [{ type: 'text', text: 'my own prompt' }],
+        messageId: 'new-user-same-text',
+        blocks: [{ type: 'text', text: '继续' }],
       },
     } as any)
 
-    expect(session.localTurns.filter((turn) => turn.role === 'user')).toHaveLength(0)
+    expect(session.localTurns.filter((turn) => turn.role === 'user').map((turn) => turn.id)).toEqual([
+      'old-user',
+      'new-user-same-text',
+    ])
+    expect(session.inFlightUserTurnId).toBe('new-user-same-text')
+  })
+
+  it('persists the authoritative realtime user_message turn with the completed assistant', async () => {
+    const { store, session } = prepareSession()
+    const persistence = require('@/services/conversation/conversationDetailPersistence')
+    session.instanceKey = 'test-instance'
+
+    store.handleEvent({
+      type: 'user_message',
+      connectionId: 'conn-1',
+      data: {
+        messageId: 'user-event-1',
+        blocks: [{ type: 'text', text: 'my prompt' }],
+      },
+    } as any)
+    store.setLiveMessage(
+      1,
+      [{ type: 'text', text: 'assistant reply' }],
+      true,
+      { id: 'live-event-1', timestamp: 200 }
+    )
+
+    await store.completeTurn(1)
+
+    expect(persistence.buildPersistedTurnRecord).toHaveBeenCalledTimes(2)
+    expect(persistence.buildPersistedTurnRecord).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        turn: expect.objectContaining({
+          id: 'user-event-1',
+          role: 'user',
+          content: [{ type: 'text', text: 'my prompt' }],
+        }),
+      })
+    )
+    expect(persistence.buildPersistedTurnRecord).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        turn: expect.objectContaining({
+          role: 'assistant',
+          content: [{ type: 'text', text: 'assistant reply' }],
+        }),
+      })
+    )
+  })
+
+  it('does not backfill history after user_message has supplied the current turn', async () => {
+    const sync = require('@/services/conversation/conversationSyncService')
+    const { store, session } = prepareSession()
+    session.instanceKey = 'test-instance'
+
+    store.handleEvent({
+      type: 'user_message',
+      connectionId: 'conn-1',
+      data: {
+        messageId: 'user-event-2',
+        blocks: [{ type: 'text', text: 'my prompt' }],
+      },
+    } as any)
+    store.handleEvent({
+      type: 'stream_batch',
+      connectionId: 'conn-1',
+      data: { delta: 'assistant reply', contentType: 'text' },
+    } as any)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(sync.calibrateAfterReplayGap).not.toHaveBeenCalled()
+    expect(session.externalTurnBackfilled).toBe(true)
+  })
+
+  it('keeps a realtime user_message when an earlier replay-gap backfill resolves late', async () => {
+    const sync = require('@/services/conversation/conversationSyncService')
+    const repo = require('@/services/db/repositories/conversationRepository')
+    const { store, session } = prepareSession()
+    session.instanceKey = 'test-instance'
+    let resolveReplayGap: (value: any) => void = () => {}
+
+    sync.calibrateAfterReplayGap.mockReturnValue(
+      new Promise((resolve) => {
+        resolveReplayGap = resolve
+      })
+    )
+    repo.getNewestTurns.mockReturnValue([
+      buildPersistedUserTurn('stale-user', 'stale prompt'),
+    ])
+
+    try {
+      store.handleEvent({
+        type: 'stream_batch',
+        connectionId: 'conn-1',
+        data: { delta: 'assistant reply', contentType: 'text' },
+      } as any)
+      for (let i = 0; i < 10 && sync.calibrateAfterReplayGap.mock.calls.length === 0; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      }
+      expect(sync.calibrateAfterReplayGap).toHaveBeenCalledTimes(1)
+
+      store.handleEvent({
+        type: 'user_message',
+        connectionId: 'conn-1',
+        data: {
+          messageId: 'user-event-late',
+          blocks: [{ type: 'text', text: 'my prompt' }],
+        },
+      } as any)
+
+      resolveReplayGap({ in_flight_user_turn_id: 'stale-user' })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      await new Promise((resolve) => setTimeout(resolve, 0))
+
+      expect(session.localTurns).toEqual([
+        expect.objectContaining({
+          id: 'user-event-late',
+          role: 'user',
+          content: [{ type: 'text', text: 'my prompt' }],
+        }),
+      ])
+      expect(session.inFlightUserTurnId).toBe('user-event-late')
+      expect(session.externalTurnBackfilled).toBe(true)
+    } finally {
+      resolveReplayGap({})
+      sync.calibrateAfterReplayGap.mockReset()
+      repo.getNewestTurns.mockReturnValue([])
+    }
   })
 
   it('does not re-synthesize the same prompt when a backfill re-keyed it with a persisted id', () => {

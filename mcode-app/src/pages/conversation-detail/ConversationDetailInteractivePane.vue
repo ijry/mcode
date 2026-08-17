@@ -1136,7 +1136,6 @@ import {
 import {
   buildDraftSendPayload,
   buildPromptStartWatchSignature,
-  findLatestOptimisticTurnId,
   isQueuedPromptResponse,
   sendPromptWithConnectionRecovery,
   resolveDraftSendFailure,
@@ -2328,13 +2327,6 @@ function historyRuntimeFingerprint(
       turn.timestamp,
       turn.content,
     ]),
-    optimisticTurns: runtimeSession.optimisticTurns.map((turn) => [
-      turn.id,
-      turn.role,
-      turn.status || "",
-      turn.timestamp,
-      turn.content,
-    ]),
     liveMessage: runtimeSession.liveMessage
       ? [
           runtimeSession.liveMessage.id,
@@ -2602,13 +2594,6 @@ async function prepareDraftForSend(draft: QueuedDraft): Promise<QueuedDraft> {
   };
 }
 
-function stripTransientAttachmentData(
-  att: UploadedAttachment,
-): UploadedAttachment {
-  const { data, ...rest } = att;
-  return rest;
-}
-
 async function readLocalImageBase64(filePath: string): Promise<string> {
   const fs = (uni as any).getFileSystemManager?.();
   if (!fs || typeof fs.readFile !== "function") {
@@ -2666,11 +2651,6 @@ async function sendDraft(draft: QueuedDraft): Promise<boolean> {
 
     const preparedDraft = await prepareDraftForSend(draft);
     const payload = buildDraftSendPayload(preparedDraft);
-    const optimisticTurnId = runtime.addOptimisticUserMessage(
-      Number(props.conversationId || 0),
-      payload.optimisticText,
-      payload.imageAttachments.map(stripTransientAttachmentData),
-    );
     scheduleViewportSync(true);
 
     const { connectionId: promptConnectionId, response: promptResponse } =
@@ -2699,10 +2679,6 @@ async function sendDraft(draft: QueuedDraft): Promise<boolean> {
         },
       });
     if (isQueuedPromptResponse(promptResponse)) {
-      runtime.removeOptimisticUserMessage(
-        Number(props.conversationId || 0),
-        optimisticTurnId,
-      );
       runtime.clearLiveMessage(Number(props.conversationId || 0));
       runtime.handleEventForConversation(Number(props.conversationId || 0), {
         connectionId: promptConnectionId,
@@ -2715,10 +2691,6 @@ async function sendDraft(draft: QueuedDraft): Promise<boolean> {
 
     const started = await waitForPromptStart(draft);
     if (!started.started) {
-      runtime.removeOptimisticUserMessage(
-        Number(props.conversationId || 0),
-        optimisticTurnId,
-      );
       runtime.clearLiveMessage(Number(props.conversationId || 0));
       const failure = resolveDraftSendFailure({
         startedResult: started,
@@ -2740,15 +2712,6 @@ async function sendDraft(draft: QueuedDraft): Promise<boolean> {
     usePetStore().addExp("user", 5);
     return true;
   } catch (error) {
-    const latestOptimisticTurnId = findLatestOptimisticTurnId(
-      session.value.optimisticTurns || [],
-    );
-    if (latestOptimisticTurnId) {
-      runtime.removeOptimisticUserMessage(
-        Number(props.conversationId || 0),
-        latestOptimisticTurnId,
-      );
-    }
     runtime.clearLiveMessage(Number(props.conversationId || 0));
     const message = toErrorMessage(error);
     const failure = resolveDraftSendFailure({ errorMessage: message });

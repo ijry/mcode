@@ -51,6 +51,7 @@ describe("runtimeRepository", () => {
       expect.stringContaining("ON CONFLICT(instance_key, conversation_id) DO UPDATE SET"),
       expect.arrayContaining([7, "direct::one", "conn-one"])
     )
+    expect(mockExecute.mock.calls[0][0]).not.toContain("optimistic_json")
   })
 
   it("preserves existing fields only for the same instance when saving draft state", async () => {
@@ -79,7 +80,8 @@ describe("runtimeRepository", () => {
       expect.any(String),
       expect.arrayContaining([7, "direct::one", "conn-one", "{\"role\":\"assistant\"}"])
     )
-    expect(mockExecute.mock.calls[0][1][9]).toBe(12)
+    expect(mockExecute.mock.calls[0][0]).not.toContain("optimistic_json")
+    expect(mockExecute.mock.calls[0][1][8]).toBe(12)
   })
 
   it("clears runtime by instance key and conversation id", async () => {

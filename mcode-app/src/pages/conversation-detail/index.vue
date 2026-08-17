@@ -462,7 +462,6 @@ import {
   normalizeConversationDraftSnapshot,
   normalizeList,
   resolveConversationDraftRestoreState,
-  safeParseArray,
   type ConversationDraftSnapshot,
   type QueuedDraft,
   type UploadedAttachment,
@@ -569,7 +568,6 @@ import {
 import {
   buildDraftSendPayload,
   buildPromptStartWatchSignature,
-  findLatestOptimisticTurnId,
   isQueuedPromptResponse,
   sendPromptWithConnectionRecovery,
   resolvePromptStartSnapshotOutcome,
@@ -3649,9 +3647,6 @@ function shouldReconcileTurnsFromPersistedRuntime(
   if (!persistedRuntime.isActive) return false
   if (persistedRuntime.liveMessageJson) return true
 
-  const optimisticTurns = safeParseArray(persistedRuntime.optimisticJson)
-  if (optimisticTurns.length > 0) return true
-
   return typeof persistedRuntime.lastAppliedSeq === "number" && persistedRuntime.lastAppliedSeq > 0
 }
 
@@ -3748,7 +3743,6 @@ function persistDetailRuntimeState() {
     attachmentsJson: JSON.stringify(attachments.value),
     scrollAnchor: anchorMessageId.value || null,
     liveMessageJson: currentSession?.liveMessage ? JSON.stringify(currentSession.liveMessage) : null,
-    optimisticJson: JSON.stringify(currentSession?.optimisticTurns || []),
     lastAppliedSeq: currentSession?.lastAppliedSeq ?? null,
     isActive: Boolean(currentSession?.connectionId),
   }).catch((error) => {
@@ -4649,11 +4643,6 @@ async function prepareDraftForSend(draft: QueuedDraft): Promise<QueuedDraft> {
   }
 }
 
-function stripTransientAttachmentData(att: UploadedAttachment): UploadedAttachment {
-  const { data, ...rest } = att
-  return rest
-}
-
 async function readLocalImageBase64(filePath: string): Promise<string> {
   const fs = (uni as any).getFileSystemManager?.()
   if (!fs || typeof fs.readFile !== "function") {
@@ -4697,14 +4686,9 @@ async function sendDraft(draft: QueuedDraft): Promise<boolean> {
 
     const targetAgent = resolveDetailTargetAgent()
     const preparedDraft = await prepareDraftForSend(draft)
-    const { imageAttachments, optimisticText, blocks } = buildDraftSendPayload(preparedDraft, {
+    const { blocks } = buildDraftSendPayload(preparedDraft, {
       targetAgent,
     })
-    const optimisticTurnId = runtime.addOptimisticUserMessage(
-      conversationId.value,
-      optimisticText,
-      imageAttachments.map(stripTransientAttachmentData)
-    )
     scheduleViewportSync(true)
     if (isViewerMode.value) {
       const liveInfo = await acpApi
@@ -4733,7 +4717,6 @@ async function sendDraft(draft: QueuedDraft): Promise<boolean> {
         },
       })
     if (isQueuedPromptResponse(promptResponse)) {
-      runtime.removeOptimisticUserMessage(conversationId.value, optimisticTurnId)
       runtime.clearLiveMessage(conversationId.value)
       runtime.handleEventForConversation(conversationId.value, {
         connectionId: promptConnectionId,
@@ -4745,7 +4728,6 @@ async function sendDraft(draft: QueuedDraft): Promise<boolean> {
     }
     const started = await waitForPromptStart(draft)
     if (!started.started) {
-      runtime.removeOptimisticUserMessage(conversationId.value, optimisticTurnId)
       runtime.clearLiveMessage(conversationId.value)
       const failure = resolveDraftSendFailure({
         startedResult: started,
@@ -4762,10 +4744,6 @@ async function sendDraft(draft: QueuedDraft): Promise<boolean> {
     usePetStore().addExp('user', 5)
     return true
   } catch (error) {
-    const latestOptimisticTurnId = findLatestOptimisticTurnId(session.value?.optimisticTurns || [])
-    if (latestOptimisticTurnId) {
-      runtime.removeOptimisticUserMessage(conversationId.value, latestOptimisticTurnId)
-    }
     runtime.clearLiveMessage(conversationId.value)
     const message = toErrorMessage(error)
     const failure = resolveDraftSendFailure({ errorMessage: message })

@@ -218,7 +218,7 @@ export function buildTurnDedupeKey(input: {
 }) {
   const turnId = firstString(input.turnId);
   if (turnId) {
-    if (turnId.startsWith("turn-") || turnId.startsWith("optimistic-")) {
+    if (turnId.startsWith("turn-")) {
       return buildFallbackTurnFingerprint(
         input.role,
         input.content,

@@ -1,5 +1,5 @@
 import type { ContentPart } from "@/types/acp"
-import type { QueuedDraft, UploadedAttachment } from "./detailDataNormalization"
+import type { QueuedDraft } from "./detailDataNormalization"
 
 export function formatTokenCountK(value: number) {
   const normalized = Number(value || 0)
@@ -180,13 +180,6 @@ export function formatQueueTime(ts: number): string {
   return `${hh}:${mm}`
 }
 
-export function buildOptimisticText(text: string, files: UploadedAttachment[]): string {
-  if (files.length === 0) return text
-  const filesLine = files.map((item) => item.name).join("、")
-  const prefix = text.trim()
-  if (!prefix) return `已附文件：${filesLine}`
-  return `${prefix}\n\n已附文件：${filesLine}`
-}
 
 export function looksLikeNetworkFailure(message: string) {
   const text = message.toLowerCase()

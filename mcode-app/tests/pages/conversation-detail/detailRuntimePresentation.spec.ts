@@ -1,7 +1,6 @@
 import {
   canEditSharedPromptQueue,
   buildLiveActivitySignature,
-  buildOptimisticText,
   draftSummary,
   formatQueueTime,
   formatTokenCountK,
@@ -81,7 +80,7 @@ describe("detailRuntimePresentation", () => {
     ]))
   })
 
-  it("formats queued draft labels and optimistic text", () => {
+  it("formats queued draft labels", () => {
     const draft: QueuedDraft = {
       id: "draft-1",
       text: "  send this  ",
@@ -97,10 +96,6 @@ describe("detailRuntimePresentation", () => {
     expect(queueStatusText("failed")).toBe("失败")
     expect(queueStatusText("pending")).toBe("待发送")
     expect(formatQueueTime(draft.createdAt)).toBe("09:05")
-    expect(buildOptimisticText("hello", [])).toBe("hello")
-    expect(buildOptimisticText("", [attachment("a.txt")])).toBe("已附文件：a.txt")
-    expect(buildOptimisticText("hello", [attachment("a.txt"), attachment("b.txt")]))
-      .toBe("hello\n\n已附文件：a.txt、b.txt")
   })
 
   it("formats shared Desktop prompt queue copy", () => {
