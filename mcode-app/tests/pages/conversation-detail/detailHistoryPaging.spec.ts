@@ -1,4 +1,5 @@
 import {
+  advanceConversationHistoryWindow,
   buildOlderHistoryRequest,
   buildTailHistoryRequest,
   canApplyOlderHistoryPage,
@@ -62,10 +63,74 @@ describe("conversation history paging protocol", () => {
       turns: [turn("old")],
     }
     const page = requireConversationTurnsPage(raw)
-    const current = { ...page, prefix_hash: "current-prefix" }
+    const current = {
+      turns_offset: 31,
+      turns_total: 60,
+      assistant_turns_before_offset: 15,
+      prefix_hash: "current-prefix",
+    }
     expect(canApplyOlderHistoryPage(current, page)).toBe(true)
     expect(canApplyOlderHistoryPage({ ...current, prefix_hash: "changed" }, page)).toBe(false)
     expect(() => requireConversationTurnsPage({ ...raw, prefix_hash_before_index: "" })).toThrow("请升级 CodeG")
+  })
+
+  it("rejects older pages that are not contiguous with the loaded window", () => {
+    const current = {
+      turns_offset: 30,
+      turns_total: 60,
+      assistant_turns_before_offset: 15,
+      prefix_hash: "current-prefix",
+    }
+    const contiguous = {
+      turns_offset: 0,
+      turns_total: 60,
+      assistant_turns_before_offset: 0,
+      prefix_hash: "older-prefix",
+      prefix_hash_before_index: "current-prefix",
+      turns: Array.from({ length: 30 }, (_, index) => turn(`old-${index}`)),
+    }
+
+    expect(canApplyOlderHistoryPage(current, contiguous)).toBe(true)
+    expect(canApplyOlderHistoryPage(current, {
+      ...contiguous,
+      turns_offset: 1,
+    })).toBe(false)
+    expect(canApplyOlderHistoryPage(current, {
+      ...contiguous,
+      turns_total: 29,
+    })).toBe(false)
+    // The current tail already represents 60 loaded turns. A lower total is
+    // internally inconsistent even when it remains above beforeIndex.
+    expect(canApplyOlderHistoryPage(current, {
+      ...contiguous,
+      turns_total: 59,
+    })).toBe(false)
+  })
+
+  it("advances a verified window without letting a newer total invalidate the loaded boundary", () => {
+    const current = {
+      turns_offset: 30,
+      turns_total: 60,
+      assistant_turns_before_offset: 15,
+      prefix_hash: "current-prefix",
+    }
+    const page = {
+      turns_offset: 0,
+      turns_total: 61,
+      assistant_turns_before_offset: 0,
+      prefix_hash: "older-prefix",
+      prefix_hash_before_index: "current-prefix",
+      uncovered_prefix_max_ts: 123,
+      turns: Array.from({ length: 30 }, (_, index) => turn(`old-${index}`)),
+    }
+
+    expect(advanceConversationHistoryWindow(current, page)).toEqual({
+      turns_offset: 0,
+      turns_total: 60,
+      assistant_turns_before_offset: 0,
+      prefix_hash: "older-prefix",
+      uncovered_prefix_max_ts: 123,
+    })
   })
 
   it("prepends older turns, deduplicates the seam, and does not mutate inputs", () => {

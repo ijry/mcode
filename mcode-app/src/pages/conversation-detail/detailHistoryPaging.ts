@@ -115,7 +115,31 @@ export function canApplyOlderHistoryPage(
   current: ConversationHistoryWindow,
   page: ConversationTurnsPage,
 ) {
-  return page.prefix_hash_before_index === current.prefix_hash
+  return (
+    page.prefix_hash_before_index === current.prefix_hash &&
+    page.turns_offset < current.turns_offset &&
+    page.turns_offset + page.turns.length === current.turns_offset &&
+    // The already loaded tail cannot disappear underneath a page response.
+    // A larger total is allowed because a newer turn may arrive concurrently.
+    page.turns_total >= current.turns_total
+  )
+}
+
+export function advanceConversationHistoryWindow(
+  current: ConversationHistoryWindow,
+  page: ConversationTurnsPage,
+): ConversationHistoryWindow {
+  return {
+    turns_offset: page.turns_offset,
+    // A newer turn may arrive between page requests. Preserve the total that
+    // describes the currently loaded tail instead of moving its boundary.
+    turns_total: current.turns_total,
+    assistant_turns_before_offset: page.assistant_turns_before_offset,
+    prefix_hash: page.prefix_hash,
+    ...(page.uncovered_prefix_max_ts !== undefined
+      ? { uncovered_prefix_max_ts: page.uncovered_prefix_max_ts }
+      : {}),
+  }
 }
 
 function turnId(turn: MessageTurn): string {
