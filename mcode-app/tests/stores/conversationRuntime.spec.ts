@@ -979,6 +979,35 @@ describe('conversationRuntime ACP error handling', () => {
     ])
   })
 
+  it('tracks a server history window per session and clears it with non-live cached state', () => {
+    const store = useConversationRuntimeStore()
+    const first = store.getOrCreateSession(1)
+    const second = store.getOrCreateSession(2)
+    const historyWindow = {
+      turns_offset: 30,
+      turns_total: 60,
+      assistant_turns_before_offset: 15,
+      prefix_hash: 'tail-prefix',
+      uncovered_prefix_max_ts: 123,
+    }
+
+    expect(first.historyWindow).toBeNull()
+    expect(second.historyWindow).toBeNull()
+
+    store.setConversationHistoryWindow(1, historyWindow)
+
+    expect(first.historyWindow).toEqual(historyWindow)
+    expect(second.historyWindow).toBeNull()
+
+    store.clearConversationHistoryWindow(1)
+    expect(first.historyWindow).toBeNull()
+
+    store.setConversationHistoryWindow(1, historyWindow)
+    store.clearCachedSessionState()
+
+    expect(first.historyWindow).toBeNull()
+  })
+
   it('keeps cached session state for hot conversations', () => {
     const hot = require('@/services/conversation/hotConversationCoordinator')
     hot.isHotConversation.mockReturnValue(true)
@@ -1789,4 +1818,37 @@ describe('conversationRuntime ACP error handling', () => {
       repo.getNewestTurns.mockReturnValue([])
     }
   })
+  it('reloads only the cached tail after completing a turn', async () => {
+    const { store, session } = prepareSession()
+    const repo = require('@/services/db/repositories/conversationRepository')
+    session.instanceKey = 'test-instance'
+    repo.getNewestTurns.mockReturnValue([
+      buildPersistedUserTurn('tail-user', 'cached tail question'),
+    ])
+
+    try {
+      store.handleEvent({
+        type: 'user_message',
+        connectionId: 'conn-1',
+        data: {
+          messageId: 'user-event-tail-only',
+          blocks: [{ type: 'text', text: 'current prompt' }],
+        },
+      } as any)
+      store.setLiveMessage(
+        1,
+        [{ type: 'text', text: 'assistant reply' }],
+        true,
+        { id: 'live-tail-only', timestamp: 200 },
+      )
+
+      await store.completeTurn(1)
+
+      expect(repo.getNewestTurns).toHaveBeenCalledWith(1, 10)
+      expect(repo.getOlderTurns).not.toHaveBeenCalled()
+    } finally {
+      repo.getNewestTurns.mockReturnValue([])
+    }
+  })
+
 })

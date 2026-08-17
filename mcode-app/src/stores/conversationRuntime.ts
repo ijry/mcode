@@ -6,6 +6,7 @@ import type {
   ConnectionInfo,
   ConversationConnectionInfo,
   ConversationDetail,
+  ConversationHistoryWindow,
   EventEnvelope,
   SessionStats,
   ContentPart,
@@ -34,11 +35,9 @@ import {
 } from "@/services/conversation/hotConversationCoordinator"
 import { ensureConversationSchema } from "@/services/db/migrations"
 import {
-  getOlderTurns,
   getNewestTurns,
   insertCompletedTurn,
   type PersistedTurnPartRow,
-  type PersistedTurnWithParts,
 } from "@/services/db/repositories/conversationRepository"
 import { buildPersistedTurnRecord } from "@/services/conversation/conversationDetailPersistence"
 import { getRelayClientId } from "@/services/gateway/relayClientIdentity"
@@ -70,6 +69,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       sessions.value.set(conversationId, reactive({
         conversationId,
         localTurns: [],
+        historyWindow: null,
         optimisticTurns: [],
         liveMessage: null,
         connectionId: null,
@@ -97,6 +97,20 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       }) as RuntimeSession)
     }
     return sessions.value.get(conversationId)!
+  }
+
+  function setConversationHistoryWindow(
+    conversationId: number,
+    historyWindow: ConversationHistoryWindow | null,
+  ) {
+    const session = getOrCreateSession(conversationId)
+    session.historyWindow = historyWindow ? { ...historyWindow } : null
+  }
+
+  function clearConversationHistoryWindow(conversationId: number) {
+    const session = sessions.value.get(conversationId)
+    if (!session) return
+    session.historyWindow = null
   }
 
   /**
@@ -996,6 +1010,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         continue
       }
       session.localTurns = []
+      session.historyWindow = null
       session.optimisticTurns = []
       session.liveMessage = null
       session.inputErrorMessage = null
@@ -1109,6 +1124,8 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     sessions,
     connections,
     getOrCreateSession,
+    setConversationHistoryWindow,
+    clearConversationHistoryWindow,
     getMessages,
     getTimelineTurns,
     addOptimisticUserMessage,
@@ -1140,6 +1157,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
 interface RuntimeSession {
   conversationId: number
   localTurns: MessageTurn[]
+  historyWindow: ConversationHistoryWindow | null
   optimisticTurns: MessageTurn[]
   liveMessage: LiveMessage | null
   connectionId: string | null
@@ -1754,48 +1772,8 @@ async function persistCompletedTurns(
 
 async function reloadLocalTurns(session: RuntimeSession) {
   const limit = Math.max(session.localTurns.length, 10)
-  const turns = await getNewestTurnsWithUserCoverage(session.conversationId, limit)
+  const turns = await getNewestTurns(session.conversationId, limit)
   return turns.slice().reverse().map(mapPersistedTurnToMessage)
-}
-
-const INITIAL_USER_TURN_TARGET = 3
-const INITIAL_TURN_EXPAND_BATCH = 12
-const INITIAL_TURN_MAX_BATCH = 48
-
-async function getNewestTurnsWithUserCoverage(
-  conversationId: number,
-  limit: number
-) {
-  let turns = await getNewestTurns(conversationId, limit)
-  if (turns.length === 0) return turns
-
-  const userTurnCount = (items: PersistedTurnWithParts[]) =>
-    items.filter((item) => String(item.role || "") === "user").length
-
-  let oldestCursor = getOldestCursorFromPersistedTurns(turns)
-  while (
-    oldestCursor != null &&
-    turns.length < INITIAL_TURN_MAX_BATCH &&
-    userTurnCount(turns) < INITIAL_USER_TURN_TARGET
-  ) {
-    const remaining = INITIAL_TURN_MAX_BATCH - turns.length
-    const batchSize = Math.min(INITIAL_TURN_EXPAND_BATCH, remaining)
-    const older = await getOlderTurns(conversationId, oldestCursor, batchSize)
-    if (older.length === 0) break
-    turns = [...turns, ...older]
-    oldestCursor = getOldestCursorFromPersistedTurns(turns)
-  }
-
-  return turns
-}
-
-function getOldestCursorFromPersistedTurns(turns: PersistedTurnWithParts[]) {
-  const oldest = turns[turns.length - 1]
-  if (!oldest) return null
-  return {
-    sortKey: oldest.sortKey,
-    id: oldest.id,
-  }
 }
 
 function maybeBackfillExternalUserTurn(
