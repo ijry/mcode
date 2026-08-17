@@ -17,30 +17,41 @@ describe("conversationRepository", () => {
     mockTransaction.mockReset()
   })
 
-  it("pages older turns with a stable composite cursor", async () => {
-    mockQuery
-      .mockResolvedValueOnce([
-        {
-          id: "turn-b",
-          conversationId: 7,
-          instanceKey: "direct::one",
-          dedupeKey: "remote:b",
-          role: "assistant",
-          createdAt: 1000,
-          seq: 1000,
-          sortKey: 1000,
-          status: "completed",
-          version: 1,
-        },
-      ])
-      .mockResolvedValueOnce([])
+  it("atomically replaces a conversation cache with its tail window", async () => {
+    mockTransaction.mockImplementation(async (work) => await work())
+    mockQuery.mockResolvedValue([])
 
-    const { getOlderTurns } = await import("@/services/db/repositories/conversationRepository")
-    const rows = await getOlderTurns(7, { sortKey: 1000, id: "turn-c" }, 20)
+    const repository = await import("@/services/db/repositories/conversationRepository")
+    await repository.replaceCompletedTurns(7, [
+      {
+        id: "tail-turn",
+        conversationId: 7,
+        instanceKey: "direct::one",
+        dedupeKey: "remote:tail-turn",
+        role: "assistant",
+        createdAt: 1000,
+        seq: 1000,
+        status: "completed",
+        version: 1,
+        parts: [],
+      },
+    ])
 
-    expect(rows.map((row) => row.id)).toEqual(["turn-b"])
-    expect(mockQuery.mock.calls[0][0]).toContain("COALESCE(seq, created_at) = ? AND id < ?")
-    expect(mockQuery.mock.calls[0][0]).toContain("ORDER BY COALESCE(seq, created_at) DESC, id DESC")
-    expect(mockQuery.mock.calls[0][1]).toEqual([7, 1000, 1000, "turn-c", 20])
+    expect(mockTransaction).toHaveBeenCalledTimes(1)
+    expect(mockExecute.mock.calls[0]).toEqual([
+      "DELETE FROM conversation_parts WHERE conversation_id = ?",
+      [7],
+    ])
+    expect(mockExecute.mock.calls[1]).toEqual([
+      "DELETE FROM conversation_turns WHERE conversation_id = ?",
+      [7],
+    ])
+    expect(mockExecute.mock.calls.slice(2)).toEqual(
+      expect.arrayContaining([
+        [expect.stringContaining("INSERT INTO conversation_turns"), expect.any(Array)],
+      ]),
+    )
+    expect((repository as Record<string, unknown>).getOlderTurns).toBeUndefined()
+    expect((repository as Record<string, unknown>).countConversationTurns).toBeUndefined()
   })
 })

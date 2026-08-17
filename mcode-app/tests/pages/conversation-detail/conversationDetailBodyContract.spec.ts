@@ -1,494 +1,771 @@
-import fs from "node:fs"
-import path from "node:path"
+import fs from "node:fs";
+import path from "node:path";
 
 describe("ConversationDetailBody", () => {
   it("keeps a stable root class for the detail swiper layout", () => {
     const source = fs.readFileSync(
-      path.resolve(__dirname, "../../../src/pages/conversation-detail/ConversationDetailBody.vue"),
-      "utf8"
-    )
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/ConversationDetailBody.vue",
+      ),
+      "utf8",
+    );
 
-    expect(source).toContain('class="detail-body"')
-    expect(source).toContain('class="message-list"')
-    expect(source).toContain("<scroll-view")
-    expect(source).toContain('class="message-list__content" :style="messageListContentStyle"')
-    expect(source).toContain('class="composer-stack"')
-    expect(source).toContain('class="composer-safe-area"')
-    expect(source).toContain("'input-status-wrap'")
-    expect(source).toContain("'input-wrap'")
-  })
+    expect(source).toContain('class="detail-body"');
+    expect(source).toContain('class="message-list"');
+    expect(source).toContain("<scroll-view");
+    expect(source).toContain(
+      'class="message-list__content" :style="messageListContentStyle"',
+    );
+    expect(source).toContain('class="composer-stack"');
+    expect(source).toContain('class="composer-safe-area"');
+    expect(source).toContain("'input-status-wrap'");
+    expect(source).toContain("'input-wrap'");
+  });
 
   it("owns layout styles that cannot cross the parent scoped boundary", () => {
     const source = fs.readFileSync(
-      path.resolve(__dirname, "../../../src/pages/conversation-detail/ConversationDetailBody.vue"),
-      "utf8"
-    )
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/ConversationDetailBody.vue",
+      ),
+      "utf8",
+    );
 
-    expect(source).toContain(".message-list")
-    expect(source).toContain(".message-list__content")
-    expect(source).toContain("messageListContentStyle?: StyleValue")
-    expect(source).toContain(".composer-stack")
-    expect(source).toContain(".composer-safe-area")
-    expect(source).toContain(".input-status-wrap")
-    expect(source).toContain(".input-wrap")
-    expect(source).toContain(".detail-body")
-    expect(source).toContain("position: relative")
-    expect(source).toContain("position: absolute")
-  })
+    expect(source).toContain(".message-list");
+    expect(source).toContain(".message-list__content");
+    expect(source).toContain("messageListContentStyle?: StyleValue");
+    expect(source).toContain(".composer-stack");
+    expect(source).toContain(".composer-safe-area");
+    expect(source).toContain(".input-status-wrap");
+    expect(source).toContain(".input-wrap");
+    expect(source).toContain(".detail-body");
+    expect(source).toContain("position: relative");
+    expect(source).toContain("position: absolute");
+  });
 
   it("measures the detail body with the setup component instance", () => {
     const source = fs.readFileSync(
-      path.resolve(__dirname, "../../../src/pages/conversation-detail/index.vue"),
-      "utf8"
-    )
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/index.vue",
+      ),
+      "utf8",
+    );
 
-    expect(source).toContain("const currentInstance = getCurrentInstance()")
-    expect(source).toContain("const instance = currentInstance?.proxy")
-    expect(source).not.toContain("const instance = getCurrentInstance()?.proxy")
-  })
+    expect(source).toContain("const currentInstance = getCurrentInstance()");
+    expect(source).toContain("const instance = currentInstance?.proxy");
+    expect(source).not.toContain(
+      "const instance = getCurrentInstance()?.proxy",
+    );
+  });
 
-  it("renders compact runtime controls from the bottom composer", () => {
-    const source = fs.readFileSync(
-      path.resolve(__dirname, "../../../src/pages/conversation-detail/index.vue"),
-      "utf8"
-    )
+  it("renders compact runtime controls from the active bottom composer", () => {
+    const paneSource = fs.readFileSync(
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/ConversationDetailInteractivePane.vue",
+      ),
+      "utf8",
+    );
+    const shellSource = fs.readFileSync(
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/index.vue",
+      ),
+      "utf8",
+    );
 
-    expect(source).not.toContain('class="detail-toolbar"')
-    expect(source).toContain("<template #status>")
-    expect(source).toContain('class="input-status-row"')
-    expect(source).toContain('class="input-status-row__text">{{ inputStatusText }}</text>')
-    expect(source).toContain('class="tool-toggle-btn"')
-    expect(source).toContain('v-if="showInputToolRow" class="input-tool-row"')
-    expect(source).toContain('class="input-tool-btn input-tool-btn--danger"')
-    expect(source).toContain("const DEFAULT_DETAIL_TOOLBAR_HEIGHT = 0")
-  })
+    expect(paneSource).not.toContain('class="detail-toolbar"');
+    expect(paneSource).toContain("<template #status>");
+    expect(paneSource).toContain('class="input-status-row"');
+    expect(paneSource).toContain(
+      'class="input-status-row__text">{{ inputStatusText }}</text>',
+    );
+    expect(paneSource).toContain("'tool-toggle-btn'");
+    expect(paneSource).toContain('v-if="showInputToolRow" class="input-tool-row"');
+    expect(paneSource).toContain('class="input-tool-btn input-tool-btn--danger"');
+    expect(shellSource).toContain("const DEFAULT_DETAIL_TOOLBAR_HEIGHT = 0");
+  });
 
   it("keeps bottom input tools evenly distributed", () => {
     const source = fs.readFileSync(
-      path.resolve(__dirname, "../../../src/pages/conversation-detail/index.scss"),
-      "utf8"
-    )
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/index.scss",
+      ),
+      "utf8",
+    );
 
-    const toolButtonBlock = source.match(/\.input-tool-btn\s*\{[^}]*\}/)?.[0] || ""
-    expect(toolButtonBlock).toContain("flex: 1;")
-    expect(toolButtonBlock).toContain("min-width: 0;")
-    expect(toolButtonBlock).not.toContain("flex: 0 0 72rpx;")
-    expect(toolButtonBlock).not.toContain("width: 72rpx;")
-  })
+    const toolButtonBlock =
+      source.match(/\.input-tool-btn\s*\{[^}]*\}/)?.[0] || "";
+    expect(toolButtonBlock).toContain("flex: 1;");
+    expect(toolButtonBlock).toContain("min-width: 0;");
+    expect(toolButtonBlock).not.toContain("flex: 0 0 72rpx;");
+    expect(toolButtonBlock).not.toContain("width: 72rpx;");
+  });
 
   it("keeps config and stop controls side by side in the interactive composer", () => {
     const source = fs.readFileSync(
-      path.resolve(__dirname, "../../../src/pages/conversation-detail/ConversationDetailInteractivePane.vue"),
-      "utf8"
-    )
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/ConversationDetailInteractivePane.vue",
+      ),
+      "utf8",
+    );
 
-    expect(source).toContain("@click=\"toggleComposerPanel('config')\"")
-    expect(source).toContain("composerPanelMode === 'config'")
-    expect(source).toContain('<up-icon name="setting"')
-    expect(source).toContain('class="input-tool-btn input-tool-btn--danger"')
-    expect(source).toContain("function loadDetailAgentConfig()")
-  })
+    expect(source).toContain("@click=\"toggleComposerPanel('config')\"");
+    expect(source).toContain("composerPanelMode === 'config'");
+    expect(source).toMatch(/<up-icon\s+name="setting"/);
+    expect(source).toContain('class="input-tool-btn input-tool-btn--danger"');
+    expect(source).toContain("function loadDetailAgentConfig()");
+  });
 
   it("defers inactive pane project and config loading", () => {
     const source = fs.readFileSync(
-      path.resolve(__dirname, "../../../src/pages/conversation-detail/ConversationDetailInteractivePane.vue"),
-      "utf8"
-    )
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/ConversationDetailInteractivePane.vue",
+      ),
+      "utf8",
+    );
 
-    expect(source).toContain("[firstString(props.instanceKey), Number(props.folderId || 0), Boolean(props.active)]")
-    expect(source).toContain("if (!active) return")
-    expect(source).toContain("Boolean(props.active),")
-    expect(source).toContain("if (!conversationId || !agentType || !active) return")
-  })
+    expect(source).toMatch(
+      /\[\s*firstString\(props\.instanceKey\),\s*Number\(props\.folderId \|\| 0\),\s*Boolean\(props\.active\),?\s*\]/,
+    );
+    expect(source).toContain("if (!active) return");
+    expect(source).toContain("Boolean(props.active),");
+    expect(source).toContain(
+      "if (!conversationId || !agentType || !active) return",
+    );
+  });
 
   it("wires composer mentions into the actual interactive composer", () => {
     const source = fs.readFileSync(
-      path.resolve(__dirname, "../../../src/pages/conversation-detail/ConversationDetailInteractivePane.vue"),
-      "utf8"
-    )
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/ConversationDetailInteractivePane.vue",
+      ),
+      "utf8",
+    );
 
-    expect(source).toContain("@input=\"handleComposerInput\"")
-    expect(source).toContain('v-if="showMentionPanel"')
-    expect(source).toContain("@click=\"insertMentionReference(item)\"")
-    expect(source).toContain("@/services/composerReferences")
-    expect(source).toContain("function ensureMentionSourcesLoaded()")
-    expect(source).toContain("getRemoteProjectFileTree")
-    expect(source).toContain("loadRemoteProjectConversations")
-    expect(source).toContain("getRemoteGitLog")
-  })
+    expect(source).toContain('@input="handleComposerInput"');
+    expect(source).toContain('v-if="showMentionPanel"');
+    expect(source).toContain('@click="insertMentionReference(item)"');
+    expect(source).toContain("@/services/composerReferences");
+    expect(source).toContain("function ensureMentionSourcesLoaded()");
+    expect(source).toContain("getRemoteProjectFileTree");
+    expect(source).toContain("loadRemoteProjectConversations");
+    expect(source).toContain("getRemoteGitLog");
+  });
 
   it("lets users dismiss the slash command panel for the current trigger", () => {
     const source = fs.readFileSync(
-      path.resolve(__dirname, "../../../src/pages/conversation-detail/ConversationDetailInteractivePane.vue"),
-      "utf8"
-    )
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/ConversationDetailInteractivePane.vue",
+      ),
+      "utf8",
+    );
 
-    expect(source).toContain('v-if="showSlashPanel"')
-    expect(source).toContain('@click.stop="dismissSlashPanel"')
-    expect(source).toContain("const dismissedSlashTriggerKey = ref(\"\")")
-    expect(source).toContain("dismissedSlashTriggerKey.value !== slashTriggerKey.value")
-  })
+    expect(source).toContain('v-if="showSlashPanel"');
+    expect(source).toContain('@click.stop="dismissSlashPanel"');
+    expect(source).toContain('const dismissedSlashTriggerKey = ref("")');
+    expect(source).toContain(
+      "dismissedSlashTriggerKey.value !== slashTriggerKey.value",
+    );
+  });
 
   it("renders each mounted swiper item with an interactive per-conversation pane", () => {
     const source = fs.readFileSync(
-      path.resolve(__dirname, "../../../src/pages/conversation-detail/index.vue"),
-      "utf8"
-    )
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/index.vue",
+      ),
+      "utf8",
+    );
 
-    expect(source).toContain("<ConversationDetailInteractivePane")
-    expect(source).toContain(':conversation-id="tab.conversationId"')
-    expect(source).toContain(':folder-id="tab.folderId"')
-    expect(source).toContain(':active="isActiveDetailTabPage(index)"')
-    expect(source).toContain("function mountDetailTabWindow(index: number)")
-    expect(source).toContain(':key="resolveDetailShellTabKey(tab)"')
-    expect(source).toContain("resolveDetailActiveTabIndex({")
-    expect(source).not.toContain(':key="tab.tabId || tab.conversationId || index"')
-    expect(source).not.toContain("<ConversationDetailReadonlyTimeline")
-  })
+    expect(source).toContain("<ConversationDetailInteractivePane");
+    expect(source).toContain('v-if="shouldRenderDetailTabPage(index)"');
+    expect(source).not.toContain('v-else-if="shouldRenderDetailTabPage(index)"');
+    expect(source).toContain(':conversation-id="tab.conversationId"');
+    expect(source).toContain(':folder-id="tab.folderId"');
+    expect(source).toContain(':active="isActiveDetailTabPage(index)"');
+    expect(source).toContain("function mountDetailTabWindow(index: number)");
+    expect(source).toContain(':key="resolveDetailShellTabKey(tab)"');
+    expect(source).toContain("resolveDetailActiveTabIndex({");
+    expect(source).not.toContain(
+      ':key="tab.tabId || tab.conversationId || index"',
+    );
+    expect(source).not.toContain("<ConversationDetailReadonlyTimeline");
+  });
 
   it("keeps active tab focus local instead of syncing it back to opened tabs", () => {
     const source = fs.readFileSync(
-      path.resolve(__dirname, "../../../src/pages/conversation-detail/index.vue"),
-      "utf8"
-    )
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/index.vue",
+      ),
+      "utf8",
+    );
 
-    expect(source).toContain('activation: "preserve"')
-    expect(source).not.toContain('activation: "allow"')
-    expect(source).not.toContain("const remoteActiveIndex = detailShellTabs.value.findIndex((tab) => tab.active)")
-  })
+    expect(source).toContain('activation: "preserve"');
+    expect(source).not.toContain('activation: "allow"');
+    expect(source).not.toContain(
+      "const remoteActiveIndex = detailShellTabs.value.findIndex((tab) => tab.active)",
+    );
+  });
 
   it("updates tab selection before deferring heavy conversation loading", () => {
     const source = fs.readFileSync(
-      path.resolve(__dirname, "../../../src/pages/conversation-detail/index.vue"),
-      "utf8"
-    )
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/index.vue",
+      ),
+      "utf8",
+    );
 
-    expect(source).toMatch(/captureActiveDetailLocalState\(\)[\s\S]*syncDetailTabSelection\(safeIndex\)[\s\S]*if \(shouldDeferDetailTabSwitch/)
-  })
+    expect(source).toMatch(
+      /captureActiveDetailLocalState\(\)[\s\S]*syncDetailTabSelection\(safeIndex\)[\s\S]*if \(shouldDeferDetailTabSwitch/,
+    );
+  });
 
   it("keeps custom detail backgrounds shared across opened tabs", () => {
     const source = fs.readFileSync(
-      path.resolve(__dirname, "../../../src/pages/conversation-detail/index.vue"),
-      "utf8"
-    )
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/index.vue",
+      ),
+      "utf8",
+    );
 
-    expect(source).toContain("return `${DETAIL_BACKGROUND_STORAGE_PREFIX}:${instanceKey}:shared`")
-    expect(source).toContain("function buildLegacyDetailBackgroundStorageKey")
-    expect(source).toContain("persistDetailBackgroundSnapshot(legacySnapshot.url)")
-    expect(source).toContain("removeLegacyDetailBackgroundSnapshots()")
-    expect(source).not.toContain("function buildDetailBackgroundStorageKey(targetConversationId")
-  })
+    expect(source).toContain(
+      "return `${DETAIL_BACKGROUND_STORAGE_PREFIX}:${instanceKey}:shared`",
+    );
+    expect(source).toContain("function buildLegacyDetailBackgroundStorageKey");
+    expect(source).toContain(
+      "persistDetailBackgroundSnapshot(legacySnapshot.url)",
+    );
+    expect(source).toContain("removeLegacyDetailBackgroundSnapshots()");
+    expect(source).not.toContain(
+      "function buildDetailBackgroundStorageKey(targetConversationId",
+    );
+  });
 
   it("exposes current-tab conversation actions from the detail more menu", () => {
     const source = fs.readFileSync(
-      path.resolve(__dirname, "../../../src/pages/conversation-detail/index.vue"),
-      "utf8"
-    )
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/index.vue",
+      ),
+      "utf8",
+    );
 
-    expect(source).toContain('{ name: "重命名", color: "#2979ff" }')
-    expect(source).toContain('{ name: "更改状态", color: "#2979ff" }')
-    expect(source).toContain('{ name: "删除", color: "#fa3534" }')
-    expect(source).toContain('title: "重命名会话"')
-    expect(source).toContain('gateway.call("update_conversation_title"')
-    expect(source).toContain('gateway.call("update_conversation_status"')
-    expect(source).toContain('title: "确认删除"')
-    expect(source).toContain('confirmText: "删除"')
-    expect(source).toContain('gateway.call("delete_conversation"')
-    expect(source).toContain("closeConversationTab({")
-  })
+    expect(source).toContain('{ name: "重命名", color: "#2979ff" }');
+    expect(source).toContain('{ name: "更改状态", color: "#2979ff" }');
+    expect(source).toContain('{ name: "删除", color: "#fa3534" }');
+    expect(source).toContain('title: "重命名会话"');
+    expect(source).toContain('gateway.call("update_conversation_title"');
+    expect(source).toContain('gateway.call("update_conversation_status"');
+    expect(source).toContain('title: "确认删除"');
+    expect(source).toContain('confirmText: "删除"');
+    expect(source).toContain('gateway.call("delete_conversation"');
+    expect(source).toContain("closeConversationTab({");
+  });
 
   it("restores and forwards the detail theme from the detail more menu", () => {
     const source = fs.readFileSync(
-      path.resolve(__dirname, "../../../src/pages/conversation-detail/index.vue"),
-      "utf8"
-    )
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/index.vue",
+      ),
+      "utf8",
+    );
 
-    expect(source).toContain("DETAIL_THEME_STORAGE_KEY")
-    expect(source).toContain("DETAIL_CYBER_MODE_STORAGE_KEY")
-    expect(source).toContain("buildDetailThemeMenuActions(detailTheme.value)")
-    expect(source).toContain('else if (action === "详情页主题")')
-    expect(source).toContain('title: `${target.name.replace(" · 当前", "")}已启用`')
-    expect(source).toContain("restoreCyberModePreference()")
-    expect(source).toContain("shouldShowDetailBackgroundImage")
-    expect(source).toContain("showDetailBackgroundImage")
-    expect(source).toContain("page--cyber")
-    expect(source).toContain("page--sweet")
-  })
+    expect(source).toContain("DETAIL_THEME_STORAGE_KEY");
+    expect(source).toContain("DETAIL_CYBER_MODE_STORAGE_KEY");
+    expect(source).toContain("buildDetailThemeMenuActions(detailTheme.value)");
+    expect(source).toContain('else if (action === "详情页主题")');
+    expect(source).toContain(
+      'title: `${target.name.replace(" · 当前", "")}已启用`',
+    );
+    expect(source).toContain("restoreCyberModePreference()");
+    expect(source).toContain("shouldShowDetailBackgroundImage");
+    expect(source).toContain("showDetailBackgroundImage");
+    expect(source).toContain("page--cyber");
+    expect(source).toContain("page--sweet");
+  });
 
   it("uses lighter translucent content surfaces over custom backgrounds", () => {
     const detailStyles = fs.readFileSync(
-      path.resolve(__dirname, "../../../src/pages/conversation-detail/index.scss"),
-      "utf8"
-    )
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/index.scss",
+      ),
+      "utf8",
+    );
     const bodySource = fs.readFileSync(
-      path.resolve(__dirname, "../../../src/pages/conversation-detail/ConversationDetailBody.vue"),
-      "utf8"
-    )
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/ConversationDetailBody.vue",
+      ),
+      "utf8",
+    );
     const bubbleSource = fs.readFileSync(
       path.resolve(__dirname, "../../../src/components/MessageBubble.vue"),
-      "utf8"
-    )
+      "utf8",
+    );
 
-    expect(bodySource).toContain("var(--up-card-bg-color, #ffffff) 38%, transparent 62%")
-    expect(bodySource).toContain("backdrop-filter: blur(12rpx)")
-    expect(bubbleSource).toContain("var(--up-primary, #2979ff) 54%, transparent 46%")
-    expect(bubbleSource).toContain("backdrop-filter: blur(0.1rem)")
-    expect(bubbleSource).toContain("var(--up-card-bg-color, #ffffff) 30%, transparent 70%")
-    expect(detailStyles).toContain("backdrop-filter: blur(10rpx)")
-    expect(detailStyles).toContain("var(--up-card-bg-color, #ffffff) 32%, transparent 68%")
-    expect(detailStyles).toContain("var(--up-card-bg-color, #ffffff) 22%, transparent 78%")
-    expect(detailStyles).toContain("send-btn--translucent")
-    expect(detailStyles).toContain("var(--up-primary, #2979ff) 48%, transparent 52%")
-    expect(detailStyles).not.toContain("backdrop-filter: blur(22rpx)")
-    expect(bubbleSource).not.toContain("backdrop-filter: blur(0.1625rem)")
-  })
+    expect(bodySource).toContain(
+      "var(--up-card-bg-color, #ffffff) 38%, transparent 62%",
+    );
+    expect(bodySource).toContain("backdrop-filter: blur(12rpx)");
+    expect(bubbleSource).toContain(
+      "var(--up-primary, #2979ff) 54%, transparent 46%",
+    );
+    expect(bubbleSource).toContain("backdrop-filter: blur(0.1rem)");
+    expect(bubbleSource).toContain(
+      "var(--up-card-bg-color, #ffffff) 30%, transparent 70%",
+    );
+    expect(detailStyles).toContain("backdrop-filter: blur(10rpx)");
+    expect(detailStyles).toContain(
+      "var(--up-card-bg-color, #ffffff) 32%, transparent 68%",
+    );
+    expect(detailStyles).toContain(
+      "var(--up-card-bg-color, #ffffff) 22%, transparent 78%",
+    );
+    expect(detailStyles).toContain("send-btn--translucent");
+    expect(detailStyles).toContain(
+      "var(--up-primary, #2979ff) 48%, transparent 52%",
+    );
+    expect(detailStyles).not.toContain("backdrop-filter: blur(22rpx)");
+    expect(bubbleSource).not.toContain("backdrop-filter: blur(0.1625rem)");
+  });
 
   it("renders Codex goal tool calls before generic tool grouping", () => {
     const bubbleSource = fs.readFileSync(
       path.resolve(__dirname, "../../../src/components/MessageBubble.vue"),
-      "utf8"
-    )
+      "utf8",
+    );
 
-    expect(bubbleSource).toContain("import GoalToolCallBlock from \"./GoalToolCallBlock.vue\"")
-    expect(bubbleSource).toContain("buildGoalDisplayParts")
     expect(bubbleSource).toContain(
-      "buildGoalDisplayParts(props.message.content || [], isStreaming.value)"
-    )
-    expect(bubbleSource).toContain("part.type === 'goal_run'")
+      'import GoalToolCallBlock from "./GoalToolCallBlock.vue"',
+    );
+    expect(bubbleSource).toContain("buildGoalDisplayParts");
+    expect(bubbleSource).toContain(
+      "buildGoalDisplayParts(props.message.content || [], isStreaming.value)",
+    );
+    expect(bubbleSource).toContain("part.type === 'goal_run'");
     expect(bubbleSource.indexOf("part.type === 'goal_run'")).toBeLessThan(
-      bubbleSource.indexOf("part.type === 'tool_call_group'")
-    )
-  })
+      bubbleSource.indexOf("part.type === 'tool_call_group'"),
+    );
+  });
 
   it("does not replay cached config into a live session when the connection attaches", () => {
     const source = fs.readFileSync(
-      path.resolve(__dirname, "../../../src/pages/conversation-detail/index.vue"),
-      "utf8"
-    )
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/index.vue",
+      ),
+      "utf8",
+    );
 
-    expect(source).toContain("void loadDetailAgentConfig()")
-    expect(source).not.toContain("void applyPendingComposerConfig()")
-    expect(source).toContain("conversationId.value || null")
-  })
+    expect(source).toContain("void loadDetailAgentConfig()");
+    expect(source).not.toContain("void applyPendingComposerConfig()");
+    expect(source).toContain("conversationId.value || null");
+  });
 
   it("does not append the route conversation while hydrating detail tabs", () => {
     const source = fs.readFileSync(
-      path.resolve(__dirname, "../../../src/pages/conversation-detail/index.vue"),
-      "utf8"
-    )
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/index.vue",
+      ),
+      "utf8",
+    );
 
-    expect(source).toContain('gateway.call<unknown>("list_opened_tabs")')
+    expect(source).toContain('gateway.call<unknown>("list_opened_tabs")');
     expect(source).not.toContain(`folderId: folderId.value,
       conversationId: conversationId.value,
       agentType: currentAgentType.value,
       activation: "preserve",
-      origin: "mcode-mobile",`)
-  })
+      origin: "mcode-mobile",`);
+  });
 
   it("measures composer chrome from the active swiper page only", () => {
     const source = fs.readFileSync(
-      path.resolve(__dirname, "../../../src/pages/conversation-detail/index.vue"),
-      "utf8"
-    )
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/index.vue",
+      ),
+      "utf8",
+    );
 
-    expect(source).toContain("detail-shell__page--active")
-    expect(source).toContain('.select(".detail-shell__page--active .input-status-row")')
-    expect(source).toContain('.select(".detail-shell__page--active .composer-stack")')
-    expect(source).toContain('.select(".detail-shell__page--active .input-main-row")')
-    expect(source).toContain('.select(".detail-shell__page--active .input-tool-row")')
-    expect(source).toContain('.select(".detail-shell__page--active .message-list__content")')
-  })
+    expect(source).toContain("detail-shell__page--active");
+    expect(source).toContain(
+      '.select(".detail-shell__page--active .input-status-row")',
+    );
+    expect(source).toContain(
+      '.select(".detail-shell__page--active .composer-stack")',
+    );
+    expect(source).toContain(
+      '.select(".detail-shell__page--active .input-main-row")',
+    );
+    expect(source).toContain(
+      '.select(".detail-shell__page--active .input-tool-row")',
+    );
+    expect(source).toContain(
+      '.select(".detail-shell__page--active .message-list__content")',
+    );
+  });
 
   it("subtracts the navbar placeholder from the swiper shell height", () => {
     const source = fs.readFileSync(
-      path.resolve(__dirname, "../../../src/pages/conversation-detail/index.vue"),
-      "utf8"
-    )
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/index.vue",
+      ),
+      "utf8",
+    );
 
-    expect(source).toContain("resolveDetailShellViewportHeight")
-    expect(source).toContain("hasNavbarPlaceholder: true")
-    expect(source).not.toContain("const height = Math.max(0, viewportHeight.value || getDetailViewportHeight())")
-  })
+    expect(source).toContain("resolveDetailShellViewportHeight");
+    expect(source).toContain("hasNavbarPlaceholder: true");
+    expect(source).not.toContain(
+      "const height = Math.max(0, viewportHeight.value || getDetailViewportHeight())",
+    );
+  });
 
   it("extends the detail navbar background into the phone status bar", () => {
     const source = fs.readFileSync(
-      path.resolve(__dirname, "../../../src/pages/conversation-detail/index.vue"),
-      "utf8"
-    )
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/index.vue",
+      ),
+      "utf8",
+    );
     const html = fs.readFileSync(
       path.resolve(__dirname, "../../../index.html"),
-      "utf8"
-    )
+      "utf8",
+    );
 
-    expect(source).toContain(':statusBarBgColor="navbarStatusBarBgColor"')
-    expect(source).toContain('detailTheme.value === "matrix"')
-    expect(source).toContain('detailTheme.value === "sweet"')
-    expect(source).toContain("const navbarBgColor = computed(() => navbarStatusBarBgColor.value)")
-    expect(source).toContain('height = statusBarHeight > 0 ? `${statusBarHeight}px` : "env(safe-area-inset-top)"')
-    expect(source).toContain("syncIosStandaloneStatusBar({")
-    expect(html).toContain('<meta name="apple-mobile-web-app-status-bar-style" content="black" />')
-    expect(html).toContain('<meta name="theme-color" content="#f3f4f6" />')
-  })
+    expect(source).toContain(':statusBarBgColor="navbarStatusBarBgColor"');
+    expect(source).toContain('detailTheme.value === "matrix"');
+    expect(source).toContain('detailTheme.value === "sweet"');
+    expect(source).toContain(
+      "const navbarBgColor = computed(() => navbarStatusBarBgColor.value)",
+    );
+    expect(source).toContain(
+      'height = statusBarHeight > 0 ? `${statusBarHeight}px` : "env(safe-area-inset-top)"',
+    );
+    expect(source).toContain("syncIosStandaloneStatusBar({");
+    expect(html).toContain(
+      '<meta name="apple-mobile-web-app-status-bar-style" content="black" />',
+    );
+    expect(html).toContain('<meta name="theme-color" content="#f3f4f6" />');
+  });
 
   it("does not add safe-area padding to the bottom scroll anchor", () => {
     const source = fs.readFileSync(
-      path.resolve(__dirname, "../../../src/pages/conversation-detail/index.scss"),
-      "utf8"
-    )
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/index.scss",
+      ),
+      "utf8",
+    );
 
-    expect(source).toMatch(/\.list-bottom\s*\{\s*height:\s*34rpx;\s*\}/)
-  })
+    expect(source).toMatch(/\.list-bottom\s*\{\s*height:\s*34rpx;\s*\}/);
+  });
 
   it("keeps the composer card above the bottom safe area", () => {
     const source = fs.readFileSync(
-      path.resolve(__dirname, "../../../src/pages/conversation-detail/ConversationDetailBody.vue"),
-      "utf8"
-    )
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/ConversationDetailBody.vue",
+      ),
+      "utf8",
+    );
 
-    expect(source).toMatch(/\.composer-stack\s*\{[\s\S]*bottom:\s*calc\(env\(safe-area-inset-bottom\) \+ 10rpx\);/)
-    expect(source).toMatch(/\.composer-safe-area\s*\{[\s\S]*height:\s*calc\(env\(safe-area-inset-bottom\) \+ 12rpx\);[\s\S]*background:\s*transparent;/)
-    expect(source).not.toContain("padding-bottom: calc(16rpx + env(safe-area-inset-bottom))")
-  })
+    expect(source).toMatch(
+      /\.composer-stack\s*\{[\s\S]*bottom:\s*calc\(env\(safe-area-inset-bottom\) \+ 10rpx\);/,
+    );
+    expect(source).toMatch(
+      /\.composer-safe-area\s*\{[\s\S]*height:\s*calc\(env\(safe-area-inset-bottom\) \+ 12rpx\);[\s\S]*background:\s*transparent;/,
+    );
+    expect(source).not.toContain(
+      "padding-bottom: calc(16rpx + env(safe-area-inset-bottom))",
+    );
+  });
 
   it("locks the outer detail page so only the message scroll-view scrolls", () => {
     const source = fs.readFileSync(
-      path.resolve(__dirname, "../../../src/pages/conversation-detail/index.scss"),
-      "utf8"
-    )
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/index.scss",
+      ),
+      "utf8",
+    );
 
-    expect(source).toMatch(/\.page\s*\{[\s\S]*height:\s*100%;[\s\S]*overflow:\s*hidden;[\s\S]*overscroll-behavior:\s*none;/)
-    expect(source).toMatch(/\.detail-container\s*\{[\s\S]*position:\s*fixed;[\s\S]*inset:\s*0;[\s\S]*overflow:\s*hidden;[\s\S]*overscroll-behavior:\s*none;/)
-  })
+    expect(source).toMatch(
+      /\.page\s*\{[\s\S]*height:\s*100%;[\s\S]*overflow:\s*hidden;[\s\S]*overscroll-behavior:\s*none;/,
+    );
+    expect(source).toMatch(
+      /\.detail-container\s*\{[\s\S]*position:\s*fixed;[\s\S]*inset:\s*0;[\s\S]*overflow:\s*hidden;[\s\S]*overscroll-behavior:\s*none;/,
+    );
+  });
 
   it("keeps per-tab scrolling inside the detail body scroll-view", () => {
     const source = fs.readFileSync(
-      path.resolve(__dirname, "../../../src/pages/conversation-detail/index.vue"),
-      "utf8"
-    )
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/index.vue",
+      ),
+      "utf8",
+    );
 
-    expect(source).not.toContain("onPageScroll")
-    expect(source).not.toContain("uni.pageScrollTo")
-    expect(source).not.toContain("visualViewport")
-    expect(source).toContain("messageScrollTop.value = Number.MAX_SAFE_INTEGER")
-    expect(source).toContain("messageScrollIntoView.value = getBottomAnchorId()")
-  })
+    expect(source).not.toContain("onPageScroll");
+    expect(source).not.toContain("uni.pageScrollTo");
+    expect(source).not.toContain("visualViewport");
+    expect(source).toContain(
+      "messageScrollTop.value = Number.MAX_SAFE_INTEGER",
+    );
+    expect(source).toContain(
+      "messageScrollIntoView.value = getBottomAnchorId()",
+    );
+  });
 
   it("keeps the interactive pane capable of sending attachments", () => {
     const source = fs.readFileSync(
-      path.resolve(__dirname, "../../../src/pages/conversation-detail/ConversationDetailInteractivePane.vue"),
-      "utf8"
-    )
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/ConversationDetailInteractivePane.vue",
+      ),
+      "utf8",
+    );
 
-    expect(source).toContain("'attachments-preview'")
-    expect(source).toContain("handleChooseImages")
-    expect(source).toContain("handleChooseFiles")
-    expect(source).toContain("uploadPickedFiles")
-    expect(source).toContain("prepareDraftForSend")
-  })
+    expect(source).toContain("'attachments-preview'");
+    expect(source).toContain("handleChooseImages");
+    expect(source).toContain("handleChooseFiles");
+    expect(source).toContain("uploadPickedFiles");
+    expect(source).toContain("prepareDraftForSend");
+  });
 
   it("resyncs layout when interactive composer chrome changes height", () => {
     const source = fs.readFileSync(
-      path.resolve(__dirname, "../../../src/pages/conversation-detail/ConversationDetailInteractivePane.vue"),
-      "utf8"
-    )
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/ConversationDetailInteractivePane.vue",
+      ),
+      "utf8",
+    );
 
-    expect(source).toMatch(/function toggleInputToolRow\(\)[\s\S]*scheduleViewportSync\(\)/)
-    expect(source).toMatch(/function toggleComposerPanel\([\s\S]*scheduleViewportSync\(\)/)
-  })
+    expect(source).toMatch(
+      /function toggleInputToolRow\(\)[\s\S]*scheduleViewportSync\(\)/,
+    );
+    expect(source).toMatch(
+      /function toggleComposerPanel\([\s\S]*scheduleViewportSync\(\)/,
+    );
+  });
 
-  it("keeps history pagination inside the interactive pane", () => {
+  it("loads the parent detail through a server tail history window", () => {
     const source = fs.readFileSync(
-      path.resolve(__dirname, "../../../src/pages/conversation-detail/ConversationDetailInteractivePane.vue"),
-      "utf8"
-    )
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/index.vue",
+      ),
+      "utf8",
+    );
 
-    expect(source).toContain("getOlderTurns")
-    expect(source).toContain("countConversationTurns")
-    expect(source).toContain("getOldestCursorFromPersistedTurns")
-    expect(source).toContain("mapPersistedTurnToMessage")
-    expect(source).toContain("const oldestLoadedCursor")
-    expect(source).toContain("runtimeSession.localTurns = [")
-  })
+    expect(source).toContain("buildTailHistoryRequest");
+    expect(source).toContain("requireConversationHistoryWindow");
+    expect(source).toContain("applyRemoteHistoryWindowDetail");
+    expect(source).toContain("runtime.setConversationHistoryWindow");
+  });
+
+  it("loads older history through the server page window protocol", () => {
+    const source = fs.readFileSync(
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/ConversationDetailInteractivePane.vue",
+      ),
+      "utf8",
+    );
+
+    expect(source).toContain("buildOlderHistoryRequest");
+    expect(source).toContain("requireConversationTurnsPage");
+    expect(source).toContain("hasOlderConversationHistory");
+    expect(source).toContain("canApplyOlderHistoryPage");
+    expect(source).toContain("prependHistoryPageTurns");
+    expect(source).toContain("advanceConversationHistoryWindow");
+    expect(source).toContain("get_folder_conversation_turns");
+    expect(source).toContain("runtime.setConversationHistoryWindow");
+    expect(source).not.toContain("getOlderTurns");
+    expect(source).not.toContain("countConversationTurns");
+    expect(source).not.toContain("getOldestCursorFromPersistedTurns");
+    expect(source).not.toContain("const oldestLoadedCursor");
+    expect(source).not.toContain("HISTORY_LOADING_MIN_MS");
+  });
+
+  it("keeps older server pages remote-only and removes the retired SQLite cursor protocol", () => {
+    const paneSource = fs.readFileSync(
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/ConversationDetailInteractivePane.vue",
+      ),
+      "utf8",
+    );
+    const pageSource = fs.readFileSync(
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/index.vue",
+      ),
+      "utf8",
+    );
+    const scrollStateSource = fs.readFileSync(
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/detailScrollState.ts",
+      ),
+      "utf8",
+    );
+    const tabStateSource = fs.readFileSync(
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/detailTabState.ts",
+      ),
+      "utf8",
+    );
+
+    expect(paneSource).not.toContain("persistConversationTurns");
+    expect(pageSource).not.toContain("getOlderTurns");
+    expect(pageSource).not.toContain("countConversationTurns");
+    expect(pageSource).not.toContain("oldestLoadedCursor");
+    expect(pageSource).not.toContain("hasMoreHistory");
+    expect(pageSource).not.toContain("HISTORY_LOADING_MIN_MS");
+    expect(scrollStateSource).not.toContain("HistoryPageCursor");
+    expect(scrollStateSource).not.toContain("getOldestCursorFromPersistedTurns");
+    expect(scrollStateSource).not.toContain("restoreHistoryCursorFromCache");
+    expect(tabStateSource).not.toContain("oldestLoadedCursor");
+    expect(tabStateSource).not.toContain("hasMoreHistory");
+  });
 
   it("keeps initial history loading feedback per interactive pane", () => {
     const source = fs.readFileSync(
-      path.resolve(__dirname, "../../../src/pages/conversation-detail/ConversationDetailInteractivePane.vue"),
-      "utf8"
-    )
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/ConversationDetailInteractivePane.vue",
+      ),
+      "utf8",
+    );
 
-    expect(source).toContain("const initialHistoryLoading = ref(false)")
-    expect(source).toContain("const historyStatusBusy = computed(() =>")
-    expect(source).toContain('v-if="historyStatusBusy"')
-    expect(source).toMatch(/if \(loadingOlder\.value\) return "历史加载中\.\.\."/)
-    expect(source).toMatch(/if \(messages\.value\.length > 0 && initialHistoryLoading\.value\) return "初始历史加载中\.\.\."/)
-    expect(source).toContain("function beginInitialHistoryLoading(conversationId: number, token: number)")
-    expect(source).toContain("function finishInitialHistoryLoading(conversationId: number, token: number)")
-    expect(source).toMatch(/const token = \+\+historySyncToken[\s\S]*beginInitialHistoryLoading\(targetConversationId, token\)[\s\S]*finally \{[\s\S]*finishInitialHistoryLoading\(targetConversationId, token\)/)
-  })
+    expect(source).toContain("const initialHistoryLoading = ref(false)");
+    expect(source).toMatch(
+      /const historyStatusBusy = computed\(\s*\(\)\s*=>/,
+    );
+    expect(source).toContain('v-if="historyStatusBusy"');
+    expect(source).toMatch(
+      /if \(loadingOlder\.value\) return "历史加载中\.\.\."/,
+    );
+    expect(source).toMatch(
+      /if \(messages\.value\.length > 0 && initialHistoryLoading\.value\)\s*return "初始历史加载中\.\.\."/,
+    );
+    expect(source).toContain(
+      "function beginInitialHistoryLoading(conversationId: number, token: number)",
+    );
+    expect(source).toContain(
+      "function finishInitialHistoryLoading(conversationId: number, token: number)",
+    );
+    expect(source).toContain("Boolean(props.initialLoading)");
+    expect(source).toMatch(
+      /const token = \+\+historySyncToken[\s\S]*beginInitialHistoryLoading\(conversationId, token\)/,
+    );
+    expect(source).not.toContain("ensureHistoryCursorFromLoadedMessages");
+  });
 
   it("shows explicit loading, failure, and empty states for conversation content", () => {
     const detailSource = fs.readFileSync(
-      path.resolve(__dirname, "../../../src/pages/conversation-detail/index.vue"),
-      "utf8"
-    )
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/index.vue",
+      ),
+      "utf8",
+    );
     const paneSource = fs.readFileSync(
-      path.resolve(__dirname, "../../../src/pages/conversation-detail/ConversationDetailInteractivePane.vue"),
-      "utf8"
-    )
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/ConversationDetailInteractivePane.vue",
+      ),
+      "utf8",
+    );
 
-    expect(detailSource).toContain("buildDetailFallbackTab")
-    expect(detailSource).toContain("if (!conversationId.value) return")
+    expect(detailSource).toContain("buildDetailFallbackTab");
+    expect(detailSource).toContain("if (!conversationId.value) return");
     const initializeShellSource = detailSource.slice(
       detailSource.indexOf("async function initializeDetailTabsShell()"),
-      detailSource.indexOf("function handleDetailTabChange")
-    )
-    expect(initializeShellSource.indexOf("if (!detailTabsEnabled.value)")).toBeLessThan(
-      initializeShellSource.indexOf("const instanceKey = resolveDetailInstanceKey()")
-    )
-    expect(detailSource).toContain(':initial-loading="isActiveDetailTabPage(index) && detailContentInitialLoading"')
-    expect(detailSource).toContain('@reload="reloadDetailContent"')
-    expect(detailSource).toContain("暂时无法显示会话内容")
-    expect(detailSource).toContain("!snapshot.currentConversationInShell || !snapshot.currentConversationMounted")
-    expect(paneSource).toContain("resolveDetailContentFallbackPresentation")
-    expect(paneSource).toContain("initialLoading?: boolean")
-    expect(paneSource).toContain("loadErrorMessage?: string")
-    expect(paneSource).toContain('(event: "reload"): void')
-    expect(paneSource).toContain("正在加载会话内容...")
-    expect(paneSource).toContain("加载会话失败")
-    expect(paneSource).toContain("这是一个新会话，暂时还没有消息")
-  })
+      detailSource.indexOf("function handleDetailTabChange"),
+    );
+    expect(
+      initializeShellSource.indexOf("if (!detailTabsEnabled.value)"),
+    ).toBeLessThan(
+      initializeShellSource.indexOf(
+        "const instanceKey = resolveDetailInstanceKey()",
+      ),
+    );
+    expect(detailSource).toContain(
+      ':initial-loading="isActiveDetailTabPage(index) && detailContentInitialLoading"',
+    );
+    expect(detailSource).toContain('@reload="reloadDetailContent"');
+    expect(detailSource).toContain("暂时无法显示会话内容");
+    expect(detailSource).toContain(
+      "!snapshot.currentConversationInShell || !snapshot.currentConversationMounted",
+    );
+    expect(paneSource).toContain("resolveDetailContentFallbackPresentation");
+    expect(paneSource).toContain("initialLoading?: boolean");
+    expect(paneSource).toContain("loadErrorMessage?: string");
+    expect(paneSource).toContain('(event: "reload"): void');
+    expect(paneSource).toContain("正在加载会话内容...");
+    expect(paneSource).toContain("加载会话失败");
+    expect(paneSource).toContain("这是一个新会话，暂时还没有消息");
+  });
 
   it("opens the plan drawer from the interactive pane status pill", () => {
     const source = fs.readFileSync(
-      path.resolve(__dirname, "../../../src/pages/conversation-detail/ConversationDetailInteractivePane.vue"),
-      "utf8"
-    )
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/ConversationDetailInteractivePane.vue",
+      ),
+      "utf8",
+    );
 
-    expect(source).toContain('class="input-status-row__plan"')
-    expect(source).toContain('@click.stop="showPlanDrawer = true"')
-    expect(source).toContain('<up-popup v-model:show="showPlanDrawer" mode="bottom" :round="20">')
-    expect(source).toContain("buildPlanFilterItems")
-    expect(source).toContain("taskStatusLabel(task.status)")
-  })
-})
+    expect(source).toContain('class="input-status-row__plan"');
+    expect(source).toContain('@click.stop="showPlanDrawer = true"');
+    expect(source).toContain(
+      '<up-popup v-model:show="showPlanDrawer" mode="bottom" :round="20">',
+    );
+    expect(source).toContain("buildPlanFilterItems");
+    expect(source).toContain("taskStatusLabel(task.status)");
+  });
+});
 
 describe("detail tab multitask mode contract", () => {
   it("routes detail tabs by off, mobile-local, and pc-sync modes", () => {
     const source = fs.readFileSync(
-      path.resolve(__dirname, "../../../src/pages/conversation-detail/index.vue"),
-      "utf8"
-    )
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/index.vue",
+      ),
+      "utf8",
+    );
 
-    expect(source).toContain("readDetailTabMultitaskMode")
-    expect(source).toContain('detailTabMultitaskMode.value !== "off"')
-    expect(source).toContain("initializeSingleDetailTabShell")
-    expect(source).toContain("initializeMobileDetailTabsShell")
-    expect(source).toContain("ensureMobileDetailTab")
-    expect(source).toContain("activateMobileDetailTab")
-    expect(source).toContain("closeMobileDetailTab")
-    expect(source).toContain("if (!detailTabsUsePcSync.value) return")
+    expect(source).toContain("readDetailTabMultitaskMode");
+    expect(source).toContain('detailTabMultitaskMode.value !== "off"');
+    expect(source).toContain("initializeSingleDetailTabShell");
+    expect(source).toContain("initializeMobileDetailTabsShell");
+    expect(source).toContain("ensureMobileDetailTab");
+    expect(source).toContain("activateMobileDetailTab");
+    expect(source).toContain("closeMobileDetailTab");
+    expect(source).toContain("if (!detailTabsUsePcSync.value) return");
     expect(source.indexOf("if (detailTabsUseMobileLocal.value)")).toBeLessThan(
-      source.indexOf('gateway.call<unknown>("list_opened_tabs")')
-    )
-  })
-})
+      source.indexOf('gateway.call<unknown>("list_opened_tabs")'),
+    );
+  });
+});

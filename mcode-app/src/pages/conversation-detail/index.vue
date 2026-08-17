@@ -197,779 +197,10 @@
             v-if="shouldMountDetailTabPage(index)"
             :class="['detail-shell__page', isActiveDetailTabPage(index) && 'detail-shell__page--active']"
           >
-            <ConversationDetailBody
-              v-if="false && isActiveDetailTabPage(index)"
-              :message-list-page-style="messageListPageStyle"
-              :message-list-content-style="messageListContentStyle"
-              :input-wrap-style="detailTheme === 'default' ? upThemeCardStyle : undefined"
-              :translucent-message-list="hasDetailBackgroundImage"
-              :message-scroll-top="messageScrollTop"
-              :message-scroll-into-view="messageScrollIntoView"
-              :message-scroll-with-animation="messageScrollWithAnimation"
-              :upper-threshold="120"
-              @message-scroll="handleMessageListScroll"
-              @message-scroll-upper="handleMessageListScrollUpper"
-            >
-        <template #history>
-          <view
-            v-if="historyStatusText"
-            :style="historyStatusStyle"
-            :class="['history-status', planTasks.length > 0 && 'history-status--with-plan']"
-          >
-            <up-loading-icon v-if="loadingOlder" mode="circle" size="16" :color="upThemeVar('--up-tips-color', '#909193')"></up-loading-icon>
-            <text class="history-status__text">{{ historyStatusText }}</text>
-          </view>
-        </template>
 
-        <template #content>
-          <view v-if="showInitialConversationLoading" class="empty-messages empty-messages--loading">
-            <up-loading-icon
-              mode="circle"
-              size="24"
-              :color="upThemeVar('--up-primary', '#2979ff')"
-            ></up-loading-icon>
-            <text class="empty-messages__loading-text">加载会话中...</text>
-          </view>
-
-          <view v-else-if="showWaitingResponseState" class="empty-messages empty-messages--pending">
-            <view class="pending-response-card">
-              <view class="pending-response-card__pulse"></view>
-              <view class="pending-response-card__badge">
-                <view class="pending-response-card__badge-dot"></view>
-                <text class="pending-response-card__badge-text">{{ waitingStateBadgeText }}</text>
-              </view>
-              <text class="pending-response-card__title">{{ waitingStateTitle }}</text>
-              <text class="pending-response-card__desc">{{ waitingStateDescription }}</text>
-              <view class="pending-response-card__bubble">
-                <view class="pending-response-card__bubble-line pending-response-card__bubble-line--strong"></view>
-                <view class="pending-response-card__bubble-line"></view>
-                <view class="pending-response-card__bubble-line pending-response-card__bubble-line--short"></view>
-                <view class="pending-response-card__typing">
-                  <view class="pending-response-card__typing-dot"></view>
-                  <view class="pending-response-card__typing-dot"></view>
-                  <view class="pending-response-card__typing-dot"></view>
-                </view>
-              </view>
-              <text v-if="waitingStateFootnote" class="pending-response-card__footnote">
-                {{ waitingStateFootnote }}
-              </text>
-            </view>
-          </view>
-
-          <view v-else-if="renderMessageItems.length === 0" class="empty-messages">
-            <up-empty mode="message" text="开始新的对话吧"></up-empty>
-          </view>
-
-          <view
-            v-for="(item, index) in renderMessageItems"
-            :key="item.key"
-            :id="messageAnchorId(item.anchorId)"
-            class="message-item"
-          >
-            <MessageBubble
-              :message="item.message"
-              :agent-type="currentAgentType"
-              :showRegenerate="index === renderMessageItems.length - 1 && item.message.role === 'assistant'"
-              @regenerate="regenerateLastMessage"
-            />
-          </view>
-
-          <view v-if="stats.totalTokens > 0" class="stats-bar">
-            <up-icon name="file-text" size="14" :color="upThemeVar('--up-light-color', '#c0c4cc')"></up-icon>
-            <text class="stats-text">
-              输入 {{ formatTokenCountK(stats.inputTokens) }} / 输出 {{ formatTokenCountK(stats.outputTokens) }} / 总计 {{ formatTokenCountK(stats.totalTokens) }}
-            </text>
-          </view>
-
-          <view v-if="showBottomGeneratingIndicator" class="bottom-generating">
-            <view class="bottom-generating__orb">
-              <view class="bottom-generating__ring"></view>
-              <view class="bottom-generating__dot"></view>
-            </view>
-            <view class="bottom-generating__copy">
-              <text class="bottom-generating__title">生成中</text>
-              <text class="bottom-generating__subtitle">{{ bottomGeneratingText }}</text>
-            </view>
-            <view class="bottom-generating__typing" aria-hidden="true">
-              <view class="bottom-generating__typing-dot"></view>
-              <view class="bottom-generating__typing-dot"></view>
-              <view class="bottom-generating__typing-dot"></view>
-            </view>
-          </view>
-
-          <view id="message-list-bottom" class="list-bottom"></view>
-        </template>
-
-        <template #status>
-        <view class="input-status-row">
-          <view class="input-status-row__main">
-            <view class="runtime-dot runtime-dot--compact" :class="`runtime-dot--${runtimeStatusClass}`"></view>
-            <text class="input-status-row__text">{{ inputStatusText }}</text>
-          </view>
-          <view
-            v-if="planTasks.length > 0"
-            class="input-status-row__plan"
-            @click.stop="showPlanDrawer = true"
-          >
-            <up-icon name="list" size="13" :color="upThemeVar('--up-primary', '#2979ff')"></up-icon>
-            <text class="input-status-row__plan-text">计划 {{ completedTaskCount }}/{{ planTasks.length }}</text>
-          </view>
-        </view>
-        </template>
-
-        <template #composer>
-        <view v-if="pendingPermissionCard" class="permission-card">
-          <view class="permission-card__header">
-            <view class="permission-card__badge"></view>
-            <text class="permission-card__title">需要授权</text>
-          </view>
-          <view v-if="pendingPermissionTextParts.length > 0" class="permission-card__desc">
-            <text
-              v-for="(part, index) in pendingPermissionTextParts"
-              :key="`permission-text-${index}`"
-              class="permission-card__desc-line"
-            >
-              {{ part }}
-            </text>
-          </view>
-          <scroll-view
-            v-if="pendingPermissionCommandBlock"
-            scroll-x
-            class="permission-card__command-scroll"
-          >
-            <view class="permission-card__command">
-              <text class="permission-card__command-text">{{ pendingPermissionCommandBlock }}</text>
-            </view>
-          </scroll-view>
-          <view
-            v-if="(pendingPermissionCard?.options || []).length > 0"
-            class="permission-card__actions"
-          >
-            <view
-              v-for="option in pendingPermissionCard?.options || []"
-              :key="option.id"
-              class="permission-card__option"
-            >
-              <button
-                class="permission-card__action"
-                :class="{
-                  'permission-card__action--loading': permissionSubmitting && pendingPermissionSubmittingOptionId === option.id,
-                }"
-                :disabled="permissionSubmitting"
-                @click="respondToPermission(option.id)"
-              >
-                {{
-                  permissionSubmitting && pendingPermissionSubmittingOptionId === option.id
-                    ? "提交中..."
-                    : option.label
-                }}
-              </button>
-              <text v-if="option.description" class="permission-card__option-desc">
-                {{ option.description }}
-              </text>
-            </view>
-          </view>
-          <text v-else class="permission-card__empty">当前授权请求没有可用选项</text>
-        </view>
-
-        <view v-if="pendingQuestionCard" class="ask-question-card">
-          <view class="ask-question-card__header">
-            <view class="ask-question-card__badge">?</view>
-            <view class="ask-question-card__heading">
-              <text class="ask-question-card__title">智能体需要你的选择</text>
-              <text class="ask-question-card__subtitle">选择后点击提交，也可以跳过让智能体自行判断</text>
-            </view>
-            <text
-              v-if="(pendingQuestionCard?.questions || []).length > 1"
-              class="ask-question-card__counter"
-            >
-              {{ questionAnsweredCount }}/{{ (pendingQuestionCard?.questions || []).length }}
-            </text>
-          </view>
-
-          <view
-            v-for="question in pendingQuestionCard?.questions || []"
-            :key="question.id"
-            class="ask-question-card__question"
-          >
-            <view class="ask-question-card__question-head">
-              <text class="ask-question-card__chip">{{ question.multi_select ? "多选" : "单选" }}</text>
-              <text class="ask-question-card__header-text">{{ question.header }}</text>
-            </view>
-            <text class="ask-question-card__prompt">{{ question.question }}</text>
-
-            <view class="ask-question-card__options">
-              <view
-                v-for="option in question.options"
-                :key="option.label"
-                :class="[
-                  'ask-question-option',
-                  isQuestionOptionSelected(question.id, option.label) && 'ask-question-option--active',
-                  questionSubmitting && 'ask-question-option--disabled',
-                ]"
-                @click="!questionSubmitting && toggleQuestionOption(question, option.label)"
-              >
-                <view class="ask-question-option__control">
-                  <view
-                    :class="[
-                      question.multi_select ? 'ask-question-option__checkbox' : 'ask-question-option__radio',
-                      isQuestionOptionSelected(question.id, option.label) && 'ask-question-option__control--active',
-                    ]"
-                  >
-                    <text v-if="isQuestionOptionSelected(question.id, option.label)" class="ask-question-option__mark">✓</text>
-                  </view>
-                </view>
-                <view class="ask-question-option__body">
-                  <view class="ask-question-option__title-row">
-                    <text class="ask-question-option__title">{{ questionLabelText(option.label) }}</text>
-                    <text v-if="isQuestionRecommended(option.label)" class="ask-question-option__recommended">推荐</text>
-                  </view>
-                  <text v-if="option.description" class="ask-question-option__desc">{{ option.description }}</text>
-                </view>
-              </view>
-
-              <view
-                :class="[
-                  'ask-question-option',
-                  isQuestionOtherActive(question.id) && 'ask-question-option--active',
-                  questionSubmitting && 'ask-question-option--disabled',
-                ]"
-                @click="!questionSubmitting && toggleQuestionOther(question)"
-              >
-                <view class="ask-question-option__control">
-                  <view
-                    :class="[
-                      question.multi_select ? 'ask-question-option__checkbox' : 'ask-question-option__radio',
-                      isQuestionOtherActive(question.id) && 'ask-question-option__control--active',
-                    ]"
-                  >
-                    <text v-if="isQuestionOtherActive(question.id)" class="ask-question-option__mark">✓</text>
-                  </view>
-                </view>
-                <view class="ask-question-option__body">
-                  <text class="ask-question-option__title">其他</text>
-                </view>
-              </view>
-
-              <input
-                v-if="isQuestionOtherActive(question.id)"
-                class="ask-question-card__other-input"
-                :value="questionSelection(question.id).otherText"
-                :disabled="questionSubmitting"
-                placeholder="输入其他答案"
-                @input="setQuestionOtherText(question.id, $event)"
-              />
-            </view>
-          </view>
-
-          <view class="ask-question-card__footer">
-            <button
-              class="ask-question-card__skip"
-              :disabled="questionSubmitting"
-              @click="answerAskQuestion(true)"
-            >
-              跳过
-            </button>
-            <button
-              class="ask-question-card__submit"
-              :class="{ 'ask-question-card__submit--disabled': !questionSubmitReady || questionSubmitting }"
-              :disabled="!questionSubmitReady || questionSubmitting"
-              @click="answerAskQuestion(false)"
-            >
-              {{ questionSubmitting ? "提交中..." : "提交" }}
-            </button>
-          </view>
-        </view>
-
-        <view
-          v-if="slashState.visible && filteredSlashCommands.length > 0"
-          class="slash-panel"
-        >
-          <view
-            v-for="item in filteredSlashCommands"
-            :key="item.key"
-            class="slash-item"
-            @click="applySlashCommand(item)"
-          >
-            <view class="slash-item__left">
-              <text class="slash-item__key">{{ item.key }}</text>
-            </view>
-            <text class="slash-item__desc">{{ getSlashCommandDesc(item) }}</text>
-          </view>
-        </view>
-
-        <view
-          v-if="showMentionPanel"
-          class="mention-panel"
-        >
-          <view class="mention-panel__header">
-            <view class="mention-panel__title">
-              <text class="mention-panel__trigger">@</text>
-              <text class="mention-panel__title-text">引用上下文</text>
-            </view>
-            <text class="mention-panel__hint">{{ mentionPanelHint }}</text>
-          </view>
-
-          <view
-            v-if="mentionSourceStatus === 'loading'"
-            class="mention-panel__state"
-          >
-            <up-loading-icon
-              mode="circle"
-              size="15"
-              :color="upThemeVar('--up-tips-color', '#909193')"
-            ></up-loading-icon>
-            <text class="mention-panel__state-text">正在读取项目上下文</text>
-          </view>
-          <view
-            v-else-if="mentionSourceStatus === 'error'"
-            class="mention-panel__state mention-panel__state--error"
-          >
-            <text class="mention-panel__state-text">{{ mentionSourceError || "引用加载失败" }}</text>
-          </view>
-          <view
-            v-else-if="mentionResultCount === 0"
-            class="mention-panel__state"
-          >
-            <text class="mention-panel__state-text">继续输入以过滤文件、会话、提交或智能体</text>
-          </view>
-          <scroll-view
-            v-else
-            scroll-y
-            class="mention-panel__scroll"
-          >
-            <view class="mention-panel__body">
-              <view
-                v-for="group in mentionVisibleGroups"
-                :key="group.kind"
-                class="mention-group"
-              >
-                <view class="mention-group__header">
-                  <text class="mention-group__title">{{ group.label }}</text>
-                  <text class="mention-group__count">{{ group.items.length }}</text>
-                </view>
-                <view
-                  v-for="item in group.items"
-                  :key="`${group.kind}:${item.id}`"
-                  class="mention-item"
-                  @click="insertMentionReference(item)"
-                >
-                  <view :class="['mention-item__badge', `mention-item__badge--${item.kind}`]">
-                    <text>{{ mentionKindShortLabel(item.kind) }}</text>
-                  </view>
-                  <view class="mention-item__body">
-                    <text class="mention-item__label u-line-1">{{ item.label }}</text>
-                    <text v-if="item.detail" class="mention-item__detail u-line-1">{{ item.detail }}</text>
-                  </view>
-                </view>
-                <text v-if="group.truncated" class="mention-group__more">
-                  结果较多，继续输入可缩小范围
-                </text>
-              </view>
-            </view>
-          </scroll-view>
-        </view>
-
-        <view v-if="uploadQueue.length > 0" class="upload-queue">
-          <view
-            v-for="item in uploadQueue"
-            :key="item.id"
-            class="upload-queue__item"
-          >
-            <view class="upload-queue__left">
-              <up-icon
-                :name="item.kind === 'image' ? 'photo' : 'file-text'"
-                size="14"
-                :color="upThemeVar('--up-tips-color', '#909193')"
-              ></up-icon>
-              <text class="upload-queue__name u-line-1">{{ item.name }}</text>
-            </view>
-            <view class="upload-queue__right">
-              <text v-if="item.status === 'uploading'" class="upload-queue__status">
-                {{ item.progress }}%
-              </text>
-              <text v-else-if="item.status === 'success'" class="upload-queue__status upload-queue__status--success">
-                已上传
-              </text>
-              <text v-else class="upload-queue__status upload-queue__status--error">
-                失败
-              </text>
-            </view>
-          </view>
-        </view>
-
-        <view v-if="attachments.length > 0" class="attachments-preview">
-          <view v-for="(att, index) in attachments" :key="att.id" class="attachment-item">
-            <image
-              v-if="att.kind === 'image'"
-              :src="att.url"
-              mode="aspectFill"
-              class="attachment-image"
-            />
-            <view v-else class="attachment-file">
-              <up-icon name="file-text" size="16" :color="upThemeVar('--up-content-color', '#606266')"></up-icon>
-              <text class="attachment-file__name u-line-1">{{ att.name }}</text>
-            </view>
-            <view class="attachment-remove" @click="removeAttachment(index)">
-              <up-icon name="close" size="10" color="#ffffff"></up-icon>
-            </view>
-          </view>
-        </view>
-
-        <view
-          v-if="draftQueue.length > 0"
-          class="queue-bar"
-          @click="queueExpanded = !queueExpanded"
-        >
-          <view class="queue-bar__left">
-            <up-icon name="clock" size="14" color="#2979ff"></up-icon>
-            <text class="queue-bar__text">待发送 {{ draftQueue.length }}</text>
-          </view>
-          <up-icon
-            :name="queueExpanded ? 'arrow-up' : 'arrow-down'"
-            size="12"
-            :color="upThemeVar('--up-light-color', '#c0c4cc')"
-          ></up-icon>
-        </view>
-
-        <view v-if="queueExpanded && draftQueue.length > 0" class="queue-panel">
-          <view v-for="item in draftQueue" :key="item.id" class="queue-item">
-            <view class="queue-item__body">
-              <text class="queue-item__text u-line-2">{{ draftSummary(item) }}</text>
-              <view class="queue-item__meta">
-                <text :class="['queue-item__status', `queue-item__status--${item.status}`]">
-                  {{ queueStatusText(item.status) }}
-                </text>
-                <text class="queue-item__time">{{ formatQueueTime(item.createdAt) }}</text>
-              </view>
-            </view>
-            <view class="queue-item__actions">
-              <view class="queue-op" @click.stop="removeDraft(item.id)">移除</view>
-              <view
-                v-if="item.status !== 'sending'"
-                class="queue-op queue-op--primary"
-                @click.stop="sendQueuedDraft(item.id)"
-              >
-                发送
-              </view>
-            </view>
-          </view>
-        </view>
-
-        <view
-          v-if="showSharedPromptQueue"
-          class="shared-queue-bar"
-          @click="sharedPromptQueueExpanded = !sharedPromptQueueExpanded"
-        >
-          <view class="shared-queue-bar__left">
-            <up-icon name="order" size="14" :color="upThemeVar('--up-primary', '#2979ff')"></up-icon>
-            <view class="shared-queue-bar__copy">
-              <text class="shared-queue-bar__title">{{ sharedPromptQueueHeaderText }}</text>
-              <text class="shared-queue-bar__summary u-line-1">{{ sharedPromptQueueSummaryText }}</text>
-            </view>
-          </view>
-          <up-icon
-            :name="sharedPromptQueueExpanded ? 'arrow-up' : 'arrow-down'"
-            size="12"
-            :color="upThemeVar('--up-light-color', '#c0c4cc')"
-          ></up-icon>
-        </view>
-
-        <view v-if="sharedPromptQueueExpanded && showSharedPromptQueue" class="shared-queue-panel">
-          <view class="shared-queue-panel__header">
-            <text class="shared-queue-panel__hint">等待 Desktop 当前任务完成后执行</text>
-            <view
-              class="shared-queue-clear"
-              :class="{ 'shared-queue-clear--disabled': sharedPromptQueueClearDisabled }"
-              @click.stop="clearSharedPromptQueue"
-            >
-              {{ clearingSharedPromptQueue ? "清空中" : "清空" }}
-            </view>
-          </view>
-          <view
-            v-for="(item, index) in sharedPromptQueueItems"
-            :key="item.queueItemId || index"
-            class="shared-queue-item"
-          >
-            <view class="shared-queue-item__position">
-              {{ sharedPromptQueuePositionLabel(item, index) }}
-            </view>
-            <view class="shared-queue-item__body">
-              <text class="shared-queue-item__text u-line-2">
-                {{ sharedPromptQueueItemPreview(item) }}
-              </text>
-              <view class="shared-queue-item__meta">
-                <text>{{ sharedPromptQueueItemSource(item, localRelayClientId) }}</text>
-                <text v-if="item.createdAtMs">{{ formatQueueTime(Number(item.createdAtMs)) }}</text>
-                <text class="shared-queue-item__priority">{{ sharedPromptQueuePriorityLabel(item) }}</text>
-              </view>
-            </view>
-            <view v-if="session?.connectionId && item.queueItemId && sharedPromptQueueControlsEnabled" class="shared-queue-item__controls">
-              <view
-                class="shared-queue-op shared-queue-op--compact"
-                :class="{ 'shared-queue-op--disabled': (item.queuePosition ?? 1) <= 1 || reorderingSharedQueueItemIds.has(item.queueItemId) }"
-                @click.stop="reorderSharedPromptQueueItem(item.queueItemId, item.sessionId, 'move_up')"
-              >
-                上移
-              </view>
-              <view
-                class="shared-queue-op shared-queue-op--compact"
-                :class="{ 'shared-queue-op--disabled': (item.queuePosition ?? 1) >= sharedPromptQueueItems.length || reorderingSharedQueueItemIds.has(item.queueItemId) }"
-                @click.stop="reorderSharedPromptQueueItem(item.queueItemId, item.sessionId, 'move_down')"
-              >
-                下移
-              </view>
-              <view
-                class="shared-queue-op shared-queue-op--compact"
-                :class="{ 'shared-queue-op--disabled': updatingSharedQueuePriorityItemIds.has(item.queueItemId) || item.priorityTier === 'high' }"
-                @click.stop="updateSharedPromptQueuePriority(item.queueItemId, item.sessionId, 'high')"
-              >
-                高
-              </view>
-              <view
-                class="shared-queue-op shared-queue-op--compact"
-                :class="{ 'shared-queue-op--disabled': updatingSharedQueuePriorityItemIds.has(item.queueItemId) || item.priorityTier === 'normal' }"
-                @click.stop="updateSharedPromptQueuePriority(item.queueItemId, item.sessionId, 'normal')"
-              >
-                中
-              </view>
-              <view
-                class="shared-queue-op shared-queue-op--compact"
-                :class="{ 'shared-queue-op--disabled': updatingSharedQueuePriorityItemIds.has(item.queueItemId) || item.priorityTier === 'low' }"
-                @click.stop="updateSharedPromptQueuePriority(item.queueItemId, item.sessionId, 'low')"
-              >
-                低
-              </view>
-            </view>
-            <view
-              v-if="session?.connectionId && item.queueItemId"
-              class="shared-queue-op"
-              :class="{ 'shared-queue-op--disabled': isSharedPromptQueueCancelDisabled(item.queueItemId, cancellingSharedQueueItemIds) }"
-              @click.stop="cancelSharedPromptQueueItem(item.queueItemId, item.sessionId)"
-            >
-              {{ isSharedPromptQueueCancelDisabled(item.queueItemId, cancellingSharedQueueItemIds) ? "取消中" : "取消" }}
-            </view>
-          </view>
-        </view>
-
-        <view class="input-main-row">
-          <view
-            class="tool-toggle-btn"
-            :class="{ 'tool-toggle-btn--active': showInputToolRow }"
-            @click="toggleInputToolRow"
-          >
-            <up-icon
-              :name="showInputToolRow ? 'close' : 'plus'"
-              size="18"
-              :color="showInputToolRow ? upThemeVar('--up-primary', '#2979ff') : upThemeVar('--up-content-color', '#606266')"
-            ></up-icon>
-          </view>
-
-          <view class="input-box">
-            <up-textarea
-              class="composer-textarea"
-              v-model="inputText"
-              placeholder="发送消息，输入 / 调出命令"
-              autoHeight
-              fixed
-              :cursor="composerCursorProp"
-              :maxlength="10000"
-              border="none"
-              height="34rpx"
-              :customStyle="{ backgroundColor: 'transparent', background: 'transparent', padding: '0', borderColor: 'transparent' }"
-              @input="handleComposerInput"
-              @blur="handleComposerBlur"
-              @linechange="handleComposerLayoutChange"
-              @keyboardheightchange="handleComposerLayoutChange"
-            ></up-textarea>
-          </view>
-
-          <view
-            class="send-btn"
-            :class="{ 'send-btn--active': canSend, 'send-btn--loading': sending }"
-            @click="sendMessage"
-          >
-            <up-loading-icon v-if="sending" color="#ffffff" size="20"></up-loading-icon>
-            <up-icon v-else name="arrow-up" size="22" color="#ffffff"></up-icon>
-          </view>
-        </view>
-
-        <view v-if="showInputToolRow" class="input-tool-row">
-          <view class="input-tool-btn" @click="handleChooseImages">
-            <view class="input-tool-btn__icon">
-              <up-icon name="photo" size="20" :color="upThemeVar('--up-content-color', '#606266')"></up-icon>
-            </view>
-          </view>
-
-          <view class="input-tool-btn" @click="handleChooseFiles">
-            <view class="input-tool-btn__icon">
-              <up-icon name="file-text" size="20" :color="upThemeVar('--up-content-color', '#606266')"></up-icon>
-            </view>
-          </view>
-
-          <view
-            :class="['input-tool-btn', composerPanelMode === 'quick_reply' && 'input-tool-btn--active']"
-            @click="toggleComposerPanel('quick_reply')"
-          >
-            <view class="input-tool-btn__icon">
-              <up-icon name="share" size="20" :color="upThemeVar('--up-content-color', '#606266')"></up-icon>
-            </view>
-          </view>
-
-          <view
-            :class="['input-tool-btn', composerPanelMode === 'config' && 'input-tool-btn--active']"
-            @click="toggleComposerPanel('config')"
-          >
-            <view class="input-tool-btn__icon">
-              <up-icon name="setting" size="20" :color="upThemeVar('--up-content-color', '#606266')"></up-icon>
-            </view>
-          </view>
-
-          <view
-            class="input-tool-btn input-tool-btn--danger"
-            :class="{ 'input-tool-btn--disabled': !canStopSession || stoppingSession }"
-            @click.stop="confirmStopSession()"
-          >
-            <view class="input-tool-btn__icon">
-              <up-loading-icon
-                v-if="stoppingSession"
-                mode="circle"
-                size="16"
-                color="#f56c6c"
-              ></up-loading-icon>
-              <view v-else class="input-tool-btn__stop-mark"></view>
-            </view>
-          </view>
-
-        </view>
-
-        <view v-if="showComposerPanel" class="composer-panel" :style="upThemeCardStyle">
-          <view v-if="composerPanelMode === 'quick_reply'" class="composer-panel__body composer-panel__body--quick">
-            <view
-              v-for="item in quickReplyItems"
-              :key="item.value"
-              class="composer-quick-chip"
-              @click="sendQuickReply(item.value)"
-            >
-              <text class="composer-quick-chip__text">{{ item.label }}</text>
-            </view>
-          </view>
-
-          <scroll-view v-else scroll-y class="composer-panel__scroll">
-            <view class="composer-panel__scroll-content">
-              <view class="composer-panel__section">
-                <text class="composer-panel__section-title">模型配置</text>
-                <view
-                  :class="['composer-config-row', !modelOption && 'composer-config-row--disabled']"
-                  @click="toggleConfigRow('model')"
-                >
-                  <text class="composer-config-row__label">模型</text>
-                  <text class="composer-config-row__value">{{ modelSummary }}</text>
-                </view>
-                <view
-                  v-if="expandedConfigKey === 'model' && modelOption"
-                  class="config-chip-grid"
-                >
-                  <view
-                    v-for="value in modelOption?.kind.options || []"
-                    :key="value.value"
-                    :class="[
-                      'config-chip',
-                      detailAgentConfig.selectedValues[modelOption?.id || ''] === value.value && 'config-chip--active',
-                    ]"
-                    @click.stop="selectDetailConfigValue(modelOption?.id || '', value.value)"
-                  >
-                    <text class="config-chip__title">{{ value.name }}</text>
-                  </view>
-                </view>
-
-                <view
-                  :class="['composer-config-row', !reasoningOption && 'composer-config-row--disabled']"
-                  @click="toggleConfigRow('reasoning')"
-                >
-                  <text class="composer-config-row__label">推理强度</text>
-                  <text class="composer-config-row__value">{{ reasoningSummary }}</text>
-                </view>
-                <view
-                  v-if="expandedConfigKey === 'reasoning' && reasoningOption"
-                  class="config-chip-grid"
-                >
-                  <view
-                    v-for="value in reasoningOption?.kind.options || []"
-                    :key="value.value"
-                    :class="[
-                      'config-chip',
-                      detailAgentConfig.selectedValues[reasoningOption?.id || ''] === value.value && 'config-chip--active',
-                    ]"
-                    @click.stop="selectDetailConfigValue(reasoningOption?.id || '', value.value)"
-                  >
-                    <text class="config-chip__title">{{ value.name }}</text>
-                  </view>
-                </view>
-
-                <view
-                  :class="['composer-config-row', !hasPermissionOptions && 'composer-config-row--disabled']"
-                  @click="toggleConfigRow('permission')"
-                >
-                  <text class="composer-config-row__label">授权类型</text>
-                  <text class="composer-config-row__value">{{ permissionSummary }}</text>
-                </view>
-                <view
-                  v-if="expandedConfigKey === 'permission' && detailAgentConfig.modes?.available_modes?.length"
-                  class="config-chip-grid"
-                >
-                  <view
-                    v-for="mode in detailAgentConfig.modes?.available_modes || []"
-                    :key="mode.id"
-                    :class="['config-chip', detailAgentConfig.selectedModeId === mode.id && 'config-chip--active']"
-                    @click.stop="selectDetailMode(mode.id)"
-                  >
-                    <text class="config-chip__title">{{ mode.name }}</text>
-                  </view>
-                </view>
-                <view
-                  v-else-if="expandedConfigKey === 'permission' && permissionOption"
-                  class="config-chip-grid"
-                >
-                  <view
-                    v-for="value in permissionOption?.kind.options || []"
-                    :key="value.value"
-                    :class="[
-                      'config-chip',
-                      detailAgentConfig.selectedValues[permissionOption?.id || ''] === value.value && 'config-chip--active',
-                    ]"
-                    @click.stop="selectDetailConfigValue(permissionOption?.id || '', value.value)"
-                  >
-                    <text class="config-chip__title">{{ value.name }}</text>
-                  </view>
-                </view>
-              </view>
-            </view>
-          </scroll-view>
-        </view>
-
-        <view v-if="showNetworkReachabilityFeedback" class="input-feedback input-feedback--floating input-feedback--network">
-          <up-icon name="error-circle" size="14" color="#fa8c16"></up-icon>
-          <text class="input-feedback__text">{{ networkReachabilityFeedbackText }}</text>
-        </view>
-
-        <view v-if="showRuntimeRetryFeedback" class="input-feedback input-feedback--floating input-feedback--retry">
-          <up-loading-icon mode="circle" size="14" color="#fa8c16"></up-loading-icon>
-          <text class="input-feedback__text">{{ runtimeRetryText }}</text>
-        </view>
-
-        <view v-if="showRuntimeErrorFeedback" class="input-feedback input-feedback--floating input-feedback--error">
-          <up-icon name="close-circle-fill" size="14" color="#fa3534"></up-icon>
-          <view class="input-feedback__body">
-            <text class="input-feedback__label">发送失败</text>
-            <text class="input-feedback__text">{{ runtimeErrorText }}</text>
-          </view>
-        </view>
-        </template>
-            </ConversationDetailBody>
 
             <ConversationDetailInteractivePane
-              v-else-if="shouldRenderDetailTabPage(index)"
+              v-if="shouldRenderDetailTabPage(index)"
               :conversation-id="tab.conversationId"
               :folder-id="tab.folderId"
               :agent-type="tab.agentType"
@@ -1089,9 +320,7 @@ import { toErrorMessage } from "@/services/gateway/error"
 import { syncIosStandaloneStatusBar } from "@/services/iosStandaloneStatusBar"
 import { ensureConversationSchema } from "@/services/db/migrations"
 import {
-  countConversationTurns,
   getConversationSummaryById,
-  getOlderTurns,
   getNewestTurns,
   markConversationSummaryDeleted,
   patchConversationSummaryStatus,
@@ -1185,7 +414,6 @@ import type {
 import type { RelaySessionInfo } from "@/services/gateway"
 import type { RemoteInstanceDescriptor } from "@/services/realtime/types"
 import MessageBubble from "@/components/MessageBubble.vue"
-import ConversationDetailBody from "./ConversationDetailBody.vue"
 import ConversationDetailCyberRain from "./ConversationDetailCyberRain.vue"
 import ConversationDetailSweetBubbles from "./ConversationDetailSweetBubbles.vue"
 import ConversationDetailSummerAtmosphere from "./ConversationDetailSummerAtmosphere.vue"
@@ -1229,6 +457,7 @@ import {
   getTurnContentParts,
   isConversationDraftSnapshotEmpty,
   mapPersistedTurnToMessage,
+  normalizeTurns,
   normalizeAgentType,
   normalizeConversationDraftSnapshot,
   normalizeList,
@@ -1238,6 +467,11 @@ import {
   type QueuedDraft,
   type UploadedAttachment,
 } from "./detailDataNormalization"
+import {
+  DEFAULT_CONVERSATION_HISTORY_PAGE_SIZE,
+  buildTailHistoryRequest,
+  requireConversationHistoryWindow,
+} from "./detailHistoryPaging"
 import {
   buildQuestionAnswer as buildPendingQuestionAnswer,
   createQuestionSelectionState,
@@ -1289,15 +523,10 @@ import {
 } from "./detailStatusPresentation"
 import {
   bottomAnchorId,
-  getOldestCursorFromPersistedTurns,
   messageAnchorId as buildMessageAnchorId,
-  resolveInitialTurnLimit as resolveInitialTurnLimitValue,
-  resolveNearBottomState,
   resolveRenderAnchorId as resolveRenderAnchorIdValue,
   resolveScrollRestoreAction,
   resolveViewportSyncAction,
-  restoreHistoryCursorFromCache as restoreHistoryCursorValueFromCache,
-  type HistoryPageCursor,
 } from "./detailScrollState"
 import {
   buildHistoryStatusStyle,
@@ -1437,10 +666,6 @@ const pageThemeClasses = computed(() => [
   detailTheme.value === "summer" && `page--summer-${cyberEffectPhase.value}`,
 ].filter(Boolean))
 
-const INITIAL_TURN_BATCH = 20
-const INITIAL_TURN_EXPAND_BATCH = 30
-const INITIAL_TURN_MAX_BATCH = 200
-const INITIAL_USER_TURN_TARGET = 8
 const PROMPT_START_TIMEOUT_MS = 4000
 const STUCK_PROMPT_TIMEOUT_MS = 3 * 60 * 1000
 const ENABLE_STUCK_PROMPT_DETECTION = false
@@ -1505,9 +730,6 @@ const lastMeasuredScrollTop = ref(0)
 const anchorMessageId = ref("")
 const shouldAutoFollowBottom = ref(true)
 const hasUnreadBelow = ref(false)
-const loadingOlder = ref(false)
-const hasMoreHistory = ref(false)
-const oldestLoadedCursor = ref<HistoryPageCursor | null>(null)
 const attachments = ref<UploadedAttachment[]>([])
 const uploadQueue = ref<UploadQueueItem[]>([])
 const draftQueue = ref<QueuedDraft[]>([])
@@ -1546,12 +768,10 @@ const activeDetailTabIndex = detailActiveTabIndex
 const hasLoadedOnce = ref(false)
 const needsResumeRefresh = ref(false)
 const hasRestoredDraftState = ref(false)
-const HISTORY_LOADING_MIN_MS = 480
 const permissionSubmitting = ref(false)
 const pendingPermissionSubmittingOptionId = ref("")
 const questionSubmitting = ref(false)
 const askQuestionSelections = ref<Record<string, QuestionSelectionState>>({})
-const cachedOldestLoadedSortKey = ref<number | null>(null)
 const forceRemoteTurnReconcileOnLoad = ref(false)
 let detailAgentProbeToken = 0
 let stuckPromptTimer: ReturnType<typeof setTimeout> | null = null
@@ -1822,11 +1042,6 @@ const showDetailBackgroundImage = computed(() =>
 )
 const hasDetailBackgroundImage = computed(() => showDetailBackgroundImage.value)
 
-const historyStatusText = computed(() => {
-  if (loadingOlder.value) return "历史加载中..."
-  if (messages.value.length > 0 && !hasMoreHistory.value) return "没有更多历史了"
-  return ""
-})
 const toolbarNoticeItems = computed(() => {
   const items: Array<{ key: string; text: string }> = []
   if (sharedLiveHint.value) {
@@ -2474,8 +1689,6 @@ function captureActiveDetailLocalState() {
   state.anchorMessageId = anchorMessageId.value
   state.shouldAutoFollowBottom = shouldAutoFollowBottom.value
   state.hasUnreadBelow = hasUnreadBelow.value
-  state.hasMoreHistory = hasMoreHistory.value
-  state.oldestLoadedCursor = oldestLoadedCursor.value
   state.showPlanDrawer = showPlanDrawer.value
   state.questionSubmitting = questionSubmitting.value
   state.permissionSubmitting = permissionSubmitting.value
@@ -2497,8 +1710,6 @@ function restoreDetailLocalState(tab: DetailShellTabItem | null | undefined) {
   anchorMessageId.value = state.anchorMessageId || ""
   shouldAutoFollowBottom.value = state.shouldAutoFollowBottom !== false
   hasUnreadBelow.value = Boolean(state.hasUnreadBelow)
-  hasMoreHistory.value = Boolean(state.hasMoreHistory)
-  oldestLoadedCursor.value = state.oldestLoadedCursor || null
   messageScrollWithAnimation.value = false
   messageScrollIntoView.value = ""
   messageScrollTop.value = Number(state.lastMeasuredScrollTop || state.pageScrollTop || 0)
@@ -2567,7 +1778,7 @@ async function ensureMountedDetailTabRuntime(tab: DetailShellTabItem | null | un
       ? await getRuntime(instanceKey, targetConversationId).catch(() => null)
       : null
     if (runtimeSession.localTurns.length === 0) {
-      const localTurns = await getNewestTurns(targetConversationId, INITIAL_TURN_BATCH).catch(() => [])
+      const localTurns = await getNewestTurns(targetConversationId, DEFAULT_CONVERSATION_HISTORY_PAGE_SIZE).catch(() => [])
       if (localTurns.length > 0) {
         runtimeSession.localTurns = localTurns
           .slice()
@@ -2587,7 +1798,13 @@ async function ensureMountedDetailTabRuntime(tab: DetailShellTabItem | null | un
     if (runtimeSession.localTurns.length === 0) {
       remoteDetail = await fetchRemoteConversationDetailById(targetConversationId).catch(() => null)
       if (remoteDetail) {
-        runtime.applyConversationDetailStats(targetConversationId, remoteDetail)
+        await applyRemoteHistoryWindowDetail({
+          instanceKey,
+          conversationId: targetConversationId,
+          folderId: Number(tab?.folderId || 0),
+          detail: remoteDetail,
+          runtimeSession,
+        })
         const metadata = getRemoteConversationMetadata(remoteDetail, agentType, resumeSessionId)
         agentType = metadata.agentType
         resumeSessionId = metadata.resumeSessionId
@@ -2596,24 +1813,6 @@ async function ensureMountedDetailTabRuntime(tab: DetailShellTabItem | null | un
             ...detailTabTitleMap.value,
             [targetConversationId]: metadata.title,
           }
-        }
-        await persistConversationDetailSnapshot({
-          instanceKey,
-          conversationId: targetConversationId,
-          detail: remoteDetail,
-          fallbackFolderId: Number(tab?.folderId || 0),
-        }).catch((error) => {
-          console.warn("persist mounted detail tab snapshot skipped", error)
-        })
-        const refreshedTurns = await getNewestTurnsWithUserCoverage(
-          targetConversationId,
-          INITIAL_TURN_BATCH
-        ).catch(() => [])
-        if (refreshedTurns.length > 0) {
-          runtimeSession.localTurns = refreshedTurns
-            .slice()
-            .reverse()
-            .map(mapPersistedTurnToMessage)
         }
       }
     }
@@ -3795,7 +2994,6 @@ function syncRouteAuthContext() {
 async function hydrateLocalConversationState(input: {
   instanceKey: string
   conversationId: number
-  initialTurnLimit: number
   hasHotRuntime: boolean
 }) {
   let localSummary: Awaited<ReturnType<typeof getConversationSummaryById>> | null = null
@@ -3816,7 +3014,7 @@ async function hydrateLocalConversationState(input: {
     if (!input.hasHotRuntime) {
       localTurns = await getNewestTurns(
         input.conversationId,
-        Math.min(input.initialTurnLimit, INITIAL_TURN_BATCH)
+        DEFAULT_CONVERSATION_HISTORY_PAGE_SIZE
       )
     }
   } catch (error) {
@@ -3853,16 +3051,57 @@ function getRemoteConversationMetadata(
 
 async function fetchRemoteConversationDetail(targetConversationId = conversationId.value) {
   const gateway = await getDetailGateway({ refreshAuth: true })
-  return await gateway.call<any>("get_folder_conversation", {
-    conversationId: targetConversationId,
-  })
+  return await gateway.call<any>(
+    "get_folder_conversation",
+    buildTailHistoryRequest(targetConversationId)
+  )
 }
 
 async function fetchRemoteConversationDetailById(targetConversationId: number) {
   const gateway = await getDetailGateway({ refreshAuth: true })
-  return await gateway.call<any>("get_folder_conversation", {
-    conversationId: targetConversationId,
-  })
+  return await gateway.call<any>(
+    "get_folder_conversation",
+    buildTailHistoryRequest(targetConversationId)
+  )
+}
+
+async function applyRemoteHistoryWindowDetail(input: {
+  instanceKey: string
+  conversationId: number
+  folderId: number
+  detail: any
+  runtimeSession: ReturnType<typeof runtime.getOrCreateSession>
+}) {
+  const historyWindow = requireConversationHistoryWindow(input.detail)
+  applyRemoteDetailStats(input.detail, input.conversationId)
+  runtime.setConversationHistoryWindow(input.conversationId, historyWindow)
+
+  const preserveRuntimeTurns =
+    hasInFlightConversationDetail(input.detail) ||
+    hasVolatileRuntimeState(input.runtimeSession) ||
+    Boolean(input.runtimeSession.inFlightUserTurnId)
+
+  if (!preserveRuntimeTurns) {
+    input.runtimeSession.localTurns = normalizeTurns(input.detail?.turns)
+  }
+
+  try {
+    await persistConversationDetailSnapshot({
+      instanceKey: input.instanceKey,
+      conversationId: input.conversationId,
+      detail: input.detail,
+      fallbackFolderId: input.folderId,
+      persistTurns: !preserveRuntimeTurns,
+    })
+  } catch (error) {
+    detailDebugLog("history-window-persist-failed", {
+      conversationId: input.conversationId,
+      message: toErrorMessage(error),
+    })
+    console.warn("persist remote history window skipped", error)
+  }
+
+  return historyWindow
 }
 
 async function hydrateRemoteConversationMetadata(input: {
@@ -3908,26 +3147,6 @@ async function hydrateRemoteConversationMetadata(input: {
   } catch (error) {
     console.warn("remote conversation metadata hydrate skipped", error)
     return input
-  }
-}
-
-async function persistInitialRemoteDetail(input: {
-  instanceKey: string
-  conversationId: number
-  folderId: number
-  detail: any
-}) {
-  try {
-    detailDebugLog("initial-remote-detail", summarizeDetailTurns(input.detail))
-    await persistConversationDetailSnapshot({
-      instanceKey: input.instanceKey,
-      conversationId: input.conversationId,
-      detail: input.detail,
-      fallbackFolderId: input.folderId,
-    })
-  } catch (error) {
-    detailDebugLog("initial-persist-failed", { message: toErrorMessage(error) })
-    console.warn("persist remote conversation detail skipped", error)
   }
 }
 
@@ -4018,7 +3237,6 @@ async function loadConversation() {
   restoredInitialScroll.value = false
   hasRestoredDraftState.value = false
   const cachedViewState = cacheStore.restore(targetConversationId)
-  cachedOldestLoadedSortKey.value = Number(cachedViewState?.oldestLoadedSeq || 0) || null
   let persistedRuntime: ConversationRuntimeRecord | null = null
   let initialLoadFinished = false
   const finishInitialLoad = (
@@ -4040,17 +3258,12 @@ async function loadConversation() {
   }
   try {
     const runtimeSession = runtime.getOrCreateSession(targetConversationId)
-    const initialTurnLimit = resolveInitialTurnLimit(
-      cachedViewState,
-      runtimeSession.localTurns.length
-    )
     const managed = connectionSessionManager.getByConversationId(targetConversationId)
     const hasHotRuntime = hasRenderableRuntimeState(runtimeSession)
 
     const localState = await hydrateLocalConversationState({
       instanceKey,
       conversationId: targetConversationId,
-      initialTurnLimit,
       hasHotRuntime,
     })
     const localSummary = localState.localSummary
@@ -4090,11 +3303,6 @@ async function loadConversation() {
     }
 
     if (hasHotRuntime) {
-      if (isActiveLoad()) {
-        oldestLoadedCursor.value =
-          restoreHistoryCursorFromCache(cachedViewState) ?? oldestLoadedCursor.value
-        hasMoreHistory.value = cachedViewState?.hasMoreHistory ?? hasMoreHistory.value
-      }
       finishInitialLoad(cachedViewState, persistedRuntime)
       if (shouldForceRemoteTurnReconcile) {
         void reconcileRemoteTurnsAfterResume({
@@ -4102,33 +3310,30 @@ async function loadConversation() {
           folderId: targetFolderId,
           instanceKey,
           runtimeSession,
-          cachedViewState,
-          limit: initialTurnLimit,
         })
       }
     } else if (localTurns.length > 0) {
-      const totalLocalTurnCount = await countConversationTurns(targetConversationId)
       runtimeSession.localTurns = localTurns
         .slice()
         .reverse()
         .map(mapPersistedTurnToMessage)
-      if (isActiveLoad()) {
-        oldestLoadedCursor.value = getOldestCursorFromPersistedTurns(localTurns)
-        hasMoreHistory.value = totalLocalTurnCount > localTurns.length
-      }
       finishInitialLoad(cachedViewState, persistedRuntime)
       void reconcileRemoteTurnsAfterLocalHydrate({
         conversationId: targetConversationId,
         folderId: targetFolderId,
         instanceKey,
         runtimeSession,
-        cachedViewState,
-        limit: initialTurnLimit,
       })
     } else {
       await hydrateRemoteMetadata()
       const result = remoteDetail || await fetchRemoteConversationDetail(targetConversationId)
-      applyRemoteDetailStats(result, targetConversationId)
+      await applyRemoteHistoryWindowDetail({
+        instanceKey,
+        conversationId: targetConversationId,
+        folderId: targetFolderId,
+        detail: result,
+        runtimeSession,
+      })
       const metadata = getRemoteConversationMetadata(result)
       if (isActiveLoad()) {
         syncConversationTitle(metadata.title)
@@ -4143,19 +3348,6 @@ async function loadConversation() {
       if (isActiveLoad()) {
         currentAgentType.value = normalizeAgentType(agentType)
       }
-      await persistInitialRemoteDetail({
-        instanceKey,
-        conversationId: targetConversationId,
-        folderId: targetFolderId,
-        detail: result,
-      })
-
-      await refreshSessionTurnsFromDb({
-        conversationId: targetConversationId,
-        runtimeSession,
-        cachedViewState,
-        limit: initialTurnLimit,
-      })
       finishInitialLoad(cachedViewState, persistedRuntime)
     }
 
@@ -4404,123 +3596,31 @@ function resumeStuckPromptDetection() {
   handleLiveActivityChange(runtimeStatus.value, conversationActivitySignature.value)
 }
 
-async function refreshSessionTurnsFromDb(input: {
-  conversationId: number
-  runtimeSession: ReturnType<typeof runtime.getOrCreateSession>
-  cachedViewState: ReturnType<typeof cacheStore.restore>
-  limit?: number
-}) {
-  const limit = input.limit ?? resolveInitialTurnLimit(input.cachedViewState)
-  const refreshedTurns = await getNewestTurnsWithUserCoverage(input.conversationId, limit)
-  const totalTurnCount = await countConversationTurns(input.conversationId)
-  detailDebugLog("db-refresh", {
-    limit,
-    count: refreshedTurns.length,
-    totalCount: totalTurnCount,
-    newestTurnId: refreshedTurns[0]?.id ?? null,
-    oldestTurnId: refreshedTurns[refreshedTurns.length - 1]?.id ?? null,
-    newestSeq: refreshedTurns[0]?.seq ?? null,
-    oldestSeq: refreshedTurns[refreshedTurns.length - 1]?.seq ?? null,
-  })
-  if (refreshedTurns.length === 0) {
-    input.runtimeSession.localTurns = []
-    if (isCurrentDetailTarget(input)) {
-      oldestLoadedCursor.value = null
-      hasMoreHistory.value = false
-    }
-    return
-  }
-
-  input.runtimeSession.localTurns = refreshedTurns
-    .slice()
-    .reverse()
-    .map(mapPersistedTurnToMessage)
-  if (isCurrentDetailTarget(input)) {
-    oldestLoadedCursor.value = getOldestCursorFromPersistedTurns(refreshedTurns)
-    hasMoreHistory.value = totalTurnCount > refreshedTurns.length
-  }
-}
-
 async function reconcileRemoteTurnsAfterLocalHydrate(input: {
   conversationId: number
   folderId: number
   instanceKey: string
   runtimeSession: ReturnType<typeof runtime.getOrCreateSession>
-  cachedViewState: ReturnType<typeof cacheStore.restore>
-  limit: number
 }) {
   if (!input.conversationId) return
   if (hasVolatileRuntimeState(input.runtimeSession)) return
 
   try {
-    const gateway = await getDetailGateway()
-    const result = await gateway.call<any>("get_folder_conversation", {
-      conversationId: input.conversationId,
-    })
-    applyRemoteDetailStats(result, input.conversationId)
-    detailDebugLog("local-hydrate-remote-reconcile", summarizeDetailTurns(result))
-    if (hasInFlightConversationDetail(result) || hasVolatileRuntimeState(input.runtimeSession)) {
-      await persistConversationDetailSnapshot({
-        instanceKey: input.instanceKey,
-        conversationId: input.conversationId,
-        detail: result,
-        fallbackFolderId: input.folderId,
-        persistTurns: false,
-      })
-      return
-    }
-    await persistConversationDetailSnapshot({
+    const result = await fetchRemoteConversationDetail(input.conversationId)
+    await applyRemoteHistoryWindowDetail({
       instanceKey: input.instanceKey,
       conversationId: input.conversationId,
+      folderId: input.folderId,
       detail: result,
-      fallbackFolderId: input.folderId,
+      runtimeSession: input.runtimeSession,
     })
-    await refreshSessionTurnsFromDb(input)
+    detailDebugLog("local-hydrate-remote-reconcile", summarizeDetailTurns(result))
   } catch (error) {
     detailDebugLog("local-hydrate-remote-reconcile-failed", {
       message: toErrorMessage(error),
     })
     console.warn("reconcile remote turns after local hydrate skipped", error)
   }
-}
-
-async function getNewestTurnsWithUserCoverage(
-  targetConversationId: number,
-  limit: number
-) {
-  let turns = await getNewestTurns(targetConversationId, limit)
-  if (turns.length === 0) return turns
-
-  const userTurnCount = (items: PersistedTurnWithParts[]) =>
-    items.filter((item) => String(item.role || "") === "user").length
-
-  let oldestCursor = getOldestCursorFromPersistedTurns(turns)
-  while (
-    oldestCursor != null &&
-    turns.length < INITIAL_TURN_MAX_BATCH &&
-    userTurnCount(turns) < INITIAL_USER_TURN_TARGET
-  ) {
-    const remaining = INITIAL_TURN_MAX_BATCH - turns.length
-    const batchSize = Math.min(INITIAL_TURN_EXPAND_BATCH, remaining)
-    const older = await getOlderTurns(targetConversationId, oldestCursor, batchSize)
-    if (older.length === 0) break
-    turns = [...turns, ...older]
-    oldestCursor = getOldestCursorFromPersistedTurns(turns)
-    if (older.length < batchSize) break
-  }
-
-  return turns
-}
-
-function resolveInitialTurnLimit(
-  cachedViewState: ReturnType<typeof cacheStore.restore>,
-  currentLoadedCount = 0
-) {
-  return resolveInitialTurnLimitValue({
-    cachedLoadedTurnCount: cachedViewState?.loadedTurnCount,
-    currentLoadedCount,
-    minimumBatch: INITIAL_TURN_BATCH,
-  })
 }
 
 function summarizeDetailTurns(detail: any) {
@@ -4629,9 +3729,6 @@ function persistDetailRuntimeState() {
   })
   cacheStore.persistViewState({
     conversationId: conversationId.value,
-    loadedTurnCount: messages.value.length,
-    oldestLoadedSeq: oldestLoadedCursor.value?.sortKey ?? undefined,
-    hasMoreHistory: hasMoreHistory.value,
     scrollAnchor: anchorMessageId.value || undefined,
     scrollTop: lastMeasuredScrollTop.value || pageScrollTop.value || 0,
     nearBottom: shouldAutoFollowBottom.value,
@@ -4690,23 +3787,6 @@ function persistDetailThemePreference(theme: DetailThemeId) {
   } catch (error) {
     console.warn("persist cyber mode preference skipped", error)
   }
-}
-
-function restoreHistoryCursorFromCache(
-  cachedViewState: ReturnType<typeof cacheStore.restore>
-): HistoryPageCursor | null {
-  return restoreHistoryCursorValueFromCache({
-    oldestLoadedSeq: cachedViewState?.oldestLoadedSeq,
-    firstMessageId: messages.value[0]?.id,
-  })
-}
-
-function ensureHistoryCursorFromLoadedMessages() {
-  if (oldestLoadedCursor.value) return
-  const sortKey = cachedOldestLoadedSortKey.value
-  const firstMessageId = messages.value[0]?.id || ""
-  if (!sortKey || !firstMessageId) return
-  oldestLoadedCursor.value = { sortKey, id: firstMessageId }
 }
 
 function buildDetailBackgroundStorageKey() {
@@ -4988,43 +4068,6 @@ function measureMessageListHeight() {
     })
 }
 
-async function loadOlderTurns() {
-  ensureHistoryCursorFromLoadedMessages()
-  if (loadingOlder.value || !hasMoreHistory.value || oldestLoadedCursor.value == null) return
-  const startedAt = Date.now()
-  loadingOlder.value = true
-  try {
-    const older = await getOlderTurns(conversationId.value, oldestLoadedCursor.value, 20)
-    if (older.length === 0) {
-      hasMoreHistory.value = false
-      return
-    }
-    const runtimeSession = runtime.getOrCreateSession(conversationId.value)
-    const firstVisibleMessageId = resolveRenderAnchorId(messages.value[0]?.id || anchorMessageId.value || "")
-    runtimeSession.localTurns = [
-      ...older.slice().reverse().map(mapPersistedTurnToMessage),
-      ...runtimeSession.localTurns,
-    ]
-    oldestLoadedCursor.value = getOldestCursorFromPersistedTurns(older)
-    const totalTurnCount = await countConversationTurns(conversationId.value)
-    hasMoreHistory.value = totalTurnCount > runtimeSession.localTurns.length
-    if (firstVisibleMessageId) {
-      nextTick(() => {
-        setProgrammaticAnchor(firstVisibleMessageId)
-      })
-    }
-  } catch (error) {
-    console.warn("load older turns skipped", error)
-    hasMoreHistory.value = false
-  } finally {
-    const elapsed = Date.now() - startedAt
-    if (elapsed < HISTORY_LOADING_MIN_MS) {
-      await new Promise((resolve) => setTimeout(resolve, HISTORY_LOADING_MIN_MS - elapsed))
-    }
-    loadingOlder.value = false
-  }
-}
-
 function scrollToBottom(force = false) {
   if (!renderMessageItems.value.length) return
   if (!force && !shouldAutoFollowBottom.value) return
@@ -5282,36 +4325,6 @@ function mentionKindShortLabel(kind: MentionReferenceKind) {
   return "G"
 }
 
-function handleMessageListScroll(event: any) {
-  const scrollTopValue = Math.max(0, Number(event?.detail?.scrollTop || 0))
-  const scrollHeight = Math.max(0, Number(event?.detail?.scrollHeight || 0))
-  const deltaY = Math.max(0, Number(event?.detail?.deltaY || 0))
-  const currentViewportHeight = Math.max(0, Number(event?.detail?.height || 0))
-  pageScrollTop.value = scrollTopValue
-  lastMeasuredScrollTop.value = scrollTopValue
-  const nearBottomState = resolveNearBottomState({
-    scrollTop: scrollTopValue,
-    scrollHeight,
-    viewportHeight: currentViewportHeight,
-    fallbackViewportHeight: Math.max(0, detailViewportHeight.value - topChromeHeight.value),
-  })
-  if (nearBottomState.canMeasure) {
-    shouldAutoFollowBottom.value = nearBottomState.nearBottom
-    if (shouldAutoFollowBottom.value) {
-      hasUnreadBelow.value = false
-      const tail = renderMessageItems.value[renderMessageItems.value.length - 1]
-      anchorMessageId.value = tail?.anchorId || ""
-    }
-  }
-  if (deltaY < 0 && scrollTopValue <= 120) {
-    void loadOlderTurns()
-  }
-}
-
-function handleMessageListScrollUpper() {
-  void loadOlderTurns()
-}
-
 function handleScrollToBottomFab() {
   shouldAutoFollowBottom.value = true
   hasUnreadBelow.value = false
@@ -5495,35 +4508,19 @@ async function reconcileRemoteTurnsAfterResume(input: {
   folderId: number
   instanceKey: string
   runtimeSession: ReturnType<typeof runtime.getOrCreateSession>
-  cachedViewState: ReturnType<typeof cacheStore.restore>
-  limit: number
 }) {
   if (!input.conversationId) return
 
   try {
-    const gateway = await getDetailGateway({ refreshAuth: true })
-    const result = await gateway.call<any>("get_folder_conversation", {
-      conversationId: input.conversationId,
-    })
-    applyRemoteDetailStats(result, input.conversationId)
-    detailDebugLog("resume-remote-reconcile", summarizeDetailTurns(result))
-    if (hasInFlightConversationDetail(result) || hasVolatileRuntimeState(input.runtimeSession)) {
-      await persistConversationDetailSnapshot({
-        instanceKey: input.instanceKey,
-        conversationId: input.conversationId,
-        detail: result,
-        fallbackFolderId: input.folderId,
-        persistTurns: false,
-      })
-      return
-    }
-    await persistConversationDetailSnapshot({
+    const result = await fetchRemoteConversationDetail(input.conversationId)
+    await applyRemoteHistoryWindowDetail({
       instanceKey: input.instanceKey,
       conversationId: input.conversationId,
+      folderId: input.folderId,
       detail: result,
-      fallbackFolderId: input.folderId,
+      runtimeSession: input.runtimeSession,
     })
-    await refreshSessionTurnsFromDb(input)
+    detailDebugLog("resume-remote-reconcile", summarizeDetailTurns(result))
   } catch (error) {
     detailDebugLog("resume-remote-reconcile-failed", {
       message: toErrorMessage(error),

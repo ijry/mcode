@@ -2,9 +2,6 @@ import { defineStore } from "pinia"
 
 export interface CachedConversationViewState {
   conversationId: number
-  loadedTurnCount: number
-  oldestLoadedSeq?: number
-  hasMoreHistory: boolean
   scrollAnchor?: string
   scrollTop?: number
   nearBottom?: boolean

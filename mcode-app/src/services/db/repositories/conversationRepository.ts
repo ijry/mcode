@@ -152,16 +152,23 @@ export async function getNewestTurns(conversationId: number, limit: number) {
   return await hydrateTurnsWithParts(turns)
 }
 
-export async function countConversationTurns(conversationId: number) {
-  const rows = await sqliteDriver.query<{ total?: number }>(
-    `
-      SELECT COUNT(*) as total
-      FROM conversation_turns
-      WHERE conversation_id = ?
-    `,
-    [conversationId]
-  )
-  return Number(rows[0]?.total || 0)
+export async function replaceCompletedTurns(
+  conversationId: number,
+  inputs: PersistedTurnRecord[]
+) {
+  await sqliteDriver.transaction(async () => {
+    await sqliteDriver.execute(
+      "DELETE FROM conversation_parts WHERE conversation_id = ?",
+      [conversationId]
+    )
+    await sqliteDriver.execute(
+      "DELETE FROM conversation_turns WHERE conversation_id = ?",
+      [conversationId]
+    )
+    for (const input of inputs) {
+      await upsertCompletedTurn(input)
+    }
+  })
 }
 
 export async function countCachedConversationData() {
@@ -186,38 +193,6 @@ export async function clearCachedConversationData() {
     await sqliteDriver.execute(`DELETE FROM conversations`)
     await sqliteDriver.execute(`DELETE FROM folders`)
   })
-}
-
-export async function getOlderTurns(
-  conversationId: number,
-  before: { sortKey: number; id: string },
-  limit = 20
-) {
-  const turns = await sqliteDriver.query<PersistedTurnRow>(
-    `
-      SELECT
-        id,
-        conversation_id as conversationId,
-        instance_key as instanceKey,
-        dedupe_key as dedupeKey,
-        role,
-        created_at as createdAt,
-        seq,
-        COALESCE(seq, created_at) as sortKey,
-        status,
-        version
-      FROM conversation_turns
-      WHERE conversation_id = ?
-        AND (
-          COALESCE(seq, created_at) < ?
-          OR (COALESCE(seq, created_at) = ? AND id < ?)
-        )
-      ORDER BY COALESCE(seq, created_at) DESC, id DESC
-      LIMIT ?
-    `,
-    [conversationId, before.sortKey, before.sortKey, before.id, limit]
-  )
-  return await hydrateTurnsWithParts(turns)
 }
 
 export async function upsertConversationSummary(input: ConversationSummaryRecord) {

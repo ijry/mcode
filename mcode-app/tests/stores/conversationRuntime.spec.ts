@@ -55,7 +55,6 @@ jest.mock('@/services/db/migrations', () => ({
 
 jest.mock('@/services/db/repositories/conversationRepository', () => ({
   getNewestTurns: jest.fn(() => []),
-  getOlderTurns: jest.fn(() => []),
   insertCompletedTurn: jest.fn(),
 }))
 
@@ -1845,7 +1844,6 @@ describe('conversationRuntime ACP error handling', () => {
       await store.completeTurn(1)
 
       expect(repo.getNewestTurns).toHaveBeenCalledWith(1, 10)
-      expect(repo.getOlderTurns).not.toHaveBeenCalled()
     } finally {
       repo.getNewestTurns.mockReturnValue([])
     }

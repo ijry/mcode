@@ -1,6 +1,5 @@
 import type { DetailShellTabItem } from "./detailTabsPresentation"
 import type { QueuedDraft, UploadedAttachment } from "./detailDataNormalization"
-import type { HistoryPageCursor } from "./detailScrollState"
 
 export interface DetailTabState {
   tab: DetailShellTabItem
@@ -17,8 +16,6 @@ export interface DetailTabState {
   anchorMessageId: string
   shouldAutoFollowBottom: boolean
   hasUnreadBelow: boolean
-  hasMoreHistory: boolean
-  oldestLoadedCursor: HistoryPageCursor | null
   showPlanDrawer: boolean
   questionSubmitting: boolean
   permissionSubmitting: boolean
@@ -40,8 +37,6 @@ export function createDetailTabState(tab: DetailShellTabItem): DetailTabState {
     anchorMessageId: "",
     shouldAutoFollowBottom: true,
     hasUnreadBelow: false,
-    hasMoreHistory: false,
-    oldestLoadedCursor: null,
     showPlanDrawer: false,
     questionSubmitting: false,
     permissionSubmitting: false,

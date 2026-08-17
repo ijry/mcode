@@ -28,11 +28,11 @@ describe("detailTabState", () => {
       anchorMessageId: "",
       shouldAutoFollowBottom: true,
       hasUnreadBelow: false,
-      hasMoreHistory: false,
-      oldestLoadedCursor: null,
       showPlanDrawer: false,
       questionSubmitting: false,
       permissionSubmitting: false,
     }))
+    expect(state).not.toHaveProperty("hasMoreHistory")
+    expect(state).not.toHaveProperty("oldestLoadedCursor")
   })
 })
