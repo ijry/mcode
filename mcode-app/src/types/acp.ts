@@ -407,6 +407,19 @@ export interface UploadAttachmentResult {
   url?: string
 }
 
+export interface ConversationHistoryWindow {
+  turns_offset: number
+  turns_total: number
+  assistant_turns_before_offset: number
+  prefix_hash: string
+  uncovered_prefix_max_ts?: number | null
+}
+
+export interface ConversationTurnsPage extends ConversationHistoryWindow {
+  turns: MessageTurn[]
+  prefix_hash_before_index: string
+}
+
 export interface ConversationDetail {
   id: number
   folderId: number
