@@ -245,6 +245,43 @@ describe('conversationRuntime ACP error handling', () => {
     expect(store.getOrCreateSession(1).status).toBe('connected')
   })
 
+  it('invalidates a matching stale connection before reconnecting', () => {
+    const manager = require('@/services/conversation/connectionSessionManager')
+    const sync = require('@/services/conversation/conversationSyncService')
+    const store = useConversationRuntimeStore()
+    const session = store.getOrCreateSession(1)
+    session.connectionId = 'conn-stale'
+    session.status = 'connected'
+    store.connections.set('conn-stale', {
+      id: 'conn-stale',
+      agentType: 'claude_code',
+      sessionId: 'sess-1',
+      status: 'connected',
+      capabilities: [],
+    })
+
+    expect(store.invalidateConnection(1, 'conn-stale')).toBe(true)
+
+    expect(sync.detachConversationRealtime).toHaveBeenCalledWith(1)
+    expect(sync.unbindConversationEventHandler).toHaveBeenCalledWith(1)
+    expect(manager.connectionSessionManager.clearConversation).toHaveBeenCalledWith(1)
+    expect(store.connections.has('conn-stale')).toBe(false)
+    expect(session.connectionId).toBeNull()
+    expect(session.status).toBe('idle')
+  })
+
+  it('does not invalidate a connection replaced by another connection', () => {
+    const manager = require('@/services/conversation/connectionSessionManager')
+    const store = useConversationRuntimeStore()
+    const session = store.getOrCreateSession(1)
+    session.connectionId = 'conn-current'
+
+    expect(store.invalidateConnection(1, 'conn-stale')).toBe(false)
+
+    expect(manager.connectionSessionManager.clearConversation).not.toHaveBeenCalled()
+    expect(session.connectionId).toBe('conn-current')
+  })
+
   it('routes fresh connect discovery through the provided instance key', async () => {
     const acp = require('@/api/acp')
     const manager = require('@/services/conversation/connectionSessionManager')

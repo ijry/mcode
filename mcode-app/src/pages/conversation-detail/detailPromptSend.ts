@@ -16,6 +16,12 @@ export interface SendAttemptResult {
   error?: string
 }
 
+export interface PromptConnectionRecoveryResult<T> {
+  connectionId: string
+  response: T
+  recovered: boolean
+}
+
 export interface PromptStartWatchSessionLike {
   status?: string
   liveMessage?: {
@@ -57,6 +63,35 @@ export function isQueuedPromptResponse(response: unknown) {
   const record = response as Record<string, unknown>
   const status = typeof record.status === "string" ? record.status.trim() : ""
   return status === "queued" || record.queued === true
+}
+
+export function isConnectionNotFoundError(message: string) {
+  return /connection\s+not\s+found/i.test(message)
+}
+
+export async function sendPromptWithConnectionRecovery<T>(input: {
+  connectionId: string
+  send: (connectionId: string) => Promise<T>
+  reconnect: (staleConnectionId: string) => Promise<string>
+}): Promise<PromptConnectionRecoveryResult<T>> {
+  try {
+    return {
+      connectionId: input.connectionId,
+      response: await input.send(input.connectionId),
+      recovered: false,
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error || "")
+    if (!isConnectionNotFoundError(message)) throw error
+  }
+
+  const connectionId = await input.reconnect(input.connectionId)
+  if (!connectionId) throw new Error("重新连接代理失败")
+  return {
+    connectionId,
+    response: await input.send(connectionId),
+    recovered: true,
+  }
 }
 
 export function buildPromptStartWatchSignature(

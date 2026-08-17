@@ -888,6 +888,7 @@ import {
   buildPromptStartWatchSignature,
   findLatestOptimisticTurnId,
   isQueuedPromptResponse,
+  sendPromptWithConnectionRecovery,
   resolveDraftSendFailure,
   resolvePromptStartSnapshotOutcome,
   resolvePromptStartTimeoutFailure,
@@ -2158,14 +2159,14 @@ async function readLocalImageBase64(filePath: string): Promise<string> {
   })
 }
 
-async function ensureConversationReadyForSend() {
+async function ensureConversationReadyForSend(resumeSessionId?: string) {
   const existingConnectionId = firstString(session.value.connectionId)
   if (existingConnectionId) return existingConnectionId
   const recovered = await runtime.connect(
     Number(props.conversationId || 0),
     normalizedAgentType.value || "claude_code",
     undefined,
-    undefined,
+    resumeSessionId,
     session.value.lastAppliedSeq ?? undefined,
     firstString(props.instanceKey) || undefined
   )
@@ -2198,17 +2199,30 @@ async function sendDraft(draft: QueuedDraft): Promise<boolean> {
     )
     scheduleViewportSync(true)
 
-    const promptResponse = await acpApi.acpPrompt(
-      conn,
-      payload.blocks,
-      Number(props.folderId || 0),
-      Number(props.conversationId || 0)
-    )
+    const { connectionId: promptConnectionId, response: promptResponse } =
+      await sendPromptWithConnectionRecovery({
+        connectionId: conn,
+        send: (connectionId) => acpApi.acpPrompt(
+          connectionId,
+          payload.blocks,
+          Number(props.folderId || 0),
+          Number(props.conversationId || 0)
+        ),
+        reconnect: async (staleConnectionId) => {
+          const managed = runtime.getManagedConversation(Number(props.conversationId || 0))
+          const resumeSessionId = firstString(
+            managed?.externalId,
+            managed?.connection.sessionId
+          )
+          runtime.invalidateConnection(Number(props.conversationId || 0), staleConnectionId)
+          return await ensureConversationReadyForSend(resumeSessionId || undefined)
+        },
+      })
     if (isQueuedPromptResponse(promptResponse)) {
       runtime.removeOptimisticUserMessage(Number(props.conversationId || 0), optimisticTurnId)
       runtime.clearLiveMessage(Number(props.conversationId || 0))
       runtime.handleEventForConversation(Number(props.conversationId || 0), {
-        connectionId: conn,
+        connectionId: promptConnectionId,
         type: "turn_queued",
         data: promptResponse,
       } as any)

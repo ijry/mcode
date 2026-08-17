@@ -940,6 +940,25 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     }
   }
 
+  function invalidateConnection(conversationId: number, expectedConnectionId?: string) {
+    const session = sessions.value.get(conversationId)
+    if (!session?.connectionId) return false
+    if (expectedConnectionId && session.connectionId !== expectedConnectionId) return false
+
+    const connectionId = session.connectionId
+    detachConversationRealtime(conversationId)
+    unbindConversationEventHandler(conversationId)
+    connections.value.delete(connectionId)
+    connectionSessionManager.clearConversation(conversationId)
+    session.connectionId = null
+    session.inputErrorMessage = null
+    session.apiRetry = null
+    if (!isSharedInProgressStatus(session.status)) {
+      session.status = "idle"
+    }
+    return true
+  }
+
   /**
    * 清理会话
    */
@@ -1104,6 +1123,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     hydrateLiveSnapshot,
     connect,
     disconnect,
+    invalidateConnection,
     clearSession,
     releasePreviewSession,
     clearCachedSessionState,

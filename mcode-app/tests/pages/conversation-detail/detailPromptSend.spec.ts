@@ -2,11 +2,13 @@ import {
   buildDraftSendPayload,
   buildPromptStartWatchSignature,
   findLatestOptimisticTurnId,
+  isConnectionNotFoundError,
   isQueuedPromptResponse,
   resolvePromptStartSnapshotOutcome,
   resolvePromptStartTimeoutFailure,
   resolvePromptStartWatchOutcome,
   resolveDraftSendFailure,
+  sendPromptWithConnectionRecovery,
 } from "@/pages/conversation-detail/detailPromptSend"
 import type { QueuedDraft, UploadedAttachment } from "@/pages/conversation-detail/detailDataNormalization"
 
@@ -83,6 +85,68 @@ describe("detailPromptSend", () => {
       error: "网络异常",
       toastTitle: "发送失败: 网络异常",
     })
+  })
+
+  it("recognizes only ACP missing-connection errors as recoverable", () => {
+    expect(isConnectionNotFoundError(
+      "acp_prompt: connection not found: eb16fb12-a8bd-4e5b-a498-9fbbf64c232f"
+    )).toBe(true)
+    expect(isConnectionNotFoundError("CONNECTION NOT FOUND: conn-1")).toBe(true)
+    expect(isConnectionNotFoundError("network request failed")).toBe(false)
+    expect(isConnectionNotFoundError("connection already in use")).toBe(false)
+  })
+
+  it("reconnects and retries a prompt once after a missing connection", async () => {
+    const send = jest.fn()
+      .mockRejectedValueOnce(new Error("acp_prompt: connection not found: conn-old"))
+      .mockResolvedValueOnce({ status: "ok" })
+    const reconnect = jest.fn().mockResolvedValue("conn-new")
+
+    await expect(sendPromptWithConnectionRecovery({
+      connectionId: "conn-old",
+      send,
+      reconnect,
+    })).resolves.toEqual({
+      connectionId: "conn-new",
+      response: { status: "ok" },
+      recovered: true,
+    })
+
+    expect(reconnect).toHaveBeenCalledWith("conn-old")
+    expect(send).toHaveBeenNthCalledWith(1, "conn-old")
+    expect(send).toHaveBeenNthCalledWith(2, "conn-new")
+  })
+
+  it("does not retry prompts for non-recoverable errors", async () => {
+    const error = new Error("network request failed")
+    const send = jest.fn().mockRejectedValue(error)
+    const reconnect = jest.fn()
+
+    await expect(sendPromptWithConnectionRecovery({
+      connectionId: "conn-old",
+      send,
+      reconnect,
+    })).rejects.toThrow(error)
+
+    expect(reconnect).not.toHaveBeenCalled()
+    expect(send).toHaveBeenCalledTimes(1)
+  })
+
+  it("stops after the single retry when the recovered connection also fails", async () => {
+    const error = new Error("acp_prompt: connection not found: conn-new")
+    const send = jest.fn()
+      .mockRejectedValueOnce(new Error("acp_prompt: connection not found: conn-old"))
+      .mockRejectedValueOnce(error)
+    const reconnect = jest.fn().mockResolvedValue("conn-new")
+
+    await expect(sendPromptWithConnectionRecovery({
+      connectionId: "conn-old",
+      send,
+      reconnect,
+    })).rejects.toThrow(error)
+
+    expect(reconnect).toHaveBeenCalledTimes(1)
+    expect(send).toHaveBeenCalledTimes(2)
   })
 
   it("accepts queued prompt responses", () => {

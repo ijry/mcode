@@ -1342,6 +1342,7 @@ import {
   buildPromptStartWatchSignature,
   findLatestOptimisticTurnId,
   isQueuedPromptResponse,
+  sendPromptWithConnectionRecovery,
   resolvePromptStartSnapshotOutcome,
   resolvePromptStartTimeoutFailure,
   resolvePromptStartWatchOutcome,
@@ -5531,7 +5532,7 @@ async function reconcileRemoteTurnsAfterResume(input: {
   }
 }
 
-async function ensureConversationReadyForSend() {
+async function ensureConversationReadyForSend(resumeSessionId?: string) {
   const connectionId = firstString(session.value?.connectionId)
   if (connectionId) return connectionId
   if (!conversationId.value) {
@@ -5542,7 +5543,7 @@ async function ensureConversationReadyForSend() {
     conversationId.value,
     currentAgentType.value || "claude_code",
     undefined,
-    undefined,
+    resumeSessionId,
     session.value?.lastAppliedSeq ?? undefined,
     resolveDetailInstanceKey()
   )
@@ -5720,12 +5721,25 @@ async function sendDraft(draft: QueuedDraft): Promise<boolean> {
         throw new Error("该会话已被其他端重新接管，请等待当前轮结束后再发送")
       }
     }
-    const promptResponse = await acpApi.acpPrompt(conn, blocks, folderId.value, conversationId.value)
+    const { connectionId: promptConnectionId, response: promptResponse } =
+      await sendPromptWithConnectionRecovery({
+        connectionId: conn,
+        send: (connectionId) =>
+          acpApi.acpPrompt(connectionId, blocks, folderId.value, conversationId.value),
+        reconnect: async (staleConnectionId) => {
+          const resumeSessionId = firstString(
+            managedConversation.value?.externalId,
+            managedConversation.value?.connection.sessionId
+          )
+          runtime.invalidateConnection(conversationId.value, staleConnectionId)
+          return await ensureConversationReadyForSend(resumeSessionId || undefined)
+        },
+      })
     if (isQueuedPromptResponse(promptResponse)) {
       runtime.removeOptimisticUserMessage(conversationId.value, optimisticTurnId)
       runtime.clearLiveMessage(conversationId.value)
       runtime.handleEventForConversation(conversationId.value, {
-        connectionId: conn,
+        connectionId: promptConnectionId,
         type: "turn_queued",
         data: promptResponse,
       } as any)
