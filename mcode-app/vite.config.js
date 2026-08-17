@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs"
 import path from "node:path"
 import { defineConfig } from "vite"
 import uniPlugin from "@dcloudio/vite-plugin-uni"
@@ -6,13 +7,17 @@ import UniUpRoot from "uview-plus/libs/root/index.js";
 
 const uni = uniPlugin?.default || uniPlugin
 const alias = []
+const localUviewPlusSource = path.resolve(
+  "D:/Repos/xyito/open/uview-plus/src/uni_modules/uview-plus",
+)
 
-if (process.env.UNI_PLATFORM === "h5" || process.env.UNI_PLATFORM === "app") {
+if (
+  (process.env.UNI_PLATFORM === "h5" || process.env.UNI_PLATFORM === "app") &&
+  existsSync(localUviewPlusSource)
+) {
   alias.push({
     find: "uview-plus",
-    replacement: path.resolve(
-      "D:/Repos/xyito/open/uview-plus/src/uni_modules/uview-plus",
-    ),
+    replacement: localUviewPlusSource,
   })
 }
 
