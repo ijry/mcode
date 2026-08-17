@@ -1,10 +1,8 @@
 <template>
   <view class="tool-group">
     <view
-      :class="[
-        'tool-group__summary',
-        translucent && 'tool-group__summary--translucent',
-      ]"
+      class="tool-group__summary"
+      :class="translucent && 'tool-group__summary--translucent'"
       @click="toggleExpanded"
     >
       <view class="tool-group__left">
@@ -137,7 +135,6 @@ function classifyToolCall(toolCall: ToolCall): "command" | "file_change" | "netw
 
 .tool-group__summary--translucent {
   background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 36%, transparent 64%);
-  border: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 32%, transparent 68%);
 }
 
 .tool-group__left {

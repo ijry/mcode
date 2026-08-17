@@ -21,6 +21,9 @@ describe("P48 conversation detail tool call status styles", () => {
     expect(source).toMatch(/\.tool-group__summary\s*\{[\s\S]*background: color-mix\(in srgb, var\(--up-hover-bg-color, var\(--up-bg-color, #f3f4f6\)\) 60%, var\(--up-card-bg-color, #ffffff\) 40%\);/)
     expect(source).toMatch(/\.tool-group__body\s*\{[\s\S]*width: 100%;/)
     expect(source).not.toMatch(/\.tool-group__summary\s*\{[\s\S]*border:/)
+    const translucentSummaryRule = source.match(/\.tool-group__summary--translucent\s*\{[\s\S]*?\n\}/)?.[0] || ""
+    expect(translucentSummaryRule).toContain("background:")
+    expect(translucentSummaryRule).not.toContain("border:")
     expect(source).not.toMatch(/\.tool-group__summary\s*\{[\s\S]*\.tool-group__label[\s\S]*var\(--up-primary/)
     expect(source).not.toContain("&--completed { background: #8f9bb3; }")
   })
