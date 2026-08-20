@@ -121,7 +121,7 @@
 
                 <view v-else-if="group.cards.length === 0" class="group-empty">
                   <text class="group-empty__text">
-                    {{ group.loadError || "暂无打开中的标签会话" }}
+                    {{ group.loadError || "暂无打开中或 24 小时内活跃的会话" }}
                   </text>
                 </view>
 
@@ -174,8 +174,12 @@
                     </view>
 
                     <view class="live-card__side">
-                      <view :class="['status-chip', `status-chip--${statusClass(card.displayStatus)}` ]">
-                        <text class="status-chip__text">{{ statusLabel(card.displayStatus) }}</text>
+                      <view class="live-card__badges">
+                        <!-- 列表已改为纯按时间排序，「PC 上开着」只能靠这枚角标表达。 -->
+                        <text v-if="card.isOpenTab" class="live-card__tab-flag">标签</text>
+                        <view :class="['status-chip', `status-chip--${statusClass(card.displayStatus)}` ]">
+                          <text class="status-chip__text">{{ statusLabel(card.displayStatus) }}</text>
+                        </view>
                       </view>
                       <text class="live-card__stamp">{{ formatTime(card.updatedAt) }}</text>
                     </view>
@@ -651,6 +655,7 @@ import {
 import {
   consumeConversationListDirty,
   markConversationListDirty,
+  shouldRefetchAfterBridgeRecovered,
 } from "@/services/conversation/conversationListRefresh"
 import {
   readConversationListLiveStreamEnabled,
@@ -668,11 +673,7 @@ import {
   ensureConversationTab,
   normalizeOpenedTabsList,
 } from "@/services/conversation/pcTabSyncService"
-import {
-  applyConversationTabBarBadge,
-  fetchOngoingActiveSessionCount,
-  getOngoingActiveSessionCount,
-} from "@/services/conversation/tabbarActiveSessions"
+import { refreshConversationTabBadge } from "@/services/conversation/conversationTabBadgeService"
 import {
   buildConnectionConversationSnapshot,
   mapConversationSummaryRecordToConversation,
@@ -687,8 +688,10 @@ import {
   formatHistoryConversationMeta,
 } from "@/pages/conversations/historyPresentation"
 import { normalizeConversationSummaryStatus } from "@/services/conversation/conversationSummaryStatus"
+import { METADATA_ONLY_CONVERSATION_TAIL_TURNS } from "@/services/conversation/conversationHistoryWindowContract"
 import {
   listConversationSummaries,
+  markMissingConversationSummariesDeleted,
   upsertConversationSummary,
   upsertConversationSummaries,
 } from "@/services/db/repositories/conversationRepository"
@@ -698,6 +701,7 @@ import type {
   AgentOptionsSnapshot,
   AcpAgentInfo,
   ConnectionInfo,
+  RealtimeBridgeHealth,
   SessionConfigOptionInfo,
   SessionModeStateInfo,
 } from "@/types/acp"
@@ -739,7 +743,6 @@ const connectionFolderSnapshotMap = new Map<string, Project[]>()
 const connectionTabSnapshotMap = new Map<string, OpenedTabItem[]>()
 const instanceConnectionKeyMap = new Map<string, string>()
 const connectionInstanceKeyMap = new Map<string, string>()
-const activeSessionBadgeCountMap = new Map<string, number>()
 const loadingCreateAgents = ref(false)
 const createAgentListError = ref("")
 let createAgentProbeToken = 0
@@ -747,6 +750,11 @@ let createAgentListToken = 0
 let disposeOverviewInvalidation: (() => void) | null = null
 const disposeOpenedTabsChangedMap = new Map<string, () => void>()
 const disposeActiveSessionsChangedMap = new Map<string, () => void>()
+const disposeBridgeHealthMap = new Map<string, () => void>()
+const disposeBulkChangedMap = new Map<string, () => void>()
+// 上一次看到的桥接状态，按实例记。用来区分「首连」与「重连」——
+// health 里的 reconnectAttempt 在发出前已被归零，指望不上。
+const lastBridgeStateMap = new Map<string, RealtimeBridgeHealth["state"]>()
 const activeSessionsRefreshTimerMap = new Map<string, ReturnType<typeof setTimeout>>()
 const ACTIVE_SESSIONS_REFRESH_DEBOUNCE_MS = 400
 let activeCreateRequestId = ""
@@ -754,7 +762,6 @@ let activeCreateRequestFingerprint = ""
 let activeCreateConversationId = 0
 let activeCreatePromptAttempted = false
 let createProgressTimer: ReturnType<typeof setInterval> | null = null
-let activeSessionBadgeRefreshPromise: Promise<void> | null = null
 const livePreviewEnabled = ref(false)
 const livePreviewPageVisible = ref(false)
 const livePreviewOwnedConversationIds = new Set<number>()
@@ -821,8 +828,10 @@ interface LiveSessionCard {
   agentType: string
   title: string
   updatedAt?: string
+  activityAt: number
   status: string
   isActive: boolean
+  isOpenTab: boolean
 }
 
 interface DisplayLiveSessionCard extends LiveSessionCard {
@@ -1450,6 +1459,11 @@ onUnload(() => {
   disposeOpenedTabsChangedMap.clear()
   disposeActiveSessionsChangedMap.forEach((dispose) => dispose())
   disposeActiveSessionsChangedMap.clear()
+  disposeBridgeHealthMap.forEach((dispose) => dispose())
+  disposeBridgeHealthMap.clear()
+  disposeBulkChangedMap.forEach((dispose) => dispose())
+  disposeBulkChangedMap.clear()
+  lastBridgeStateMap.clear()
   activeSessionsRefreshTimerMap.forEach((timer) => clearTimeout(timer))
   activeSessionsRefreshTimerMap.clear()
   if (livePreviewReconcileTimer) {
@@ -1476,7 +1490,7 @@ onPullDownRefresh(() => {
   }
 
   loadOverviewDataAfterConnectionPrepare({ force: true }).finally(() => {
-    void refreshActiveSessionTabBadge()
+    void refreshConversationTabBadge()
     uni.stopPullDownRefresh()
   })
 })
@@ -1491,7 +1505,7 @@ onShow(() => {
   ).finally(() => {
     scheduleLivePreviewReconcile()
   })
-  void refreshActiveSessionTabBadge()
+  void refreshConversationTabBadge()
 })
 
 function loadConversationLivePreviewPreference() {
@@ -1766,10 +1780,11 @@ async function loadOverviewDataInternal() {
       connectionGroups.value = []
       showHistoryPanel.value = false
       projects.value = []
-      activeSessionBadgeCountMap.clear()
       connectionInstanceKeyMap.clear()
       livePreviewTransferredConversationIds.clear()
-      void applyConversationTabBarBadge(0)
+      // 角标归 `conversationTabBadgeService` 管，这里只是通知它重算一次
+      // （它自己会发现已无连接并清零）。
+      void refreshConversationTabBadge()
       return
     }
     const connectedMap = readConnectedMap()
@@ -1832,6 +1847,8 @@ async function loadConnectionGroup(conn: ConnectionItem): Promise<ConnectionGrou
   })
   ensureOpenedTabsSubscription(descriptor.instanceKey)
   ensureActiveSessionsSubscription(descriptor.instanceKey)
+  ensureBridgeRecoverySubscription(descriptor.instanceKey)
+  ensureBulkChangedSubscription(descriptor.instanceKey)
   const foldersRaw = await gateway.call<unknown>("list_open_folder_details")
   const folders = normalizeList(foldersRaw) as Project[]
   const tabsRaw = await gateway.call<unknown>("list_opened_tabs")
@@ -1925,12 +1942,19 @@ async function loadLocalConversationSummaries(
 async function loadRemoteConnectionSnapshot(
   conn: ConnectionItem,
   folders: Project[],
-  tabs: OpenedTabItem[]
+  tabs: OpenedTabItem[],
+  options?: { reconcile?: boolean }
 ): Promise<ConnectionGroup> {
   const gateway = await createConnectionGateway(conn)
   const descriptor = gateway.getRemoteInstanceDescriptor()
   const remoteConversations = await fetchRemoteConversations(gateway, folders)
-  await persistConversationSummaries(descriptor.instanceKey, remoteConversations)
+  await persistConversationSummaries(descriptor.instanceKey, remoteConversations, {
+    // 对账范围严格等于本次请求过的 folder：`fetchRemoteConversations` 就是拿
+    // `folders.map(f => f.id)` 当 `folderIds` 的，响应只对它们权威。
+    reconcileFolderIds: options?.reconcile
+      ? folders.map((folder) => Number(folder.id)).filter((id) => Number.isFinite(id) && id > 0)
+      : undefined,
+  })
   return buildConnectionGroupSnapshot({
     conn,
     folders,
@@ -1939,7 +1963,11 @@ async function loadRemoteConnectionSnapshot(
   })
 }
 
-async function refreshConnectionGroupFromRemote(conn: ConnectionItem, current: ConnectionGroup) {
+async function refreshConnectionGroupFromRemote(
+  conn: ConnectionItem,
+  current: ConnectionGroup,
+  options?: { reconcile?: boolean }
+) {
   const gateway = await createConnectionGateway(conn)
   const descriptor = gateway.getRemoteInstanceDescriptor()
   void ensureGlobalConversationSync(descriptor.instanceKey).catch((error) => {
@@ -1947,14 +1975,49 @@ async function refreshConnectionGroupFromRemote(conn: ConnectionItem, current: C
   })
   ensureOpenedTabsSubscription(descriptor.instanceKey)
   ensureActiveSessionsSubscription(descriptor.instanceKey)
+  ensureBridgeRecoverySubscription(descriptor.instanceKey)
+  ensureBulkChangedSubscription(descriptor.instanceKey)
   const foldersRaw = await gateway.call<unknown>("list_open_folder_details")
   const folders = normalizeList(foldersRaw) as Project[]
   const tabsRaw = await gateway.call<unknown>("list_opened_tabs")
   const tabsSnapshot = normalizeOpenedTabsResponse(descriptor.instanceKey, tabsRaw)
   const tabs = tabsSnapshot.items
   rememberConnectionRemoteState(connectionKey(conn), descriptor.instanceKey, folders, tabs)
-  const nextGroup = await loadRemoteConnectionSnapshot(conn, folders, tabs)
+  const nextGroup = await loadRemoteConnectionSnapshot(conn, folders, tabs, {
+    reconcile: options?.reconcile,
+  })
   replaceConnectionGroup(nextGroup)
+}
+
+/**
+ * 重连 / 批量变更后的**权威重取**：一次把 folder、标签、会话全部拉回来，并对账掉远端
+ * 已经不存在的本地摘要。
+ *
+ * 走 `refreshConnectionGroupFromRemote` 而不是 `refreshOverviewFromRemoteByInstance`，
+ * 原因有三：后者在页面不可见时直接早退、缓存缺失时静默 bail，而且它复用**缓存的**
+ * folders/tabs —— 而 `folder://changed` 客户端从未订阅，断线期间 PC 上新开/关闭的
+ * folder 只有重拉 `list_open_folder_details` 才能发现。
+ *
+ * 也刻意不走 `loadOverviewData({ force: true })`：那个入口的 `overviewLoadPromise`
+ * 是 promise 共享而非队列，force 撞上正在飞的非强制加载时会被静默吞掉。
+ */
+async function refreshConnectionGroupAuthoritative(instanceKey: string, reason: string) {
+  if (!instanceKey) return
+
+  const mappedConnKey = instanceConnectionKeyMap.get(instanceKey) || ""
+  if (!mappedConnKey) return
+  const conn = findConnectedConnectionByKey(mappedConnKey)
+  if (!conn) return
+  const current = connectionGroups.value.find(
+    (group) => connectionKey(group.connection) === mappedConnKey
+  )
+  if (!current) return
+
+  try {
+    await refreshConnectionGroupFromRemote(conn, current, { reconcile: true })
+  } catch (error) {
+    console.warn("authoritative conversation refresh skipped:", { instanceKey, reason, error })
+  }
 }
 
 async function refreshConnectionGroupFromLocalCache(instanceKey: string) {
@@ -2070,7 +2133,8 @@ async function scheduleOverviewConversationRefresh(input: {
 
 async function persistConversationSummaries(
   instanceKey: string,
-  conversations: Conversation[]
+  conversations: Conversation[],
+  options?: { reconcileFolderIds?: number[] }
 ) {
   try {
     await ensureConversationSchema()
@@ -2079,15 +2143,66 @@ async function persistConversationSummaries(
         mapConversationToSummaryRecord(instanceKey, conversation)
       )
     )
+    await reconcileMissingConversationSummaries(
+      instanceKey,
+      conversations,
+      options?.reconcileFolderIds
+    )
   } catch (error) {
     console.warn("persist conversation summaries skipped:", error)
   }
 }
 
+/**
+ * 把远端**没有返回**的会话在本地打墓碑。只有「权威重取」路径会传
+ * `reconcileFolderIds` —— 实时推送路径绝不能传。
+ *
+ * 单条 `conversation://changed` 事件不携带「该 folder 的全集」，拿它对账等于按一条
+ * 消息删掉整个 folder。所以这里只认调用方显式给出的 folder 列表，且那个列表必须正是
+ * 本次 `list_all_conversations` 请求过的 `folderIds`（响应只对这些 folder 权威）。
+ */
+async function reconcileMissingConversationSummaries(
+  instanceKey: string,
+  conversations: Conversation[],
+  reconcileFolderIds?: number[]
+) {
+  if (!Array.isArray(reconcileFolderIds) || reconcileFolderIds.length === 0) return
+
+  for (const rawFolderId of reconcileFolderIds) {
+    const folderId = Number(rawFolderId)
+    if (!Number.isFinite(folderId) || folderId <= 0) continue
+
+    const presentIds = conversations
+      .filter((conversation) => Number(conversation.folder_id) === folderId)
+      .map((conversation) => Number(conversation.id))
+      .filter((id) => Number.isFinite(id) && id > 0)
+
+    try {
+      const removed = await markMissingConversationSummariesDeleted({
+        instanceKey,
+        folderId,
+        presentIds,
+      })
+      if (removed > 0) {
+        console.info("[conversation-list] reconciled stale summaries", {
+          instanceKey,
+          folderId,
+          removed,
+        })
+      }
+    } catch (error) {
+      console.warn("reconcile conversation summaries skipped:", error)
+    }
+  }
+}
+
 function toConnectionGroup(snapshot: ConnectionConversationSnapshot): ConnectionGroup {
+  // 顺序完全由 `buildConnectionConversationSnapshot` 定（纯按活跃时间降序）。
+  // 这里曾经写成 `[...openTabCards, ...recentActiveCards]`，于是一个几天前的标签会被
+  // 钉在 5 分钟前的会话上面 —— 用户看到的就是「24H 顺序不对」。
   return {
     ...snapshot,
-    cards: [...snapshot.openTabCards, ...snapshot.recentActiveCards],
+    cards: snapshot.cards,
   }
 }
 
@@ -2138,11 +2253,17 @@ function ensureOpenedTabsSubscription(instanceKey: string) {
   disposeOpenedTabsChangedMap.set(instanceKey, unsubscribe)
 }
 
+/**
+ * 页面侧只关心「有会话在跑 → 顺带刷新列表」。
+ *
+ * **角标不再由这里维护** —— 它归 `conversationTabBadgeService`（由 App.vue 启动）。
+ * 原先角标的订阅活在本页生命周期里，而 App 冷启动落在「连接」页，本页可能整个会话期间
+ * 都没挂载过，角标于是从来不显示；`onUnload` 又会把订阅拆掉。角标恰恰是给「不在本页时」
+ * 看的东西，生命周期不能绑在本页上。
+ */
 function ensureActiveSessionsSubscription(instanceKey: string) {
   if (!instanceKey || disposeActiveSessionsChangedMap.has(instanceKey)) return
-  const unsubscribe = acpApi.subscribeGlobalEvent("pet://sessions", (payload) => {
-    activeSessionBadgeCountMap.set(instanceKey, getOngoingActiveSessionCount(payload))
-    void applyConversationTabBarBadge(sumActiveSessionBadgeCounts())
+  const unsubscribe = acpApi.subscribeGlobalEvent("pet://sessions", () => {
     if (livePreviewPageVisible.value) {
       scheduleActiveSessionsOverviewRefresh(instanceKey)
     }
@@ -2150,54 +2271,43 @@ function ensureActiveSessionsSubscription(instanceKey: string) {
   disposeActiveSessionsChangedMap.set(instanceKey, unsubscribe)
 }
 
-async function refreshActiveSessionTabBadge() {
-  if (activeSessionBadgeRefreshPromise) {
-    return await activeSessionBadgeRefreshPromise
-  }
-  activeSessionBadgeRefreshPromise = refreshActiveSessionTabBadgeInternal()
-  try {
-    await activeSessionBadgeRefreshPromise
-  } finally {
-    activeSessionBadgeRefreshPromise = null
-  }
-}
-
-async function refreshActiveSessionTabBadgeInternal() {
-  const conns = getConnectedConnections()
-  if (conns.length === 0) {
-    activeSessionBadgeCountMap.clear()
-    await applyConversationTabBarBadge(0)
-    return
-  }
-
-  const results = await Promise.allSettled(
-    conns.map(async (conn) => {
-      const gateway = await createConnectionGateway(conn)
-      const instanceKey = gateway.getRemoteInstanceDescriptor().instanceKey
-      ensureActiveSessionsSubscription(instanceKey)
-      return {
-        instanceKey,
-        count: await fetchOngoingActiveSessionCount(gateway),
-      }
-    })
-  )
-
-  activeSessionBadgeCountMap.clear()
-  results.forEach((result) => {
-    if (result.status === "fulfilled") {
-      activeSessionBadgeCountMap.set(result.value.instanceKey, result.value.count)
-      return
+/**
+ * 重连后重新获取：断线期间服务端**不入队**事件（无订阅者时直接丢弃），且
+ * `/ws/events` 的帧上没有 event id，所以丢掉的 `conversation://changed` 无从补发。
+ * 唯一可靠的补救是「重连成功时重新拉一次权威数据」。
+ *
+ * 判据在 `shouldRefetchAfterBridgeRecovered` 里（纯模块、可测），它挡掉首连：
+ * `subscribeRealtimeBridgeHealth` 订阅瞬间会推一个合成 `idle`，紧随其后的 `connected`
+ * 是首连而非重连。`reconnectAttempt` 在这里没用 —— 它在发 health 之前就被归零了。
+ */
+function ensureBridgeRecoverySubscription(instanceKey: string) {
+  if (!instanceKey || disposeBridgeHealthMap.has(instanceKey)) return
+  const unsubscribe = acpApi.subscribeRealtimeBridgeHealth((health) => {
+    const previousState = lastBridgeStateMap.get(instanceKey) || null
+    lastBridgeStateMap.set(instanceKey, health.state)
+    if (shouldRefetchAfterBridgeRecovered({ previousState, nextState: health.state })) {
+      void refreshConnectionGroupAuthoritative(instanceKey, "bridge_recovered")
     }
-    console.warn("refresh active session tabbar badge skipped:", result.reason)
-  })
-  await applyConversationTabBarBadge(sumActiveSessionBadgeCounts())
+  }, instanceKey)
+  disposeBridgeHealthMap.set(instanceKey, unsubscribe)
 }
 
-function sumActiveSessionBadgeCounts() {
-  return Array.from(activeSessionBadgeCountMap.values()).reduce(
-    (total, count) => total + Math.max(0, Number(count) || 0),
-    0
+/**
+ * 批量导入完成后的一次性提醒。服务端刻意为它开了独立通道而非
+ * `conversation://changed` 的第四种 kind，注释里写明契约就是「clients respond with a
+ * single full refetch」—— payload 只有 `{ imported, updated, folder_ids }`，不含会话内容。
+ * 所以这里只用它触发权威重取，不解析 payload。
+ */
+function ensureBulkChangedSubscription(instanceKey: string) {
+  if (!instanceKey || disposeBulkChangedMap.has(instanceKey)) return
+  const unsubscribe = acpApi.subscribeGlobalEvent(
+    "conversations://bulk-changed",
+    () => {
+      void refreshConnectionGroupAuthoritative(instanceKey, "bulk_changed")
+    },
+    instanceKey
   )
+  disposeBulkChangedMap.set(instanceKey, unsubscribe)
 }
 
 function replaceConnectionGroup(nextGroup: ConnectionGroup) {
@@ -2240,8 +2350,11 @@ async function seedCreatedConversationSummary(input: {
   })
 
   try {
+    // 只读 summary / title / folderId / agentType / status，完全不看轮次内容
+    // （lastTurnId 在新建会话时硬编码为 null），所以取最小窗口。
     const detail = await input.gateway.call<any>("get_folder_conversation", {
       conversationId: input.conversationId,
+      tailTurns: METADATA_ONLY_CONVERSATION_TAIL_TURNS,
     })
     const summary =
       detail?.summary && typeof detail.summary === "object"
@@ -2833,8 +2946,10 @@ async function shouldSkipCreatePromptReplay(
   if (!activeCreatePromptAttempted) return false
 
   try {
+    // 只判「有没有轮次」，1 条窗口下 `length > 0` 语义完全不变。
     const detail = await gateway.call<any>("get_folder_conversation", {
       conversationId,
+      tailTurns: METADATA_ONLY_CONVERSATION_TAIL_TURNS,
     })
     if (Array.isArray(detail?.turns) && detail.turns.length > 0) {
       return true
@@ -3011,7 +3126,7 @@ async function confirmCreate() {
     createAgentListError.value = ""
     markConversationListDirty()
     await loadOverviewData({ force: true })
-    await refreshActiveSessionTabBadge()
+    await refreshConversationTabBadge()
     openConversation(
       { id: newConversationId, folder_id: selectedProjectId.value },
       selectedConnectionKey.value
@@ -3054,7 +3169,7 @@ async function confirmBulkSend() {
       exitSelectionMode()
       markConversationListDirty()
       await loadOverviewData({ force: true })
-      await refreshActiveSessionTabBadge()
+      await refreshConversationTabBadge()
     }
 
     const title = failureCount > 0
@@ -3707,6 +3822,23 @@ function formatTime(time?: string): string {
 
 .live-card__side--history {
   gap: 12rpx;
+}
+
+.live-card__badges {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8rpx;
+}
+
+.live-card__tab-flag {
+  flex-shrink: 0;
+  padding: 4rpx 10rpx;
+  border-radius: 999rpx;
+  font-size: 18rpx;
+  line-height: 1.2;
+  color: var(--up-primary, #2979ff);
+  background-color: color-mix(in srgb, var(--up-primary, #2979ff) 12%, transparent);
 }
 
 .live-card__stamp {

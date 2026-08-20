@@ -84,7 +84,10 @@ describe("P67 conversation list bulk send contract", () => {
     expect(confirmBlock).toContain("for (const item of items)")
     expect(confirmBlock).toContain("await sendBulkSelectionItem(item, text)")
     expect(confirmBlock).toContain("await loadOverviewData({ force: true })")
-    expect(confirmBlock).toContain("await refreshActiveSessionTabBadge()")
+    // 角标刷新已从页面自有的 `refreshActiveSessionTabBadge` 改为委托给
+    // `conversationTabBadgeService` —— 它由 App.vue 启动，不再依赖本页生命周期
+    // （原先 App 冷启动落在「连接」页时本页从未挂载，角标从来不显示）。
+    expect(confirmBlock).toContain("await refreshConversationTabBadge()")
 
     expect(sendBlock).toContain("const conn = findConnectedConnectionByKey(item.connectionKey)")
     expect(sendBlock).toContain("syncAuthToConnection(conn)")

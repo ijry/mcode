@@ -8,6 +8,7 @@ import {
   upsertConversationSummary,
 } from "@/services/db/repositories/conversationRepository"
 import { mapConversationToSummaryRecord } from "@/services/conversation/conversationOverviewSnapshot"
+import { METADATA_ONLY_CONVERSATION_TAIL_TURNS } from "@/services/conversation/conversationHistoryWindowContract"
 import { getRegisteredRemoteInstanceDescriptor } from "@/services/realtime/remoteInstanceRegistry"
 import type { RelaySessionInfo } from "@/services/gateway"
 import type {
@@ -127,8 +128,10 @@ async function resolveConversationFolderId(input: {
   try {
     const gateway = createGatewayForInstance(input.instanceKey)
     if (!gateway) return 0
+    // 只读 summary.folderId，不看轮次内容，所以取最小窗口。
     const detail = (await gateway.call("get_folder_conversation", {
       conversationId: input.conversationId,
+      tailTurns: METADATA_ONLY_CONVERSATION_TAIL_TURNS,
     })) as Record<string, unknown> | null
     const detailSummary =
       detail?.summary && typeof detail.summary === "object"
