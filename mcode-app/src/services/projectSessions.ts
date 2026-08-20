@@ -76,6 +76,10 @@ export async function loadRemoteProjectConversations(
   return normalizeList(raw)
     .map(normalizeConversationRecord)
     .filter((item): item is RemoteConversationRecord => Boolean(item))
+    // 服务端默认已经是 `updated_at DESC`（codeg-plus `conversation_service::list_all`
+    // 的 `_ => order_by_desc(UpdatedAt)`），所以这行**看起来**冗余 —— 但它不是：
+    // `parseTimestamp` 还负责统一「远端历史上出现过数值 epoch 与 ISO 串混用」的口径，
+    // 而且它让本函数的返回顺序成为自身契约，不随服务端默认排序的改动而漂移。
     .sort((left, right) => parseTimestamp(right.updatedAt) - parseTimestamp(left.updatedAt))
 }
 
