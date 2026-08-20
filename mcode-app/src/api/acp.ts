@@ -1380,6 +1380,28 @@ class AcpApiClient {
           },
         }
       }
+      case "session_failure": {
+        // JetBrains AIR 结构化失败记录。**原样透传整条记录**，不在这里做取舍：
+        // 单调合并（id + revision）必须与快照那条路用同一份实现，所以判定放在
+        // `services/conversation/sessionFailureRecords.ts`。
+        //
+        // 这条通道对 codex 是重试横幅的**唯一**来源（声明 AIR 后
+        // `_meta.codex.error` / `TurnRetrying` 都不再发），对 Claude 承载终止性失败。
+        const source = toRecord(record.record) || record
+        return {
+          connectionId,
+          type: "session_failure",
+          data: {
+            id: firstString(source.id),
+            revision: firstNumber(source.revision),
+            category: firstString(source.category) || "unknown",
+            severity: firstString(source.severity) || "error",
+            title: firstString(source.title) || "",
+            details: firstString(source.details) || undefined,
+            actions: Array.isArray(source.actions) ? source.actions : [],
+          },
+        }
+      }
       case "error":
         return {
           connectionId,

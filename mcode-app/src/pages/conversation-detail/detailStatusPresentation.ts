@@ -25,7 +25,7 @@ export interface DetailStatusState {
   icon: string
   iconColor: string
   loading: boolean
-  actionKey?: "reconnect" | "inspect"
+  actionKey?: "reconnect" | "reconnect_agent" | "inspect"
   actionLabel?: string
   /**
    * 诊断证据（agent stderr 尾巴），来自 `AcpEvent::Error` 的 `details`。
@@ -116,6 +116,14 @@ export function buildDetailStatusState(input: {
    * 服务端不改的前提下这个空窗消不掉，但至少不该让它读起来像「一切正常」。
    */
   attachElapsedMs?: number
+  /**
+   * 当前活跃的 AIR 失败记录是否建议 `retry`
+   * （`services/conversation/sessionFailureRecords.ts` 的 `sessionFailureSuggestsRetry`）。
+   *
+   * 用它决定「运行异常」时给不给重连入口。缺省 `false` = 不给 —— 拿不到适配器的建议时
+   * 宁可少一个入口，也不要给一个点了没用的。
+   */
+  failureSuggestsRetry?: boolean
   longWaitElapsedMs: number
   activeModelStatusLabel: string
   planTaskCount: number
@@ -186,6 +194,11 @@ export function buildDetailStatusState(input: {
       iconColor: color("--up-error", "#fa3534"),
       loading: false,
       details: input.runtimeErrorDetails || undefined,
+      // 与上面 bridge_* 的 `reconnect` 是**两个不同的动作**：那个重连手机↔主机的
+      // WebSocket，这个重新拉起 ACP agent 进程。用同一个 actionKey 会让「agent 死了」
+      // 时去重连一条本来就好好的传输通道，点了没反应。
+      actionKey: "reconnect_agent",
+      actionLabel: "重新连接智能体",
     }
   }
   if (input.runtimeErrorText) {
@@ -197,6 +210,20 @@ export function buildDetailStatusState(input: {
       iconColor: color("--up-error", "#fa3534"),
       loading: false,
       details: input.runtimeErrorDetails || undefined,
+      /*
+        重连入口的可用性**取决于适配器自己的建议**（AIR `session_failures` 记录里的
+        `actions`，词表是 `retry|login|new_session`），而不是从错误文案里猜关键字。
+
+        这是接那条通道最实在的收益：`login`（登录过期）和 `new_session`（会话失效）时
+        给「重新连接」是误导 —— 重连不会解决它们，用户点几次然后放弃。只有 `retry`
+        才真的可能恢复。
+
+        拿不到记录时（Claude 的重试走 SDK 消息旁路、或旧后端不发 AIR）保持原样不给按钮：
+        宁可少一个入口，也不要给一个点了没用的。
+      */
+      ...(input.failureSuggestsRetry
+        ? { actionKey: "reconnect_agent" as const, actionLabel: "重新连接智能体" }
+        : {}),
     }
   }
   if (input.runtimeRetryText) {

@@ -15,6 +15,7 @@ import type {
   PendingQuestionState,
   ApiRetryEvent,
   RuntimeErrorEvent,
+  SessionFailureRecord,
   TurnQueueEvent,
 } from "@/types/acp"
 import { acpApi } from "@/api/acp"
@@ -47,6 +48,12 @@ import {
   mergeTailIntoTurns,
   normalizeTurnRole,
 } from "@/services/conversation/conversationTurnIdentity"
+import {
+  mergeSessionFailure,
+  mergeSessionFailureSnapshot,
+  normalizeSessionFailureRecord,
+  settleRecoveredSessionFailures,
+} from "@/services/conversation/sessionFailureRecords"
 import {
   DEFAULT_CONVERSATION_HISTORY_PAGE_SIZE,
   isWindowedConversationDetail,
@@ -88,6 +95,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         status: "idle",
         inputErrorMessage: null,
         inputErrorDetails: null,
+        sessionFailures: [],
         inputErrorTurnKey: null,
         apiRetry: null,
         pendingPermission: null,
@@ -371,6 +379,25 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     if (snapshotError) {
       recordSessionError(session, snapshotError.message, snapshotError.details)
     }
+    // AIR 失败表在快照里（`session_state.rs:1671`，注释明说是为 mid-session attach 设计
+    // 的），所以**冷启动就能拿到** —— 这是它比 Claude 的 `api_retry` 强的地方，后者必须
+    // 等下一次事件。合并保留本地推断出的 `resolved`：线上没这个字段，快照里每条都是
+    // false，整表替换会让已经恢复的警告在每次 attach 后复活。
+    const snapshotFailures = (
+      Array.isArray(snapshot?.session_failures)
+        ? snapshot.session_failures
+        : Array.isArray(snapshot?.sessionFailures)
+          ? snapshot.sessionFailures
+          : []
+    )
+      .map((raw: unknown) => normalizeSessionFailureRecord(raw))
+      .filter(Boolean) as SessionFailureRecord[]
+    if (snapshotFailures.length > 0) {
+      session.sessionFailures = mergeSessionFailureSnapshot(
+        session.sessionFailures,
+        snapshotFailures
+      )
+    }
     // **不清 `apiRetry`。** 重试横幅（Claude 的 `api_retry` / codex 的 `TurnRetrying`）
     // 是瞬态提示，服务端**刻意不放进快照**（`session_state.rs` 的注释：「与 Claude 的
     // api_retry 一样是前端瞬态提示（重试横幅），不进快照 —— 回合边界会清除它」）。
@@ -473,6 +500,14 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     session.pendingPermission = null
     session.pendingQuestion = null
     session.stats.turnCount++
+    // 一次成功的回合结束 = AIR 的 warning 记录（重试警告）自愈了。
+    //
+    // **只结算 warning，`error` 保持活跃** —— 服务端刻意让终止性失败留着
+    // （`types.rs:67-69`：codex 靠它防止迟到的重复通知追加出重复行），它们要等用户实际
+    // 处理（重连 / 重新登录 / 开新会话）。一起清掉等于把没解决的问题从界面上抹掉。
+    //
+    // 线上永远没有 resolve 帧，「恢复」只能这样推断出来（`types.rs:70-74`）。
+    session.sessionFailures = settleRecoveredSessionFailures(session.sessionFailures)
   }
 
   /**
@@ -713,6 +748,25 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         // 不知道在重试什么。让 `clearStaleTurnError` 按轮次判断。
         clearStaleTurnError(session)
         break
+
+      case "session_failure": {
+        // AIR 结构化失败记录。合并规则（id + revision 严格递增）与快照那条路**共用同一份
+        // 实现** —— 服务端要求两侧行为一致，写两份必然漂移，而漂移的症状是重复行或幽灵
+        // 记录，都不报错。
+        //
+        // **不动 status、不动 inputErrorMessage。** 这张表回答的是「有哪些失败、建议怎么
+        // 处理」，与「当前会话是什么状态」是两件事：severity=warning 的重试记录期间会话
+        // 仍在正常跑（codex 靠它接管重试横幅），把它当 error 会让界面在自愈过程中反复红。
+        // 终止性失败自己会通过 `error` / `status_changed` 改 status。
+        const incoming = normalizeSessionFailureRecord(event.data)
+        if (!incoming) break
+        touchHotConversation(session.conversationId)
+        const merged = mergeSessionFailure(session.sessionFailures, incoming)
+        if (merged.changed) {
+          session.sessionFailures = merged.records
+        }
+        break
+      }
 
       case "error": {
         touchHotConversation(session.conversationId)
@@ -1272,6 +1326,15 @@ interface RuntimeSession {
    * 单独存一份而不是拼进文案：它可能有几十行，UI 要默认折叠、按需展开。
    */
   inputErrorDetails: string | null
+  /**
+   * JetBrains AIR 结构化失败记录表（`services/conversation/sessionFailureRecords.ts`）。
+   *
+   * 与 `inputErrorMessage` 并存而不是二选一：那个是「最近一条错误的文案」，这张表是
+   * **带结构的**失败清单（category / severity / actions / 是否已解决），能回答
+   * 「该给重连按钮还是该让用户重新登录」。两条来源也不同 —— 这张表在 attach 快照里，
+   * 冷启动就有；`inputErrorMessage` 主要靠实时事件。
+   */
+  sessionFailures: SessionFailureRecord[]
   /**
    * 当前那条错误属于哪一轮（取 `liveMessage.id`）。
    *

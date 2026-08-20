@@ -238,6 +238,7 @@ export interface EventEnvelope {
     | "question_request"
     | "question_resolved"
     | "api_retry"
+    | "session_failure"
     | "error"
   connectionId: string
   seq?: number
@@ -400,6 +401,50 @@ export interface RealtimeBridgeHealth {
   replayWindowStart?: number | null
   requestedLastEventId?: number | null
   recoveryMessage?: string | null
+}
+
+/**
+ * 一条 JetBrains AIR 结构化会话失败记录。
+ *
+ * 来自 `session_info_update._meta.jetbrains.air.sessionFailure`
+ * （claude-agent-acp 0.67+ / codex-acp 1.2+），codeg 在 `build_client_capabilities`
+ * 里声明了 `clientCapabilities._meta.jetbrains.air` 才会收到。
+ *
+ * **它替代了 codex 的老失败通道**：声明 AIR 之后 `_meta.codex.error` → `TurnRetrying`
+ * 与 warning 文本块都不再发，`severity: "warning"` 的记录接过了重试横幅这个角色
+ * （`codeg-plus/src-tauri/src/acp/types.rs:330-338`）。Claude 侧 AIR 只承载**终止性**
+ * 失败，它的重试仍走 `_claude/sdkMessage` 旁路 —— 那条不进快照。
+ *
+ * 三条契约必须照做，漏一条就会出现重复行或幽灵记录：
+ *
+ * 1. **线上只有 upsert**，没有 resolve、没有墓碑。同一条记录靠 `id` + `revision`
+ *    （每个 id 从 1 开始）原地修订。
+ * 2. **合并必须单调**：`revision <= 已存的` 一律丢弃。适配器会在 `session/load` 时
+ *    重播仍然活跃的失败，不丢就会把状态抖回旧值。
+ * 3. **`resolved` 是客户端推断的**，永远不在线上。`warning` 记录在下一次成功的回合
+ *    结束时翻成已解决；`error` 记录**故意保持活跃**（codex 靠它防止迟到的重复通知
+ *    追加出重复行）。
+ *
+ * `category` / `severity` / `actions` 保持纯字符串：服务端刻意留了扩展空间，将来加了
+ * 新取值时应当退化成兜底渲染，而不是解析失败。
+ */
+export interface SessionFailureRecord {
+  id: string
+  revision: number
+  /** `connection|access|limit|request|service|unknown`，将来可能更多。 */
+  category: string
+  /** `"warning"`（瞬态、会自愈）或 `"error"`（终止性）。 */
+  severity: string
+  /**
+   * 适配器写的用户可读文案（claude 直接转发模型自己的话，codex 限长 240 字符）。
+   * **可能是空的** —— 那时要退回 category 的本地化标签。
+   */
+  title: string
+  details?: string
+  /** 建议的恢复动作，目前是 `retry|login|new_session` 的子集。 */
+  actions: string[]
+  /** 客户端推断的生命周期，不在线上。见类型说明第 3 条。 */
+  resolved: boolean
 }
 
 export interface RuntimeErrorEvent {

@@ -334,6 +334,10 @@ import {
 } from "@/services/db/repositories/runtimeRepository"
 import { connectionSessionManager } from "@/services/conversation/connectionSessionManager"
 import { markConversationListDirty } from "@/services/conversation/conversationListRefresh"
+import {
+  primarySessionFailure,
+  sessionFailureSuggestsRetry,
+} from "@/services/conversation/sessionFailureRecords"
 import { persistConversationDetailSnapshot } from "@/services/conversation/conversationDetailPersistence"
 import {
   readDetailTabMultitaskMode,
@@ -768,6 +772,9 @@ function hydrateDetailSnapshot(targetConversationId: number, snapshot: unknown) 
   runtime.hydrateLiveSnapshot(targetConversationId, snapshot)
 }
 const longWaitStartedAt = ref(0)
+// 重连智能体在途标记：防止连点发出多个 connect（每个都会先 invalidate，互相把对方
+// 刚建好的连接拆掉）。
+const reconnectingDetailAgent = ref(false)
 const measuredPageHeight = ref(0)
 let detailBridgeHealthUnsubscribe: (() => void) | null = null
 let longWaitTimer: ReturnType<typeof setInterval> | null = null
@@ -1294,6 +1301,16 @@ const attachElapsedMs = computed(() => {
 })
 const runtimeErrorText = computed(() => firstString(session.value?.inputErrorMessage) || "")
 const runtimeErrorDetails = computed(() => firstString(session.value?.inputErrorDetails) || "")
+/**
+ * 当前活跃的 AIR 失败记录是否建议 `retry` —— 决定「运行异常」时给不给重连入口。
+ *
+ * 取适配器自己给的 `actions`（`retry|login|new_session`）而不是猜错误文案：`login`
+ * （登录过期）/ `new_session`（会话失效）时给「重新连接」是误导，重连解决不了它们。
+ */
+const detailFailureSuggestsRetry = computed(() => {
+  const record = primarySessionFailure(session.value?.sessionFailures || [])
+  return record ? sessionFailureSuggestsRetry(record) : false
+})
 const runtimeRetryText = computed(() => buildRuntimeRetryText(session.value?.apiRetry))
 const networkReachabilityFeedbackText = computed(() =>
   buildNetworkReachabilityFeedbackText({
@@ -1319,6 +1336,7 @@ const detailStatusState = computed<DetailStatusState>(() =>
     runtimeRetryText: runtimeRetryText.value,
     runtimeStatus: runtimeStatus.value,
     attachElapsedMs: attachElapsedMs.value,
+    failureSuggestsRetry: detailFailureSuggestsRetry.value,
     longWaitElapsedMs: longWaitElapsedMs.value,
     activeModelStatusLabel: activeModelStatusLabel.value,
     planTaskCount: planTasks.value.length,
@@ -2807,7 +2825,7 @@ function clearCyberSettleTimer() {
   cyberSettleTimer = null
 }
 
-function handleDetailStatusAction(actionKey?: "reconnect" | "inspect") {
+function handleDetailStatusAction(actionKey?: "reconnect" | "reconnect_agent" | "inspect") {
   if (!actionKey) return
   if (actionKey === "reconnect") {
     const instanceKey = resolveDetailInstanceKey()
@@ -2821,12 +2839,62 @@ function handleDetailStatusAction(actionKey?: "reconnect" | "inspect") {
     })
     return
   }
+  if (actionKey === "reconnect_agent") {
+    void reconnectDetailAgent()
+    return
+  }
   if (actionKey === "inspect") {
     if (planTasks.value.length > 0) {
       showPlanDrawer.value = true
       return
     }
     handleScrollToBottomFab()
+  }
+}
+
+/**
+ * 重新拉起 ACP agent 连接。
+ *
+ * 与 `acpApi.reconnectRealtimeBridge`（重连手机↔主机的 WebSocket）是**两件不同的事**：
+ * agent 进程死了的时候传输通道好得很，重连它没有任何用。这里要做的是让那条已死的
+ * ACP 连接失效、再重新建立。
+ *
+ * `runtime.connect` 会复用已有 connectionId（`conversationRuntime.ts` 里
+ * `existingManaged?.connectionId` 那个分支），所以**必须先 `invalidateConnection`** ——
+ * 否则它会原样返回那条死连接，界面看起来点了没反应。
+ */
+async function reconnectDetailAgent() {
+  const targetConversationId = Number(conversationId.value || 0)
+  if (!targetConversationId) return
+  if (reconnectingDetailAgent.value) return
+
+  reconnectingDetailAgent.value = true
+  try {
+    runtime.invalidateConnection(targetConversationId)
+    await runtime.connect(
+      targetConversationId,
+      normalizeAgentType(currentAgentType.value),
+      undefined,
+      firstString(session.value?.resumeSessionId) || undefined,
+      undefined,
+      resolveDetailInstanceKey()
+    )
+    // 重连后立刻取一次快照：状态、pending 卡片、AIR 失败表都要重新对齐 ——
+    // 新连接不会重播断连前的事件。
+    const snapshot = await acpApi
+      .acpGetSessionSnapshotByConversation(targetConversationId)
+      .catch(() => null)
+    if (snapshot) {
+      hydrateDetailSnapshot(targetConversationId, snapshot)
+    }
+  } catch (error) {
+    uni.showToast({
+      title: toErrorMessage(error, "重新连接智能体失败"),
+      icon: "none",
+      duration: 2500,
+    })
+  } finally {
+    reconnectingDetailAgent.value = false
   }
 }
 
