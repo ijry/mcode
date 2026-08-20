@@ -747,6 +747,26 @@ const showDetailMoreMenu = ref(false)
 const composerPanelMode = ref<ComposerPanelMode>("")
 const toolRowExpanded = ref(false)
 const longWaitTick = ref(0)
+/**
+ * 每个会话最近一次 attach（拿到快照）的时刻。
+ *
+ * 只用来算 `attachElapsedMs` —— 标出「瞬态状态还没到齐」那几秒。不放进 session：
+ * 它是纯 UI 的过渡窗口，与运行时状态无关，落进 store 会被当成需要持久化的东西。
+ */
+const detailAttachedAtMap = new Map<number, number>()
+
+/**
+ * 水合快照，并记下 attach 时刻。
+ *
+ * **所有 `hydrateLiveSnapshot` 都要走这里**，不要直接调 store —— 漏一处那条路径就没有
+ * 「同步中」过渡态，又会退回「冷启动看起来一切正常」。包一层而不是在 5 个调用点各加
+ * 一行，是为了让以后新增的调用点自动覆盖。
+ */
+function hydrateDetailSnapshot(targetConversationId: number, snapshot: unknown) {
+  if (!targetConversationId) return
+  detailAttachedAtMap.set(targetConversationId, Date.now())
+  runtime.hydrateLiveSnapshot(targetConversationId, snapshot)
+}
 const longWaitStartedAt = ref(0)
 const measuredPageHeight = ref(0)
 let detailBridgeHealthUnsubscribe: (() => void) | null = null
@@ -1258,6 +1278,20 @@ const longWaitElapsedMs = computed(() => {
   if (!longWaitStartedAt.value) return 0
   return Math.max(0, Date.now() - longWaitStartedAt.value)
 })
+/**
+ * 距离本会话 attach（拿到快照）多久了。
+ *
+ * 用来标出「刚接上、瞬态状态还没到齐」那几秒：重试横幅服务端刻意不放进快照，
+ * 冷启动进入一个正在 504 重试的会话时前几秒只能显示「思考中」，读起来像一切正常。
+ *
+ * 复用 `longWaitTick` 驱动重算 —— 那个计时器本来就在跑，不必再起一个。
+ */
+const attachElapsedMs = computed(() => {
+  void longWaitTick.value
+  const attachedAt = detailAttachedAtMap.get(Number(conversationId.value || 0))
+  if (!attachedAt) return 0
+  return Math.max(0, Date.now() - attachedAt)
+})
 const runtimeErrorText = computed(() => firstString(session.value?.inputErrorMessage) || "")
 const runtimeErrorDetails = computed(() => firstString(session.value?.inputErrorDetails) || "")
 const runtimeRetryText = computed(() => buildRuntimeRetryText(session.value?.apiRetry))
@@ -1284,6 +1318,7 @@ const detailStatusState = computed<DetailStatusState>(() =>
     runtimeErrorDetails: runtimeErrorDetails.value,
     runtimeRetryText: runtimeRetryText.value,
     runtimeStatus: runtimeStatus.value,
+    attachElapsedMs: attachElapsedMs.value,
     longWaitElapsedMs: longWaitElapsedMs.value,
     activeModelStatusLabel: activeModelStatusLabel.value,
     planTaskCount: planTasks.value.length,
@@ -1823,7 +1858,7 @@ async function ensureMountedDetailTabRuntime(tab: DetailShellTabItem | null | un
         .acpGetSessionSnapshotByConversation(targetConversationId)
         .catch(() => null)
       if (snapshot) {
-        runtime.hydrateLiveSnapshot(targetConversationId, snapshot)
+        hydrateDetailSnapshot(targetConversationId, snapshot)
       }
       return
     }
@@ -1839,11 +1874,11 @@ async function ensureMountedDetailTabRuntime(tab: DetailShellTabItem | null | un
       .acpGetSessionSnapshotByConversation(targetConversationId)
       .catch(() => null)
     if (snapshot) {
-      runtime.hydrateLiveSnapshot(targetConversationId, snapshot)
+      hydrateDetailSnapshot(targetConversationId, snapshot)
     } else if (conn?.id) {
       const fallbackSnapshot = await acpApi.acpGetSessionSnapshot(conn.id).catch(() => null)
       if (fallbackSnapshot) {
-        runtime.hydrateLiveSnapshot(targetConversationId, fallbackSnapshot)
+        hydrateDetailSnapshot(targetConversationId, fallbackSnapshot)
       }
     }
   } catch (error) {
@@ -2668,6 +2703,7 @@ async function deleteCurrentDetailConversation(targetConversationId: number) {
     })
     runtime.clearSession(targetConversationId)
     detailTabStateMap.delete(targetConversationId)
+    detailAttachedAtMap.delete(targetConversationId)
     const snapshot = await closeConversationTab({
       instanceKey,
       gateway,
@@ -3513,7 +3549,7 @@ async function loadConversation() {
         agentType,
         connectionId: conn.id,
       })
-      runtime.hydrateLiveSnapshot(targetConversationId, snapshot)
+      hydrateDetailSnapshot(targetConversationId, snapshot)
       if (isActiveLoad()) {
         persistDetailRuntimeState()
       }
@@ -4961,7 +4997,7 @@ async function confirmPromptStartFromSnapshot() {
   try {
     const snapshot = await acpApi.acpGetSessionSnapshotByConversation(conversationId.value)
     if (!snapshot || typeof snapshot !== "object") return false
-    runtime.hydrateLiveSnapshot(conversationId.value, snapshot)
+    hydrateDetailSnapshot(conversationId.value, snapshot)
     touchHotConversation(conversationId.value)
     return hasPromptActuallyStarted()
   } catch {

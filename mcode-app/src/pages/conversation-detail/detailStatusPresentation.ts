@@ -9,6 +9,7 @@ export type DetailStatusCode =
   | "agent_disconnected"
   | "runtime_error"
   | "api_retry"
+  | "attach_settling"
   | "waiting_permission"
   | "waiting_question"
   | "connecting"
@@ -36,6 +37,14 @@ export interface DetailStatusState {
 }
 
 export type ThemeColorResolver = (name: string, fallback: string) => string
+
+/**
+ * attach 之后「瞬态状态还没到齐」的窗口长度。
+ *
+ * Claude 的重试首个间隔约 0.5s 且指数退避，3s 足够让第一条 `api_retry` 事件到达；
+ * 再长就会在正常会话上白挂一条噪音文案。
+ */
+const ATTACH_SETTLING_WINDOW_MS = 3_000
 
 export function buildRuntimeRetryText(retry?: ApiRetryEvent | null) {
   if (!retry) return ""
@@ -92,6 +101,21 @@ export function buildDetailStatusState(input: {
   /** `AcpEvent::Error` 的 `details`（agent stderr 尾巴）。可能很长，UI 默认折叠。 */
   runtimeErrorDetails?: string
   runtimeStatus: string
+  /**
+   * 距离本会话 attach（拿到快照）过去了多久，毫秒。`0`/缺省表示不适用。
+   *
+   * 用来标出「刚接上、瞬态状态还没到齐」这个窗口。重试横幅（Claude 的 `api_retry`、
+   * codex 的 `TurnRetrying`）是**纯瞬态提示，服务端刻意不放进快照**
+   * （`codeg-plus/src-tauri/src/acp/session_state.rs`：「与 Claude 的 api_retry 一样是
+   * 前端瞬态提示（重试横幅），不进快照 —— 回合边界会清除它」）。
+   *
+   * 于是冷启动进入一个正在 504 重试的会话时，前几秒只能显示「思考中」——
+   * 用户报的原话：「一开始是不显示这个重试报错的，但是过了一会却又显示了」。
+   * 重试是指数退避的，那个空窗可能有好几秒。
+   *
+   * 服务端不改的前提下这个空窗消不掉，但至少不该让它读起来像「一切正常」。
+   */
+  attachElapsedMs?: number
   longWaitElapsedMs: number
   activeModelStatusLabel: string
   planTaskCount: number
@@ -215,6 +239,32 @@ export function buildDetailStatusState(input: {
       loading: true,
     }
   }
+  /*
+    刚 attach 上、且远端正忙的那几秒：瞬态状态（重试横幅）还没推过来，此时显示
+    「思考中」会让一个正在 504 重试的会话看起来一切正常。
+
+    排在 `long_wait` / `thinking` / `running_tool` **之前**，但在所有真实错误、
+    `api_retry`、等待授权/选择**之后** —— 只要拿到了任何确切信息，就不该再显示这条
+    模糊的过渡文案。
+
+    `ATTACH_SETTLING_WINDOW_MS` 取 3s：Claude 重试首个间隔约 0.5s、指数退避，3s 足够
+    让第一条 `api_retry` 到达；再长就会在正常会话上白挂一条噪音。
+  */
+  if (
+    input.attachElapsedMs != null
+    && input.attachElapsedMs > 0
+    && input.attachElapsedMs < ATTACH_SETTLING_WINDOW_MS
+    && (input.runtimeStatus === "thinking" || input.runtimeStatus === "running_tool")
+  ) {
+    return {
+      code: "attach_settling",
+      severity: "info",
+      text: "正在同步远端状态...",
+      icon: "reload",
+      iconColor: color("--up-primary", "#2979ff"),
+      loading: true,
+    }
+  }
   if (
     (input.runtimeStatus === "thinking" || input.runtimeStatus === "running_tool")
     && input.longWaitElapsedMs >= 20_000
@@ -270,6 +320,7 @@ export function buildRuntimeStatusLabel(input: {
   if (input.detailStatusCode === "replay_miss") return "恢复中"
   // 「已断开」而不是「运行异常」：agent 进程没了，这是个终态，不是运行中的故障。
   if (input.detailStatusCode === "agent_disconnected") return "已断开"
+  if (input.detailStatusCode === "attach_settling") return "同步中"
   if (input.runtimeStatus === "disconnected") return "已断开"
   if (input.runtimeStatus === "thinking" || input.runtimeStatus === "running_tool") {
     return input.activeModelStatusLabel || (input.runtimeStatus === "thinking" ? "思考中" : "执行命令中")
@@ -290,6 +341,8 @@ export function buildRuntimeStatusClass(input: {
   if (input.detailStatusCode === "bridge_error") return "error"
   if (input.detailStatusCode === "replay_miss") return "pending"
   if (input.detailStatusCode === "agent_disconnected") return "error"
+  // 同步中仍然是「在跑」，不是异常 —— 用 running 让转圈动效延续，别闪成灰色。
+  if (input.detailStatusCode === "attach_settling") return "running"
   if (input.runtimeStatus === "disconnected") return "error"
   if (input.runtimeStatus === "thinking" || input.runtimeStatus === "running_tool") return "running"
   if (input.runtimeStatus === "waiting_permission" || input.runtimeStatus === "waiting_question") return "pending"

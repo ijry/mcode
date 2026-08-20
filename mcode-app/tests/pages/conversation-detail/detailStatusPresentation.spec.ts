@@ -243,4 +243,88 @@ describe("detailStatusPresentation", () => {
       })).toBe("error")
     })
   })
+
+  describe("attach settling window", () => {
+    // 用户报「打开一个正在 504 重试的会话，一开始不显示重试报错，过了一会却又显示了」。
+    // 成因：重试横幅是纯瞬态提示，服务端**刻意不放进快照**，要等下一次 api_retry 事件
+    // 推过来才有。重试是指数退避的，那个空窗可能好几秒，期间显示「思考中」看起来一切正常。
+    const base = {
+      showBridgeRecoveredBanner: false,
+      runtimeErrorText: "",
+      runtimeRetryText: "",
+      longWaitElapsedMs: 0,
+      activeModelStatusLabel: "",
+      planTaskCount: 0,
+      themeColor,
+    }
+
+    it("marks the first seconds after attach as syncing, not as normal thinking", () => {
+      expect(buildDetailStatusState({
+        ...base,
+        runtimeStatus: "thinking",
+        attachElapsedMs: 800,
+      })).toEqual(expect.objectContaining({
+        code: "attach_settling",
+        text: "正在同步远端状态...",
+        loading: true,
+      }))
+    })
+
+    it("falls back to the normal thinking label once the window passes", () => {
+      expect(buildDetailStatusState({
+        ...base,
+        runtimeStatus: "thinking",
+        attachElapsedMs: 5_000,
+      }).code).toBe("thinking")
+    })
+
+    it("never overrides a concrete signal that already arrived", () => {
+      // 只要拿到确切信息就不该再显示这条模糊文案 —— 它是「还不知道」的占位。
+      expect(buildDetailStatusState({
+        ...base,
+        runtimeStatus: "thinking",
+        attachElapsedMs: 500,
+        runtimeRetryText: "server_error HTTP 504 · 正在重试 1/10",
+      }).code).toBe("api_retry")
+
+      expect(buildDetailStatusState({
+        ...base,
+        runtimeStatus: "thinking",
+        attachElapsedMs: 500,
+        runtimeErrorText: "turn failed",
+      }).code).toBe("runtime_error")
+
+      expect(buildDetailStatusState({
+        ...base,
+        runtimeStatus: "waiting_permission",
+        attachElapsedMs: 500,
+      }).code).toBe("waiting_permission")
+    })
+
+    it("does not apply when the session is idle or the timestamp is unknown", () => {
+      // 空闲会话没有「远端在忙」这回事，不该挂同步态。
+      expect(buildDetailStatusState({
+        ...base,
+        runtimeStatus: "idle",
+        attachElapsedMs: 500,
+      }).code).toBe("idle")
+      // 拿不到 attach 时刻（老状态/未记录）时保持原行为。
+      expect(buildDetailStatusState({
+        ...base,
+        runtimeStatus: "thinking",
+      }).code).toBe("thinking")
+    })
+
+    it("keeps the spinner class so the pill does not flash grey", () => {
+      expect(buildRuntimeStatusClass({
+        detailStatusCode: "attach_settling",
+        runtimeStatus: "thinking",
+      })).toBe("running")
+      expect(buildRuntimeStatusLabel({
+        detailStatusCode: "attach_settling",
+        runtimeStatus: "thinking",
+        activeModelStatusLabel: "",
+      })).toBe("同步中")
+    })
+  })
 })

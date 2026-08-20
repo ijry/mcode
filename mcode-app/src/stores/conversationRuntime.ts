@@ -371,7 +371,16 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     if (snapshotError) {
       recordSessionError(session, snapshotError.message, snapshotError.details)
     }
-    session.apiRetry = null
+    // **不清 `apiRetry`。** 重试横幅（Claude 的 `api_retry` / codex 的 `TurnRetrying`）
+    // 是瞬态提示，服务端**刻意不放进快照**（`session_state.rs` 的注释：「与 Claude 的
+    // api_retry 一样是前端瞬态提示（重试横幅），不进快照 —— 回合边界会清除它」）。
+    //
+    // 所以「快照里没有」不等于「重试已经结束」。这里主动清空会让冷启动进入一个正在
+    // 504 重试的会话时横幅先消失，等下一次 `api_retry` 事件推过来才重新出现 ——
+    // 用户报的正是这个：「一开始不显示，过了一会却又显示了」。而重试是指数退避的，
+    // 那个空窗可能有好几秒。
+    //
+    // 冷启动时它本来就是 null，无需清；已经有值时那个值来自比快照更可信的实时事件。
     session.lastAppliedSeq = snapshotSeq ?? session.lastAppliedSeq
 
     const usage = snapshot.usage
