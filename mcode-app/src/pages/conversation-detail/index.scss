@@ -2017,6 +2017,7 @@
 }
 
 .ask-question-card__skip,
+.ask-question-card__next,
 .ask-question-card__submit {
   min-width: 132rpx;
   height: 66rpx;
@@ -2030,6 +2031,7 @@
 }
 
 .ask-question-card__skip::after,
+.ask-question-card__next::after,
 .ask-question-card__submit::after {
   border: none;
 }
@@ -2037,6 +2039,24 @@
 .ask-question-card__skip {
   background: transparent;
   color: var(--up-content-color, #606266);
+}
+
+/*
+  「下一题」是次要动作：描边而非实心，免得和「提交」抢注意力。
+
+  `margin-left: auto` 挂在**它**身上而不是 `__submit` —— footer 是
+  `justify-content: space-between` 的三列（跳过 / 下一题 / 提交），auto 边距要落在
+  中间那一列才能把后两个按钮一起推到右侧。不分栏时它不渲染，auto 自然回到 `__submit`。
+*/
+.ask-question-card__next {
+  margin-left: auto;
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 10%, var(--up-card-bg-color, #ffffff) 90%);
+  border: 1rpx solid color-mix(in srgb, var(--up-primary, #2979ff) 30%, transparent 70%);
+  color: var(--up-primary, #2979ff);
+}
+
+.ask-question-card--translucent .ask-question-card__next {
+  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 30%, transparent 70%);
 }
 
 .ask-question-card__submit {
@@ -2047,6 +2067,7 @@
 
 .ask-question-card__submit--disabled,
 .ask-question-card__submit[disabled],
+.ask-question-card__next[disabled],
 .ask-question-card__skip[disabled] {
   opacity: 0.58;
 }

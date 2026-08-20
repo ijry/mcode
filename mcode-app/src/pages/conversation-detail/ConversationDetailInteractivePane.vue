@@ -326,8 +326,27 @@
             </text>
           </view>
 
+          <!--
+            多问题分栏。此前是全部问题竖排铺开，四个问题就是一屏放不下的长卡片，
+            用户得反复上下滚动才能看清自己漏了哪一题。改成一次只显示一题，
+            对齐 codeg-plus 桌面端（单问题不分栏）。
+          -->
+          <up-tabs
+            v-if="questionUsesTabs"
+            v-model:current="askQuestionTabIndex"
+            :list="questionTabItems"
+            keyName="title"
+            :scrollable="false"
+            lineWidth="24"
+            :activeStyle="{
+              color: upThemeVar('--up-primary', '#2979ff'),
+              fontWeight: '600',
+            }"
+            :inactiveStyle="{ color: upThemeVar('--up-content-color', '#606266') }"
+          ></up-tabs>
+
           <view
-            v-for="question in pendingQuestionCard.questions"
+            v-for="question in visibleQuestions"
             :key="question.id"
             class="ask-question-card__question"
           >
@@ -335,9 +354,12 @@
               <text class="ask-question-card__chip">{{
                 question.multi_select ? "多选" : "单选"
               }}</text>
-              <text class="ask-question-card__header-text">{{
-                question.header
-              }}</text>
+              <!-- 分栏时 header 已经是 tab 标签了，这里再显示一遍是重复。 -->
+              <text
+                v-if="!questionUsesTabs"
+                class="ask-question-card__header-text"
+                >{{ question.header }}</text
+              >
             </view>
             <text class="ask-question-card__prompt">{{
               question.question
@@ -443,6 +465,19 @@
               @click="answerAskQuestion(true)"
             >
               跳过
+            </button>
+            <!--
+              「下一题」只在还有后续 tab 时出现。单选点完会自动跳，所以它主要服务
+              多选和「其他」那两种不自动跳的情形 —— 那时用户需要一个明确的前进入口，
+              否则只能去点上方的 tab 栏。
+            -->
+            <button
+              v-if="questionUsesTabs && askQuestionTabIndex < questionTabItems.length - 1"
+              class="ask-question-card__next"
+              :disabled="questionSubmitting"
+              @click="askQuestionTabIndex = askQuestionTabIndex + 1"
+            >
+              下一题
             </button>
             <button
               class="ask-question-card__submit"
@@ -1199,11 +1234,13 @@ import {
 } from "./detailComposerPresentation";
 import {
   buildQuestionAnswer as buildPendingQuestionAnswer,
+  buildQuestionTabItems,
   createQuestionSelectionState,
   isQuestionRecommended,
   isQuestionSelectionAnswered,
   questionInputValue,
   questionLabelText,
+  resolveNextQuestionTabIndex,
   splitPermissionDescription,
   type QuestionSelectionState,
 } from "./detailInteractionPresentation";
@@ -1365,6 +1402,9 @@ const questionSubmitting = ref(false);
 const permissionSubmitting = ref(false);
 const pendingPermissionSubmittingOptionId = ref("");
 const askQuestionSelections = ref<Record<string, QuestionSelectionState>>({});
+// 多问题时当前展示的 tab 下标。`up-tabs` 是下标驱动的（`v-model:current`），
+// 所以这里存下标而不是 question id；需要 id 时经 questionTabItems 回查。
+const askQuestionTabIndex = ref(0);
 const sequence = ref(0);
 const showPlanDrawer = ref(false);
 const planStatusFilter = ref<PlanTaskFilter>("all");
@@ -1655,6 +1695,22 @@ const questionSubmitReady = computed(() => {
     questionAnsweredCount.value === pending.questions.length,
   );
 });
+// 单问题**不分栏** —— 与 codeg-plus 桌面端一致。一个问题套一层 tab 只是多一次点击，
+// 而且 tab 栏里只有一个标签看起来像出了错。
+const questionUsesTabs = computed(
+  () => (pendingQuestionCard.value?.questions.length || 0) > 1,
+);
+const questionTabItems = computed(() =>
+  buildQuestionTabItems(pendingQuestionCard.value, askQuestionSelections.value),
+);
+// 分栏时只渲染当前那一题；不分栏时渲染全部（其实就是唯一那一题）。
+// 这正是修掉「垂直堆叠太长」的那一步。
+const visibleQuestions = computed(() => {
+  const questions = pendingQuestionCard.value?.questions || [];
+  if (!questionUsesTabs.value) return questions;
+  const current = questions[askQuestionTabIndex.value];
+  return current ? [current] : questions.slice(0, 1);
+});
 const historyIndicator = computed(() =>
   resolveDetailHistoryIndicatorPresentation({
     hasMessages: messages.value.length > 0,
@@ -1684,6 +1740,9 @@ watch(
     askQuestionSelections.value = createQuestionSelectionState(
       pendingQuestionCard.value,
     );
+    // 换了一组问题就回到第一题。不重置的话，上一组停在第 3 个 tab、新组只有 2 个问题时
+    // 会渲染出空白（`visibleQuestions` 取不到那个下标）。
+    askQuestionTabIndex.value = 0;
   },
   { immediate: true },
 );
@@ -3174,6 +3233,31 @@ function toggleQuestionOption(
       otherActive: question.multi_select ? current.otherActive : false,
     },
   };
+
+  // 单选选中后自动跳下一题 —— 这是让多个 tab 读起来像向导而不是作业的关键。
+  // 取消选中（nextSelected 为空）时不跳：那是在改主意，跳走等于把他推离刚要重选的那题。
+  if (nextSelected.length > 0) {
+    maybeAdvanceQuestionTab(question, false);
+  }
+}
+
+/**
+ * 作答后按需前进到下一个 tab。判据在纯模块 `resolveNextQuestionTabIndex` 里
+ * （多选不跳、切「其他」不跳、末题不跳），这里只负责套上「当前是否分栏」这一层。
+ */
+function maybeAdvanceQuestionTab(
+  question: PendingQuestionState["questions"][number],
+  isOtherToggle: boolean,
+) {
+  if (!questionUsesTabs.value) return;
+  const nextIndex = resolveNextQuestionTabIndex({
+    questionCount: questionTabItems.value.length,
+    currentIndex: askQuestionTabIndex.value,
+    multiSelect: question.multi_select,
+    isOtherToggle,
+  });
+  if (nextIndex == null) return;
+  askQuestionTabIndex.value = nextIndex;
 }
 
 function toggleQuestionOther(
