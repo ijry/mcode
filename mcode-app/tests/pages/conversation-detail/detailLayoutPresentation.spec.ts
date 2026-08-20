@@ -1,5 +1,4 @@
 import {
-  buildHistoryStatusStyle,
   buildMessageListContentStyle,
   buildMessageListPageStyle,
   buildTopOffsetStyle,
@@ -88,16 +87,18 @@ describe("detailLayoutPresentation", () => {
     })).toBe(192)
   })
 
-  it("builds top offset and history status styles", () => {
+  it("builds top offset styles and clamps negatives", () => {
     expect(buildTopOffsetStyle(88)).toEqual({ top: "88px" })
     expect(buildTopOffsetStyle(-10)).toEqual({ top: "0px" })
+  })
 
-    expect(buildHistoryStatusStyle({
-      navbarHeight: 96,
-      tabsBarHeight: 52,
-      toolbarHeight: 44,
-    })).toEqual({
-      top: "192px",
-    })
+  it("no longer exposes a fixed-position style for the history indicator", async () => {
+    // `buildHistoryStatusStyle` 算的是 `position: fixed` 指示行的 top 坐标。指示行改成
+    // scroll-view 内容流里的第一个子元素后，这个坐标不但没用，接回去还会让它重新浮到
+    // 第一条消息上面 —— 所以这里断言导出已消失，防止回归。
+    const mod: Record<string, unknown> = await import(
+      "@/pages/conversation-detail/detailLayoutPresentation"
+    )
+    expect(mod.buildHistoryStatusStyle).toBeUndefined()
   })
 })

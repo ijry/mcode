@@ -63,6 +63,27 @@ describe("detailMessagePresentation", () => {
     })
   })
 
+  // system 轮次（上下文压缩摘要等注入上下文）必须独立成项，不能被拼进相邻 agent
+  // 回复的气泡 —— 那等于把内部说明混进正文，而且它会打断 assistant 的合并串。
+  it("keeps a system turn as its own item and splits the assistant run", () => {
+    const items = buildRenderMessageItems([
+      turn({ id: "a1", role: "assistant", content: [{ type: "text", text: "before" }], timestamp: 10 }),
+      turn({
+        id: "s1",
+        role: "system",
+        content: [{ type: "text", text: "This session is being continued…" }],
+        timestamp: 20,
+      }),
+      turn({ id: "a2", role: "assistant", content: [{ type: "text", text: "after" }], timestamp: 30 }),
+    ])
+
+    expect(items.map((item) => item.key)).toEqual(["a1", "s1", "a2"])
+    expect(items[1].message.role).toBe("system")
+    expect(items[1].message.content).toEqual([
+      { type: "text", text: "This session is being continued…" },
+    ])
+  })
+
   it("clones merged content so caller mutations do not mutate source turns", () => {
     const messages = [
       turn({ id: "a1", content: [{ type: "text", text: "first" }] }),

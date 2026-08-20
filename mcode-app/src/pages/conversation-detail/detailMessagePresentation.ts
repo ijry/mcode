@@ -49,6 +49,8 @@ export function buildRenderMessageItems(messages: MessageTurn[]): RenderMessageI
   }
 
   for (const message of messages) {
+    // 只有 assistant 轮次参与合并。system（上下文压缩摘要等注入上下文）必须独立成项，
+    // 否则会被拼进相邻 agent 回复的气泡里，等于把内部说明混进正文。
     if (message.role === "assistant") {
       assistantBuffer.push(message)
       continue

@@ -66,14 +66,8 @@ export function buildTopOffsetStyle(topOffsetPx: number) {
   }
 }
 
-export function buildHistoryStatusStyle(input: {
-  navbarHeight: number
-  tabsBarHeight?: number
-  toolbarHeight: number
-}) {
-  return buildTopOffsetStyle(
-    Math.max(0, Number(input.navbarHeight || 0))
-    + Math.max(0, Number(input.tabsBarHeight || 0))
-    + Math.max(0, Number(input.toolbarHeight || 0))
-  )
-}
+// 这里曾有 `buildHistoryStatusStyle`：把导航栏 + tab 条 + 工具栏的高度加起来，算出
+// 「历史加载指示行」这个 `position: fixed` 元素该贴在哪。指示行现在是 scroll-view
+// 内容流里的第一个子元素（`min-height: 64rpx`，见 index.scss `.history-status`），
+// 跟着列表一起滚，不需要任何绝对坐标 —— 函数一并删掉，避免有人照着旧签名把它重新
+// 接回去，那会让指示行又浮到第一条消息上面。

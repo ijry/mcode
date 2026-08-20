@@ -1,4 +1,5 @@
 import type { ContentPart, MessageTurn, ToolCall } from "@/types/acp"
+import { isSubagentToolCall } from "@/services/conversation/subagentToolCall"
 import { firstString, getTurnContentParts, toObject } from "./detailDataNormalization"
 
 export type PlanTaskStatus = "pending" | "in_progress" | "completed" | "failed"
@@ -53,6 +54,13 @@ function mergeTaskFromToolCall(
   toolCall: ToolCall,
   nextOrder: () => number
 ) {
+  // 原生子智能体（Claude `Task`、Cursor `task`）不是计划任务。
+  //
+  // 今天它其实走不到下面任何一个精确分支，所以不会真的建出任务来 —— 但入口过滤是
+  // 宽松的 `includes("task")`，一旦有人后续补一条 `name === "task"` 分支（不少 agent
+  // 的待办工具就叫 `task`），每个子智能体调用都会静默变成一条计划任务。先挡住。
+  if (isSubagentToolCall(toolCall)) return
+
   const name = normalizeToolName(toolCall.name)
   if (!name.includes("task") && !name.includes("todo")) return
 

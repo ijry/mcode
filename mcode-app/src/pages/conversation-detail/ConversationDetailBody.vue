@@ -9,7 +9,6 @@
       detailTheme === 'sweet' && `detail-body--sweet-${cyberEffectPhase || 'idle'}`,
     ]"
   >
-    <slot name="history"></slot>
     <scroll-view
       class="message-list"
       :style="messageListPageStyle"
@@ -18,10 +17,20 @@
       :scroll-into-view="messageScrollIntoView"
       :scroll-with-animation="messageScrollWithAnimation"
       :upper-threshold="upperThreshold"
+      :refresher-enabled="refresherEnabled"
+      :refresher-triggered="refresherTriggered"
+      :refresher-threshold="refresherThreshold"
+      refresher-default-style="none"
+      refresher-background="transparent"
       @scroll="emit('message-scroll', $event)"
       @scrolltoupper="emit('message-scroll-upper')"
+      @refresherrefresh="emit('refresher-refresh')"
+      @refresherpulling="emit('refresher-pulling', $event)"
+      @refresherrestore="emit('refresher-restore')"
+      @refresherabort="emit('refresher-abort')"
     >
       <view class="message-list__content" :style="messageListContentStyle">
+        <slot name="history"></slot>
         <slot name="content"></slot>
       </view>
     </scroll-view>
@@ -55,6 +64,12 @@ const props = defineProps<{
   messageScrollIntoView?: string
   messageScrollWithAnimation?: boolean
   upperThreshold?: number
+  // 下拉刷新（加载更早历史）。`refresher-default-style="none"` + `#history` 插槽
+  // 把 uni 自带的绿色转圈换成我们自己的行内指示器，见
+  // detailHistoryIndicatorPresentation.ts。
+  refresherEnabled?: boolean
+  refresherTriggered?: boolean
+  refresherThreshold?: number
   detailTheme?: DetailThemeId
   cyberEffectPhase?: CyberEffectPhase
   cyberActive?: boolean
@@ -67,6 +82,10 @@ const resolvedInputWrapStyle = computed(() =>
 const emit = defineEmits<{
   (event: "message-scroll", payload: unknown): void
   (event: "message-scroll-upper"): void
+  (event: "refresher-refresh"): void
+  (event: "refresher-pulling", payload: unknown): void
+  (event: "refresher-restore"): void
+  (event: "refresher-abort"): void
 }>()
 </script>
 

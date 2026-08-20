@@ -1411,24 +1411,36 @@
   }
 }
 
+/**
+ * 历史加载指示行。**必须是流内元素**（曾经是 `position: fixed` 且在 scroll-view
+ * 外面，于是它浮在第一条消息上面把内容盖住）。
+ *
+ * `min-height` 固定：前插更早历史后要按锚点把滚动位置还原，还原量依赖「插入了多高的
+ * 内容」。指示行的文案在 pulling / loading / error 之间切换，若行高跟着变，
+ * 这个差值就带上了一份不该有的抖动，锚点会漂。所以行高钉死，只换里面的字。
+ */
 .history-status {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 10rpx;
   flex-shrink: 0;
+  min-height: 64rpx;
   padding: 12rpx 24rpx;
   background-color: transparent;
-  position: fixed;
-  left: 50%;
-  width: calc(100% - 72rpx);
-  max-width: 888rpx;
-  transform: translateX(-50%);
-  z-index: 18;
+  box-sizing: border-box;
 }
 
-.history-status--with-plan {
-  padding-right: 220rpx;
+/**
+ * 失败态要在**所有主题**下都读起来像错误。sweet / summer / cyber 三套主题都用
+ * `!important` 改写 `.history-status__text` 的颜色（本文件 :83 / :182 / :484），
+ * 不带 `!important` 的话这里会被它们压掉，赛博主题下「加载失败」是一行正常的绿字。
+ * 两边都 `!important` 且选择器同为两个类，靠**源码顺序**取胜 —— 所以这条必须留在
+ * 那三处之后，别往上搬。
+ */
+.history-status--retryable .history-status__text {
+  color: var(--up-warning, #f9ae3d) !important;
+  text-shadow: none !important;
 }
 
 .history-status__text {

@@ -40,6 +40,7 @@
               :detail-theme="detailTheme"
               :cyber-effect-phase="cyberEffectPhase || 'idle'"
               :cyber-active="false"
+              :subagent-transcripts="subagentTranscripts"
             />
           </view>
 
@@ -94,6 +95,11 @@ const runtime = useConversationRuntimeStore()
 
 const renderMessageItems = computed(() =>
   buildRenderMessageItems(runtime.getMessages(Number(props.conversationId || 0)))
+)
+
+/** 与可交互面板同源：子智能体实时正文按父 tool_call id 索引，只在流式期间有值。 */
+const subagentTranscripts = computed(() =>
+  runtime.getSubagentTranscripts(Number(props.conversationId || 0))
 )
 
 const session = computed(() =>
