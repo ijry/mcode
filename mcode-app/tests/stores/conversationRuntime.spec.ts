@@ -1,5 +1,6 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { useConversationRuntimeStore } from '@/stores/conversationRuntime'
+import { writeLocalTurnCacheEnabled } from '@/services/conversation/localTurnCachePreference'
 
 jest.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
@@ -56,6 +57,7 @@ jest.mock('@/services/db/migrations', () => ({
 jest.mock('@/services/db/repositories/conversationRepository', () => ({
   getNewestTurns: jest.fn(() => []),
   insertCompletedTurn: jest.fn(),
+  pruneConversationTurnsToNewest: jest.fn(() => 0),
 }))
 
 jest.mock('@/services/conversation/conversationDetailPersistence', () => ({
@@ -66,6 +68,9 @@ describe('conversationRuntime ACP error handling', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     jest.clearAllMocks()
+    // 本地缓存是实验性功能，**默认关闭**。这个 suite 里的大部分断言讲的是「缓存开着时
+    // 的行为」，所以统一打开；关闭时的行为由本文件末尾那两条专门的测试锁。
+    writeLocalTurnCacheEnabled(true)
     const acp = require('@/api/acp')
     const manager = require('@/services/conversation/connectionSessionManager')
     acp.acpApi.acpFindConnectionForConversation.mockResolvedValue(null)
@@ -433,6 +438,10 @@ describe('conversationRuntime ACP error handling', () => {
           output,
           rawOutput: output,
           error: undefined,
+          // 实时首帧就要把 `_meta` 透传下来：原生子智能体的权威标记
+          // （`meta.claudeCode.subagent === true`）只在这一帧出现，丢了胶囊就退化成
+          // 普通工具组。这里事件没带，落到 null。
+          meta: null,
         },
       },
     ])
@@ -998,13 +1007,37 @@ describe('conversationRuntime ACP error handling', () => {
     expect(first.historyWindow).toEqual(historyWindow)
     expect(second.historyWindow).toBeNull()
 
-    store.clearConversationHistoryWindow(1)
-    expect(first.historyWindow).toBeNull()
-
     store.setConversationHistoryWindow(1, historyWindow)
     store.clearCachedSessionState()
 
     expect(first.historyWindow).toBeNull()
+  })
+
+  it('drops the stale timeline together with the window when a page seam is disproven', () => {
+    // canApplyOlderHistoryPage 失败 = 服务端哈希证明内存前缀已陈旧（历史被压缩重写）。
+    // 只清窗口是不够的：重载会走 mergeTailIntoTurnsWithSeam 保住前缀，陈旧轮次会留在
+    // 列表顶部和刷新出来的新轮次并排显示。必须连轮次一起丢掉才能重新锚定。
+    const store = useConversationRuntimeStore()
+    const session = store.getOrCreateSession(1)
+    session.localTurns = Array.from({ length: 90 }, (_, index) => ({
+      id: `stale-${index}`,
+      dedupeKey: `remote:stale-${index}`,
+      role: 'user',
+      content: [{ type: 'text', text: `turn ${index}` }],
+      timestamp: index,
+      status: 'completed',
+    })) as any
+    store.setConversationHistoryWindow(1, {
+      turns_offset: 90,
+      turns_total: 180,
+      assistant_turns_before_offset: 45,
+      prefix_hash: 'deep-prefix',
+    })
+
+    store.resetConversationHistoryToLatest(1)
+
+    expect(session.localTurns).toEqual([])
+    expect(session.historyWindow).toBeNull()
   })
 
   it('keeps cached session state for hot conversations', () => {
@@ -1072,6 +1105,116 @@ describe('conversationRuntime ACP error handling', () => {
       outputTokens: 40,
       totalTokens: 300,
       turnCount: 1,
+    })
+  })
+
+  // 窗口化响应里除 turns 之外的字段（含 session_stats）仍描述**完整**会话，
+  // 所以尾窗的 turns 既不能拿来累加 usage，也不能拿 length 当轮次数。
+  describe('windowed detail stats', () => {
+    const windowFields = {
+      turns_offset: 150,
+      turns_total: 180,
+      assistant_turns_before_offset: 75,
+      prefix_hash: 'tail-prefix',
+    }
+
+    it('keeps existing stats instead of summing the tail as if it were the whole conversation', () => {
+      const store = useConversationRuntimeStore()
+      const session = store.getOrCreateSession(1)
+      session.stats = {
+        inputTokens: 9000,
+        outputTokens: 4000,
+        totalTokens: 13000,
+        turnCount: 180,
+      }
+
+      const applied = store.applyConversationDetailStats(1, {
+        ...windowFields,
+        // 尾窗里只有一条带 usage 的轮次；累加它会把 13000 覆盖成 153。
+        turns: [
+          {
+            id: 'assistant-1',
+            role: 'assistant',
+            content: [],
+            timestamp: 1,
+            usage: {
+              input_tokens: 100,
+              output_tokens: 35,
+              cache_creation_input_tokens: 7,
+              cache_read_input_tokens: 11,
+            },
+          },
+        ],
+      } as any)
+
+      expect(applied).toBe(false)
+      expect(session.stats).toEqual({
+        inputTokens: 9000,
+        outputTokens: 4000,
+        totalTokens: 13000,
+        turnCount: 180,
+      })
+    })
+
+    it('takes turnCount from turns_total, not from the window length', () => {
+      const store = useConversationRuntimeStore()
+      const session = store.getOrCreateSession(1)
+
+      store.applyConversationDetailStats(1, {
+        ...windowFields,
+        // 向前对齐可能让尾窗返回 30~230 条，长度本身没有意义。
+        turns: Array.from({ length: 47 }, (_, index) => ({
+          id: `assistant-${index}`,
+          role: 'assistant',
+          content: [],
+          timestamp: index,
+        })),
+        session_stats: {
+          total_usage: {
+            input_tokens: 200,
+            output_tokens: 40,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 60,
+          },
+          total_tokens: 300,
+        },
+      } as any)
+
+      expect(session.stats).toEqual({
+        inputTokens: 260,
+        outputTokens: 40,
+        totalTokens: 300,
+        turnCount: 180,
+      })
+    })
+
+    it('still sums turns for a legacy full response that omits the window fields', () => {
+      const store = useConversationRuntimeStore()
+      const session = store.getOrCreateSession(1)
+
+      store.applyConversationDetailStats(1, {
+        turns: [
+          {
+            id: 'assistant-1',
+            role: 'assistant',
+            content: [],
+            timestamp: 1,
+            usage: {
+              input_tokens: 100,
+              output_tokens: 35,
+              cache_creation_input_tokens: 7,
+              cache_read_input_tokens: 11,
+            },
+          },
+        ],
+      } as any)
+
+      expect(session.stats).toEqual({
+        inputTokens: 118,
+        outputTokens: 35,
+        totalTokens: 153,
+        turnCount: 1,
+      })
     })
   })
 
@@ -1480,7 +1623,15 @@ describe('conversationRuntime ACP error handling', () => {
     }
   })
 
-  it('stops streaming external-user backfill after the running turn is captured once', async () => {
+  // ── 观察者进入进行中会话时的一次性历史补齐 ─────────────────────────────
+  //
+  // 旧实现挂在 7 个实时事件上，带 1.5s 节流 + 4 次配额，也就是流式期间反复全量拉取。
+  // 那是给不广播 `AcpEvent::UserMessage` 的旧后端留的兼容层：现在用户轮次由
+  // `applyRealtimeUserMessage` 直接插进 localTurns，一行请求都不用发。
+  //
+  // 真正剩下的缺口只有 mid-turn attach —— attach 快照（LiveSessionSnapshot）带
+  // pending_user_message 但**不含历史轮次**。判据因此是 `localTurns.length === 0`。
+  it('backfills history once when a viewer attaches to a running conversation', async () => {
     const sync = require('@/services/conversation/conversationSyncService')
     const repo = require('@/services/db/repositories/conversationRepository')
     const store = useConversationRuntimeStore()
@@ -1489,38 +1640,35 @@ describe('conversationRuntime ACP error handling', () => {
     session.instanceKey = 'test-instance'
     session.status = 'connected'
 
-    sync.calibrateAfterReplayGap.mockResolvedValue({
-      in_flight_user_turn_id: 'ext-user-1',
-    })
-    // 补齐一次后本地已有历史消息，守卫方可停止后续的流式全量刷新。
+    sync.calibrateAfterReplayGap.mockResolvedValue({})
     repo.getNewestTurns.mockReturnValue([
       buildPersistedUserTurn('ext-user-1', 'external question'),
     ])
 
     try {
-      // 观察者视角：其他设备发起的回合，本地没有 optimistic 用户轮次。
+      // 观察者视角：别的设备发起的回合，本地一条轮次都没有。
       store.handleEvent({
         type: 'stream_batch',
         connectionId: 'conn-1',
         data: { delta: 'external reply', contentType: 'text' },
       } as any)
-
       for (let i = 0; i < 10 && sync.calibrateAfterReplayGap.mock.calls.length === 0; i++) {
         await new Promise((resolve) => setTimeout(resolve, 0))
       }
-      // 让 backfill 的 promise 链完成，捕获外部用户轮次。
       await new Promise((resolve) => setTimeout(resolve, 0))
 
       expect(sync.calibrateAfterReplayGap).toHaveBeenCalledTimes(1)
-      expect(session.externalTurnBackfilled).toBe(true)
+      expect(session.localTurns.length).toBeGreaterThan(0)
 
-      // 绕过 1.5s 节流后，流式仍在进行，但不应再触发全量历史刷新。
-      session.externalTurnBackfillLastAttemptAt = 0
-      store.handleEvent({
-        type: 'stream_batch',
-        connectionId: 'conn-1',
-        data: { delta: ' more text', contentType: 'text' },
-      } as any)
+      // 历史已到位：后续每一个实时事件都不该再拉。**没有节流参与** ——
+      // 判据是「有没有本地轮次」，不是「距上次多久」。
+      for (const delta of [' more', ' and more', ' still more']) {
+        store.handleEvent({
+          type: 'stream_batch',
+          connectionId: 'conn-1',
+          data: { delta, contentType: 'text' },
+        } as any)
+      }
       await new Promise((resolve) => setTimeout(resolve, 0))
 
       expect(sync.calibrateAfterReplayGap).toHaveBeenCalledTimes(1)
@@ -1530,7 +1678,7 @@ describe('conversationRuntime ACP error handling', () => {
     }
   })
 
-  it('keeps syncing history while streaming when local messages are still empty', async () => {
+  it('keeps retrying while the conversation still has no local turns', async () => {
     const sync = require('@/services/conversation/conversationSyncService')
     const repo = require('@/services/db/repositories/conversationRepository')
     const store = useConversationRuntimeStore()
@@ -1539,7 +1687,7 @@ describe('conversationRuntime ACP error handling', () => {
     session.instanceKey = 'test-instance'
     session.status = 'connected'
 
-    // 远端详情不回报 in-flight 用户轮次，且本地仍拉不到历史（返回空）。
+    // 拉了但仍然空（真的没有历史，或这一次请求没拿到）。
     sync.calibrateAfterReplayGap.mockResolvedValue({})
     repo.getNewestTurns.mockReturnValue([])
 
@@ -1553,13 +1701,10 @@ describe('conversationRuntime ACP error handling', () => {
         await new Promise((resolve) => setTimeout(resolve, 0))
       }
       await new Promise((resolve) => setTimeout(resolve, 0))
-
       expect(sync.calibrateAfterReplayGap).toHaveBeenCalledTimes(1)
-      // 本地消息为空时，即使已尝试过也不锁死守卫，需要再拉一次历史。
-      expect(session.externalTurnBackfilled).toBe(false)
-      expect(session.inFlightUserTurnId).toBeNull()
 
-      session.externalTurnBackfillLastAttemptAt = 0
+      // 仍然空 → 下一个事件还要再试。漏掉的代价是观察者永远看着空白，
+      // 比几次空窗口请求严重得多。
       store.handleEvent({
         type: 'stream_batch',
         connectionId: 'conn-1',
@@ -1570,64 +1715,50 @@ describe('conversationRuntime ACP error handling', () => {
       }
 
       expect(sync.calibrateAfterReplayGap).toHaveBeenCalledTimes(2)
+
+      // 绝不并发：第二个请求还在飞的时候，再来的事件不会发出第三个。
+      expect(session.historyBackfillInFlight).toBe(true)
+      store.handleEvent({
+        type: 'stream_batch',
+        connectionId: 'conn-1',
+        data: { delta: ' third', contentType: 'text' },
+      } as any)
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(sync.calibrateAfterReplayGap).toHaveBeenCalledTimes(2)
     } finally {
       sync.calibrateAfterReplayGap.mockReset()
       repo.getNewestTurns.mockReturnValue([])
     }
   })
 
-  it('allows one more external-user backfill after a turn boundary resets the guard', async () => {
+  it('never backfills when a realtime user_message already supplied the turn', async () => {
+    // 这是删掉轮询的依据：用户轮次由事件直接落进 localTurns，不需要任何拉取。
     const sync = require('@/services/conversation/conversationSyncService')
-    const repo = require('@/services/db/repositories/conversationRepository')
-    const store = useConversationRuntimeStore()
-    const session = store.getOrCreateSession(1)
-    session.connectionId = 'conn-1'
+    const { store, session } = prepareSession()
     session.instanceKey = 'test-instance'
-    session.status = 'connected'
-
-    sync.calibrateAfterReplayGap.mockResolvedValue({
-      in_flight_user_turn_id: 'ext-user-1',
-    })
-    // 每次补齐后本地都有历史消息，避免"本地为空必须继续同步"覆盖回合守卫。
-    repo.getNewestTurns.mockReturnValue([
-      buildPersistedUserTurn('ext-user-1', 'external question'),
-    ])
 
     try {
       store.handleEvent({
+        type: 'user_message',
+        connectionId: 'conn-1',
+        data: {
+          messageId: 'user-1',
+          blocks: [{ type: 'text', text: 'my prompt' }],
+        },
+      } as any)
+      // 事件自己把轮次插进了时间线。
+      expect(session.localTurns).toHaveLength(1)
+
+      store.handleEvent({
         type: 'stream_batch',
         connectionId: 'conn-1',
-        data: { delta: 'external reply', contentType: 'text' },
+        data: { delta: 'reply', contentType: 'text' },
       } as any)
-      for (let i = 0; i < 10 && sync.calibrateAfterReplayGap.mock.calls.length === 0; i++) {
-        await new Promise((resolve) => setTimeout(resolve, 0))
-      }
       await new Promise((resolve) => setTimeout(resolve, 0))
-      expect(sync.calibrateAfterReplayGap).toHaveBeenCalledTimes(1)
-      expect(session.externalTurnBackfilled).toBe(true)
 
-      // 回合被取消属于回合边界，应重置守卫，让下一个回合可再补齐一次。
-      store.handleEvent({
-        type: 'turn_cancelled',
-        connectionId: 'conn-1',
-        data: {},
-      } as any)
-      expect(session.externalTurnBackfilled).toBe(false)
-
-      session.externalTurnBackfillLastAttemptAt = 0
-      store.handleEvent({
-        type: 'stream_batch',
-        connectionId: 'conn-1',
-        data: { delta: 'next external reply', contentType: 'text' },
-      } as any)
-      for (let i = 0; i < 10 && sync.calibrateAfterReplayGap.mock.calls.length < 2; i++) {
-        await new Promise((resolve) => setTimeout(resolve, 0))
-      }
-
-      expect(sync.calibrateAfterReplayGap).toHaveBeenCalledTimes(2)
+      expect(sync.calibrateAfterReplayGap).not.toHaveBeenCalled()
     } finally {
       sync.calibrateAfterReplayGap.mockReset()
-      repo.getNewestTurns.mockReturnValue([])
     }
   })
 
@@ -1746,30 +1877,6 @@ describe('conversationRuntime ACP error handling', () => {
     )
   })
 
-  it('does not backfill history after user_message has supplied the current turn', async () => {
-    const sync = require('@/services/conversation/conversationSyncService')
-    const { store, session } = prepareSession()
-    session.instanceKey = 'test-instance'
-
-    store.handleEvent({
-      type: 'user_message',
-      connectionId: 'conn-1',
-      data: {
-        messageId: 'user-event-2',
-        blocks: [{ type: 'text', text: 'my prompt' }],
-      },
-    } as any)
-    store.handleEvent({
-      type: 'stream_batch',
-      connectionId: 'conn-1',
-      data: { delta: 'assistant reply', contentType: 'text' },
-    } as any)
-    await new Promise((resolve) => setTimeout(resolve, 0))
-
-    expect(sync.calibrateAfterReplayGap).not.toHaveBeenCalled()
-    expect(session.externalTurnBackfilled).toBe(true)
-  })
-
   it('keeps a realtime user_message when an earlier replay-gap backfill resolves late', async () => {
     const sync = require('@/services/conversation/conversationSyncService')
     const repo = require('@/services/db/repositories/conversationRepository')
@@ -1818,7 +1925,9 @@ describe('conversationRuntime ACP error handling', () => {
         }),
       ])
       expect(session.inFlightUserTurnId).toBe('user-event-late')
-      expect(session.externalTurnBackfilled).toBe(true)
+      // 在途请求被 generation 判废：user_message 到达时 resetTurnScopedBackfillState
+      // 自增了 generation，所以晚到的 backfill 结果整段丢弃。
+      expect(session.historyBackfillInFlight).toBe(false)
     } finally {
       resolveReplayGap({})
       sync.calibrateAfterReplayGap.mockReset()
@@ -1841,10 +1950,13 @@ describe('conversationRuntime ACP error handling', () => {
     expect(session.localTurns.filter((turn) => turn.role === 'user')).toHaveLength(1)
 
     // 模拟 maybeBackfillExternalUserTurn 全量拉取后，用 DB 持久 id 换掉了本地轮次
-    // （id 与实时 message_id 不一致，但内容相同）。
+    // （id 与实时 message_id 不一致，但内容相同）。DB 来源的轮次一定经过
+    // mapPersistedTurnToMessage，因此必然带 dedupeKey —— 正是这个标记把「落库后换了
+    // id 的孪生轮次」与「排队发送的相同文本新轮次」区分开。
     session.localTurns = [
       {
         id: 'db-persisted-42',
+        dedupeKey: 'remote:turn-7',
         role: 'user',
         content: [{ type: 'text', text: 'external prompt' }],
         timestamp: 100,
@@ -1866,101 +1978,77 @@ describe('conversationRuntime ACP error handling', () => {
     expect(session.localTurns.filter((turn) => turn.role === 'user')).toHaveLength(1)
   })
 
-  it('stops streaming external-user backfill after the attempt cap even when nothing is captured', async () => {
-    const sync = require('@/services/conversation/conversationSyncService')
-    const repo = require('@/services/db/repositories/conversationRepository')
-    const store = useConversationRuntimeStore()
-    const session = store.getOrCreateSession(1)
-    session.connectionId = 'conn-1'
-    session.instanceKey = 'test-instance'
-    session.status = 'connected'
+  it('recognizes the persisted in-flight prompt even when assistant turns follow it', () => {
+    const { store, session } = prepareSession()
 
-    // 旧后端：既不回报 in-flight 用户轮次 id，也拉不到任何历史（始终为空）。
-    // captured 永远判不出来，只有硬上限能止住无限全量拉取。
-    sync.calibrateAfterReplayGap.mockResolvedValue({})
-    repo.getNewestTurns.mockReturnValue([])
+    // 服务端一个逻辑回复会被拆成多条连续 assistant 轮次（解析器在下一条 assistant
+    // 消息处断开），所以全量补齐后的 localTurns 尾部通常是 assistant，进行中的用户
+    // 轮次被盖在中间。旧实现只看数组最后一条，必然漏判，于是同一条 prompt 被追加成
+    // 第二条用户消息 —— 详情页"用户消息重复 2 次"。
+    session.inFlightUserTurnId = 'ext-msg-1'
+    session.localTurns = [
+      {
+        id: 'db-persisted-42',
+        dedupeKey: 'remote:turn-7',
+        role: 'user',
+        content: [{ type: 'text', text: 'external prompt' }],
+        timestamp: 100,
+        status: 'completed',
+      },
+      {
+        id: 'db-persisted-43',
+        dedupeKey: 'remote:turn-8',
+        role: 'assistant',
+        content: [{ type: 'text', text: '第一段回复' }],
+        timestamp: 101,
+        status: 'completed',
+      },
+      {
+        id: 'db-persisted-44',
+        dedupeKey: 'remote:turn-9',
+        role: 'assistant',
+        content: [{ type: 'text', text: '第二段回复' }],
+        timestamp: 102,
+        status: 'completed',
+      },
+    ] as any
 
-    try {
-      for (let attempt = 0; attempt < 8; attempt++) {
-        session.externalTurnBackfillLastAttemptAt = 0
-        store.handleEvent({
-          type: 'stream_batch',
-          connectionId: 'conn-1',
-          data: { delta: `chunk ${attempt}`, contentType: 'text' },
-        } as any)
-        await new Promise((resolve) => setTimeout(resolve, 0))
-        await new Promise((resolve) => setTimeout(resolve, 0))
-      }
+    store.handleEvent({
+      type: 'user_message',
+      connectionId: 'conn-1',
+      data: {
+        messageId: 'ext-msg-1',
+        blocks: [{ type: 'text', text: 'external prompt' }],
+      },
+    } as any)
 
-      // 达到硬上限后，即便绕过 1.5s 节流、流式仍在进行，也不再触发全量拉取。
-      const callsAtCap = sync.calibrateAfterReplayGap.mock.calls.length
-      expect(callsAtCap).toBeGreaterThan(0)
-      expect(callsAtCap).toBeLessThanOrEqual(5)
-
-      session.externalTurnBackfillLastAttemptAt = 0
-      store.handleEvent({
-        type: 'stream_batch',
-        connectionId: 'conn-1',
-        data: { delta: 'after cap', contentType: 'text' },
-      } as any)
-      await new Promise((resolve) => setTimeout(resolve, 0))
-
-      expect(sync.calibrateAfterReplayGap.mock.calls.length).toBe(callsAtCap)
-    } finally {
-      sync.calibrateAfterReplayGap.mockReset()
-      repo.getNewestTurns.mockReturnValue([])
-    }
+    const userTurns = session.localTurns.filter((turn) => turn.role === 'user')
+    expect(userTurns).toHaveLength(1)
+    expect(userTurns[0].id).toBe('db-persisted-42')
+    expect(session.inFlightUserTurnId).toBe('db-persisted-42')
   })
 
-  it('restores the external-user backfill quota after a turn boundary', async () => {
-    const sync = require('@/services/conversation/conversationSyncService')
-    const repo = require('@/services/db/repositories/conversationRepository')
-    const store = useConversationRuntimeStore()
-    const session = store.getOrCreateSession(1)
-    session.connectionId = 'conn-1'
-    session.instanceKey = 'test-instance'
-    session.status = 'connected'
+  it('still appends a queued prompt that repeats text of a realtime turn', () => {
+    const { store, session } = prepareSession()
 
-    sync.calibrateAfterReplayGap.mockResolvedValue({})
-    repo.getNewestTurns.mockReturnValue([])
+    // 排队连发两次相同文本：第一条是实时来源（无 dedupeKey），第二条必须独立成条，
+    // 不能被内容签名兜底误合并。
+    store.handleEvent({
+      type: 'user_message',
+      connectionId: 'conn-1',
+      data: { messageId: 'msg-1', blocks: [{ type: 'text', text: '继续' }] },
+    } as any)
+    store.handleEvent({
+      type: 'user_message',
+      connectionId: 'conn-1',
+      data: { messageId: 'msg-2', blocks: [{ type: 'text', text: '继续' }] },
+    } as any)
 
-    try {
-      for (let attempt = 0; attempt < 8; attempt++) {
-        session.externalTurnBackfillLastAttemptAt = 0
-        store.handleEvent({
-          type: 'stream_batch',
-          connectionId: 'conn-1',
-          data: { delta: `chunk ${attempt}`, contentType: 'text' },
-        } as any)
-        await new Promise((resolve) => setTimeout(resolve, 0))
-        await new Promise((resolve) => setTimeout(resolve, 0))
-      }
-      const callsAtCap = sync.calibrateAfterReplayGap.mock.calls.length
-
-      // 回合边界重置配额，下一个回合可以再补齐。
-      store.handleEvent({
-        type: 'turn_cancelled',
-        connectionId: 'conn-1',
-        data: {},
-      } as any)
-      expect(session.externalTurnBackfillAttempts).toBe(0)
-
-      session.status = 'connected'
-      session.externalTurnBackfillLastAttemptAt = 0
-      store.handleEvent({
-        type: 'stream_batch',
-        connectionId: 'conn-1',
-        data: { delta: 'next turn', contentType: 'text' },
-      } as any)
-      await new Promise((resolve) => setTimeout(resolve, 0))
-      await new Promise((resolve) => setTimeout(resolve, 0))
-
-      expect(sync.calibrateAfterReplayGap.mock.calls.length).toBe(callsAtCap + 1)
-    } finally {
-      sync.calibrateAfterReplayGap.mockReset()
-      repo.getNewestTurns.mockReturnValue([])
-    }
+    expect(
+      session.localTurns.filter((turn) => turn.role === 'user').map((turn) => turn.id)
+    ).toEqual(['msg-1', 'msg-2'])
   })
+
   it('reloads only the cached tail after completing a turn', async () => {
     const { store, session } = prepareSession()
     const repo = require('@/services/db/repositories/conversationRepository')
@@ -1987,7 +2075,174 @@ describe('conversationRuntime ACP error handling', () => {
 
       await store.completeTurn(1)
 
-      expect(repo.getNewestTurns).toHaveBeenCalledWith(1, 10)
+      // 固定一页，不再按 localTurns.length 定读取量。
+      expect(repo.getNewestTurns).toHaveBeenCalledWith(1, 30)
+    } finally {
+      repo.getNewestTurns.mockReturnValue([])
+    }
+  })
+
+  // 本次改动最危险的点：本地缓存只留最新一页，而用户可能已经往上翻了好几页。
+  // 缓存刷新过去是整体赋值，于是发一条消息就把翻出来的历史静默砍回一页 ——
+  // 不报错，消息只是凭空消失。
+  it('keeps the paged-in prefix when the cached tail only covers one page', async () => {
+    const { store, session } = prepareSession()
+    const repo = require('@/services/db/repositories/conversationRepository')
+    session.instanceKey = 'test-instance'
+    // 内存里 200 条：往上翻了 6 页。翻页得到的轮次都带 dedupeKey（归一化时算的），
+    // 这是跨来源认出同一条轮次的唯一依据。
+    session.localTurns = Array.from({ length: 200 }, (_, index) => ({
+      id: `paged-${index}`,
+      dedupeKey: `remote:paged-${index}`,
+      role: index % 2 === 0 ? 'user' : 'assistant',
+      content: [{ type: 'text', text: `turn ${index}` }],
+      timestamp: index,
+      status: 'completed',
+    })) as any
+    // SQLite 只缓存最新 30 条：刚落库的这一问一答，加上它之前的 28 条。
+    // 接缝落在 paged-172。
+    repo.getNewestTurns.mockReturnValue([
+      buildPersistedUserTurn('fresh-assistant', 'assistant reply'),
+      buildPersistedUserTurn('fresh-user', 'one more prompt'),
+      ...Array.from({ length: 28 }, (_, index) => {
+        const globalIndex = 199 - index
+        return buildPersistedUserTurn(`paged-${globalIndex}`, `turn ${globalIndex}`)
+      }),
+    ])
+
+    try {
+      store.handleEvent({
+        type: 'user_message',
+        connectionId: 'conn-1',
+        data: {
+          messageId: 'user-event-after-paging',
+          blocks: [{ type: 'text', text: 'one more prompt' }],
+        },
+      } as any)
+      store.setLiveMessage(
+        1,
+        [{ type: 'text', text: 'assistant reply' }],
+        true,
+        { id: 'live-after-paging', timestamp: 500 },
+      )
+
+      await store.completeTurn(1)
+
+      const ids = session.localTurns.map((turn) => turn.id)
+      // 前缀 paged-0..171（172 条）+ 缓存页 30 条 = 202，长度不缩水。
+      expect(session.localTurns).toHaveLength(202)
+      expect(ids[0]).toBe('paged-0')
+      // 接缝之前原样保留，接缝之后交给缓存 —— 两边都不重复。
+      expect(ids.filter((id) => id === 'paged-171')).toHaveLength(1)
+      expect(ids.filter((id) => id === 'paged-172')).toHaveLength(1)
+      expect(ids.filter((id) => id === 'paged-199')).toHaveLength(1)
+      // 刚发出的这一问一答必须在，且只有缓存那份（realtime 那份 id 不同，
+      // 重复插入就是详情页「消息重复 2 次」那个 bug）。
+      expect(ids.filter((id) => id === 'fresh-user')).toHaveLength(1)
+      expect(ids.filter((id) => id === 'fresh-assistant')).toHaveLength(1)
+      expect(ids).not.toContain('live-after-paging')
+    } finally {
+      repo.getNewestTurns.mockReturnValue([])
+    }
+  })
+
+  // 缓存的语义是「只存最新一页」，而 `insertCompletedTurn` 只 upsert、从不删。
+  // 不裁剪的话一直聊下去缓存会单调增长（读取侧的 LIMIT 让它读不到，所以完全静默）。
+  it('prunes the cache back to one page after appending a completed turn', async () => {
+    writeLocalTurnCacheEnabled(true)
+    const { store, session } = prepareSession()
+    const repo = require('@/services/db/repositories/conversationRepository')
+    session.instanceKey = 'test-instance'
+
+    store.setLiveMessage(
+      1,
+      [{ type: 'text', text: 'assistant reply' }],
+      true,
+      { id: 'live-prune', timestamp: 200 },
+    )
+
+    await store.completeTurn(1)
+
+    // 裁剪条数必须与读取条数一致：裁多了就是读取侧要 30 条、库里只剩更少。
+    expect(repo.pruneConversationTurnsToNewest).toHaveBeenCalledWith(1, 30)
+    // 顺序也重要 —— 先插入再裁剪。反了的话刚完成的这一轮会被算进「更早的」
+    // 而当场删掉。
+    const insertOrder = repo.insertCompletedTurn.mock.invocationCallOrder[0]
+    const pruneOrder = repo.pruneConversationTurnsToNewest.mock.invocationCallOrder[0]
+    expect(insertOrder).toBeLessThan(pruneOrder)
+  })
+
+  it('does not prune when the local cache toggle is off', async () => {
+    writeLocalTurnCacheEnabled(false)
+    const { store, session } = prepareSession()
+    const repo = require('@/services/db/repositories/conversationRepository')
+    session.instanceKey = 'test-instance'
+
+    store.setLiveMessage(
+      1,
+      [{ type: 'text', text: 'assistant reply' }],
+      true,
+      { id: 'live-prune-off', timestamp: 200 },
+    )
+
+    await store.completeTurn(1)
+
+    // 关闭时这条路径整条不执行 —— 连裁剪都不该发生（没写入就没有要裁的东西，
+    // 而且开关关闭时不应该有任何 SQLite 写操作）。切到 OFF 时的清理由设置页的
+    // `clearCachedConversationTurns` 负责。
+    expect(repo.pruneConversationTurnsToNewest).not.toHaveBeenCalled()
+  })
+
+  // ——— 实验性开关关闭（默认）时的行为 ———  //
+  // 语义是「完全不用本地缓存」：既不写也不读。两侧必须一起关 —— 只关写入的话，
+  // 之前开启期间留下的旧行仍会被读回来，而它们可能已经很旧，`mergeTailIntoTurns`
+  // 找不到接缝就把它们接在当前轮次之后，用户看到一段错位的历史复活。
+  it('neither writes nor reads SQLite turns when the local cache toggle is off', async () => {
+    writeLocalTurnCacheEnabled(false)
+    const { store, session } = prepareSession()
+    const repo = require('@/services/db/repositories/conversationRepository')
+    session.instanceKey = 'test-instance'
+
+    store.setLiveMessage(
+      1,
+      [{ type: 'text', text: 'assistant reply' }],
+      true,
+      { id: 'live-cache-off', timestamp: 200 },
+    )
+
+    await store.completeTurn(1)
+
+    expect(repo.insertCompletedTurn).not.toHaveBeenCalled()
+    expect(repo.getNewestTurns).not.toHaveBeenCalled()
+  })
+
+  it('keeps the just-completed turn in memory when the local cache toggle is off', async () => {
+    writeLocalTurnCacheEnabled(false)
+    const { store, session } = prepareSession()
+    const repo = require('@/services/db/repositories/conversationRepository')
+    session.instanceKey = 'test-instance'
+    // 缓存里躺着陈旧的行。开关关闭时它们**一条都不能**被读回来 —— 那正是
+    // 「幽灵历史复活」的来源。
+    repo.getNewestTurns.mockReturnValue([
+      buildPersistedUserTurn('stale-cached', 'ancient question'),
+    ])
+
+    try {
+      store.setLiveMessage(
+        1,
+        [{ type: 'text', text: 'assistant reply' }],
+        true,
+        { id: 'live-cache-off-2', timestamp: 200 },
+      )
+
+      await store.completeTurn(1)
+
+      const ids = session.localTurns.map((turn) => turn.id)
+      // `persistCompletedTurns` 关闭时返回 **false**，调用方据此走「把刚完成的轮次
+      // 直接并进内存」那条分支。返回 true 会让它去 `reloadLocalTurns` 读一个空表，
+      // 刚说完的话当场消失 —— 这条断言就是锁住那个返回值语义的。
+      expect(ids.some((id) => id.includes('live-cache-off-2'))).toBe(true)
+      expect(ids).not.toContain('stale-cached')
     } finally {
       repo.getNewestTurns.mockReturnValue([])
     }

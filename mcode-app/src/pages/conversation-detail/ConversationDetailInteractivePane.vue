@@ -24,21 +24,44 @@
       :message-scroll-into-view="messageScrollIntoView"
       :message-scroll-with-animation="messageScrollWithAnimation"
       :upper-threshold="120"
+      :refresher-enabled="
+        Boolean(active && (historyIndicator.canPull || historyRefresherActive))
+      "
+      :refresher-triggered="historyRefresherTriggered"
+      :refresher-threshold="HISTORY_REFRESHER_THRESHOLD"
       :detail-theme="detailTheme"
       :cyber-effect-phase="active ? cyberEffectPhase : 'idle'"
       :cyber-active="Boolean(detailTheme === 'matrix' && active)"
       @message-scroll="handleMessageListScroll"
       @message-scroll-upper="handleMessageListScrollUpper"
+      @refresher-refresh="handleHistoryRefresherRefresh"
+      @refresher-pulling="handleHistoryRefresherPulling"
+      @refresher-restore="handleHistoryRefresherSettled"
+      @refresher-abort="handleHistoryRefresherSettled"
     >
       <template #history>
-        <view v-if="historyStatusText" class="history-status">
+        <view
+          v-if="historyIndicator.visible"
+          :class="[
+            'history-status',
+            `history-status--${historyIndicator.code}`,
+            historyIndicator.retryable && 'history-status--retryable',
+          ]"
+          @click="handleHistoryIndicatorTap"
+        >
           <up-loading-icon
-            v-if="historyStatusBusy"
+            v-if="historyIndicator.busy"
             mode="circle"
             size="16"
             :color="upThemeVar('--up-tips-color', '#909193')"
           ></up-loading-icon>
-          <text class="history-status__text">{{ historyStatusText }}</text>
+          <up-icon
+            v-else-if="historyIndicator.retryable"
+            name="reload"
+            size="13"
+            :color="upThemeVar('--up-warning', '#f9ae3d')"
+          ></up-icon>
+          <text class="history-status__text">{{ historyIndicator.text }}</text>
         </view>
       </template>
 
@@ -132,6 +155,7 @@
             :detail-theme="detailTheme"
             :cyber-effect-phase="active ? (cyberEffectPhase || 'idle') : 'idle'"
             :cyber-active="Boolean(detailTheme === 'matrix' && active)"
+            :subagent-transcripts="subagentTranscripts"
             @regenerate="regenerateLastMessage"
           />
         </view>
@@ -1093,7 +1117,6 @@ import {
   type MentionSessionSource,
   type MentionTriggerState,
 } from "@/services/composerReferences";
-import { hasVolatileRuntimeState } from "@/services/conversation/runtimeViewState";
 import { toErrorMessage } from "@/services/gateway/error";
 import { getRemoteGitLog } from "@/services/projectGit";
 import {
@@ -1119,6 +1142,7 @@ import {
   prependHistoryPageTurns,
   requireConversationTurnsPage,
 } from "./detailHistoryPaging";
+import { resolveDetailHistoryIndicatorPresentation } from "./detailHistoryIndicatorPresentation";
 import {
   firstString,
   getTurnContentParts,
@@ -1272,6 +1296,10 @@ const cyberPanelStyle = computed(() =>
 );
 
 const PROMPT_START_TIMEOUT_MS = 4000;
+// scroll-view 的 refresher-threshold 单位是 **px**（不是 rpx）—— uni 内部直接拿它和
+// touchmove 的 pageY 差值比较，也直接写进 refresher 容器的 style.height。
+// 45px 是 uni 的默认值，这里放宽一点，避免长列表里轻微的边缘回弹误触发整页请求。
+const HISTORY_REFRESHER_THRESHOLD = 56;
 const quickReplyItems = [
   { label: "yes", value: "yes" },
   { label: "继续", value: "继续" },
@@ -1314,9 +1342,25 @@ const lastMeasuredScrollTop = ref(0);
 const anchorMessageId = ref("");
 const loadingOlder = ref(false);
 const initialHistoryLoading = ref(false);
+// 上一次「加载更早」的失败原因。原实现只 uni.showToast 一次 —— 吐司消失后界面上
+// 再没有任何重试入口，用户只能猜。现在留在指示行里，可点重试。
+const historyLoadErrorMessage = ref("");
+// 下拉手势的实时距离（px），驱动「继续下拉 / 松手加载」的文案切换。
+const historyPullDistance = ref(0);
+// 传给 scroll-view 的 refresher-triggered。必须由我们自己置回 false，
+// 否则 uni 的刷新态会一直停在 refreshing（它只在这个 prop 变 false 时收回）。
+const historyRefresherTriggered = ref(false);
+// 一次下拉刷新的生命周期内强制保持 refresher-enabled。见
+// handleHistoryRefresherRefresh 里的长注释：uni 在 enabled 为 false 时会**丢弃**
+// restore，把刷新态永久卡死。
+const historyRefresherActive = ref(false);
 const hasMoreHistory = computed(() =>
   hasOlderConversationHistory(session.value.historyWindow),
 );
+// 窗口坐标是否已建立。与 hasMoreHistory 分开传给指示器：两者都为 false 时语义完全
+// 不同（「还不知道」vs「真的翻到底了」），合并成一个布尔就是用户报的
+// 「刚打开显示没有更多历史，过一会又能加载」。
+const historyWindowKnown = computed(() => session.value.historyWindow != null);
 const questionSubmitting = ref(false);
 const permissionSubmitting = ref(false);
 const pendingPermissionSubmittingOptionId = ref("");
@@ -1327,6 +1371,10 @@ const planStatusFilter = ref<PlanTaskFilter>("all");
 let historySyncToken = 0;
 let initialHistoryLoadingConversationId = 0;
 let initialHistoryLoadingToken = 0;
+// 前插更早历史期间挂起 scheduleViewportSync()：列表内容变化会触发下方的
+// renderMessageItems watcher，若此时同步视口就会把滚动位置拽走，
+// 覆盖掉 loadOlderTurns 随后要恢复的锚点。
+let preservingHistoryAnchor = false;
 let detailAgentProbeToken = 0;
 let detailProjectEntriesToken = 0;
 let mentionSourceLoadToken = 0;
@@ -1354,6 +1402,13 @@ const messages = computed(() =>
 );
 const renderMessageItems = computed(() =>
   buildRenderMessageItems(messages.value),
+);
+/**
+ * 子智能体实时正文，按父 tool_call id 索引。刻意**不落库**，所以只有正在流式的
+ * 那一轮拿得到值；历史轮次的胶囊靠 `agent_stats` 展示，不靠这里。
+ */
+const subagentTranscripts = computed(() =>
+  runtime.getSubagentTranscripts(Number(props.conversationId || 0)),
 );
 const stats = computed(
   () =>
@@ -1600,19 +1655,18 @@ const questionSubmitReady = computed(() => {
     questionAnsweredCount.value === pending.questions.length,
   );
 });
-const historyStatusBusy = computed(
-  () => loadingOlder.value || initialHistoryLoading.value,
-);
-const historyStatusText = computed(() => {
-  if (loadingOlder.value) return "历史加载中...";
-  if (messages.value.length > 0 && initialHistoryLoading.value)
-    return "初始历史加载中...";
-  if (messages.value.length > 0 && hasMoreHistory.value)
-    return "上滑加载更早消息";
-  if (messages.value.length > 0 && !hasMoreHistory.value)
-    return "没有更多历史了";
-  return "";
-});
+const historyIndicator = computed(() =>
+  resolveDetailHistoryIndicatorPresentation({
+    hasMessages: messages.value.length > 0,
+    hasMore: hasMoreHistory.value,
+    loadingOlder: loadingOlder.value,
+    initialLoading: initialHistoryLoading.value,
+    windowKnown: historyWindowKnown.value,
+    errorMessage: historyLoadErrorMessage.value,
+    pullDistance: historyPullDistance.value,
+    pullThreshold: HISTORY_REFRESHER_THRESHOLD,
+  }),
+)
 const showScrollToBottomFab = computed(() =>
   Boolean(
     props.active &&
@@ -1777,6 +1831,21 @@ watch(
     finishInitialHistoryLoading(conversationId, token);
   },
   { immediate: true },
+);
+
+watch(
+  () => Number(props.conversationId || 0),
+  () => {
+    // 指示行的这几个 ref 都是**按会话**的状态。切 tab 不重置的话，A 会话的
+    // 「加载失败，点击重试」会原样显示在 B 会话头上，点一下还会去拉 B 的历史。
+    historyLoadErrorMessage.value = "";
+    historyPullDistance.value = 0;
+    historyRefresherTriggered.value = false;
+    // active 也要跟着清：切会话时 loadOlderTurns 的 finally 会认出自己已经不是当前
+    // 请求而提前 return（isCurrentOlderHistoryRequest），留下 active 常真，
+    // 于是新会话即便没有更早历史也一直能下拉。
+    historyRefresherActive.value = false;
+  },
 );
 
 function createLocalId(prefix: string): string {
@@ -2260,12 +2329,71 @@ function handleMessageListScroll(event: any) {
       anchorMessageId.value = tail?.anchorId || "";
     }
   }
-  if (deltaY < 0 && scrollTopValue <= 120) {
+  // uni-app 的 scroll-view 里 deltaY = lastScrollTop - scrollTop，**向上滑是正值**
+  // （uni 自己的 scrolltoupper 判定用的就是 `lastScrollTop - scrollTop > 0`）。
+  // 这里原先写的是 `deltaY < 0`，语义恰好反了 —— 只在「已经贴顶还继续往下滑」时
+  // 才触发，连续上滑加载因此从未生效，只剩 @scrolltoupper 的边沿触发在干活。
+  if (deltaY > 0 && scrollTopValue <= 120) {
     void loadOlderTurns();
   }
 }
 
 function handleMessageListScrollUpper() {
+  void loadOlderTurns();
+}
+
+/**
+ * 下拉手势的实时距离。只更新文案，**不触发请求** —— 触发由 `refresherrefresh` 负责
+ * （uni 只在松手且距离过阈值时才发它，见 `__handleTouchEnd`）。
+ */
+function handleHistoryRefresherPulling(event: any) {
+  const dy = Number(event?.detail?.dy ?? event?.detail?.deltaY ?? 0);
+  historyPullDistance.value = Number.isFinite(dy) ? Math.max(0, dy) : 0;
+}
+
+/**
+ * 手势结束（松手回弹 / 中途取消）。距离必须归零，否则指示行会永远停在
+ * 「松手加载更早消息」上 —— `refresherpulling` 不会再发一次 dy=0。
+ */
+function handleHistoryRefresherSettled() {
+  historyPullDistance.value = 0;
+}
+
+async function handleHistoryRefresherRefresh() {
+  // 这两个 ref 的置位/复位顺序是**有讲究的**，别合并、别调换：
+  //
+  // uni 的 `_setRefreshState` 第一行就是 `if (!props.refresherEnabled) return`
+  // （uni-h5.es.js:14481）。而 `refresher-enabled` 绑的是 `historyIndicator.canPull`，
+  // 它会随 `hasMoreHistory` 变化 —— 这次加载恰好翻到底时就会变 false，而且
+  // `loadOlderTurns` 内部有 `await nextTick()`，等它返回时这个 prop **早已**刷成
+  // false 了。此时再置 `triggered = false`，uni 的 restore 会被上面那行直接吞掉：
+  // `refreshState` 永远停在 "refreshing"、`beforeRefreshing` 永远为 true。之后一旦
+  // 因为任何原因重新有历史可翻（切会话、resetConversationHistoryToLatest），
+  // Refresher 会带着 refreshing 态挂回来 —— 顶部凭空多出一条阈值高度的空白，且
+  // `__handleTouchMove` 走 `beforeRefreshing` 分支不再发 `refresherpulling`、
+  // `__handleTouchEnd` 也不再发 `refresherrefresh`：下拉彻底失效且不可恢复。
+  //
+  // 所以用 `historyRefresherActive` 把 enabled 强行按住，直到 restore 被真正处理完。
+  historyRefresherActive.value = true;
+  historyRefresherTriggered.value = true;
+  try {
+    await loadOlderTurns();
+  } finally {
+    historyPullDistance.value = 0;
+    // 先只收 triggered。此刻 enabled 仍为 true（被 active 按着），restore 能进得去。
+    historyRefresherTriggered.value = false;
+    await nextTick();
+    // restore 已落地，再放开 enabled，Refresher 卸载时状态是干净的。
+    historyRefresherActive.value = false;
+  }
+}
+
+/**
+ * 点击指示行。只有 `error` 状态可点 —— 其余状态点击必须无副作用，否则
+ * 「没有更多历史了」被点一下就发一个注定失败的请求。
+ */
+function handleHistoryIndicatorTap() {
+  if (!historyIndicator.value.retryable) return;
   void loadOlderTurns();
 }
 
@@ -2316,58 +2444,52 @@ function isSameHistoryWindow(
   );
 }
 
-function historyRuntimeFingerprint(
-  runtimeSession: ReturnType<typeof runtime.getOrCreateSession>,
-) {
-  return JSON.stringify({
-    localTurns: runtimeSession.localTurns.map((turn) => [
-      turn.id,
-      turn.role,
-      turn.status || "",
-      turn.timestamp,
-      turn.content,
-    ]),
-    liveMessage: runtimeSession.liveMessage
-      ? [
-          runtimeSession.liveMessage.id,
-          runtimeSession.liveMessage.isStreaming,
-          runtimeSession.liveMessage.timestamp,
-          runtimeSession.liveMessage.content,
-        ]
-      : null,
-    inFlightUserTurnId: runtimeSession.inFlightUserTurnId,
-    lastAppliedSeq: runtimeSession.lastAppliedSeq,
-  });
-}
-
-function hasVolatileHistoryRuntimeState(
-  runtimeSession: ReturnType<typeof runtime.getOrCreateSession>,
-) {
-  return (
-    hasVolatileRuntimeState(runtimeSession) ||
-    Boolean(runtimeSession.inFlightUserTurnId)
-  );
-}
-
+/**
+ * 一次「加载更早」请求飞回来时，判断它是否仍然可以安全前插。
+ *
+ * **只校验前插真正依赖的东西**，一共三样：
+ *
+ * 1. 还在同一个会话、同一个 runtime session、且这个 tab 仍是激活的；
+ * 2. 窗口坐标一个字没变（`isSameHistoryWindow`）—— 前插位置与
+ *    `canApplyOlderHistoryPage` 的接缝断言全都建立在它上面；
+ * 3. 就这些。
+ *
+ * ## 为什么**不**校验流式状态
+ *
+ * 早先这里还有 `!hasVolatileHistoryRuntimeState(currentSession)` 与一个把
+ * `liveMessage.content` 整个塞进去的 `historyRuntimeFingerprint`。那让「流式期间发出的
+ * 请求」**必然**在返回时被判废（每个 delta 都会改指纹），于是入口处只能顺势也早退 ——
+ * 结果就是回复进行中完全无法往上翻历史。用户说得对：那不该是限制。
+ *
+ * 前插不关心尾部：`prependHistoryPageTurns` 只做「接到最前面 + 按身份去重」
+ * （`conversationTurnIdentity.ts`），流式期间尾部增长多少条都不影响它。真正会让前插
+ * 出错的只有窗口坐标变化，而窗口坐标由 `setConversationHistoryWindow` 独家维护，
+ * 流式事件不碰它。
+ *
+ * 会话切换 / 窗口被重新锚定（`resetConversationHistoryToLatest`）仍然会让请求判废 ——
+ * 那两种情况下第 1、2 条会失败，正是它们该拦的。
+ */
 function isCurrentOlderHistoryRequest(input: {
   conversationId: number;
   runtimeSession: ReturnType<typeof runtime.getOrCreateSession>;
   historyWindow: ConversationHistoryWindow;
-  runtimeFingerprint: string;
 }) {
   const currentSession = runtime.getOrCreateSession(input.conversationId);
   return (
     Boolean(props.active) &&
     Number(props.conversationId || 0) === input.conversationId &&
     currentSession === input.runtimeSession &&
-    isSameHistoryWindow(currentSession.historyWindow, input.historyWindow) &&
-    !hasVolatileHistoryRuntimeState(currentSession) &&
-    historyRuntimeFingerprint(currentSession) === input.runtimeFingerprint
+    isSameHistoryWindow(currentSession.historyWindow, input.historyWindow)
   );
 }
 
 function requestLatestHistoryWindow(conversationId: number) {
-  runtime.clearConversationHistoryWindow(conversationId);
+  // 走到这里意味着 canApplyOlderHistoryPage 断言失败：服务端回的
+  // prefix_hash_before_index 与我们记的 prefix_hash 不符 —— 内存前缀**已被证明**是
+  // 陈旧的（历史被压缩重写）。所以要连轮次一起丢掉重新锚定，只清窗口是不够的：
+  // 重载路径的 applyRemoteHistoryWindowDetail 现在会用 mergeTailIntoTurnsWithSeam
+  // 保住前缀，陈旧轮次会被原样留在列表顶部，和刷新出来的新轮次并排显示。
+  runtime.resetConversationHistoryToLatest(conversationId);
   uni.showToast({
     title: "会话历史已更新，正在刷新最新消息",
     icon: "none",
@@ -2382,20 +2504,20 @@ async function loadOlderTurns() {
 
   const runtimeSession = runtime.getOrCreateSession(targetConversationId);
   const historyWindow = runtimeSession.historyWindow;
-  if (
-    !hasOlderConversationHistory(historyWindow) ||
-    hasVolatileHistoryRuntimeState(runtimeSession)
-  )
-    return;
+  // 唯一的前置条件是「窗口坐标说得出还有更早的历史」。
+  // **流式中同样允许翻页** —— 回复正在生成时想往上看历史是完全正常的需求，
+  // 而前插不依赖尾部状态（见 `isCurrentOlderHistoryRequest` 的说明）。
+  if (!hasOlderConversationHistory(historyWindow)) return;
 
   const capturedWindow = { ...historyWindow };
-  const capturedRuntimeFingerprint = historyRuntimeFingerprint(runtimeSession);
   const firstVisibleMessageId = resolveRenderAnchorId({
     messageId: messages.value[0]?.id || anchorMessageId.value || "",
     items: renderMessageItems.value,
   });
 
   loadingOlder.value = true;
+  // 重试时先清掉上一次的错误，否则请求还在飞、指示行却仍写着「点击重试」。
+  historyLoadErrorMessage.value = "";
   try {
     const gateway = await getDetailGateway();
     const rawPage = await gateway.call<unknown>(
@@ -2412,7 +2534,6 @@ async function loadOlderTurns() {
         conversationId: targetConversationId,
         runtimeSession,
         historyWindow: capturedWindow,
-        runtimeFingerprint: capturedRuntimeFingerprint,
       })
     ) {
       return;
@@ -2428,32 +2549,39 @@ async function loadOlderTurns() {
       throw new Error("会话历史页数据无效，请重新加载");
     }
 
-    runtimeSession.localTurns = prependHistoryPageTurns(
-      runtimeSession.localTurns,
-      olderTurns,
-    );
-    runtime.setConversationHistoryWindow(
-      targetConversationId,
-      advanceConversationHistoryWindow(capturedWindow, page),
-    );
+    preservingHistoryAnchor = true;
+    try {
+      runtimeSession.localTurns = prependHistoryPageTurns(
+        runtimeSession.localTurns,
+        olderTurns,
+      );
+      runtime.setConversationHistoryWindow(
+        targetConversationId,
+        advanceConversationHistoryWindow(capturedWindow, page),
+      );
 
-
-    await nextTick();
-    if (
-      firstVisibleMessageId &&
-      Boolean(props.active) &&
-      Number(props.conversationId || 0) === targetConversationId &&
-      runtime.getOrCreateSession(targetConversationId) === runtimeSession
-    ) {
-      setProgrammaticAnchor(firstVisibleMessageId);
+      await nextTick();
+      if (
+        firstVisibleMessageId &&
+        Boolean(props.active) &&
+        Number(props.conversationId || 0) === targetConversationId &&
+        runtime.getOrCreateSession(targetConversationId) === runtimeSession
+      ) {
+        setProgrammaticAnchor(firstVisibleMessageId);
+      }
+    } finally {
+      preservingHistoryAnchor = false;
     }
   } catch (error) {
     const isCurrentSession =
       Number(props.conversationId || 0) === targetConversationId &&
       runtime.getOrCreateSession(targetConversationId) === runtimeSession;
     if (isCurrentSession) {
+      // 吐司给即时反馈，指示行留常驻重试入口 —— 只有吐司的话它一消失就没退路了。
+      const message = toErrorMessage(error, "加载更早消息失败");
+      historyLoadErrorMessage.value = message;
       uni.showToast({
-        title: toErrorMessage(error, "加载更早消息失败"),
+        title: message,
         icon: "none",
       });
     }

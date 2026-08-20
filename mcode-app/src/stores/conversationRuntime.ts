@@ -37,9 +37,21 @@ import { ensureConversationSchema } from "@/services/db/migrations"
 import {
   getNewestTurns,
   insertCompletedTurn,
+  pruneConversationTurnsToNewest,
   type PersistedTurnPartRow,
+  type PersistedTurnWithParts,
 } from "@/services/db/repositories/conversationRepository"
 import { buildPersistedTurnRecord } from "@/services/conversation/conversationDetailPersistence"
+import {
+  dropEmptyThinkingParts,
+  mergeTailIntoTurns,
+  normalizeTurnRole,
+} from "@/services/conversation/conversationTurnIdentity"
+import {
+  DEFAULT_CONVERSATION_HISTORY_PAGE_SIZE,
+  isWindowedConversationDetail,
+} from "@/services/conversation/conversationHistoryWindowContract"
+import { readLocalTurnCacheEnabled } from "@/services/conversation/localTurnCachePreference"
 import { getRelayClientId } from "@/services/gateway/relayClientIdentity"
 import {
   buildConversationTimeline,
@@ -83,11 +95,9 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         lastAppliedSeq: null,
         lastCompletedTurnKey: null,
         lastCompletedTurnAt: 0,
-        externalTurnBackfillInFlight: false,
-        externalTurnBackfillLastAttemptAt: 0,
-        externalTurnBackfilled: false,
-        externalTurnBackfillAttempts: 0,
-        externalTurnBackfillGeneration: 0,
+        historyBackfillInFlight: false,
+        historyBackfillGeneration: 0,
+        subagentTranscripts: new Map<string, string>(),
         stats: {
           inputTokens: 0,
           outputTokens: 0,
@@ -107,9 +117,25 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     session.historyWindow = historyWindow ? { ...historyWindow } : null
   }
 
-  function clearConversationHistoryWindow(conversationId: number) {
+  /**
+   * 丢弃整条内存时间线并清空窗口坐标，等待重新拉取最新一页。
+   *
+   * 只给一个场景用：`canApplyOlderHistoryPage` 断言失败 —— 服务端回的
+   * `prefix_hash_before_index` 与我们记的 `prefix_hash` 不符，也就是**已经证明**
+   * 内存里的前缀是陈旧的（历史被压缩重写了）。
+   *
+   * 这里必须整条清掉，不能只清窗口。别处刷新时间线一律走
+   * `mergeTailIntoTurnsWithSeam` 保住前缀，那是因为「连续性无从证明」时宁可重复也
+   * 不丢消息；而这条路是**连续性已被否证**，保住前缀只会把陈旧轮次和新轮次一起
+   * 显示出来。两种情况必须区别对待。
+   *
+   * 清空后 `hasRenderableRuntimeState` 变 false，`loadConversation` 会走缓存/远端
+   * 路径重新水合最新一页 —— 正是这条恢复路径想要的重新锚定。
+   */
+  function resetConversationHistoryToLatest(conversationId: number) {
     const session = sessions.value.get(conversationId)
     if (!session) return
+    session.localTurns = []
     session.historyWindow = null
   }
 
@@ -165,7 +191,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     const session = getOrCreateSession(conversationId)
     session.liveMessage = null
     session.inFlightUserTurnId = null
-    resetExternalTurnBackfill(session)
+    resetTurnScopedBackfillState(session)
   }
 
   function syncManagedSendPermission(conversationId: number) {
@@ -203,10 +229,48 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
   }
 
   /**
+   * 子智能体实时正文上限。十分钟的子智能体运行不能让内存无界增长；胶囊展开时只看
+   * 尾部，早期内容由 turn_complete 后的 `agent_stats` 承载。
+   */
+  const SUBAGENT_TRANSCRIPT_MAX_CHARS = 4000
+
+  function appendSubagentTranscript(
+    session: RuntimeSession,
+    parentToolUseId: string,
+    delta: string
+  ) {
+    if (!delta) return
+    const previous = session.subagentTranscripts.get(parentToolUseId) || ""
+    const next = previous + delta
+    session.subagentTranscripts.set(
+      parentToolUseId,
+      next.length > SUBAGENT_TRANSCRIPT_MAX_CHARS
+        ? next.slice(-SUBAGENT_TRANSCRIPT_MAX_CHARS)
+        : next
+    )
+  }
+
+  /**
    * 追加流式内容
    */
-  function appendLiveContent(conversationId: number, delta: string, contentType: string) {
+  function appendLiveContent(
+    conversationId: number,
+    delta: string,
+    contentType: string,
+    parentToolUseId?: string | null
+  ) {
     const session = getOrCreateSession(conversationId)
+
+    // 带归属的 chunk 属于某个子智能体胶囊，不是主线程内容。必须在动 liveMessage
+    // 之前分流，且**不要**做下面那两件事：
+    // - 不设 `session.status = "thinking"`：父 tool_call 已把状态设成 running_tool，
+    //   子智能体每来一个 chunk 就翻成「思考中」会让底部状态条全程是错的。
+    // - 不清占位 thinking：子智能体的内容不是主线程回复，不该消掉主线程的占位。
+    if (parentToolUseId) {
+      appendSubagentTranscript(session, parentToolUseId, delta)
+      return
+    }
+
     if (!session.liveMessage) {
       session.liveMessage = createLiveMessage()
     }
@@ -303,7 +367,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     if (usage && typeof usage === "object") {
       session.stats.totalTokens = firstNumber(usage.used) || session.stats.totalTokens
     }
-    maybeBackfillExternalUserTurn(session, "snapshot")
+    maybeBackfillMissingHistory(session, "snapshot")
   }
 
   function applyConversationDetailStats(conversationId: number, detail: ConversationDetail | any) {
@@ -325,7 +389,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       return
     }
     markCompleteTurnHandled(session, completeTurnKey)
-    resetExternalTurnBackfill(session)
+    resetTurnScopedBackfillState(session)
     const authoritativeUserTurn = getAuthoritativeInFlightUserTurn(session)
     const completedTurns: MessageTurn[] = authoritativeUserTurn
       ? [cloneMessageTurn(authoritativeUserTurn)]
@@ -437,9 +501,10 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         appendLiveContent(
           session.conversationId,
           event.data.delta,
-          event.data.contentType
+          event.data.contentType,
+          event.data.parentToolUseId
         )
-        maybeBackfillExternalUserTurn(session, "stream_batch")
+        maybeBackfillMissingHistory(session, "stream_batch")
         break
 
       case "user_message":
@@ -475,11 +540,12 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
                 output,
                 rawOutput,
                 error,
+                meta: event.data.meta ?? null,
               },
             },
           ],
         }
-        maybeBackfillExternalUserTurn(session, "tool_call")
+        maybeBackfillMissingHistory(session, "tool_call")
         break
       }
 
@@ -508,6 +574,9 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
               output: event.data.output,
               status: event.data.status,
               error: event.data.error,
+              // 用 `??` 而不是直接赋值：update 常常不带 meta，直接覆盖会擦掉首帧的
+              // 子智能体权威标记，胶囊会在流式中途退化成普通工具组。
+              meta: event.data.meta ?? currentToolCall.meta ?? null,
             },
           }
         })
@@ -515,7 +584,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
           ...session.liveMessage,
           content: nextContent,
         }
-        maybeBackfillExternalUserTurn(session, "tool_call_update")
+        maybeBackfillMissingHistory(session, "tool_call_update")
         break
       }
 
@@ -563,7 +632,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         if (event.data.status !== "waiting_question") {
           session.pendingQuestion = null
         }
-        maybeBackfillExternalUserTurn(session, "status_changed")
+        maybeBackfillMissingHistory(session, "status_changed")
         syncManagedSendPermission(session.conversationId)
         break
 
@@ -573,7 +642,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         session.inputErrorMessage = null
         session.pendingPermission = normalizePermissionRequest(event.data)
         session.pendingQuestion = null
-        maybeBackfillExternalUserTurn(session, "permission_request")
+        maybeBackfillMissingHistory(session, "permission_request")
         syncManagedSendPermission(session.conversationId)
         break
 
@@ -583,7 +652,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         session.inputErrorMessage = null
         session.pendingPermission = null
         session.pendingQuestion = normalizeQuestionRequest(event.data)
-        maybeBackfillExternalUserTurn(session, "question_request")
+        maybeBackfillMissingHistory(session, "question_request")
         syncManagedSendPermission(session.conversationId)
         break
 
@@ -630,7 +699,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         session.status = session.connectionId ? "connected" : "idle"
         session.inputErrorMessage = null
         session.apiRetry = null
-        resetExternalTurnBackfill(session)
+        resetTurnScopedBackfillState(session)
         releaseHotConversation(session.conversationId)
         syncManagedSendPermission(session.conversationId)
         break
@@ -808,7 +877,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         session.lastAppliedSeq = null
         session.lastCompletedTurnKey = null
         session.lastCompletedTurnAt = 0
-        resetExternalTurnBackfill(session)
+        resetTurnScopedBackfillState(session)
       }
 
       if (!managed && discoveredConnectionId) {
@@ -894,7 +963,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       session.inFlightUserTurnId = null
       session.lastCompletedTurnKey = null
       session.lastCompletedTurnAt = 0
-      resetExternalTurnBackfill(session)
+      resetTurnScopedBackfillState(session)
     }
   }
 
@@ -965,7 +1034,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       session.lastAppliedSeq = null
       session.lastCompletedTurnKey = null
       session.lastCompletedTurnAt = 0
-      resetExternalTurnBackfill(session)
+      resetTurnScopedBackfillState(session)
       session.status = session.connectionId ? "connected" : "idle"
     }
   }
@@ -1029,7 +1098,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     session.pendingQuestion = null
     session.sharedPromptQueue = createSharedPromptQueueState()
     session.inFlightUserTurnId = null
-    resetExternalTurnBackfill(session)
+    resetTurnScopedBackfillState(session)
     session.lastAppliedSeq = 0
     session.lastCompletedTurnKey = null
     session.lastCompletedTurnAt = 0
@@ -1061,14 +1130,29 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     return connectionSessionManager.getByConversationId(conversationId)
   }
 
+  /**
+   * 子智能体实时正文快照。转成普通对象是为了让 Vue 的 computed 能追踪 ——
+   * `Map` 在模板里不便直接消费，且组件侧只需要只读视图。
+   */
+  function getSubagentTranscripts(conversationId: number): Record<string, string> {
+    const session = sessions.value.get(conversationId)
+    if (!session || session.subagentTranscripts.size === 0) return {}
+    const snapshot: Record<string, string> = {}
+    session.subagentTranscripts.forEach((value, key) => {
+      snapshot[key] = value
+    })
+    return snapshot
+  }
+
   return {
     sessions,
     connections,
     getOrCreateSession,
     setConversationHistoryWindow,
-    clearConversationHistoryWindow,
+    resetConversationHistoryToLatest,
     getMessages,
     getTimelineTurns,
+    getSubagentTranscripts,
     beginPlaceholderThinking,
     clearLiveMessage,
     setLiveMessage,
@@ -1110,21 +1194,38 @@ interface RuntimeSession {
   lastAppliedSeq: number | null
   lastCompletedTurnKey: string | null
   lastCompletedTurnAt: number
-  externalTurnBackfillInFlight: boolean
-  externalTurnBackfillLastAttemptAt: number
-  externalTurnBackfilled: boolean
-  externalTurnBackfillAttempts: number
-  externalTurnBackfillGeneration: number
+  // 观察者进入进行中会话时的一次性历史补齐（见 `maybeBackfillMissingHistory`）。
+  // 旧实现有 5 个字段（节流时间戳、尝试计数、已补齐标记…）驱动 1.5s 轮询，
+  // 那套是给不广播 `UserMessage` 的旧后端留的兼容层，已删。
+  historyBackfillInFlight: boolean
+  /** 回合边界 / 会话切换时自增，让在途请求的结果失效。 */
+  historyBackfillGeneration: number
+  /**
+   * 子智能体实时正文缓冲：`parent_tool_use_id` → 该胶囊的文本尾巴。
+   *
+   * **刻意放在 session 上而不是挂 `ToolCall`**，三个原因：
+   * 1. `liveMessage` 是整轮累加器、每个 delta 都整体替换 content 数组；往嵌套
+   *    `tool_call` 里追加字符串会让每个 chunk 都重建全部 part 身份。
+   * 2. 父 `tool_call` 事件不保证先到，按 id 收的 map 不丢早到的 chunk。
+   * 3. `toPersistedPartPayload` 存的是**整个** `tool_call` 对象 —— 任何挂上去的字段
+   *    都会自动进 SQLite。放这里让「不持久化」成为结构性保证而非纪律。
+   *
+   * 不持久化是有意的：这些 chunk 是无结构的纯 delta，而 turn_complete 后历史回填会
+   * 带回结构化的 `agent_stats.tool_calls[]`（含耗时），严格优于实时尾巴。存下来只会
+   * 得到两份互相矛盾、无法对账的渲染源。
+   */
+  subagentTranscripts: Map<string, string>
   stats: SessionStats
 }
 
-function resetExternalTurnBackfill(session: RuntimeSession) {
-  // 回合边界或权威 user_message 到达后，旧请求的异步回填结果不得覆盖新状态。
-  session.externalTurnBackfillGeneration += 1
-  session.externalTurnBackfillInFlight = false
-  session.externalTurnBackfillLastAttemptAt = 0
-  session.externalTurnBackfilled = false
-  session.externalTurnBackfillAttempts = 0
+function resetTurnScopedBackfillState(session: RuntimeSession) {
+  // 回合边界后，在途的历史补齐结果不得覆盖新状态。
+  session.historyBackfillGeneration += 1
+  session.historyBackfillInFlight = false
+  // 子智能体实时正文只在本回合内有意义：回合结束后权威内容来自历史回填的
+  // `agent_stats`。这里是所有回合边界（turn_complete / turn_cancelled / disconnect
+  // / 缓存清理）的唯一漏斗，清在这里不会漏。
+  session.subagentTranscripts?.clear()
 }
 
 interface SharedPromptQueueState {
@@ -1383,8 +1484,7 @@ function applyRealtimeUserMessage(session: RuntimeSession, eventData: any) {
 
   // user_message 是客户端唯一的用户消息权威来源。它一到达，就让更早启动的
   // replay-gap 回填结果失效，避免旧 SQLite 快照把刚确认的用户轮次换走。
-  resetExternalTurnBackfill(session)
-  session.externalTurnBackfilled = true
+  resetTurnScopedBackfillState(session)
 
   if (existingTurn) {
     session.inFlightUserTurnId = existingTurn.id
@@ -1408,11 +1508,26 @@ function findInFlightUserTurnByContentSignature(
 ): MessageTurn | null {
   if (!firstString(session.inFlightUserTurnId) || !contentSignature) return null
 
-  const latestTurn = session.localTurns[session.localTurns.length - 1]
-  if (latestTurn?.role !== "user") return null
+  // 服务端一个逻辑回复会被拆成多条连续 assistant 轮次（解析器在下一条 assistant
+  // 消息处断开），因此进行中的用户轮次通常不在数组末尾，而是被若干条 assistant
+  // 轮次盖住。只看最后一条会漏判，于是同一条 prompt 会被追加成第二条用户消息 ——
+  // 这正是详情页"用户消息重复 2 次"的来源。跳过尾部 assistant 轮次再比对。
+  let index = session.localTurns.length - 1
+  while (index >= 0 && session.localTurns[index]?.role === "assistant") {
+    index -= 1
+  }
 
-  return buildUserTurnContentSignature(latestTurn.content) === contentSignature
-    ? latestTurn
+  const candidate = index >= 0 ? session.localTurns[index] : null
+  if (candidate?.role !== "user") return null
+
+  // 只认「持久化/远端来源」的孪生轮次：它带 dedupeKey，且 id 与当前 in-flight id
+  // 不同，说明就是同一条 prompt 落库后换了 id。实时追加的轮次没有 dedupeKey，
+  // 因此排队发送的重复文本（例如连续两次"继续"）不会被误合并。
+  if (!firstString(candidate.dedupeKey)) return null
+  if (candidate.id === firstString(session.inFlightUserTurnId)) return null
+
+  return buildUserTurnContentSignature(candidate.content) === contentSignature
+    ? candidate
     : null
 }
 
@@ -1479,7 +1594,6 @@ const COMPLETE_TURN_DUPLICATE_WINDOW_MS = 3000
 // 单个回合内 external-user backfill（全量拉取）的最大尝试次数。正常路径首次即
 // capture 成功并 latch 守卫，这个上限只在 captured 长期判不出来（旧后端）时兜底，
 // 防止流式期间无限全量拉取拖垮客户端。回合边界会重置计数。
-const MAX_EXTERNAL_TURN_BACKFILL_ATTEMPTS = 4
 
 function buildCompleteTurnKey(session: RuntimeSession, eventData?: any) {
   const explicitTurnId = firstString(
@@ -1596,17 +1710,32 @@ function isSharedInProgressStatus(status: RuntimeSession["status"]) {
   )
 }
 
+/**
+ * 从会话详情推导顶部统计（token / 轮次数）。
+ *
+ * **窗口化响应必须区别对待。** 服务端的 `apply_turn_window` 只切 `turns`，其余字段
+ * （含 `session_stats`）仍描述**完整**会话。所以拿尾窗的 `turns` 去累加 usage 或数长度，
+ * 会把「最近 30 轮」当成「整个会话」上报，顶部数字凭空缩水。
+ *
+ * - `usage`：窗口化且 `session_stats.total_usage` 缺失 → 返回 `null`，让调用方保留
+ *   已有的 `session.stats`，而不是用尾窗累加冒充全量。
+ * - `turnCount`：窗口化时用服务端回报的 `turns_total`（`turns.length` 只是窗口长度，
+ *   而且因为向前对齐可能是 30~230 的任意值）。
+ */
 function deriveSessionStatsFromConversationDetail(
   detail: ConversationDetail | any,
   fallbackTurnCount = 0
 ): SessionStats | null {
   if (!detail || typeof detail !== "object") return null
 
+  const windowed = isWindowedConversationDetail(detail)
   const rawSessionStats = firstObject(detail.sessionStats, detail.session_stats)
   const totalUsage = normalizeTurnUsage(
     firstObject(rawSessionStats?.total_usage, rawSessionStats?.totalUsage)
   )
-  const usage = totalUsage || sumTurnUsage(Array.isArray(detail.turns) ? detail.turns : [])
+  const usage =
+    totalUsage ||
+    (windowed ? null : sumTurnUsage(Array.isArray(detail.turns) ? detail.turns : []))
   if (!usage) return null
 
   const totalTokens =
@@ -1616,11 +1745,17 @@ function deriveSessionStatsFromConversationDetail(
       usage.cache_creation_input_tokens +
       usage.cache_read_input_tokens
 
+  const turnCount = windowed
+    ? (firstNumber(detail.turns_total, detail.turnsTotal) ?? fallbackTurnCount)
+    : Array.isArray(detail.turns)
+      ? detail.turns.length
+      : fallbackTurnCount
+
   return {
     inputTokens: usage.input_tokens + usage.cache_creation_input_tokens + usage.cache_read_input_tokens,
     outputTokens: usage.output_tokens,
     totalTokens,
-    turnCount: Array.isArray(detail.turns) ? detail.turns.length : fallbackTurnCount,
+    turnCount,
   }
 }
 
@@ -1716,6 +1851,10 @@ async function persistCompletedTurns(
   turns: MessageTurn[]
 ) {
   if (!session.instanceKey) return
+  // 实验性开关关闭（默认）时不落库。返回 false 而不是 true —— 调用方据此走
+  // 「把刚完成的轮次直接并进内存时间线」那条分支（`dedupeTurnsByRoleAndId`）。
+  // 返回 true 会让它去 `reloadLocalTurns` 读一个空表，刚说完的话当场消失。
+  if (!readLocalTurnCacheEnabled()) return false
   try {
     await ensureConversationSchema()
     for (const turn of turns) {
@@ -1729,6 +1868,14 @@ async function persistCompletedTurns(
         })
       )
     }
+    // `insertCompletedTurn` 只 upsert、从不删，所以这条追加路径必须自己裁剪回一页，
+    // 否则一直聊下去缓存会单调增长（读取侧的 LIMIT 让它读不到，但行还躺在库里
+    // 占存储、并被「清除缓存」页面算进条数）。裁剪的排序键与 `getNewestTurns`
+    // 一致，所以刚插进去的这几条一定在保留集里。
+    await pruneConversationTurnsToNewest(
+      session.conversationId,
+      DEFAULT_CONVERSATION_HISTORY_PAGE_SIZE
+    )
     return true
   } catch (error) {
     console.warn("persist completed runtime turns skipped", error)
@@ -1736,37 +1883,72 @@ async function persistCompletedTurns(
   }
 }
 
+/**
+ * 用本地缓存刷新时间线尾部。
+ *
+ * **不能整体替换。** 本地 SQLite 只缓存最新一页（30 条），而用户可能已经往上翻到
+ * 200 条 —— 这里过去按 `session.localTurns.length` 定读取量再整体赋值，缓存被裁到
+ * 30 条后就把内存时间线也砍回 30。四个调用点全都无条件赋值，`:1856` 那处的
+ * `areLocalTurnsEquivalent` 守卫也挡不住：它在长度不等时直接返回 false，坍缩会被
+ * 当成「有变化」照样写进去。
+ *
+ * 所以固定按一页读取，再用 `mergeTailIntoTurns` 把内存里更早的前缀接回去。
+ *
+ * 实验性开关关闭（默认）时**原样返回内存时间线**，一行都不读。必须两侧一起关：
+ * 只关写入的话，之前开启期间留下的旧行仍会被读回来，而它们可能已经很旧 ——
+ * `mergeTailIntoTurns` 找不到接缝就把它们**接在当前轮次之后**，用户看到一段错位的
+ * 历史复活。
+ */
 async function reloadLocalTurns(session: RuntimeSession) {
-  const limit = Math.max(session.localTurns.length, 10)
-  const turns = await getNewestTurns(session.conversationId, limit)
-  return turns.slice().reverse().map(mapPersistedTurnToMessage)
+  if (!readLocalTurnCacheEnabled()) return session.localTurns
+  const turns = await getNewestTurns(
+    session.conversationId,
+    DEFAULT_CONVERSATION_HISTORY_PAGE_SIZE
+  )
+  const cachedTail = turns.slice().reverse().map(mapPersistedTurnToMessage)
+  return mergeTailIntoTurns(session.localTurns, cachedTail)
 }
 
-function maybeBackfillExternalUserTurn(
+/**
+ * 观察者进入一个**已在进行中**的会话时，补齐缺失的历史轮次。
+ *
+ * ## 它补的到底是什么
+ *
+ * 用户轮次本身**不需要**这个函数。后端把所有客户端发出的 prompt 都通过
+ * `AcpEvent::UserMessage` 广播回来（codeg-plus `acp/types.rs` 的 `UserMessage`），
+ * `applyRealtimeUserMessage` 收到后自己把它插进 `localTurns` —— 一行网络请求都不用发。
+ *
+ * 真正的缺口只有一个：**mid-turn attach**。attach 快照
+ * （`LiveSessionSnapshot`，codeg-plus `acp/session_state.rs`）带 `pending_user_message`
+ * 与 `live_message`，但**不含任何历史轮次**。所以手机打开一个 PC 上已经跑起来的会话时，
+ * `inFlightUserTurnId` 有值、`localTurns` 却是空的，界面上 agent 在自言自语，
+ * 看不到问题是什么。这一份历史只能靠 `get_folder_conversation` 拉。
+ *
+ * ## 为什么不再轮询
+ *
+ * 旧实现挂在 7 个实时事件上（snapshot / status_changed / stream_batch / tool_call /
+ * tool_call_update / permission_request / question_request），带 1.5s 节流和 4 次配额，
+ * 也就是「流式期间每 1.5s 全量拉一次会话，最多 4 次」。它是给**旧后端**留的兼容层 ——
+ * 当年后端既不回报 in-flight 用户轮次 id、也不广播 `UserMessage`，客户端只能反复拉。
+ *
+ * 对着现在的 codeg-plus 那是纯浪费，而且有害：每次拉回的是 30 条尾窗，
+ * 沿途的 `reloadLocalTurns` / `applyRemoteHistoryWindowDetail` 会把用户已经往上翻到的
+ * 200 条砍回一页。用户报过「历史加载不出来」，放大器就是这条轮询。
+ *
+ * 所以现在只在**真的一条本地轮次都没有**时拉一次。判据是 `localTurns.length === 0`，
+ * 不是「有没有拿到 in-flight id」—— 后者由快照提供、必然有值，用它当判据这个函数就永不执行。
+ * 拉到内容后 `localTurns` 非空，下一个事件进来时这里直接返回，天然一次性。
+ *
+ * 空会话（真的没有历史）会在每个事件上重试。这是刻意的：代价是几次拉空窗口的请求，
+ * 而漏掉会让观察者永远看着空白。`inFlight` 守卫保证不会并发。
+ */
+function maybeBackfillMissingHistory(
   session: RuntimeSession,
   reason: "snapshot" | "status_changed" | "stream_batch" | "tool_call" | "tool_call_update" | "permission_request" | "question_request"
 ) {
-  // 已收到 user_message 的当前轮次可直接作为权威内容展示并在 turn_complete 时
-  // 写入缓存，无需再为同一轮触发 get_folder_conversation 校准。
-  if (getAuthoritativeInFlightUserTurn(session)) {
-    session.externalTurnBackfilled = true
-    return
-  }
-
-  // 实时传输期间只补齐一次缺失的外部用户轮次：一旦当前进行中的回合已补齐过远端
-  // 详情，就不再重复拉取全量历史。回合边界（turn_complete / turn_cancelled /
-  // 缓存清理）会重置该守卫，让下一个回合可以再补齐一次。
-  //
-  // 例外：本地消息为空时（观察者/新设备打开进行中的会话）必须先同步一次历史，
-  // 否则用户看不到任何历史消息，因此此时不受守卫拦截。
-  if (session.externalTurnBackfilled && session.localTurns.length > 0) return
-
-  // 硬上限：即使 captured 一直判不出来（如旧后端既不回报 in-flight 用户轮次 id，
-  // 也不落地用户轮次），也不能整段流式期间每 1.5s 无限全量拉取 —— 那会持续吃
-  // CPU/内存/带宽，把 Safari WebContent 进程拖垮触发“重复出现问题”。达到上限后
-  // 停止本回合的补齐；回合边界（turn_complete / turn_cancelled / disconnect /
-  // connect 重绑 / 缓存清理）会重置计数，让下一个回合重新获得配额。
-  if (session.externalTurnBackfillAttempts >= MAX_EXTERNAL_TURN_BACKFILL_ATTEMPTS) return
+  // 有任何本地轮次就说明历史已经到位（实时事件填的、或上一次补齐拉到的）。
+  if (session.localTurns.length > 0) return
+  if (session.historyBackfillInFlight) return
 
   const hasInFlightRemoteTurn =
     session.liveMessage != null ||
@@ -1778,55 +1960,27 @@ function maybeBackfillExternalUserTurn(
     session.status === "waiting_question"
   if (!hasInFlightRemoteTurn) return
 
-  const now = Date.now()
-  if (session.externalTurnBackfillInFlight) return
-  if (now - session.externalTurnBackfillLastAttemptAt < 1500) return
-
-  const backfillGeneration = session.externalTurnBackfillGeneration
-  session.externalTurnBackfillInFlight = true
-  session.externalTurnBackfillLastAttemptAt = now
-  session.externalTurnBackfillAttempts += 1
-  const userTurnCountBefore = session.localTurns.filter(
-    (turn) => turn.role === "user"
-  ).length
+  const backfillGeneration = session.historyBackfillGeneration
+  session.historyBackfillInFlight = true
   void (async () => {
     try {
       const replayDetail = await calibrateAfterReplayGap(session.conversationId)
-      if (session.externalTurnBackfillGeneration !== backfillGeneration) return
-      if (getAuthoritativeInFlightUserTurn(session)) {
-        session.externalTurnBackfilled = true
-        return
-      }
+      // 回合边界 / 会话切换期间发出的请求，结果不得覆盖新状态。
+      if (session.historyBackfillGeneration !== backfillGeneration) return
 
       applyConversationDetailStatsToSession(session, replayDetail)
       const reloaded = await reloadLocalTurns(session)
-      if (session.externalTurnBackfillGeneration !== backfillGeneration) return
-      if (getAuthoritativeInFlightUserTurn(session)) {
-        session.externalTurnBackfilled = true
-        return
-      }
+      if (session.historyBackfillGeneration !== backfillGeneration) return
 
-      const reloadedUserTurnCount = reloaded.filter(
-        (turn) => turn.role === "user"
-      ).length
-      // 仅在本地轮次确有变化时才重新赋值，避免流式期间整表 re-render 引起
-      // 的列表闪烁与滚动跳动。
+      // 仅在确有变化时赋值，避免流式期间整表 re-render 引起列表闪烁与滚动跳动。
       if (!areLocalTurnsEquivalent(session.localTurns, reloaded)) {
         session.localTurns = reloaded
       }
-      // 捕获到外部用户轮次后即认为本回合补齐完成，停止后续的流式全量刷新：
-      // 后端已回报 in-flight 用户轮次 id，或本地已多出一条用户轮次。
-      const captured =
-        Boolean(session.inFlightUserTurnId) ||
-        reloadedUserTurnCount > userTurnCountBefore
-      if (captured) {
-        session.externalTurnBackfilled = true
-      }
     } catch (error) {
-      console.warn(`external-user backfill skipped (${reason})`, error)
+      console.warn(`history backfill skipped (${reason})`, error)
     } finally {
-      if (session.externalTurnBackfillGeneration === backfillGeneration) {
-        session.externalTurnBackfillInFlight = false
+      if (session.historyBackfillGeneration === backfillGeneration) {
+        session.historyBackfillInFlight = false
       }
     }
   })()
@@ -1878,14 +2032,24 @@ function applySnapshotInFlightUserTurnId(session: RuntimeSession, snapshot: any)
 function mapPersistedTurnToMessage(turn: PersistedTurnWithParts): MessageTurn {
   return {
     id: turn.id,
-    role: turn.role as MessageTurn["role"],
+    // 必须透传 dedupe_key：reloadLocalTurns 走的是这份实现，缺了它，turn_complete /
+    // backfill 之后从 SQLite 重载出来的轮次就失去跨来源身份，会和远端载荷里的同一条
+    // 轮次在时间线上各占一行（详情页消息重复 2 次）。
+    dedupeKey: String(turn.dedupeKey || "").trim() || undefined,
+    // 与展示侧、落库侧共用同一份角色判定。这里过去是裸 `as` 断言，SQLite 里存的任何
+    // 字符串都会原样透出：一旦落库的 role 不是这三种之一，渲染分支就会全部落空。
+    role: normalizeTurnRole(turn.role),
     timestamp: turn.createdAt,
     status: (turn.status as MessageTurn["status"] | undefined) || "completed",
-    content: turn.parts
-      .slice()
-      .sort((a, b) => a.partIndex - b.partIndex)
-      .map(mapPersistedPartToContent)
-      .filter(Boolean) as ContentPart[],
+    // 与展示侧一致：读回时滤掉空 thinking。过滤上线前落库的行里已经有存量空胶囊，
+    // reloadLocalTurns 走的正是这份实现。
+    content: dropEmptyThinkingParts(
+      turn.parts
+        .slice()
+        .sort((a, b) => a.partIndex - b.partIndex)
+        .map(mapPersistedPartToContent)
+        .filter(Boolean) as ContentPart[]
+    ),
   }
 }
 
@@ -2002,10 +2166,14 @@ function mapSnapshotContentBlock(
 ): ContentPart | null {
   const kind = firstString(block?.kind)
   if (kind === "text") {
-    return { type: "text", text: firstString(block?.text) }
+    return { type: "text", text: firstString(block?.text) || "" }
   }
   if (kind === "thinking") {
-    return { type: "thinking", thinking: firstString(block?.text) }
+    // 这条路径复原的是**实时** liveMessage（`isStreaming: true`），所以空 thinking
+    // **故意不过滤** —— 它是驱动「正在思考」的合法实时状态，对 reasoning-redacting
+    // 模型更是永久状态。只补 `|| ""`：漏了它会得到 `thinking: undefined`，
+    // 与 `ContentPart` 的类型不符，且渲染出字面量 "undefined"。
+    return { type: "thinking", thinking: firstString(block?.text) || "" }
   }
   if (kind === "tool_call_ref") {
     const toolCallId = firstString(block?.tool_call_id, block?.toolCallId)
@@ -2067,6 +2235,9 @@ function buildToolCallPart(entry: any): ContentPart | null {
       status: mapToolCallStatus(entry?.status),
       output: stringifyToolCallOutput(entry?.output),
       error: extractToolCallError(entry?.output),
+      // 快照恢复（mid-turn attach）也要带上 meta，否则冷启动时子智能体胶囊会退化
+      // 成普通工具组。
+      meta: recordFromUnknown(entry?.meta),
     },
   }
 }
@@ -2268,6 +2439,11 @@ function describePermission(toolCall: unknown) {
     firstString(record.title, record.name, record.kind, record.description) ||
     firstString(record.tool_call_id, record.toolCallId)
   )
+}
+
+function recordFromUnknown(value: unknown): Record<string, any> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null
+  return value as Record<string, any>
 }
 
 function normalizeToolCallInput(input: unknown) {

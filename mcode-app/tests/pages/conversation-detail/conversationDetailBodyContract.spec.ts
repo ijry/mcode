@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { buildBubbleDisplayParts } from "@/services/conversation/bubbleDisplayParts";
+
 describe("ConversationDetailBody", () => {
   it("keeps a stable root class for the detail swiper layout", () => {
     const source = fs.readFileSync(
@@ -342,7 +344,68 @@ describe("ConversationDetailBody", () => {
     expect(bubbleSource).not.toContain("backdrop-filter: blur(0.1625rem)");
   });
 
-  it("renders Codex goal tool calls before generic tool grouping", () => {
+  // 以前这条是对 `MessageBubble.vue` 的源码文本断言（`toContain("buildGoalDisplayParts(...)")`
+  // 加两个 `indexOf` 比大小）。分组循环抽进 `buildBubbleDisplayParts` 之后，那些字面量
+  // 不在气泡里了；更重要的是文本断言本来就挡不住行为回归 —— 气泡曾调用一个没 import
+  // 的函数（`isEmptyThinkingPart`），非流式轮次每次重算都 ReferenceError，而这类断言全绿。
+  // 改成对分组函数的行为断言。
+  it("folds goal lifecycles and subagents out before generic tool grouping", () => {
+    const goalOutput = (status: string) =>
+      JSON.stringify({ goal: { objective: "Ship mobile goal card", status } });
+    const parts = [
+      {
+        type: "tool_call",
+        tool_call: {
+          id: "task-1",
+          name: "Task",
+          input: { subagent_type: "Explore" },
+          status: "completed",
+        },
+      },
+      { type: "tool_call", tool_call: { id: "read-1", name: "Read", status: "completed" } },
+      { type: "tool_call", tool_call: { id: "grep-1", name: "Grep", status: "completed" } },
+      {
+        type: "tool_call",
+        tool_call: {
+          id: "codex-goal-1",
+          name: "create_goal",
+          input: { objective: "Ship mobile goal card" },
+          output: goalOutput("active"),
+          status: "completed",
+        },
+      },
+      { type: "text", text: "Working" },
+      {
+        type: "tool_call",
+        tool_call: {
+          id: "codex-goal-2",
+          name: "update_goal",
+          input: { status: "complete", objective: "Ship mobile goal card" },
+          output: goalOutput("complete"),
+          status: "completed",
+        },
+      },
+    ] as any[];
+
+    const rendered = buildBubbleDisplayParts({ parts });
+
+    // 三类块各自独立，且顺序与来源一致。
+    expect(rendered.map((part) => part.type)).toEqual([
+      "subagent_call",
+      "tool_call_group",
+      "goal_run",
+    ]);
+    // goal 标记工具**不能**落进通用工具组 —— 否则 goal 卡不出现，用户只看到
+    // 「调用 2 个工具」，其中一个叫 create_goal。
+    const group = rendered.find((part) => part.type === "tool_call_group") as any;
+    expect(group.tool_calls.map((call: any) => call.id)).toEqual(["read-1", "grep-1"]);
+    // 子智能体同理不能被并进工具组：它自带一整段会话，并进去就退化成一行摘要，
+    // 而它的正文会把父气泡撑到极长（本次改动的起因）。
+    const subagent = rendered.find((part) => part.type === "subagent_call") as any;
+    expect(subagent.tool_call.id).toBe("task-1");
+  });
+
+  it("keeps the goal_run branch ahead of tool_call_group in the bubble template", () => {
     const bubbleSource = fs.readFileSync(
       path.resolve(__dirname, "../../../src/components/MessageBubble.vue"),
       "utf8",
@@ -351,11 +414,13 @@ describe("ConversationDetailBody", () => {
     expect(bubbleSource).toContain(
       'import GoalToolCallBlock from "./GoalToolCallBlock.vue"',
     );
-    expect(bubbleSource).toContain("buildGoalDisplayParts");
     expect(bubbleSource).toContain(
-      "buildGoalDisplayParts(props.message.content || [], isStreaming.value)",
+      'import SubagentCapsuleBlock from "./SubagentCapsuleBlock.vue"',
     );
-    expect(bubbleSource).toContain("part.type === 'goal_run'");
+    // 三个分支都要在模板里真的存在 —— 分组函数产出了某个 type 而模板没有对应分支时，
+    // 那一块会静默消失（v-if 链全部落空，什么都不渲染）。
+    expect(bubbleSource.indexOf("part.type === 'goal_run'")).toBeGreaterThan(-1);
+    expect(bubbleSource.indexOf("part.type === 'subagent_call'")).toBeGreaterThan(-1);
     expect(bubbleSource.indexOf("part.type === 'goal_run'")).toBeLessThan(
       bubbleSource.indexOf("part.type === 'tool_call_group'"),
     );
@@ -605,6 +670,75 @@ describe("ConversationDetailBody", () => {
     expect(source).not.toContain("HISTORY_LOADING_MIN_MS");
   });
 
+  it("triggers the older page when the user keeps swiping up, not down", () => {
+    const source = fs.readFileSync(
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/ConversationDetailInteractivePane.vue",
+      ),
+      "utf8",
+    );
+
+    // uni 的 scroll-view 里 `deltaY = lastScrollTop - scrollTop`，**向上滑是正值**
+    // （uni 自己的 scrolltoupper 判定用的就是 `lastScrollTop - scrollTop > 0`）。
+    // 写成 `deltaY < 0` 语义恰好反了：只在「已经贴顶还继续往下滑」时才触发，
+    // 连续上滑加载从此从未生效，只剩 @scrolltoupper 的**边沿**触发在干活 ——
+    // 而边沿触发在阈值内静止后不会复发，用户会觉得列表卡住了。
+    expect(source).toMatch(/if \(deltaY > 0 && scrollTopValue <= 120\)\s*\{?\s*void loadOlderTurns\(\)/);
+    // 不断言 `not.toContain("deltaY < 0")` —— 上面那段解释旧 bug 的注释里就引用了
+    // 这个错写法，断言会打到注释上。方向由上面那条正向匹配钉住即可。
+    // 边沿触发仍要保留：贴顶那一下靠它，靠 deltaY 分支的 <=120 兜不住惯性滚动。
+    expect(source).toContain('@message-scroll-upper="handleMessageListScrollUpper"');
+  });
+
+  it("probes a history window on entry so paging cannot self-lock", () => {
+    const pageSource = fs.readFileSync(
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/index.vue",
+      ),
+      "utf8",
+    );
+
+    const probeSource = pageSource.slice(
+      pageSource.indexOf("async function ensureConversationHistoryWindow(input: {"),
+      pageSource.indexOf("async function hydrateRemoteConversationMetadata(input: {"),
+    );
+    expect(probeSource).not.toBe("");
+
+    // 已有窗口就不要再探测 —— 否则每次进详情都白发一个尾窗请求。
+    expect(probeSource).toContain("if (input.runtimeSession.historyWindow) return");
+    // 流式中/有 in-flight 用户轮次时建不出窗口：窗口的语义是「localTurns[0] 的全局
+    // 下标」，而此刻我们不知道 localTurns[0] 落在哪，硬记一个尾窗坐标会造成不可
+    // 恢复的错位（见 resolvePreservedTurnsWindow）。
+    expect(probeSource).toContain(
+      "if (hasVolatileRuntimeState(input.runtimeSession)) return",
+    );
+    // 并发去重：watcher 与 loadConversation 会同时走到这里。
+    expect(probeSource).toContain(
+      "if (historyWindowProbeConversationIds.has(input.conversationId)) return",
+    );
+    expect(probeSource).toMatch(
+      /historyWindowProbeConversationIds\.add\([\s\S]*finally \{[\s\S]*historyWindowProbeConversationIds\.delete\(/,
+    );
+    // 期间可能切走或被别的路径建好窗口，不能覆盖后者。
+    expect(probeSource).toContain(
+      "if (session !== input.runtimeSession || session.historyWindow) return",
+    );
+
+    // 自愈 watcher：流式结束后补探测。少了它，热运行时分支进来时正在流式的会话
+    // 会把窗口永久停在 null（探测当场早退，而翻页是唯一的另一个写窗口方)。
+    expect(pageSource).toMatch(
+      /hasVolatileRuntimeState\(runtimeSession\),[\s\S]*Number\(runtimeSession\?\.localTurns\?\.length \|\| 0\) > 0,/,
+    );
+    expect(pageSource).toMatch(
+      /if \(!targetConversationId \|\| hasWindow \|\| volatile \|\| !hasTurns\) return/,
+    );
+    expect(pageSource).toMatch(
+      /void ensureConversationHistoryWindow\(\{[\s\S]*?conversationId: targetConversationId,/,
+    );
+  });
+
   it("keeps older server pages remote-only and removes the retired SQLite cursor protocol", () => {
     const paneSource = fs.readFileSync(
       path.resolve(
@@ -702,16 +836,39 @@ describe("ConversationDetailBody", () => {
     );
 
     expect(source).toContain("const initialHistoryLoading = ref(false)");
+    // 文案分支本身在 detailHistoryIndicatorPresentation.ts 里，有独立的单元测试。
+    // 这里只钉住「面板确实把四个来源都喂进了状态机」——少喂一个就会退化成某个
+    // 状态永远显示不出来（例如漏 initialLoading 会先闪一下「没有更多历史了」）。
+    expect(source).toContain("resolveDetailHistoryIndicatorPresentation({");
+    expect(source).toMatch(/hasMessages: messages\.value\.length > 0/);
+    expect(source).toMatch(/hasMore: hasMoreHistory\.value/);
+    expect(source).toMatch(/loadingOlder: loadingOlder\.value/);
+    expect(source).toMatch(/initialLoading: initialHistoryLoading\.value/);
+    // 窗口坐标未知必须单独传，不能让 hasMore: false 兼任两种语义 —— 那会在刚进
+    // 详情页时显示「没有更多历史了」，等探测回来才变可翻页（用户报的现象）。
+    expect(source).toMatch(/windowKnown: historyWindowKnown\.value/);
+    // 流式期间必须**允许**翻页：唯一的前置条件是窗口说得出还有更早历史。
+    // 曾经这里还有 `|| hasVolatileHistoryRuntimeState(runtimeSession)`，导致回复
+    // 生成中完全无法往上看历史；连带那个把 liveMessage.content 塞进指纹的
+    // historyRuntimeFingerprint 一起删除（前插不依赖尾部状态）。
     expect(source).toMatch(
-      /const historyStatusBusy = computed\(\s*\(\)\s*=>/,
+      /if \(!hasOlderConversationHistory\(historyWindow\)\) return;/,
     );
-    expect(source).toContain('v-if="historyStatusBusy"');
+    // 只断言**代码**里没有了 —— 注释里保留着「为什么删」，那段说明有价值，
+    // 所以不能裸搜函数名（注释里带反引号的提及会误报）。这里盯的是三个真实语法位置：
+    // 函数声明、`||` 早退里的调用、以及传参。
+    expect(source).not.toMatch(/function hasVolatileHistoryRuntimeState\b/);
+    expect(source).not.toMatch(/function historyRuntimeFingerprint\b/);
+    expect(source).not.toMatch(/\|\|\s*hasVolatileHistoryRuntimeState\(/);
+    expect(source).not.toContain("runtimeFingerprint:");
     expect(source).toMatch(
-      /if \(loadingOlder\.value\) return "历史加载中\.\.\."/,
+      /const historyWindowKnown = computed\(\(\) => session\.value\.historyWindow != null\)/,
     );
-    expect(source).toMatch(
-      /if \(messages\.value\.length > 0 && initialHistoryLoading\.value\)\s*return "初始历史加载中\.\.\."/,
-    );
+    expect(source).toMatch(/errorMessage: historyLoadErrorMessage\.value/);
+    expect(source).toMatch(/pullDistance: historyPullDistance\.value/);
+    expect(source).toMatch(/pullThreshold: HISTORY_REFRESHER_THRESHOLD/);
+    expect(source).toContain('v-if="historyIndicator.visible"');
+    expect(source).toContain('v-if="historyIndicator.busy"');
     expect(source).toContain(
       "function beginInitialHistoryLoading(conversationId: number, token: number)",
     );
@@ -723,6 +880,79 @@ describe("ConversationDetailBody", () => {
       /const token = \+\+historySyncToken[\s\S]*beginInitialHistoryLoading\(conversationId, token\)/,
     );
     expect(source).not.toContain("ensureHistoryCursorFromLoadedMessages");
+  });
+
+  it("drives the history indicator through the scroll-view refresher, in document flow", () => {
+    const bodySource = fs.readFileSync(
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/ConversationDetailBody.vue",
+      ),
+      "utf8",
+    );
+    const paneSource = fs.readFileSync(
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/ConversationDetailInteractivePane.vue",
+      ),
+      "utf8",
+    );
+    const styleSource = fs.readFileSync(
+      path.resolve(__dirname, "../../../src/pages/conversation-detail/index.scss"),
+      "utf8",
+    );
+
+    // 指示行必须在 `.message-list__content` **里面**且排在 `#content` 前面。它曾经是
+    // scroll-view 的兄弟节点 + `position: fixed`，于是浮在第一条消息上面挡住内容。
+    const contentOpen = bodySource.indexOf('<view class="message-list__content"');
+    const historySlot = bodySource.indexOf('<slot name="history">');
+    const contentSlot = bodySource.indexOf('<slot name="content">');
+    expect(contentOpen).toBeGreaterThan(-1);
+    expect(historySlot).toBeGreaterThan(contentOpen);
+    expect(historySlot).toBeLessThan(contentSlot);
+
+    // 详情页禁了页面级下拉（pages.json enablePullDownRefresh:false，且 .page 锁了
+    // overflow），手势只能来自 scroll-view 自己的 refresher。
+    expect(bodySource).toContain(':refresher-enabled="refresherEnabled"');
+    expect(bodySource).toContain(':refresher-triggered="refresherTriggered"');
+    expect(bodySource).toContain(':refresher-threshold="refresherThreshold"');
+    // "none" 才会渲染 refresher 插槽；任何其它值都换成 uni 自带的绿色转圈。
+    expect(bodySource).toContain('refresher-default-style="none"');
+    expect(bodySource).toContain('@refresherrefresh="emit(\'refresher-refresh\')"');
+    expect(bodySource).toContain(
+      "@refresherpulling=\"emit('refresher-pulling', $event)\"",
+    );
+
+    // refresher-triggered 是**受控** prop：uni 只在它变 false 时收回 refreshing 态。
+    // 少了这句 finally，转圈会一直转下去。
+    expect(paneSource).toMatch(
+      /historyRefresherTriggered\.value = true;[\s\S]*await loadOlderTurns\(\);[\s\S]*finally \{[\s\S]*historyRefresherTriggered\.value = false;/,
+    );
+    // uni 的 _setRefreshState 在 refresherEnabled 为 false 时**直接 return**，会把
+    // restore 吞掉、刷新态永久卡死。翻到底那一次 canPull 恰好变 false，所以整个下拉
+    // 生命周期内必须由 historyRefresherActive 强行按住 enabled，且它要在 restore
+    // 落地（await nextTick）之后才放开。
+    expect(paneSource).toContain(
+      "Boolean(active && (historyIndicator.canPull || historyRefresherActive))",
+    );
+    expect(paneSource).toMatch(
+      /historyRefresherTriggered\.value = false;[\s\S]{0,200}?await nextTick\(\);[\s\S]{0,200}?historyRefresherActive\.value = false;/,
+    );
+    // 没有更早历史时关掉手势，否则能拽出一片空白却什么都不发生。
+    expect(paneSource).toContain("historyIndicator.canPull");
+    // 只有 error 态可点；其余状态点击必须无副作用。
+    expect(paneSource).toMatch(
+      /function handleHistoryIndicatorTap\(\) \{\s*if \(!historyIndicator\.value\.retryable\) return;/,
+    );
+
+    // 行高钉死：前插更早历史后要按锚点还原滚动位置，还原量依赖「插入了多高的内容」，
+    // 指示行随文案变高就会让这个差值带上抖动，锚点漂。
+    const historyRule = styleSource.slice(
+      styleSource.indexOf("\n.history-status {"),
+      styleSource.indexOf("\n.history-status--retryable"),
+    );
+    expect(historyRule).toContain("min-height: 64rpx");
+    expect(historyRule).not.toContain("position: fixed");
   });
 
   it("shows explicit loading, failure, and empty states for conversation content", () => {

@@ -469,8 +469,13 @@ import {
 import {
   DEFAULT_CONVERSATION_HISTORY_PAGE_SIZE,
   buildTailHistoryRequest,
+  canKeepPreviousTailWindow,
+  mergeTailIntoTurnsWithSeam,
   requireConversationHistoryWindow,
+  resolvePreservedTurnsWindow,
+  resolveRefreshedTailWindow,
 } from "./detailHistoryPaging"
+import { readLocalTurnCacheEnabled } from "@/services/conversation/localTurnCachePreference"
 import {
   buildQuestionAnswer as buildPendingQuestionAnswer,
   createQuestionSelectionState,
@@ -528,7 +533,6 @@ import {
   resolveViewportSyncAction,
 } from "./detailScrollState"
 import {
-  buildHistoryStatusStyle,
   buildMessageListContentStyle,
   buildMessageListPageStyle,
   buildTopOffsetStyle,
@@ -771,6 +775,9 @@ const pendingPermissionSubmittingOptionId = ref("")
 const questionSubmitting = ref(false)
 const askQuestionSelections = ref<Record<string, QuestionSelectionState>>({})
 const forceRemoteTurnReconcileOnLoad = ref(false)
+// 正在进行的窗口探测，按会话去重。watcher 与 loadConversation 都会调
+// ensureConversationHistoryWindow，没有这个守卫会并发发出多个相同的尾窗请求。
+const historyWindowProbeConversationIds = new Set<number>()
 let detailAgentProbeToken = 0
 let stuckPromptTimer: ReturnType<typeof setTimeout> | null = null
 let lastLiveActivitySignature = ""
@@ -989,13 +996,6 @@ const connectingOperationBlockerStyle = computed(() =>
 const detailDropdownMaskStyle = computed(() => ({
   top: `${getNavbarHeight()}px`,
 }))
-const historyStatusStyle = computed(() =>
-  buildHistoryStatusStyle({
-    navbarHeight: getNavbarHeight(),
-    tabsBarHeight: effectiveDetailTabsBarHeight.value,
-    toolbarHeight: toolbarHeight.value,
-  })
-)
 
 const detailConnectionKey = computed(() => {
   if (routeConnectionKey.value) {
@@ -1775,7 +1775,9 @@ async function ensureMountedDetailTabRuntime(tab: DetailShellTabItem | null | un
     const persistedRuntime = instanceKey
       ? await getRuntime(instanceKey, targetConversationId).catch(() => null)
       : null
-    if (runtimeSession.localTurns.length === 0) {
+    // 缓存开关关闭（默认）时跳过水合：下面那段 `localTurns.length === 0` 的分支
+    // 会转而拉远端尾窗，代价是冷启动要等网络（已确认接受的取舍）。
+    if (runtimeSession.localTurns.length === 0 && readLocalTurnCacheEnabled()) {
       const localTurns = await getNewestTurns(targetConversationId, DEFAULT_CONVERSATION_HISTORY_PAGE_SIZE).catch(() => [])
       if (localTurns.length > 0) {
         runtimeSession.localTurns = localTurns
@@ -2911,14 +2913,6 @@ watch(
 )
 
 watch(
-  () => historyStatusText.value,
-  () => {
-    if (!hasInitialBottomScroll.value) return
-    scheduleViewportSync()
-  }
-)
-
-watch(
   () => [inputText.value, composerCursor.value] as const,
   () => {
     syncMentionTrigger()
@@ -3009,7 +3003,9 @@ async function hydrateLocalConversationState(input: {
       }
     }
     persistedRuntime = await getRuntime(input.instanceKey, input.conversationId)
-    if (!input.hasHotRuntime) {
+    // `readLocalTurnCacheEnabled()` 关闭（默认）时不读轮次 —— 摘要与 runtime
+    // （标题、草稿、断点）照旧读，那两张表不受这个开关约束。
+    if (!input.hasHotRuntime && readLocalTurnCacheEnabled()) {
       localTurns = await getNewestTurns(
         input.conversationId,
         DEFAULT_CONVERSATION_HISTORY_PAGE_SIZE
@@ -3072,15 +3068,43 @@ async function applyRemoteHistoryWindowDetail(input: {
 }) {
   const historyWindow = requireConversationHistoryWindow(input.detail)
   applyRemoteDetailStats(input.detail, input.conversationId)
-  runtime.setConversationHistoryWindow(input.conversationId, historyWindow)
 
   const preserveRuntimeTurns =
     hasInFlightConversationDetail(input.detail) ||
     hasVolatileRuntimeState(input.runtimeSession) ||
     Boolean(input.runtimeSession.inFlightUserTurnId)
 
-  if (!preserveRuntimeTurns) {
-    input.runtimeSession.localTurns = normalizeTurns(input.detail?.turns)
+  if (preserveRuntimeTurns) {
+    // 轮次不动，窗口坐标也不能动 —— 两者必须成对。旧窗口仍精确描述 localTurns[0]，
+    // 换成尾窗那一组会把「翻了多远」打回一页，「加载更早」随后会连着几次拉回内存里
+    // 已有的轮次（全被去重掉），看起来就像按钮失灵。只允许刷新 turns_total。
+    runtime.setConversationHistoryWindow(
+      input.conversationId,
+      resolvePreservedTurnsWindow(input.runtimeSession.historyWindow, historyWindow)
+    )
+  } else {
+    // 已翻页出来的前缀要尽量保住：远端只回 30 条尾窗，整体赋值会把用户翻到的 200 条
+    // 静默砍回一页。但「保住前缀」和「沿用旧窗口坐标」必须是同一个决定 ——
+    // 窗口浅而时间线深会让下一次「加载更早」把已有轮次搬到列表头部，时间线错乱且
+    // 那个空洞不可恢复（没有请求能填上前缀结尾到尾窗起点之间那段）。
+    const remoteTail = normalizeTurns(input.detail?.turns)
+    const merged = mergeTailIntoTurnsWithSeam(input.runtimeSession.localTurns, remoteTail)
+    const keepPrefix = canKeepPreviousTailWindow(
+      input.runtimeSession.historyWindow,
+      historyWindow,
+      merged.seamIndex
+    )
+    // 接缝证明不了连续性时宁可丢掉前缀：用户往上滑还能重新翻回来，而错位的时间线
+    // 不报错也修不回来。
+    input.runtimeSession.localTurns = keepPrefix ? merged.turns : remoteTail
+    runtime.setConversationHistoryWindow(
+      input.conversationId,
+      resolveRefreshedTailWindow(
+        input.runtimeSession.historyWindow,
+        historyWindow,
+        merged.seamIndex
+      )
+    )
   }
 
   try {
@@ -3101,6 +3125,106 @@ async function applyRemoteHistoryWindowDetail(input: {
 
   return historyWindow
 }
+
+/**
+ * 确保 `session.historyWindow` 存在 —— 不存在就拉一次尾窗把它建起来。
+ *
+ * 为什么需要这个：`historyWindow` 是「能否往上翻页」的**唯一**依据
+ * （`hasOlderConversationHistory` 只看 `turns_offset > 0`），但建立它的路径只有
+ * `applyRemoteHistoryWindowDetail`，而 `loadConversation` 三条分支里只有冷启动那条
+ * 会 await 它。列表页的实时预览会**预连接**会话（`conversations/index.vue` 的
+ * `runLivePreviewAttach` → `runtime.connect`），realtime 事件把 `localTurns` 填出内容，
+ * 于是 `hasRenderableRuntimeState` 为真、走热运行时分支；而该分支只在
+ * `shouldForceRemoteTurnReconcile` 时才对账（首次进入恒为 false）。
+ * 结果：**时间线有内容、窗口是 null，「加载更早」永远不动，指示器还显示
+ * 「没有更多历史了」**。这就是用户报的「无法下拉加载分页的历史消息」。
+ *
+ * 而且这是个**自锁**：没窗口 → `loadOlderTurns` 在入口就返回 → 永远建不起窗口。
+ * 所以必须由详情页主动探测，不能等翻页手势。
+ *
+ * 关键约束：**这条路径绝不能覆盖 `localTurns`。** 走到这里意味着内存里可能正有
+ * 流式内容/待回答卡片，整体赋值会把它们抹掉。所以只取窗口三元组，轮次交给
+ * `applyRemoteHistoryWindowDetail` 自己的保留逻辑处理。
+ */
+async function ensureConversationHistoryWindow(input: {
+  conversationId: number
+  folderId: number
+  instanceKey: string
+  runtimeSession: ReturnType<typeof runtime.getOrCreateSession>
+}) {
+  if (!input.conversationId) return
+  if (input.runtimeSession.historyWindow) return
+  // 轮次被保留期间建不出窗口：窗口的语义是「localTurns[0] 的全局下标」，而流式中
+  // 我们不知道 localTurns[0] 落在哪 —— 硬记一个尾窗坐标会造成不可恢复的错位
+  // （见 resolvePreservedTurnsWindow 的注释）。等流式结束后由 watcher 再探测。
+  if (hasVolatileRuntimeState(input.runtimeSession)) return
+  if (historyWindowProbeConversationIds.has(input.conversationId)) return
+
+  historyWindowProbeConversationIds.add(input.conversationId)
+  try {
+    const detail = await fetchRemoteConversationDetail(input.conversationId)
+    // 期间可能已经切走 / 被别的路径建好了窗口，别覆盖后者的结果。
+    const session = runtime.getOrCreateSession(input.conversationId)
+    if (session !== input.runtimeSession || session.historyWindow) return
+    await applyRemoteHistoryWindowDetail({
+      instanceKey: input.instanceKey,
+      conversationId: input.conversationId,
+      folderId: input.folderId,
+      detail,
+      runtimeSession: input.runtimeSession,
+    })
+    detailDebugLog("history-window-probe", summarizeDetailTurns(detail))
+  } catch (error) {
+    // 探测失败不影响已渲染的内容，下一次 loadConversation / 下拉刷新会再试。
+    detailDebugLog("history-window-probe-failed", {
+      conversationId: input.conversationId,
+      message: toErrorMessage(error),
+    })
+    console.warn("ensure conversation history window skipped", error)
+  } finally {
+    historyWindowProbeConversationIds.delete(input.conversationId)
+  }
+}
+
+/**
+ * 窗口探测的自愈 watcher：流式结束 / in-flight 用户轮次落地后补一次探测。
+ *
+ * 覆盖三个「窗口停留在 null」的洞：
+ * 1. 热运行时分支进来时正在流式 —— `ensureConversationHistoryWindow` 当场因
+ *    `hasVolatileRuntimeState` 返回，要等这里补。
+ * 2. `reconcileRemoteTurnsAfterLocalHydrate` 因 `inFlightUserTurnId` 早退
+ *    （`hasRenderableRuntimeState` 不看这个字段、`hasVolatileRuntimeState` 看，
+ *    两个谓词的字段集不一致造成的缝隙），原先没有任何补救路径。
+ * 3. 上一次探测网络失败。
+ *
+ * 只管当前激活的会话：窗口只在用户看得见的那个 tab 里才有意义，
+ * 后台 tab 等它自己被激活时再探测。
+ */
+watch(
+  () => {
+    const targetConversationId = Number(conversationId.value || 0)
+    const runtimeSession = targetConversationId
+      ? runtime.sessions.get(targetConversationId)
+      : null
+    return [
+      targetConversationId,
+      Boolean(runtimeSession?.historyWindow),
+      hasVolatileRuntimeState(runtimeSession),
+      Number(runtimeSession?.localTurns?.length || 0) > 0,
+    ] as const
+  },
+  ([targetConversationId, hasWindow, volatile, hasTurns]) => {
+    if (!targetConversationId || hasWindow || volatile || !hasTurns) return
+    if (loading.value) return
+    const runtimeSession = runtime.getOrCreateSession(targetConversationId)
+    void ensureConversationHistoryWindow({
+      conversationId: targetConversationId,
+      folderId: Number(folderId.value || 0),
+      instanceKey: resolveDetailInstanceKey(),
+      runtimeSession,
+    })
+  }
+)
 
 async function hydrateRemoteConversationMetadata(input: {
   managed: ReturnType<typeof connectionSessionManager.getByConversationId>
@@ -3304,6 +3428,16 @@ async function loadConversation() {
       finishInitialLoad(cachedViewState, persistedRuntime)
       if (shouldForceRemoteTurnReconcile) {
         void reconcileRemoteTurnsAfterResume({
+          conversationId: targetConversationId,
+          folderId: targetFolderId,
+          instanceKey,
+          runtimeSession,
+        })
+      } else {
+        // 热运行时分支不做对账，于是**没有任何代码**会建立 historyWindow ——
+        // 列表页实时预览预热过的会话正是走这里进来的。补一次窗口探测，
+        // 否则「加载更早」永远不动（详见 ensureConversationHistoryWindow）。
+        void ensureConversationHistoryWindow({
           conversationId: targetConversationId,
           folderId: targetFolderId,
           instanceKey,
