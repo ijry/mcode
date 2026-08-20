@@ -17,6 +17,11 @@
 - Every mcode change must include or update a Markdown note under `docs/mcode-architecture-notes/`.
 - The note should describe the architecture, protocol/data-flow changes, UI behavior, compatibility considerations, and native iOS/Android replication guidance.
 - Keep notes concise but concrete enough that an AI agent can reimplement the same behavior in native clients without reading the full web/uni-app implementation.
+- 文件名格式为 `YYYY-MM-DD-hh-mm-<kebab-case-topic>.md`（本地时间，如
+  `2026-08-19-05-26-conversation-detail-system-turn-role.md`）。时间戳既是排序依据也保证
+  同一天多篇不重名，**不要再往文件名里塞需求编号** —— 形如 `P202608190010` 的编号已经
+  包含日期，和前缀重复。需求编号写在文档标题与正文里即可。
+- 重命名笔记时记得改掉其他笔记里指向它的交叉引用（`grep -rn '<旧文件名>' docs/`）。
 
 ## Implementation Plan 执行方式
 
