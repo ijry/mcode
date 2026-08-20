@@ -12,7 +12,7 @@
         <view class="experimental-notice__content">
           <text class="experimental-notice__title">实验性功能</text>
           <text class="experimental-notice__text">
-            实时信息流和同步 PC 端 TAB 仅供体验，不建议正式使用。
+            实时信息流、本地缓存消息和同步 PC 端 TAB 仅供体验，不建议正式使用。
           </text>
         </view>
       </view>
@@ -32,6 +32,24 @@
             :checked="conversationListLiveStreamEnabled"
             color="#2979ff"
             @change="handleConversationListLiveStreamChange"
+          />
+        </view>
+
+        <view class="menu-item">
+          <view class="menu-left menu-left--column">
+            <view class="menu-row-title">
+              <u-icon name="server-man" size="22" :color="upThemeVar('--up-primary', '#2979ff')"></u-icon>
+              <text class="menu-text">本地缓存最新页消息</text>
+            </view>
+            <text class="menu-desc">
+              开启后把每个会话最新一页消息存到本机，再次进入可先看到内容；关闭时消息一律从服务端拉取，冷启动需要等待网络。
+            </text>
+          </view>
+          <switch
+            class="menu-switch"
+            :checked="localTurnCacheEnabled"
+            color="#2979ff"
+            @change="handleLocalTurnCacheChange"
           />
         </view>
 
@@ -84,6 +102,12 @@ import {
   writeConversationListLiveStreamEnabled,
 } from "@/services/conversation/conversationListLiveStreamPreference"
 import {
+  readLocalTurnCacheEnabled,
+  writeLocalTurnCacheEnabled,
+} from "@/services/conversation/localTurnCachePreference"
+import { ensureConversationSchema } from "@/services/db/migrations"
+import { clearCachedConversationTurns } from "@/services/db/repositories/conversationRepository"
+import {
   readDetailTabMultitaskMode,
   writeDetailTabMultitaskMode,
   type DetailTabMultitaskMode,
@@ -102,6 +126,7 @@ const directBaseUrl = ref("")
 const token = ref("")
 const status = ref("")
 const conversationListLiveStreamEnabled = ref(false)
+const localTurnCacheEnabled = ref(false)
 const detailTabMode = ref<DetailTabMultitaskMode>("off")
 const showTabModeSheet = ref(false)
 
@@ -119,6 +144,7 @@ const detailTabModeLabel = computed(() => {
 
 onMounted(() => {
   conversationListLiveStreamEnabled.value = readConversationListLiveStreamEnabled()
+  localTurnCacheEnabled.value = readLocalTurnCacheEnabled()
   detailTabMode.value = readDetailTabMultitaskMode()
 })
 
@@ -129,6 +155,30 @@ function handleConversationListLiveStreamChange(event: { detail?: { value?: bool
     title: enabled ? "会话列表实时消息流已开启" : "会话列表实时消息流已关闭",
     icon: "none",
   })
+}
+
+async function handleLocalTurnCacheChange(event: { detail?: { value?: boolean } }) {
+  const enabled = writeLocalTurnCacheEnabled(Boolean(event?.detail?.value))
+  localTurnCacheEnabled.value = enabled
+  if (enabled) {
+    uni.showToast({ title: "已开启本地缓存最新页消息", icon: "none" })
+    return
+  }
+
+  // 关掉时顺手把已缓存的轮次删掉，否则它们会变成「幽灵行」：读写两侧都已关闭，
+  // 谁都不会再碰它们，但仍占着存储、还被「清除缓存」页面算进条数
+  // （`cacheManager` 的 conversation-sqlite 项），用户看到一个删不掉又说不清来源的数字。
+  //
+  // 只删轮次与 part，会话摘要留着 —— 列表页的标题/状态/未读靠它，删了会让列表离线空白。
+  // 失败不阻塞：读取点已经被开关挡住，残留的行是惰性的，下次开关或清除缓存还有机会收拾。
+  try {
+    await ensureConversationSchema()
+    await clearCachedConversationTurns()
+    uni.showToast({ title: "已关闭并清除本地消息缓存", icon: "none" })
+  } catch (error) {
+    console.warn("clear local turn cache skipped", error)
+    uni.showToast({ title: "已关闭本地缓存（旧数据清理失败）", icon: "none" })
+  }
 }
 
 function handleTabModeSelect(action: { value?: DetailTabMultitaskMode }) {
