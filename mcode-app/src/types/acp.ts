@@ -25,12 +25,36 @@ export type PromptInputBlock =
 
 export interface MessageTurn {
   id: string
-  role: "user" | "assistant"
+  /**
+   * 与服务端 `TurnRole` 对齐的三种角色（`models/message.rs` 的 `enum TurnRole`）。
+   *
+   * `system` 是**全部解析器共有**的第三种角色，不是 Claude 特例：上下文压缩摘要
+   * （`This session is being continued from a previous conversation`，见
+   * `parsers/claude.rs` 的 `is_context_continuation`）在 JSONL 里是 `type: "user"`，
+   * 但解析器会把它改判成 System，因为它是注入的系统上下文而非用户输入。
+   *
+   * 归一化时必须显式识别它。漏掉会落到 assistant 分支，把压缩摘要当成 agent 回复
+   * 渲染出来 —— 用户会看到一大段「会话被压缩」的内部说明。
+   */
+  role: "user" | "assistant" | "system"
   content: ContentPart[]
   timestamp: number
   status?: "pending" | "streaming" | "completed" | "error"
   error?: string
   usage?: TurnUsage | null
+  /**
+   * 与来源无关的稳定去重键，取值与 SQLite `conversation_turns.dedupe_key` 完全一致。
+   *
+   * `id` 会随来源变化：同一条逻辑轮次在 SQLite 里是 `turn:<hash>`，在服务端载荷里
+   * 是解析器的 `turn-N`，实时事件里又是 ACP `message_id`。只按 `id` 去重时，本地
+   * 缓存水合与远端对账会把同一条轮次当成两条，导致详情页用户/助手消息各重复一次。
+   *
+   * 仅由「服务端载荷」与「SQLite 行」两个来源填充 —— 二者跑的是同一个
+   * `buildTurnDedupeKey`，对已完成轮次结果逐字节相同，因此可安全折叠。实时/流式
+   * 轮次不填充，继续沿用 `inFlightUserTurnId` + message_id 那套权威机制，避免误合
+   * 并连续发送的相同文本。
+   */
+  dedupeKey?: string
 }
 
 export interface ContentPart {
@@ -51,6 +75,16 @@ export interface ToolCall {
   output?: string
   error?: string
   rawOutput?: string
+  /**
+   * ACP `_meta` 原样透传。`meta.claudeCode.subagent === true` 是子智能体的权威标记。
+   */
+  meta?: Record<string, any> | null
+  /**
+   * `tool_result` 上的 `agent_stats`（服务端 `AgentExecutionStats`），**保持
+   * snake_case 原样** —— 字段名映射集中在 `subagentToolCall.normalizeSubagentStats`，
+   * 这样 6 处归一化都只做哑透传，服务端加字段时不用逐处跟改。
+   */
+  agentStats?: Record<string, any> | null
 }
 
 export interface GoalRunContentPart {
@@ -62,6 +96,23 @@ export interface GoalRunContentPart {
 }
 
 export type GoalDisplayPart = ContentPart | GoalRunContentPart
+
+/** 原生子智能体调用：单独渲染成默认折叠的胶囊，不并进通用工具组。 */
+export interface SubagentCallContentPart {
+  type: "subagent_call"
+  tool_call: ToolCall
+}
+
+/** 相邻普通工具调用的合成分组。 */
+export interface ToolCallGroupContentPart {
+  type: "tool_call_group"
+  tool_calls: ToolCall[]
+}
+
+export type BubbleDisplayPart =
+  | GoalDisplayPart
+  | SubagentCallContentPart
+  | ToolCallGroupContentPart
 
 export interface ToolResult {
   tool_call_id: string
@@ -241,6 +292,13 @@ export interface ConversationConnectionInfo {
 export interface StreamBatchEvent {
   delta: string
   contentType: "text" | "thinking" | "plan"
+  /**
+   * `_meta.claudeCode.parentToolUseId`：这段内容属于某个子智能体 tool call，而不是
+   * 主线程。有值时必须路由进那个胶囊自己的实时缓冲，**不能**追加进父气泡 ——
+   * 否则子智能体的整段会话会把父气泡撑到极长（这正是本次要修的现象）。
+   * 无该能力的 agent 完全不会带这个字段。
+   */
+  parentToolUseId?: string
 }
 
 export interface ToolCallEvent {
@@ -251,6 +309,8 @@ export interface ToolCallEvent {
   output?: string
   error?: string
   rawOutput?: string
+  /** ACP `_meta`，`meta.claudeCode.subagent === true` 是子智能体的权威标记。 */
+  meta?: Record<string, any> | null
 }
 
 export interface ToolCallUpdateEvent {
@@ -258,6 +318,7 @@ export interface ToolCallUpdateEvent {
   output?: string
   error?: string
   status?: "running" | "completed" | "error"
+  meta?: Record<string, any> | null
 }
 
 export interface StatusChangedEvent {

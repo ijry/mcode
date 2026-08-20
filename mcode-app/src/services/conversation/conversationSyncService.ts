@@ -198,14 +198,12 @@ export function getConversationIdByConnectionId(connectionId: string) {
   return managed?.conversationId ?? null
 }
 
-export async function calibrateConversationDetail(conversationId: number) {
-  return await calibrateConversationDetailInternal(conversationId, true)
-}
-
 async function calibrateConversationDetailInternal(
   conversationId: number,
   persistTurns: boolean
 ) {
+  // 一律 30 条尾窗（`getFolderConversation` 的默认值）。这条路在流式期间被
+  // `maybeBackfillExternalUserTurn` 每 ≥1.5s 触发一次，绝不能退回全量拉取。
   const detail = await acpApi.getFolderConversation(conversationId)
   const binding = bindings.get(conversationId)
   if (binding?.instanceKey) {

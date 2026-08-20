@@ -18,6 +18,10 @@ import type { RealtimeTransport, RealtimeTransportHost, RemoteInstanceDescriptor
 import type { EventChannelConnection, RelaySessionInfo } from "@/services/gateway/types"
 import { classifyRelayRealtimeFrame } from "@/services/gateway/relayRecovery"
 import {
+  DEFAULT_CONVERSATION_HISTORY_PAGE_SIZE,
+  type ConversationTurnWindowRequest,
+} from "@/services/conversation/conversationHistoryWindowContract"
+import {
   clearRelayCheckpoint,
   clearRelayCheckpoints,
   readRelayCheckpoint,
@@ -372,9 +376,30 @@ class AcpApiClient {
 
   /**
    * 获取会话详情
+   *
+   * **必须带窗口选择器。** 不带 `tailTurns` / `fromIndex` 时服务端走 legacy 分支
+   * （`resolve_turn_window_req` 的 `(None, None) => Ok(None)`），会返回**完整**轮次
+   * 列表，且四个窗口元数据字段被整体省略。这条路径曾让流式期间的
+   * `maybeBackfillExternalUserTurn` 每 1.5s 反复全量拉取整个会话历史。
+   *
+   * 因此默认值就是 30 条尾窗，而且**两个选择器都为空时也退回这个默认值** —— 调用方
+   * 拿不到「不传窗口」这个选项。只读元数据的调用点请显式传
+   * `METADATA_ONLY_CONVERSATION_TAIL_TURNS`。
    */
-  async getFolderConversation(conversationId: number): Promise<ConversationDetail> {
-    return await this.request("/get_folder_conversation", { conversationId })
+  async getFolderConversation(
+    conversationId: number,
+    window: ConversationTurnWindowRequest = {}
+  ): Promise<ConversationDetail> {
+    // 条件展开：`tailTurns: undefined` 不能作为显式 key 上线，否则服务端会把它和
+    // fromIndex 同时视为「已提供」而报 mutually exclusive。
+    const selector =
+      window.fromIndex != null
+        ? { fromIndex: window.fromIndex }
+        : { tailTurns: window.tailTurns ?? DEFAULT_CONVERSATION_HISTORY_PAGE_SIZE }
+    return await this.request("/get_folder_conversation", {
+      conversationId,
+      ...selector,
+    })
   }
 
   /**
@@ -702,7 +727,18 @@ class AcpApiClient {
       lastEventId: this.getOrCreateRelayRecoveryState(targetKey).lastRelayEventId,
     })
     bridge.connection = eventConnection
-    bridge.detachReady = eventConnection.onReady(() => {
+    // 同一次连接只认一次 ready。
+    //
+    // 两条路径都会到达这里：`onReady` 在 socket 已开时会**同步**回调
+    // （directGateway / relayGateway 都是这个语义），而下面的 `isOpen()` 分支是为了
+    // 兜住「socket 在 `await connectEvents` 期间就已打开、onReady 注册晚了」的情况。
+    // 两者同时命中时，会发两遍 connected health 并把 readyCallbacks 跑两遍 ——
+    // 后者意味着重复 attach：服务端收到同 subscription_id 的第二次 attach 会中止前一个
+    // forwarder 并重发一整份快照（纯浪费）。健康事件发两遍也让订阅方难以自己判重。
+    let readyHandled = false
+    const handleReady = () => {
+      if (readyHandled) return
+      readyHandled = true
       bridge.reconnectAttempt = 0
       this.emitBridgeHealth(targetKey, this.buildBridgeHealth(targetKey, bridge))
       readyCallbacks.forEach((callback) => {
@@ -712,7 +748,8 @@ class AcpApiClient {
           console.error("实时桥接 ready 回调失败:", error)
         }
       })
-    })
+    }
+    bridge.detachReady = eventConnection.onReady(handleReady)
     bridge.detachClose = eventConnection.onClose(() => {
       bridge.connection = null
       this.handleBridgeDisconnect(targetKey, "close")
@@ -721,15 +758,7 @@ class AcpApiClient {
       this.handleBridgeDisconnect(targetKey, "error")
     })
     if (eventConnection.isOpen()) {
-      bridge.reconnectAttempt = 0
-      this.emitBridgeHealth(targetKey, this.buildBridgeHealth(targetKey, bridge))
-      readyCallbacks.forEach((callback) => {
-        try {
-          callback()
-        } catch (error) {
-          console.error("实时桥接 ready 回调失败:", error)
-        }
-      })
+      handleReady()
     }
 
     return bridge
@@ -1081,6 +1110,10 @@ class AcpApiClient {
           data: {
             delta: firstString(record.text),
             contentType: "text",
+            // 子智能体正文的归属。服务端用 `skip_serializing_if = "Option::is_none"`
+            // 下发，所以主线程内容上这个键根本不存在，`|| undefined` 保持载荷形状不变。
+            parentToolUseId:
+              firstString(record.parent_tool_use_id, record.parentToolUseId) || undefined,
           },
         }
       case "thinking":
@@ -1090,6 +1123,8 @@ class AcpApiClient {
           data: {
             delta: firstString(record.text),
             contentType: "thinking",
+            parentToolUseId:
+              firstString(record.parent_tool_use_id, record.parentToolUseId) || undefined,
           },
         }
       case "plan_update":
