@@ -94,10 +94,65 @@ function suppressCoveredTrailingAssistantPartial(
   )
   if (anchored !== turns) return anchored
 
-  const tail = turns[turns.length - 1]
-  if (!tail || tail.role !== "assistant") return turns
-  if (!isContentPrefix(tail.content, liveMessage.content)) return turns
-  return turns.slice(0, -1)
+  return suppressLiveOwnedTrailingAssistantRun(turns, liveMessage)
+}
+
+// live_message 是「整轮累加器」：codeg-plus 只在 TurnComplete 时把它清空，期间所有
+// 文本段与 tool_call 都往同一条上追加；而解析器落盘时会在每条 assistant 记录处断开，
+// 把同一条逻辑回复拆成 **多条连续 assistant 轮次**。于是「已落盘的前半段」会同时出现在
+// localTurns 和实时气泡里 —— 这就是用户看到的从中途开始的重复。
+//
+// 服务端在有 ≥2 条尾随 assistant 轮次时会把 in_flight_user_turn_id 返回 None
+// （conversations.rs 的 does_not_stamp_with_two_trailing_assistant_turns），正好是多段
+// 场景，所以不能依赖它来定位当前轮次。这里改为直接看尾部这一串 assistant 轮次，
+// 取「拼起来仍是 live 内容前缀」的最长**后缀**抹掉。
+// 只抹后缀（而不是整串）是因为这串里可能混着上一轮的回答：外部客户端发来的新用户
+// 轮次可能还没落盘（见 maybeBackfillExternalUserTurn），此时上一轮的 assistant 轮次
+// 会紧贴在本轮前面。前缀校验保证它不会被误删。
+const MAX_LIVE_OWNED_TRAILING_ASSISTANT_TURNS = 32
+
+function suppressLiveOwnedTrailingAssistantRun(
+  turns: MessageTurn[],
+  liveMessage: LiveMessage
+): MessageTurn[] {
+  const runLength = trailingAssistantRunLength(turns)
+  if (runLength <= 0) return turns
+
+  const coveredCount = countCoveredTrailingAssistantTurns(
+    turns,
+    runLength,
+    liveMessage
+  )
+  if (coveredCount <= 0) return turns
+
+  return turns.slice(0, turns.length - coveredCount)
+}
+
+function trailingAssistantRunLength(turns: MessageTurn[]): number {
+  let length = 0
+  while (
+    length < turns.length &&
+    turns[turns.length - 1 - length]?.role === "assistant"
+  ) {
+    length += 1
+  }
+  return length
+}
+
+function countCoveredTrailingAssistantTurns(
+  turns: MessageTurn[],
+  runLength: number,
+  liveMessage: LiveMessage
+): number {
+  const maxCount = Math.min(runLength, MAX_LIVE_OWNED_TRAILING_ASSISTANT_TURNS)
+  // 从最长的后缀往回试：命中的段数越多，说明这一整串确实属于当前 live 轮次。
+  for (let count = maxCount; count >= 1; count -= 1) {
+    const combined = turns
+      .slice(turns.length - count)
+      .flatMap((turn) => turn.content || [])
+    if (isContentPrefix(combined, liveMessage.content)) return count
+  }
+  return 0
 }
 
 function suppressAnchoredAssistantPartials(
@@ -130,16 +185,40 @@ function suppressAnchoredAssistantPartials(
 }
 
 function isContentPrefix(prefixParts: MessageTurn["content"], fullParts: MessageTurn["content"]) {
-  const prefix = buildContentSignature(prefixParts)
-  const full = buildContentSignature(fullParts)
-  if (prefix.length > 0 && full.length >= prefix.length && full.startsWith(prefix)) {
-    return true
-  }
+  if (isSignaturePrefix(prefixParts, fullParts, buildPartSignature)) return true
+  // 同一个 tool_call 在「已落盘轮次」和「实时累加器」里的 status/output/input 常常不一致：
+  // 落盘的是 JSONL 里 tool_use 记录的初始态，实时的是 active_tool_calls 的当前态
+  // （codeg-plus session_state.rs 的 push_tool_call_ref_if_absent 只追加引用，
+  // 快照时才解析成实体）。所以退一步只按 id+name 认这次调用。
+  if (isSignaturePrefix(prefixParts, fullParts, buildStablePartSignature)) return true
   return isTextProjectionPrefix(prefixParts, fullParts)
 }
 
-function buildContentSignature(parts: MessageTurn["content"]) {
-  return parts.map(buildPartSignature).filter(Boolean).join("\n")
+function isSignaturePrefix(
+  prefixParts: MessageTurn["content"],
+  fullParts: MessageTurn["content"],
+  toSignature: (part: MessageTurn["content"][number]) => string
+) {
+  const prefix = buildContentSignature(prefixParts, toSignature)
+  const full = buildContentSignature(fullParts, toSignature)
+  return prefix.length > 0 && full.length >= prefix.length && full.startsWith(prefix)
+}
+
+function buildContentSignature(
+  parts: MessageTurn["content"],
+  toSignature: (part: MessageTurn["content"][number]) => string = buildPartSignature
+) {
+  return parts.map(toSignature).filter(Boolean).join("\n")
+}
+
+function buildStablePartSignature(part: MessageTurn["content"][number]) {
+  if (part.type === "tool_call") {
+    return `tool_call:${stableStringify({
+      id: part.tool_call?.id,
+      name: part.tool_call?.name,
+    })}`
+  }
+  return buildPartSignature(part)
 }
 
 function buildPartSignature(part: MessageTurn["content"][number]) {
@@ -212,10 +291,27 @@ function dedupeEntriesByRoleAndId<T>(
   getTurn: (entry: T) => MessageTurn
 ): T[] {
   const retainedIndexByKey = new Map<string, number>()
+  // dedupeKey → 最终保留的 [role, id] 键。把「同一条逻辑轮次的不同来源 id」折叠到
+  // 先出现的那一个身份上，避免本地缓存 id 与服务端 id 各占一行。
+  const identityByDedupeKey = new Map<string, string>()
+
+  const resolveRetainKey = (turn: MessageTurn) => {
+    const ownKey = JSON.stringify([turn.role, turn.id])
+    const dedupeKey = normalizeDedupeKey(turn)
+    if (!dedupeKey) return ownKey
+
+    const groupKey = JSON.stringify([turn.role, dedupeKey])
+    const existing = identityByDedupeKey.get(groupKey)
+    if (existing !== undefined) return existing
+    identityByDedupeKey.set(groupKey, ownKey)
+    return ownKey
+  }
+
+  const retainKeys = entries.map((entry) => resolveRetainKey(getTurn(entry)))
 
   entries.forEach((entry, index) => {
     const turn = getTurn(entry)
-    const retainKey = JSON.stringify([turn.role, turn.id])
+    const retainKey = retainKeys[index]
     const existing = retainedIndexByKey.get(retainKey)
     if (existing === undefined || turn.role !== "user") {
       retainedIndexByKey.set(retainKey, index)
@@ -226,8 +322,11 @@ function dedupeEntriesByRoleAndId<T>(
     return entries
   }
 
-  return entries.filter((entry, index) => {
-    const turn = getTurn(entry)
-    return retainedIndexByKey.get(JSON.stringify([turn.role, turn.id])) === index
-  })
+  return entries.filter(
+    (_entry, index) => retainedIndexByKey.get(retainKeys[index]) === index
+  )
+}
+
+function normalizeDedupeKey(turn: MessageTurn): string {
+  return typeof turn.dedupeKey === "string" ? turn.dedupeKey.trim() : ""
 }

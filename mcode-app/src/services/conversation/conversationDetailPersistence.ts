@@ -8,6 +8,19 @@ import {
   type PersistedTurnRecord,
 } from "@/services/db/repositories/conversationRepository";
 import { normalizeConversationSummaryStatus } from "./conversationSummaryStatus";
+import { readLocalTurnCacheEnabled } from "./localTurnCachePreference";
+import {
+  buildPersistedTurnStorageId,
+  buildTurnDedupeKey,
+  dropEmptyThinkingParts,
+  normalizeTurnRole,
+} from "./conversationTurnIdentity";
+import { clampSubagentStats } from "./subagentToolCall";
+
+// 去重键算法集中在 conversationTurnIdentity（纯函数、不依赖 SQLite 驱动），这里
+// 继续 re-export 以保持既有引用点不变，并确保「落库时算的键」与「归一化/时间线
+// 折叠时算的键」永远来自同一份实现。
+export { buildTurnDedupeKey };
 
 interface PersistConversationDetailInput {
   instanceKey: string;
@@ -40,7 +53,10 @@ export async function persistConversationDetailSnapshot(
 ): Promise<PersistConversationDetailResult> {
   await ensureConversationSchema();
 
-  const shouldPersistTurns = input.persistTurns !== false;
+  // 实验性开关关闭（默认）时**一条轮次都不写**。摘要仍然写 —— 关掉摘要会让会话列表
+  // 在离线时整个空白，那不是这个开关的语义（见 `localTurnCachePreference` 的说明）。
+  const shouldPersistTurns =
+    input.persistTurns !== false && readLocalTurnCacheEnabled();
   const currentSummary = input.instanceKey
     ? await getConversationSummaryById(input.instanceKey, input.conversationId)
     : null;
@@ -210,48 +226,6 @@ export function buildPersistedTurnRecord(
   };
 }
 
-export function buildTurnDedupeKey(input: {
-  turnId?: string | null;
-  role: string;
-  content: ContentPart[];
-  timestamp: number;
-}) {
-  const turnId = firstString(input.turnId);
-  if (turnId) {
-    if (turnId.startsWith("turn-")) {
-      return buildFallbackTurnFingerprint(
-        input.role,
-        input.content,
-        input.timestamp,
-      );
-    }
-    return `remote:${turnId}`;
-  }
-  return buildFallbackTurnFingerprint(
-    input.role,
-    input.content,
-    input.timestamp,
-  );
-}
-
-function buildFallbackTurnFingerprint(
-  role: string,
-  content: ContentPart[],
-  timestamp: number,
-) {
-  const contentHash = stableHashString(stableSerializeContent(content));
-  const timeBucket = Math.floor(Number(timestamp || 0) / 1000);
-  return `fp:${role}:${contentHash}:${timeBucket}`;
-}
-
-function buildPersistedTurnStorageId(
-  instanceKey: string,
-  conversationId: number,
-  dedupeKey: string,
-) {
-  return `turn:${stableHashString(`${instanceKey}:${conversationId}:${dedupeKey}`)}`;
-}
-
 function toPersistedPartPayload(part: ContentPart): Record<string, any> {
   if (part.type === "text") return { text: part.text || "" };
   if (part.type === "thinking") return { thinking: part.thinking || "" };
@@ -272,8 +246,9 @@ function normalizeTurns(rawTurns: unknown): NormalizedTurn[] {
 
 function normalizeTurn(raw: any, index: number): NormalizedTurn | null {
   if (!raw || typeof raw !== "object") return null;
-  const rawRole = String(raw.role || "").toLowerCase();
-  const role = rawRole === "user" ? "user" : "assistant";
+  // 与展示侧归一化共用同一份角色判定：`system`（上下文压缩摘要）必须显式识别，
+  // 否则会被当成 assistant 落库，重载后依然把压缩说明当 agent 回复渲染出来。
+  const role = normalizeTurnRole(raw.role);
   const content = normalizeContentParts(raw.content, raw.blocks);
   const id = firstString(raw.id) || `turn-${index}-${Date.now()}`;
   const timestamp =
@@ -290,7 +265,24 @@ function normalizeTurn(raw: any, index: number): NormalizedTurn | null {
   };
 }
 
+/**
+ * 落库侧的内容归一化。与展示侧（`detailDataNormalization.normalizeContentParts`）保持
+ * 同样的结构：解析出来之后统一丢弃空 thinking 胶囊，**空块因此也不会进 SQLite** ——
+ * 否则清了缓存才好、重载又会把它们读回来。
+ *
+ * 过滤放在出口而不是 `normalizeBlocks` 里逐条跳过，原因见展示侧那份注释
+ * （里面的 `parts.length > 0` 分支选择依赖「这一路有没有解析出东西」）。
+ */
 function normalizeContentParts(
+  rawContent: unknown,
+  rawBlocks?: unknown,
+): ContentPart[] {
+  return dropEmptyThinkingParts(
+    selectNormalizedContentParts(rawContent, rawBlocks),
+  );
+}
+
+function selectNormalizedContentParts(
   rawContent: unknown,
   rawBlocks?: unknown,
 ): ContentPart[] {
@@ -353,6 +345,11 @@ function normalizeContentPart(raw: any): ContentPart | null {
           undefined,
         error: firstString(raw.tool_call.error) || undefined,
         rawOutput: firstString(raw.tool_call.rawOutput) || undefined,
+        meta: recordFromUnknown(raw.tool_call.meta),
+        agentStats:
+          clampSubagentStats(
+            raw.tool_call.agentStats ?? raw.tool_call.agent_stats,
+          ) || null,
       },
     };
   }
@@ -455,6 +452,9 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
           output,
           status: matchedResult ? (isError ? "error" : "completed") : "running",
           error: isError ? output : undefined,
+          meta: recordFromUnknown(block.meta),
+          // 子智能体的状态/耗时/内层工具列表都在 tool_result 的 agent_stats 上。
+          agentStats: clampSubagentStats(matchedResult?.agent_stats) || null,
         },
       });
       continue;
@@ -473,6 +473,10 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
           matched.tool_call.output = output;
           matched.tool_call.status = block.is_error ? "error" : "completed";
           if (block.is_error) matched.tool_call.error = output;
+          // 带 tool_use_id 的常规配对会走到这里（`consumedResultIndexes` 只在按位置
+          // 配对时才登记），所以 agent_stats 也要在这条路上回填。
+          const stats = clampSubagentStats(block.agent_stats);
+          if (stats) matched.tool_call.agentStats = stats;
           continue;
         }
       }
@@ -485,6 +489,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
           output,
           status: block.is_error ? "error" : "completed",
           error: block.is_error ? output : undefined,
+          agentStats: clampSubagentStats(block.agent_stats) || null,
         },
       });
     }
@@ -503,69 +508,13 @@ function toObject(text: string): Record<string, any> | null {
   }
 }
 
-function stableSerializeContent(content: ContentPart[]) {
-  return JSON.stringify(content.map(stableNormalizePart));
-}
-
-function stableNormalizePart(part: ContentPart): Record<string, any> {
-  if (part.type === "text") {
-    return { type: "text", text: part.text || "" };
-  }
-  if (part.type === "thinking") {
-    return { type: "thinking", thinking: part.thinking || "" };
-  }
-  if (part.type === "tool_call") {
-    return {
-      type: "tool_call",
-      tool_call: sortUnknown(part.tool_call || {}),
-    };
-  }
-  if (part.type === "tool_result") {
-    return {
-      type: "tool_result",
-      tool_result: sortUnknown(part.tool_result || {}),
-    };
-  }
-  if (part.type === "image") {
-    return {
-      type: "image",
-      image: sortUnknown(part.image || {}),
-    };
-  }
-  if (part.type === "plan") {
-    return {
-      type: "plan",
-      plan: sortUnknown(part.plan || {}),
-    };
-  }
-  return sortUnknown(part as unknown as Record<string, unknown>) as Record<
-    string,
-    any
-  >;
-}
-
-function sortUnknown(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map(sortUnknown);
-  }
-  if (value && typeof value === "object") {
-    return Object.keys(value as Record<string, unknown>)
-      .sort()
-      .reduce<Record<string, unknown>>((result, key) => {
-        result[key] = sortUnknown((value as Record<string, unknown>)[key]);
-        return result;
-      }, {});
-  }
-  return value;
-}
-
-function stableHashString(input: string) {
-  let hash = 2166136261;
-  for (let index = 0; index < input.length; index += 1) {
-    hash ^= input.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0).toString(16);
+/**
+ * `meta` 在线上已经是对象，不是 JSON 串 —— 上面那个 `toObject` 只吃字符串，
+ * 直接拿它解对象会走进 catch 静默变 null。
+ */
+function recordFromUnknown(value: unknown): Record<string, any> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, any>;
 }
 
 function normalizeAgentType(raw?: string): string {
