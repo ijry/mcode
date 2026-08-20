@@ -3,6 +3,8 @@ import type {
   PersistedTurnPartRow,
   PersistedTurnWithParts,
 } from "@/services/db/repositories/conversationRepository"
+import { buildTurnDedupeKey, dropEmptyThinkingParts, normalizeTurnRole } from "@/services/conversation/conversationTurnIdentity"
+import { clampSubagentStats } from "@/services/conversation/subagentToolCall"
 
 export interface UploadedAttachment {
   id: string
@@ -79,12 +81,18 @@ export function normalizeTurns(rawTurns: unknown): MessageTurn[] {
   return rawTurns.map((raw, index) => normalizeTurn(raw, index)).filter(Boolean) as MessageTurn[]
 }
 
+/**
+ * 与服务端 `TurnRole`（`models/message.rs`）一一对应的三种角色。
+ *
+ * 实现在 `conversationTurnIdentity`（纯模块），与落库版归一化共用同一份判定，
+ * 避免两处归一化再次漂移。这里 re-export 保持既有引用点不变。
+ */
+export { normalizeTurnRole }
+
 function normalizeTurn(raw: any, index: number): MessageTurn | null {
   if (!raw || typeof raw !== "object") return null
-  const rawRole = String(raw.role || "").toLowerCase()
-  const role = rawRole === "user" ? "user" : "assistant"
+  const role = normalizeTurnRole(raw.role)
   const content = normalizeContentParts(raw.content, raw.blocks)
-  const id = firstString(raw.id) || `turn-${index}-${Date.now()}`
   const timestamp =
     typeof raw.timestamp === "number"
       ? raw.timestamp
@@ -93,9 +101,22 @@ function normalizeTurn(raw: any, index: number): MessageTurn | null {
         : typeof raw.created_at === "number"
           ? raw.created_at
           : Date.now()
+  // 与 SQLite 落库同源的稳定键：CodeG 解析器的 turn id 是「按下标派生」的
+  // （turn-N / grok-turn-N / acp-N），历史被压缩重写时整段会平移，因此它不能
+  // 当跨来源身份用。dedupeKey 对 turn- 前缀自动退化成内容指纹，正好覆盖这点。
+  const dedupeKey = buildTurnDedupeKey({
+    turnId: firstString(raw.id),
+    role,
+    content,
+    timestamp,
+  })
+  // 服务端缺 id 时不要再用 Date.now() 造 id —— 每次归一化都会得到一个新 id，
+  // 让同一条轮次在时间线上无限分裂。退回稳定的 dedupeKey 派生 id。
+  const id = firstString(raw.id) || `turn-${index}-${dedupeKey}`
 
   return {
     id,
+    dedupeKey,
     role,
     content,
     timestamp,
@@ -104,7 +125,25 @@ function normalizeTurn(raw: any, index: number): MessageTurn | null {
   }
 }
 
+/**
+ * 归一化服务端下发的一轮内容。
+ *
+ * 末尾统一丢弃**空的 thinking 胶囊**（`dropEmptyThinkingParts`）：服务端确实会发
+ * `{"type":"thinking","thinking":""}`，一轮里可能有很多个，不过滤就是一堆点开全空的
+ * 「深度思考」折叠块。放在**出口**做而不是在 `normalizeBlocks` / `normalizeContentPart`
+ * 里逐条跳过，是因为上面那三处 `if (parts.length > 0) return parts` 的分支选择依赖
+ * 「这一路解析出没出东西」—— 在里面过滤会让「只有空 thinking」的一轮被判成解析失败，
+ * 从而回退到另一条解析路径，那是行为改变。
+ *
+ * 这条路径**只喂历史/回放渲染**（`normalizeTurn` 与 `mapPersistedTurnToMessage`），
+ * 流式内容走 `conversationRuntime` 的累加器，不经过这里 —— 所以在这里过滤天然满足
+ * 「只在非流式路径丢」的要求，见 `isEmptyThinkingPart` 的说明。
+ */
 export function normalizeContentParts(rawContent: unknown, rawBlocks?: unknown): ContentPart[] {
+  return dropEmptyThinkingParts(selectNormalizedContentParts(rawContent, rawBlocks))
+}
+
+function selectNormalizedContentParts(rawContent: unknown, rawBlocks?: unknown): ContentPart[] {
   if (Array.isArray(rawBlocks) && rawBlocks.length > 0) {
     const parts = normalizeBlocks(rawBlocks)
     if (parts.length > 0) return parts
@@ -151,6 +190,9 @@ function normalizeContentPart(raw: any): ContentPart | null {
         output: firstString(raw.tool_call.output, raw.tool_call.rawOutput),
         error: firstString(raw.tool_call.error),
         rawOutput: firstString(raw.tool_call.rawOutput),
+        meta: toObject(raw.tool_call.meta) || null,
+        agentStats:
+          clampSubagentStats(raw.tool_call.agentStats ?? raw.tool_call.agent_stats) || null,
       },
     }
   }
@@ -191,14 +233,22 @@ export function getTurnContentParts(turn: any): ContentPart[] {
 export function mapPersistedTurnToMessage(turn: PersistedTurnWithParts): MessageTurn {
   return {
     id: turn.id,
-    role: turn.role as MessageTurn["role"],
+    // SQLite 行自带的 dedupe_key 与服务端载荷算出来的键同源，携带它才能让
+    // 「本地缓存水合」与「远端对账」认出同一条逻辑轮次。
+    dedupeKey: firstString(turn.dedupeKey) || undefined,
+    // 与 conversationRuntime 的私有副本共用同一份角色判定，避免两处再次漂移。
+    role: normalizeTurnRole(turn.role),
     timestamp: turn.createdAt,
     status: (turn.status as MessageTurn["status"] | undefined) || "completed",
-    content: turn.parts
-      .slice()
-      .sort((a, b) => a.partIndex - b.partIndex)
-      .map(mapPersistedPartToContent)
-      .filter(Boolean) as ContentPart[],
+    // 读回时也要滤掉空 thinking：过滤上线前落库的行里已经存了一批空胶囊，
+    // 只在写入侧过滤治不了存量缓存。
+    content: dropEmptyThinkingParts(
+      turn.parts
+        .slice()
+        .sort((a, b) => a.partIndex - b.partIndex)
+        .map(mapPersistedPartToContent)
+        .filter(Boolean) as ContentPart[],
+    ),
   }
 }
 
@@ -322,6 +372,9 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
           output,
           status: matchedResult ? (isError ? "error" : "completed") : "running",
           error: isError ? output : undefined,
+          meta: toObject(block.meta) || null,
+          // 子智能体的状态/耗时/内层工具列表都在 tool_result 的 agent_stats 上。
+          agentStats: clampSubagentStats(matchedResult?.agent_stats) || null,
         },
       })
       continue
@@ -337,6 +390,10 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
           matched.tool_call.output = output
           matched.tool_call.status = block.is_error ? "error" : "completed"
           if (block.is_error) matched.tool_call.error = output
+          // 带 tool_use_id 的常规配对会走到这里（`consumedResultIndexes` 只在按位置
+          // 配对时才登记），所以 agent_stats 也要在这条路上回填。
+          const stats = clampSubagentStats(block.agent_stats)
+          if (stats) matched.tool_call.agentStats = stats
           continue
         }
       }
@@ -349,6 +406,7 @@ function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {
           output,
           status: block.is_error ? "error" : "completed",
           error: block.is_error ? output : undefined,
+          agentStats: clampSubagentStats(block.agent_stats) || null,
         },
       })
     }

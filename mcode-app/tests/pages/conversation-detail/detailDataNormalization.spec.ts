@@ -61,7 +61,14 @@ describe("detailDataNormalization", () => {
       role: "user",
       content: [{ type: "text", text: "hello" }],
     }))
-    expect(turns[1].id).toBe("turn-1-1700000000000")
+    // 服务端缺 id 时的兜底 id 必须稳定：过去用 Date.now() 拼接，每次归一化都会
+    // 得到一个新 id，同一条轮次会在详情页时间线上分裂成多条。现在退回内容指纹。
+    //
+    // 这个字面量同时锁住另一件事：`meta` / `agentStats` **不参与**内容指纹
+    // （`stripNonContentToolCallFields`）。`agentStats` 是扫到配对 tool_result 时
+    // 原地回填的，算进指纹会让同一条轮次在回填前后得到两个 `fp:` 键，缓存那份与
+    // 远端那份认不出彼此 —— 详情页重复一条消息。加进去这个 hash 就会变。
+    expect(turns[1].id).toBe("turn-1-fp:assistant:1ebd4fdd:1700000000")
     expect(turns[1].content).toEqual([
       { type: "text", text: "answer" },
       {
@@ -73,9 +80,37 @@ describe("detailDataNormalization", () => {
           output: "done",
           status: "completed",
           error: undefined,
+          // 普通工具调用两个字段都是 null —— 只有子智能体才带值。
+          meta: null,
+          agentStats: null,
         },
       },
     ])
+  })
+
+  // 服务端 TurnRole 有三种取值（models/message.rs）。上下文压缩摘要在 JSONL 里是
+  // type: "user"，解析器（parsers/claude.rs 的 is_context_continuation）会把它改判成
+  // System 再下发。归一化早先写的是 rawRole === "user" ? "user" : "assistant"，
+  // system 落进 else 分支被当成 agent 回复渲染 —— 详情页因此显示出「会话被压缩」的内部说明。
+  it("preserves the system role instead of folding it into assistant", () => {
+    const turns = normalizeTurns([
+      { id: "u1", role: "user", content: "看下这个 bug" },
+      {
+        id: "turn-1",
+        role: "system",
+        content:
+          "This session is being continued from a previous conversation that ran out of context.",
+      },
+      { id: "a1", role: "assistant", content: "我来定位" },
+    ])
+
+    expect(turns.map((turn) => turn.role)).toEqual(["user", "system", "assistant"])
+  })
+
+  it("falls back to assistant for unknown roles", () => {
+    const turns = normalizeTurns([{ id: "x1", role: "tool", content: "?" }])
+
+    expect(turns[0].role).toBe("assistant")
   })
 
   it("normalizes typed content parts and turn content fallback", () => {
@@ -315,6 +350,9 @@ describe("detailDataNormalization", () => {
 
     expect(message).toEqual({
       id: "turn-local",
+      // SQLite 行的 dedupe_key 必须透传：它是「本地缓存水合」与「远端对账」认出
+      // 同一条逻辑轮次的唯一依据，缺失会让详情页把同一条消息渲染两次。
+      dedupeKey: "dedupe",
       role: "assistant",
       timestamp: 12345,
       status: "completed",

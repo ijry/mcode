@@ -21,6 +21,12 @@ The thinking section (`part.type === 'thinking'`) in `MessageBubble` now support
   - **non-streaming**: collapsed unless in `manuallyExpanded`
 - When streaming ends (watch fires), both sets are cleared → all thinking collapses.
 
+> ⚠️ 这两个 Set 用的是 **`displayParts` 的下标**，所以任何「跳过某些 part」的过滤都
+> 必须发生在**构造 `displayParts` 时**，不能放到模板的 `v-if` 上 —— 否则下标与实际
+> 渲染项错位，点一个展开另一个。空 thinking 胶囊的过滤就是按这条约束落在
+> `displayParts` 里的，见
+> [[2026-08-19-12-41-conversation-detail-empty-thinking-parts]]。
+
 ## UI Details
 
 - Header row: brain icon (30rpx) + "深度思考" label + chevron arrow (right-aligned).
