@@ -6,6 +6,7 @@ export type DetailStatusCode =
   | "replay_miss"
   | "bridge_reconnecting"
   | "bridge_error"
+  | "agent_disconnected"
   | "runtime_error"
   | "api_retry"
   | "waiting_permission"
@@ -25,6 +26,13 @@ export interface DetailStatusState {
   loading: boolean
   actionKey?: "reconnect" | "inspect"
   actionLabel?: string
+  /**
+   * 诊断证据（agent stderr 尾巴），来自 `AcpEvent::Error` 的 `details`。
+   *
+   * 与 `text` 分开返回而不是拼进去：它可能有几十行，胶囊里塞不下 —— UI 默认折叠，
+   * 点一下才展开。只在真的拿到证据时才有值，所以模板可以直接用它判断「有没有可展开的内容」。
+   */
+  details?: string
 }
 
 export type ThemeColorResolver = (name: string, fallback: string) => string
@@ -81,6 +89,8 @@ export function buildDetailStatusState(input: {
   showBridgeRecoveredBanner: boolean
   runtimeErrorText: string
   runtimeRetryText: string
+  /** `AcpEvent::Error` 的 `details`（agent stderr 尾巴）。可能很长，UI 默认折叠。 */
+  runtimeErrorDetails?: string
   runtimeStatus: string
   longWaitElapsedMs: number
   activeModelStatusLabel: string
@@ -136,6 +146,24 @@ export function buildDetailStatusState(input: {
       actionLabel: "立即重试",
     }
   }
+  // agent 进程死了 / 连接被拆掉。排在 `runtimeErrorText` **之前**：断连时那条文案往往
+  // 就是导致断连的那个 Error，两者说的是同一件事，而「断开了」比「出错了」更可操作 ——
+  // 前者能给出重连入口。
+  //
+  // 与上面几条 bridge_* 的区别要说清楚：那些是**传输层**（手机↔CodeG 主机的 WebSocket）
+  // 断了，重连它由 `acpApi.reconnectRealtimeBridge` 自动做；这一条是 **ACP agent 进程**
+  // 没了，传输层好得很，事件收得到 —— 收到的正是「agent 死了」。两者的恢复手段完全不同。
+  if (input.runtimeStatus === "disconnected") {
+    return {
+      code: "agent_disconnected",
+      severity: "error",
+      text: input.runtimeErrorText || "智能体连接已断开",
+      icon: "close-circle-fill",
+      iconColor: color("--up-error", "#fa3534"),
+      loading: false,
+      details: input.runtimeErrorDetails || undefined,
+    }
+  }
   if (input.runtimeErrorText) {
     return {
       code: "runtime_error",
@@ -144,6 +172,7 @@ export function buildDetailStatusState(input: {
       icon: "close-circle-fill",
       iconColor: color("--up-error", "#fa3534"),
       loading: false,
+      details: input.runtimeErrorDetails || undefined,
     }
   }
   if (input.runtimeRetryText) {
@@ -239,6 +268,9 @@ export function buildRuntimeStatusLabel(input: {
   if (input.detailStatusCode === "bridge_reconnecting") return "重连中"
   if (input.detailStatusCode === "bridge_error") return "连接异常"
   if (input.detailStatusCode === "replay_miss") return "恢复中"
+  // 「已断开」而不是「运行异常」：agent 进程没了，这是个终态，不是运行中的故障。
+  if (input.detailStatusCode === "agent_disconnected") return "已断开"
+  if (input.runtimeStatus === "disconnected") return "已断开"
   if (input.runtimeStatus === "thinking" || input.runtimeStatus === "running_tool") {
     return input.activeModelStatusLabel || (input.runtimeStatus === "thinking" ? "思考中" : "执行命令中")
   }
@@ -257,6 +289,8 @@ export function buildRuntimeStatusClass(input: {
   if (input.detailStatusCode === "bridge_reconnecting") return "error"
   if (input.detailStatusCode === "bridge_error") return "error"
   if (input.detailStatusCode === "replay_miss") return "pending"
+  if (input.detailStatusCode === "agent_disconnected") return "error"
+  if (input.runtimeStatus === "disconnected") return "error"
   if (input.runtimeStatus === "thinking" || input.runtimeStatus === "running_tool") return "running"
   if (input.runtimeStatus === "waiting_permission" || input.runtimeStatus === "waiting_question") return "pending"
   if (input.runtimeStatus === "error") return "error"

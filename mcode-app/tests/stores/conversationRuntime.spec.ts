@@ -2248,4 +2248,63 @@ describe('conversationRuntime ACP error handling', () => {
     }
   })
 
+  describe('snapshot last_error', () => {
+    // 服务端把最近一次 agent 报错放在 `SessionState.last_error` 并在 `to_snapshot()` 上
+    // 暴露，注释写明是为了「重连后错过实时 Error 的客户端仍能显示最近一次失败」。
+    // 改动前 deriveRuntimeError 读的 snapshot.error/.message/.detail 三个字段在
+    // LiveSessionSnapshot 上都不存在，真正的原因一次都没显示过。
+    it('surfaces message, code and stderr details from the snapshot', () => {
+      const { store, session } = prepareSession()
+
+      store.hydrateLiveSnapshot(1, {
+        status: 'connected',
+        last_error: {
+          message: 'turn failed with empty result',
+          code: 'turn_failed_empty',
+          details: 'stderr:\nline 1\nline 2',
+        },
+      })
+
+      expect(session.inputErrorMessage).toBe('turn failed with empty result')
+      expect(session.inputErrorDetails).toBe('stderr:\nline 1\nline 2')
+    })
+
+    it('surfaces last_error even when the connection is healthy again', () => {
+      // last_error 与 status 是**独立**的：非终止性错误（单轮失败、SetMode 失败、
+      // 空 prompt 被拒）之后连接还活着，status 已回到 connected，但那条错误仍值得显示。
+      // 服务端自己的清除时机是「新 prompt 开始」，不是「状态变好」。
+      const { store, session } = prepareSession()
+
+      store.hydrateLiveSnapshot(1, {
+        status: 'connected',
+        last_error: { message: 'set mode failed' },
+      })
+
+      expect(session.inputErrorMessage).toBe('set mode failed')
+      expect(session.inputErrorDetails).toBeNull()
+    })
+
+    it('does not let an error-free snapshot erase a fresher live error', () => {
+      // attach 快照可能比刚收到的实时 error 更旧（seq 缺失时 shouldIgnoreOlderSnapshot
+      // 挡不住），拿一份不含错误的旧快照擦掉刚报出来的原因，等于故障又变回静默。
+      const { store, session } = prepareSession()
+      session.inputErrorMessage = 'live error just arrived'
+      session.inputErrorDetails = 'live stderr'
+
+      store.hydrateLiveSnapshot(1, { status: 'connected' })
+
+      expect(session.inputErrorMessage).toBe('live error just arrived')
+      expect(session.inputErrorDetails).toBe('live stderr')
+    })
+
+    it('falls back to a generic message for an old backend without last_error', () => {
+      const { store, session } = prepareSession()
+
+      store.hydrateLiveSnapshot(1, { status: 'error' })
+
+      expect(session.inputErrorMessage).toBe('会话运行失败')
+      expect(session.inputErrorDetails).toBeNull()
+    })
+  })
+
 })

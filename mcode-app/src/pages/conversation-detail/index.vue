@@ -1259,6 +1259,7 @@ const longWaitElapsedMs = computed(() => {
   return Math.max(0, Date.now() - longWaitStartedAt.value)
 })
 const runtimeErrorText = computed(() => firstString(session.value?.inputErrorMessage) || "")
+const runtimeErrorDetails = computed(() => firstString(session.value?.inputErrorDetails) || "")
 const runtimeRetryText = computed(() => buildRuntimeRetryText(session.value?.apiRetry))
 const networkReachabilityFeedbackText = computed(() =>
   buildNetworkReachabilityFeedbackText({
@@ -1280,6 +1281,7 @@ const detailStatusState = computed<DetailStatusState>(() =>
     bridgeHealth: bridgeHealth.value,
     showBridgeRecoveredBanner: showBridgeRecoveredBanner.value,
     runtimeErrorText: runtimeErrorText.value,
+    runtimeErrorDetails: runtimeErrorDetails.value,
     runtimeRetryText: runtimeRetryText.value,
     runtimeStatus: runtimeStatus.value,
     longWaitElapsedMs: longWaitElapsedMs.value,

@@ -168,4 +168,79 @@ describe("detailStatusPresentation", () => {
       longWaitElapsedMs: 20_000,
     })).toBe("")
   })
+
+  describe("agent disconnect and error details", () => {
+    // 用户报「智能体 ACP 断开连接的报错有办法获取到吗，还有别的报错似乎无法获取」。
+    // 两个成因：`disconnected` 此前不是一个被识别的状态；`AcpEvent::Error` 的
+    // `details`（agent stderr 尾巴）在归一化时被丢掉了。
+    const base = {
+      showBridgeRecoveredBanner: false,
+      runtimeRetryText: "",
+      longWaitElapsedMs: 0,
+      activeModelStatusLabel: "",
+      planTaskCount: 0,
+      themeColor,
+    }
+
+    it("surfaces a disconnected agent as its own state, ahead of runtime_error", () => {
+      // 断连时 runtimeErrorText 往往就是导致断连的那条 Error —— 两者说的是同一件事，
+      // 而「断开了」比「出错了」更可操作。所以 agent_disconnected 必须排在前面。
+      expect(buildDetailStatusState({
+        ...base,
+        runtimeErrorText: "agent exited with code 1",
+        runtimeStatus: "disconnected",
+      })).toEqual(expect.objectContaining({
+        code: "agent_disconnected",
+        severity: "error",
+        text: "agent exited with code 1",
+      }))
+    })
+
+    it("falls back to a generic disconnect message when no error text arrived", () => {
+      expect(buildDetailStatusState({
+        ...base,
+        runtimeErrorText: "",
+        runtimeStatus: "disconnected",
+      })).toEqual(expect.objectContaining({
+        code: "agent_disconnected",
+        text: "智能体连接已断开",
+      }))
+    })
+
+    it("carries stderr details separately from the pill text", () => {
+      // details 可能有几十行，胶囊里塞不下 —— 必须单独返回，让 UI 默认折叠。
+      const state = buildDetailStatusState({
+        ...base,
+        runtimeErrorText: "turn failed",
+        runtimeErrorDetails: "stderr:\nline 1\nline 2",
+        runtimeStatus: "error",
+      })
+
+      expect(state.code).toBe("runtime_error")
+      expect(state.text).toBe("turn failed")
+      expect(state.details).toBe("stderr:\nline 1\nline 2")
+      // 证据不能被拼进胶囊文案里。
+      expect(state.text).not.toContain("line 1")
+    })
+
+    it("omits details when the event carried none", () => {
+      expect(buildDetailStatusState({
+        ...base,
+        runtimeErrorText: "turn failed",
+        runtimeStatus: "error",
+      }).details).toBeUndefined()
+    })
+
+    it("labels a disconnected agent as 已断开 rather than 运行异常", () => {
+      expect(buildRuntimeStatusLabel({
+        detailStatusCode: "agent_disconnected",
+        runtimeStatus: "disconnected",
+        activeModelStatusLabel: "",
+      })).toBe("已断开")
+      expect(buildRuntimeStatusClass({
+        detailStatusCode: "agent_disconnected",
+        runtimeStatus: "disconnected",
+      })).toBe("error")
+    })
+  })
 })

@@ -87,6 +87,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         instanceKey: "",
         status: "idle",
         inputErrorMessage: null,
+        inputErrorDetails: null,
         apiRetry: null,
         pendingPermission: null,
         pendingQuestion: null,
@@ -359,7 +360,17 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         ? session.liveMessage
         : normalizedLiveMessage ?? session.liveMessage
     )
-    session.inputErrorMessage = deriveRuntimeError(snapshot)
+    // 快照里的 `last_error` 是「最近一次 agent 报错」，与 status 无关 —— 冷启动进入一个
+    // 已经失败的会话时，它是唯一能拿到原因的地方（实时 error 事件早发完了）。
+    //
+    // 快照没带错误时**不清空已有的**：attach 快照可能比刚收到的实时 error 更旧
+    // （`shouldIgnoreOlderSnapshot` 只挡 seq 明确更小的，seq 缺失时挡不住），
+    // 拿一份不含错误的旧快照擦掉刚刚报出来的原因，等于故障又变回静默。
+    const snapshotError = deriveSnapshotLastError(snapshot)
+    if (snapshotError) {
+      session.inputErrorMessage = snapshotError.message
+      session.inputErrorDetails = snapshotError.details || null
+    }
     session.apiRetry = null
     session.lastAppliedSeq = snapshotSeq ?? session.lastAppliedSeq
 
@@ -495,6 +506,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     switch (event.type) {
       case "stream_batch":
         session.inputErrorMessage = null
+        session.inputErrorDetails = null
         session.apiRetry = null
         session.pendingPermission = null
         session.pendingQuestion = null
@@ -516,6 +528,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       case "tool_call": {
         session.status = "running_tool"
         session.inputErrorMessage = null
+        session.inputErrorDetails = null
         session.apiRetry = null
         session.pendingPermission = null
         session.pendingQuestion = null
@@ -597,6 +610,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
           } else if (event.data.status === "idle" && !session.liveMessage && !session.pendingPermission && !session.pendingQuestion) {
             session.status = session.connectionId ? "connected" : "idle"
             session.inputErrorMessage = null
+            session.inputErrorDetails = null
             session.apiRetry = null
           }
           syncManagedSendPermission(session.conversationId)
@@ -607,13 +621,27 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         if (event.data.status === "error") {
           session.inputErrorMessage =
             firstString(event.data.message) || session.inputErrorMessage || "连接异常"
+          session.inputErrorDetails =
+            firstString(event.data.details) || session.inputErrorDetails || null
+        } else if (event.data.status === "disconnected") {
+          // agent 进程已死 / 连接被拆掉。此前它掉进下面的 else 分支：被当成正常状态，
+          // 还会把 `inputErrorMessage` 清空 —— 于是 agent 死了界面上什么都不显示。
+          //
+          // 保留已有的错误文案：`Disconnected` 往往紧跟在一条 `Error` 之后（服务端
+          // `run_connection` 先发 Error 再发 Disconnected），那条 Error 才带着真正的
+          // 原因。拿不到时才退回通用文案。
+          session.inputErrorMessage =
+            firstString(event.data.message)
+            || session.inputErrorMessage
+            || "智能体连接已断开"
         } else {
           const preserveTerminalError =
             event.data.status === "idle"
-            && previousStatus === "error"
+            && (previousStatus === "error" || previousStatus === "disconnected")
             && Boolean(firstString(session.inputErrorMessage))
           if (!preserveTerminalError) {
             session.inputErrorMessage = null
+            session.inputErrorDetails = null
           }
           session.apiRetry = null
         }
@@ -640,6 +668,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         touchHotConversation(session.conversationId)
         session.status = "waiting_permission"
         session.inputErrorMessage = null
+        session.inputErrorDetails = null
         session.pendingPermission = normalizePermissionRequest(event.data)
         session.pendingQuestion = null
         maybeBackfillMissingHistory(session, "permission_request")
@@ -650,6 +679,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         touchHotConversation(session.conversationId)
         session.status = "waiting_question"
         session.inputErrorMessage = null
+        session.inputErrorDetails = null
         session.pendingPermission = null
         session.pendingQuestion = normalizeQuestionRequest(event.data)
         maybeBackfillMissingHistory(session, "question_request")
@@ -660,15 +690,18 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         touchHotConversation(session.conversationId)
         session.apiRetry = normalizeApiRetryEvent(event.data)
         session.inputErrorMessage = null
+        session.inputErrorDetails = null
         break
 
-      case "error":
+      case "error": {
         touchHotConversation(session.conversationId)
+        const runtimeError = normalizeRuntimeErrorEvent(event.data)
         session.status = "error"
         session.apiRetry = null
-        session.inputErrorMessage =
-          normalizeRuntimeErrorEvent(event.data)?.message || "请求失败"
+        session.inputErrorMessage = runtimeError?.message || "请求失败"
+        session.inputErrorDetails = runtimeError?.details || null
         break
+      }
 
       case "permission_resolved":
         clearPendingPermission(session.conversationId, firstString(event.data?.requestId))
@@ -698,6 +731,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         session.inFlightUserTurnId = null
         session.status = session.connectionId ? "connected" : "idle"
         session.inputErrorMessage = null
+        session.inputErrorDetails = null
         session.apiRetry = null
         resetTurnScopedBackfillState(session)
         releaseHotConversation(session.conversationId)
@@ -794,6 +828,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       session.status = "connected"
     }
     session.inputErrorMessage = null
+    session.inputErrorDetails = null
     session.apiRetry = null
     syncManagedSendPermission(conversationId)
 
@@ -956,6 +991,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       session.connectionId = null
       session.status = "idle"
       session.inputErrorMessage = null
+      session.inputErrorDetails = null
       session.apiRetry = null
       session.pendingPermission = null
       session.pendingQuestion = null
@@ -979,6 +1015,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     connectionSessionManager.clearConversation(conversationId)
     session.connectionId = null
     session.inputErrorMessage = null
+    session.inputErrorDetails = null
     session.apiRetry = null
     if (!isSharedInProgressStatus(session.status)) {
       session.status = "idle"
@@ -1026,6 +1063,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       session.historyWindow = null
       session.liveMessage = null
       session.inputErrorMessage = null
+      session.inputErrorDetails = null
       session.apiRetry = null
       session.pendingPermission = null
       session.pendingQuestion = null
@@ -1093,6 +1131,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     session.instanceKey = managed.instanceKey
     session.status = "connected"
     session.inputErrorMessage = null
+    session.inputErrorDetails = null
     session.apiRetry = null
     session.pendingPermission = null
     session.pendingQuestion = null
@@ -1184,8 +1223,19 @@ interface RuntimeSession {
   liveMessage: LiveMessage | null
   connectionId: string | null
   instanceKey: string
-  status: "idle" | "connecting" | "connected" | "thinking" | "running_tool" | "waiting_permission" | "waiting_question" | "error"
+  /**
+   * `disconnected` 对应服务端 `ConnectionStatus::Disconnected`（agent 进程已死/连接被
+   * 拆掉）。它此前**不在这个联合类型里**，于是 `status_changed` 的 `disconnected` 掉进
+   * else 分支被当成正常状态，还会顺手清掉 `inputErrorMessage` —— agent 死了，界面上
+   * 什么都不显示。
+   */
+  status: "idle" | "connecting" | "connected" | "thinking" | "running_tool" | "waiting_permission" | "waiting_question" | "disconnected" | "error"
   inputErrorMessage: string | null
+  /**
+   * 上一次报错的诊断证据（agent stderr 尾巴）。与 `inputErrorMessage` 同生同灭。
+   * 单独存一份而不是拼进文案：它可能有几十行，UI 要默认折叠、按需展开。
+   */
+  inputErrorDetails: string | null
   apiRetry: ApiRetryEvent | null
   pendingPermission: PermissionRequest | null
   pendingQuestion: PendingQuestionState | null
@@ -1304,6 +1354,7 @@ function handleTurnQueueEvent(
       applySharedPromptQueueCount(session.sharedPromptQueue, data)
       session.status = "thinking"
       session.inputErrorMessage = null
+      session.inputErrorDetails = null
       session.apiRetry = null
       break
     case "turn_queue_cancelled":
@@ -1311,6 +1362,7 @@ function handleTurnQueueEvent(
       applySharedPromptQueueCount(session.sharedPromptQueue, data)
       session.sharedPromptQueue.lastMessage = "队列任务已取消。"
       session.inputErrorMessage = null
+      session.inputErrorDetails = null
       break
     case "turn_queue_failed":
       removeSharedPromptQueueItem(session.sharedPromptQueue, data.queueItemId)
@@ -2264,13 +2316,45 @@ function resolveLiveMessageId(...candidates: Array<string | null | undefined>) {
   return normalized || createRuntimeLiveMessageId()
 }
 
-function deriveRuntimeError(snapshot: any): string | null {
-  const status = firstString(snapshot?.status)
-  if (status === "error") {
-    return (
-      firstString(snapshot?.error, snapshot?.message, snapshot?.detail) ||
-      "会话运行失败"
-    )
+/**
+ * 从 attach 快照里取出最近一次 agent 报错。
+ *
+ * 服务端把它放在 `SessionState.last_error`（`acp/session_state.rs` 的
+ * `SessionLastError { message, code, details? }`），并在 `to_snapshot()` 上暴露，注释
+ * 写明了用意：
+ *
+ * > Exposed on `to_snapshot()` so clients that reconnect after missing the live
+ * > `AcpEvent::Error` can still surface the latest agent failure.
+ *
+ * 也就是说**冷启动 / 重连进入一个已经失败的会话**时，这是唯一能拿到失败原因的地方 ——
+ * 实时 `error` 事件早就发完了。
+ *
+ * 改动前这个函数读的三个字段（`snapshot.error` / `.message` / `.detail`）在
+ * `LiveSessionSnapshot` 上**都不存在**，于是它要么返回 null，要么在 `status === "error"`
+ * 时返回兜底文案「会话运行失败」—— 真正的原因一次都没显示过。
+ *
+ * 另外**不能再用 `status === "error"` 当前置条件**：`last_error` 与 status 是独立的两件事。
+ * agent 报错后连接可能还活着（非终止性错误：单轮失败、SetMode 失败、空 prompt 被拒），
+ * status 已经回到 `connected`，但那条错误仍然值得显示。服务端自己的清除时机是
+ * 「新 prompt 开始（`Prompting`）时」，不是「状态变好时」。
+ */
+function deriveSnapshotLastError(snapshot: any): RuntimeErrorEvent | null {
+  const lastError = firstObject(snapshot?.last_error, snapshot?.lastError)
+  if (lastError) {
+    const message = firstString(lastError.message)
+    if (message) {
+      return {
+        message,
+        code: firstString(lastError.code) || undefined,
+        details: firstString(lastError.details) || undefined,
+      }
+    }
+  }
+
+  // 没有 last_error 但状态是 error：给一句兜底，总比静默好。旧后端（不带
+  // `last_error` 的版本）也走这条路。
+  if (firstString(snapshot?.status) === "error") {
+    return { message: "会话运行失败" }
   }
   return null
 }
@@ -2295,6 +2379,9 @@ function normalizeRuntimeErrorEvent(raw: any): RuntimeErrorEvent | null {
     message,
     code: firstString(raw.code) || undefined,
     agentType: firstString(raw.agentType, raw.agent_type) || undefined,
+    // agent 的 stderr 尾巴。只有 codeg 推断出来的错误才带（agent 报告成功但线上没有
+    // 任何错误信息的那一族），恰恰是最难排查的那种 —— 不收就等于「有报错但看不到原因」。
+    details: firstString(raw.details) || undefined,
   }
 }
 

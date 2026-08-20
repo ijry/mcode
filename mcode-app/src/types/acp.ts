@@ -406,6 +406,17 @@ export interface RuntimeErrorEvent {
   message: string
   code?: string
   agentType?: string
+  /**
+   * 诊断证据：agent 的 stderr 尾巴 + codeg 解析失败的 update 摘要。
+   *
+   * 只有 codeg **推断**出来的错误才带它（`turn_failed_empty*` 那一族 —— agent 报告成功
+   * 但线上根本没有错误信息）。服务端在源头就已脱敏并限长
+   * （`codeg-plus/src-tauri/src/acp/stderr_tail.rs`），注释明确说它会被渲染到 UI 并在
+   * server 模式下推过 WebSocket，所以可以直接显示。
+   *
+   * 可能很长（stderr 尾巴），UI 必须默认折叠。
+   */
+  details?: string
 }
 
 export interface PermissionRequest {
