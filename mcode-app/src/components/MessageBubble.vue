@@ -1,5 +1,46 @@
 <template>
+  <!--
+    system 轮次（上下文压缩摘要等注入的系统上下文）单独渲染成一条可折叠提示，
+    默认收起 —— 对齐 codeg-plus 的 CollapsibleSystemMessage
+    （message-list-view.tsx 的 group.role === "system" 分支）。
+    它不是用户输入也不是 agent 回复，套普通气泡会让内部说明看起来像正文。
+
+    形制与 `tool-group__summary` / `subagent__summary` **共用同一套**：药丸圆角、
+    中性底色、无边框、常规字重。它表达的只是「这里发生过一次压缩」，属于背景信息，
+    不该比正文更抢眼 —— 早先那版是橙色告警卡（warning 边框 + 橙底 + info 图标 +
+    600 字重橙字），在时间线里读起来像出了错。
+  -->
   <view
+    v-if="isSystemMessage"
+    :class="[
+      'system-note',
+      detailTheme !== 'default' && `system-note--theme-${detailTheme}`,
+    ]"
+  >
+    <view
+      :class="[
+        'system-note__summary',
+        translucent && 'system-note__summary--translucent',
+        systemNoteHasBody && 'system-note__summary--tappable',
+      ]"
+      @click="toggleSystemNote"
+    >
+      <!-- 没有正文时不挂箭头：挂一个点不开的箭头比不挂更糟（同 SubagentCapsuleBlock）。 -->
+      <up-icon
+        v-if="systemNoteHasBody"
+        :name="systemNoteExpanded ? 'arrow-down' : 'arrow-right'"
+        size="12"
+        :color="upThemeVar('--up-light-color', '#c0c4cc')"
+      ></up-icon>
+      <text class="system-note__label">{{ systemNoteLabel }}</text>
+    </view>
+    <view v-if="systemNoteExpanded && systemNoteHasBody" class="system-note__body">
+      <text class="system-note__text">{{ systemNoteText }}</text>
+    </view>
+  </view>
+
+  <view
+    v-else
     :class="[
       'bubble-wrap',
       `bubble-wrap--${message.role}`,
@@ -90,6 +131,23 @@
               :end="part.end"
               :items="part.items"
               :isRunning="part.isRunning"
+              :translucent="translucent"
+              :subagentTranscripts="subagentTranscripts"
+            />
+          </view>
+
+          <!--
+            原生子智能体：默认折叠的胶囊。必须排在 `tool_call_group` 之前 ——
+            分组分支只接 `tool_call_group`，但顺序写反会让后续维护者以为
+            子智能体也能落进通用分组。折叠状态是组件内部 `ref`，用 tool_call id
+            作 key，避免像 thinking 那样按下标存状态（气泡的 `v-for` 用的是 index，
+            列表一变就串位）。
+          -->
+          <view v-else-if="part.type === 'subagent_call'" class="part-tool">
+            <SubagentCapsuleBlock
+              :key="part.tool_call.id"
+              :toolCall="part.tool_call"
+              :transcript="subagentTranscript(part.tool_call.id)"
               :translucent="translucent"
             />
           </view>
@@ -197,15 +255,17 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue"
-import type { ContentPart, GoalDisplayPart, MessageTurn, ToolCall } from "@/types/acp"
+import type { BubbleDisplayPart, MessageTurn } from "@/types/acp"
 import {
   buildCyberDecodeText,
   deriveCyberDecodeRevealProgress,
   type CyberEffectPhase,
   type DetailThemeId,
 } from "@/pages/conversation-detail/detailCyberMode"
-import { buildGoalDisplayParts } from "@/services/conversation/goalToolCall"
+import { buildBubbleDisplayParts } from "@/services/conversation/bubbleDisplayParts"
+import { CONTEXT_CONTINUATION_PREFIX } from "@/services/conversation/conversationTurnIdentity"
 import GoalToolCallBlock from "./GoalToolCallBlock.vue"
+import SubagentCapsuleBlock from "./SubagentCapsuleBlock.vue"
 import ToolCallBlock from "./ToolCallBlock.vue"
 import ToolCallGroupBlock from "./ToolCallGroupBlock.vue"
 
@@ -217,50 +277,62 @@ const props = defineProps<{
   detailTheme?: DetailThemeId
   cyberEffectPhase?: CyberEffectPhase
   cyberActive?: boolean
+  /**
+   * 子智能体实时正文，按父 tool_call id 索引（`conversationRuntime.getSubagentTranscripts()`）。
+   * 只有正在流式的那一轮拿得到值，历史轮次没有 —— 它刻意不落库。
+   */
+  subagentTranscripts?: Record<string, string>
 }>()
 
 const emit = defineEmits<{
   regenerate: []
 }>()
 
-type DisplayPart = GoalDisplayPart | {
-  type: "tool_call_group"
-  tool_calls?: ToolCall[]
+const displayParts = computed<BubbleDisplayPart[]>(() =>
+  buildBubbleDisplayParts({
+    parts: props.message.content || [],
+    isStreaming: isStreaming.value,
+  })
+)
+
+function subagentTranscript(toolCallId: string): string {
+  return props.subagentTranscripts?.[toolCallId] || ""
 }
-
-const displayParts = computed<DisplayPart[]>(() => {
-  const grouped: DisplayPart[] = []
-  let pendingToolCalls: ToolCall[] = []
-
-  const flushPendingToolCalls = () => {
-    if (pendingToolCalls.length === 0) return
-    grouped.push({
-      type: "tool_call_group",
-      tool_calls: pendingToolCalls,
-    })
-    pendingToolCalls = []
-  }
-
-  const goalDisplayParts = buildGoalDisplayParts(props.message.content || [], isStreaming.value)
-  for (const part of goalDisplayParts) {
-    if (part.type === "tool_call" && part.tool_call) {
-      pendingToolCalls.push(part.tool_call)
-      continue
-    }
-
-    flushPendingToolCalls()
-    grouped.push(part as DisplayPart)
-  }
-
-  flushPendingToolCalls()
-  return grouped
-})
 
 // 思考折叠状态
 const manuallyCollapsed = ref<Set<number>>(new Set())
 const manuallyExpanded = ref<Set<number>>(new Set())
 const cyberTick = ref(0)
 let cyberTimer: ReturnType<typeof setInterval> | null = null
+
+// system 轮次：注入的系统上下文（最常见的是上下文压缩摘要），默认折叠。
+const systemNoteExpanded = ref(false)
+const isSystemMessage = computed(() => props.message.role === "system")
+const systemNoteText = computed(() =>
+  (props.message.content || [])
+    .map((part) => {
+      if (part.type === "text") return part.text || ""
+      if (part.type === "thinking") return part.thinking || ""
+      return ""
+    })
+    .filter(Boolean)
+    .join("\n\n")
+    .trim()
+)
+// 压缩摘要在服务端由内容前缀判定（parsers/claude.rs 的 CONTEXT_CONTINUATION_PREFIX），
+// 下发时已经改判成 system，这里只用同一个前缀把标签说得更具体一点。
+const systemNoteLabel = computed(() =>
+  systemNoteText.value.startsWith(CONTEXT_CONTINUATION_PREFIX)
+    ? "上下文已压缩（历史摘要）"
+    : "系统消息"
+)
+// 摘要正文可能是空的（只有前缀、或 part 里没有可取的文本），那时退化成一枚纯胶囊。
+const systemNoteHasBody = computed(() => systemNoteText.value.length > 0)
+
+function toggleSystemNote() {
+  if (!systemNoteHasBody.value) return
+  systemNoteExpanded.value = !systemNoteExpanded.value
+}
 
 const isStreaming = computed(() => props.message.status === "streaming")
 const isCyberStreamingPhase = computed(() => {
@@ -1109,6 +1181,137 @@ function normalizeAgentType(raw?: string) {
   font-size: 24rpx;
   color: var(--up-tips-color, #909193);
   line-height: 1.6;
+}
+
+/* =====
+   系统消息（上下文压缩摘要等注入上下文），默认折叠。
+
+   形制与 `tool-group__summary` / `subagent__summary` 逐条对齐：药丸圆角 999rpx、
+   中性 `--up-hover-bg-color` 底、**无边框**、22rpx 常规字重、箭头 12rpx +
+   `--up-light-color`。这三处是同一类「可展开的中性摘要控件」，不该各长一个样。
+   ===== */
+.system-note {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10rpx;
+  margin: 12rpx 0;
+  width: 100%;
+}
+
+.system-note__summary {
+  min-height: 48rpx;
+  padding: 10rpx 18rpx;
+  border-radius: 999rpx;
+  background: color-mix(in srgb, var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6)) 60%, var(--up-card-bg-color, #ffffff) 40%);
+  display: flex;
+  align-items: center;
+  align-self: flex-start;
+  max-width: 100%;
+  gap: 10rpx;
+  box-sizing: border-box;
+}
+
+.system-note__summary--translucent {
+  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 36%, transparent 64%);
+}
+
+.system-note__summary--tappable:active {
+  opacity: 0.72;
+}
+
+.system-note__label {
+  font-size: 22rpx;
+  line-height: 1.2;
+  color: var(--up-content-color, #606266);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.system-note__body {
+  width: 100%;
+  padding: 16rpx;
+  border-radius: 18rpx;
+  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 82%, transparent 18%);
+  border: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 62%, transparent 38%);
+  box-sizing: border-box;
+}
+
+.system-note__text {
+  display: block;
+  font-size: 24rpx;
+  color: var(--up-tips-color, #909193);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/*
+  主题覆盖挂在 `.system-note--theme-*` 上，**不能**复用下面那三份
+  `.bubble-wrap--cyber :deep(...)` 列表 —— `.system-note` 是 `.bubble-wrap` 的
+  `v-else` 兄弟节点，主题类挂在 `.bubble-wrap` 上时选择器根本落不到它身上。
+  往那些列表里加 `system-note__*` 会写出一条永不命中的死规则。
+
+  只改配色、不改形制：圆角/内距/字号继续由上面那份基础规则统一，与
+  `tool-group__summary` 保持同一套。
+*/
+.system-note--theme-matrix .system-note__summary {
+  background:
+    linear-gradient(135deg, rgba(0, 255, 65, 0.08), transparent 44%),
+    rgba(0, 20, 7, 0.54);
+}
+
+.system-note--theme-matrix .system-note__label {
+  color: rgba(186, 255, 200, 0.88);
+}
+
+.system-note--theme-matrix .system-note__body {
+  background: rgba(0, 13, 4, 0.56);
+  border-color: rgba(0, 255, 65, 0.26);
+}
+
+.system-note--theme-matrix .system-note__text {
+  color: rgba(186, 255, 200, 0.72);
+}
+
+.system-note--theme-sweet .system-note__summary {
+  background:
+    linear-gradient(135deg, rgba(255, 221, 239, 0.34), rgba(255, 255, 255, 0.24)),
+    rgba(255, 248, 252, 0.42);
+}
+
+.system-note--theme-sweet .system-note__label {
+  color: rgba(122, 40, 79, 0.86);
+}
+
+.system-note--theme-sweet .system-note__body {
+  background: rgba(255, 248, 252, 0.42);
+  border-color: rgba(236, 72, 153, 0.16);
+}
+
+.system-note--theme-sweet .system-note__text {
+  color: rgba(122, 40, 79, 0.7);
+}
+
+.system-note--theme-summer .system-note__summary {
+  background:
+    linear-gradient(135deg, rgba(210, 244, 255, 0.28), rgba(255, 255, 255, 0.18)),
+    rgba(236, 251, 255, 0.34);
+}
+
+.system-note--theme-summer .system-note__label {
+  color: rgba(8, 85, 109, 0.9);
+}
+
+.system-note--theme-summer .system-note__body {
+  background: rgba(239, 252, 255, 0.38);
+  border-color: rgba(14, 136, 165, 0.2);
+}
+
+.system-note--theme-summer .system-note__text {
+  color: rgba(8, 85, 109, 0.74);
 }
 
 /* ===== 计划块 ===== */

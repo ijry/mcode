@@ -36,6 +36,44 @@ describe("P48 conversation detail tool call status styles", () => {
     expect(assistantBubbleRule).not.toContain("border:")
   })
 
+  it("renders the context-compaction system note as the same neutral pill", () => {
+    // 用户报「会话已压缩样式太难看，应该跟普通胶囊一样」：早先那版是橙色告警卡
+    // （warning 边框 + 橙底 + info 图标 + 600 字重橙字）。它只是背景信息，
+    // 不该比正文更抢眼 —— 形制必须与 `tool-group__summary` 逐条相同。
+    const source = readComponent("MessageBubble.vue")
+    const summaryRule = source.match(/\n\.system-note__summary\s*\{[\s\S]*?\n\}/)?.[0] || ""
+
+    expect(summaryRule).toContain("border-radius: 999rpx;")
+    expect(summaryRule).toContain(
+      "background: color-mix(in srgb, var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6)) 60%, var(--up-card-bg-color, #ffffff) 40%);"
+    )
+    expect(summaryRule).toContain("align-self: flex-start;")
+    // 无边框是这套胶囊的定义性特征（见 2026-08-17-tool-call-group-summary-style）。
+    expect(summaryRule).not.toContain("border:")
+    expect(summaryRule).not.toContain("--up-warning")
+
+    // 标签跟 tool-group__label 同款：22rpx、常规字重、content 色。600 字重会让它抢戏。
+    const labelRule = source.match(/\n\.system-note__label\s*\{[\s\S]*?\n\}/)?.[0] || ""
+    expect(labelRule).toContain("font-size: 22rpx;")
+    expect(labelRule).toContain("color: var(--up-content-color, #606266);")
+    expect(labelRule).not.toContain("font-weight")
+
+    // 箭头与另两处胶囊统一（size 12 + --up-light-color），且没有正文时不挂箭头 ——
+    // 一个点不开的箭头比不挂更糟。
+    expect(source).toContain(`v-if="systemNoteHasBody"`)
+    expect(source).toContain(`:color="upThemeVar('--up-light-color', '#c0c4cc')"`)
+    expect(source).not.toContain('name="info-circle"')
+
+    // 主题类必须挂在 system-note 自己的根上：它是 .bubble-wrap 的 v-else 兄弟，
+    // `.bubble-wrap--cyber :deep(.system-note__summary)` 永远选不中。
+    expect(source).toContain("`system-note--theme-${detailTheme}`")
+    expect(source).not.toContain(":deep(.system-note")
+    for (const theme of ["matrix", "sweet", "summer"]) {
+      expect(source).toContain(`.system-note--theme-${theme} .system-note__summary`)
+      expect(source).toContain(`.system-note--theme-${theme} .system-note__label`)
+    }
+  })
+
   it("colors individual tool calls with uview runtime theme variables", () => {
     const source = readComponent("ToolCallBlock.vue")
 

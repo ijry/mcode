@@ -52,6 +52,13 @@
             :toolCalls="item.tool_calls || []"
             :translucent="translucent"
           />
+          <SubagentCapsuleBlock
+            v-else-if="item.type === 'subagent_call'"
+            :key="item.tool_call.id"
+            :toolCall="item.tool_call"
+            :transcript="subagentTranscript(item.tool_call.id)"
+            :translucent="translucent"
+          />
           <ToolCallBlock
             v-else-if="item.type === 'tool_call'"
             :toolCall="item.tool_call!"
@@ -96,15 +103,12 @@
 
 <script setup lang="ts">
 import { computed, ref } from "vue"
-import type { ContentPart, ToolCall } from "@/types/acp"
+import type { BubbleDisplayPart, ContentPart, ToolCall } from "@/types/acp"
 import { parseGoalToolCall } from "@/services/conversation/goalToolCall"
+import { buildBubbleDisplayParts } from "@/services/conversation/bubbleDisplayParts"
+import SubagentCapsuleBlock from "./SubagentCapsuleBlock.vue"
 import ToolCallBlock from "./ToolCallBlock.vue"
 import ToolCallGroupBlock from "./ToolCallGroupBlock.vue"
-
-type NestedDisplayPart = ContentPart | {
-  type: "tool_call_group"
-  tool_calls?: ToolCall[]
-}
 
 const props = withDefaults(defineProps<{
   start: ToolCall
@@ -112,6 +116,8 @@ const props = withDefaults(defineProps<{
   items?: ContentPart[]
   isRunning?: boolean
   translucent?: boolean
+  /** 与 `MessageBubble` 同源，按父 tool_call id 索引的子智能体实时正文。 */
+  subagentTranscripts?: Record<string, string>
 }>(), {
   end: null,
   items: () => [],
@@ -153,31 +159,23 @@ const remainingSummary = computed(() => formatTokens(goal.value.remainingTokens)
 const durationSummary = computed(() => formatDuration(goal.value.timeUsedSeconds))
 const errorText = computed(() => props.end?.error || props.start.error || "")
 
-const nestedDisplayParts = computed<NestedDisplayPart[]>(() => {
-  const grouped: NestedDisplayPart[] = []
-  let pendingToolCalls: ToolCall[] = []
+/**
+ * 与气泡共用同一份分组实现，`skipGoalRuns` 防止 goal 卡里再折出一层 goal 卡。
+ *
+ * 抽出去之前这里是气泡那段循环的手抄副本，加子智能体豁免时若不合并，就会出现
+ * 「`/goal` 运行块里的子智能体仍被并进『调用 N 个工具』」的功能缺口。
+ * goal 内层不走流式过滤（`isStreaming` 保持 false）：这些 items 都是已解析完的历史块。
+ */
+const nestedDisplayParts = computed<BubbleDisplayPart[]>(() =>
+  buildBubbleDisplayParts({
+    parts: props.items || [],
+    skipGoalRuns: true,
+  })
+)
 
-  const flushPendingToolCalls = () => {
-    if (pendingToolCalls.length === 0) return
-    grouped.push({
-      type: "tool_call_group",
-      tool_calls: pendingToolCalls,
-    })
-    pendingToolCalls = []
-  }
-
-  for (const item of props.items || []) {
-    if (item.type === "tool_call" && item.tool_call) {
-      pendingToolCalls.push(item.tool_call)
-      continue
-    }
-    flushPendingToolCalls()
-    grouped.push(item)
-  }
-
-  flushPendingToolCalls()
-  return grouped
-})
+function subagentTranscript(toolCallId: string): string {
+  return props.subagentTranscripts?.[toolCallId] || ""
+}
 
 function toggleExpanded() {
   expanded.value = !expanded.value
