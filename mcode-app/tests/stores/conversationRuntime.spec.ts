@@ -2307,4 +2307,80 @@ describe('conversationRuntime ACP error handling', () => {
     })
   })
 
+  describe('error retention across a retried turn', () => {
+    // 用户报「Mcode 看不到右侧 PC 端的错误」：PC 上一条红色的
+    // `unexpected status 502 Bad Gateway` 横幅挂着，手机端什么都没有，状态还是「已连接」。
+    //
+    // 成因不是字段丢失，是 `stream_batch` / `tool_call` / `api_retry` 的第一行无条件
+    // `inputErrorMessage = null`。502 之后 agent 自动重试并继续输出，**下一个 delta
+    // 一到错误就被抹掉**。PC 端的横幅要手动关，两边于是完全不同。
+    it('keeps the error while the same turn keeps streaming', () => {
+      const { store, session } = prepareSession()
+
+      store.handleEvent({
+        type: 'error',
+        connectionId: 'conn-1',
+        data: {
+          message: 'unexpected status 502 Bad Gateway',
+          details: 'AgentRouterL站: sensitive words detected',
+        },
+      } as any)
+      expect(session.inputErrorMessage).toBe('unexpected status 502 Bad Gateway')
+
+      // 重试后的续写：同一轮，错误必须留着。
+      store.handleEvent({
+        type: 'stream_batch',
+        connectionId: 'conn-1',
+        data: { delta: 'retried output', contentType: 'text' },
+      } as any)
+
+      expect(session.inputErrorMessage).toBe('unexpected status 502 Bad Gateway')
+      expect(session.inputErrorDetails).toBe('AgentRouterL站: sensitive words detected')
+    })
+
+    it('keeps the error when api_retry announces the retry', () => {
+      // api_retry 与 error 是同一件事的两面。清掉错误会让「正在重试」取代原因，
+      // 用户永远不知道在重试什么。
+      const { store, session } = prepareSession()
+
+      store.handleEvent({
+        type: 'error',
+        connectionId: 'conn-1',
+        data: { message: '502 Bad Gateway' },
+      } as any)
+      store.handleEvent({
+        type: 'api_retry',
+        connectionId: 'conn-1',
+        data: { attempt: 1, max_retries: 3 },
+      } as any)
+
+      expect(session.inputErrorMessage).toBe('502 Bad Gateway')
+      expect(session.apiRetry).toMatchObject({ attempt: 1 })
+    })
+
+    it('drops the error once a genuinely new turn starts streaming', () => {
+      // 反向保护：换了一轮就该清。否则上一轮的失败会一直挂在界面上。
+      const { store, session } = prepareSession()
+
+      store.setLiveMessage(1, [{ type: 'text', text: 'first' }], true, { id: 'turn-a' })
+      store.handleEvent({
+        type: 'error',
+        connectionId: 'conn-1',
+        data: { message: 'old turn failed' },
+      } as any)
+      expect(session.inputErrorMessage).toBe('old turn failed')
+
+      // 新一轮：liveMessage 换了 id。
+      store.setLiveMessage(1, [{ type: 'text', text: 'second' }], true, { id: 'turn-b' })
+      store.handleEvent({
+        type: 'stream_batch',
+        connectionId: 'conn-1',
+        data: { delta: 'new turn output', contentType: 'text' },
+      } as any)
+
+      expect(session.inputErrorMessage).toBeNull()
+      expect(session.inputErrorDetails).toBeNull()
+    })
+  })
+
 })

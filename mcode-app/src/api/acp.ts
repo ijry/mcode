@@ -1196,6 +1196,8 @@ class AcpApiClient {
           data: {
             status: mapConnectionStatus(firstString(record.status)),
             message: firstString(record.message) || undefined,
+            // 状态变更也可能带诊断证据（断连前那条 Error 的 stderr）。
+            details: firstString(record.details) || undefined,
             scope: "connection",
           },
         }
@@ -1386,6 +1388,12 @@ class AcpApiClient {
             message: firstString(record.message) || "请求失败",
             code: firstString(record.code) || undefined,
             agentType: firstString(record.agent_type, record.agentType) || undefined,
+            // agent 的 stderr 尾巴。**这一层漏了它就全链路都拿不到** —— 下游
+            // `normalizeRuntimeErrorEvent` 再怎么收也无从收起。
+            //
+            // 它恰恰是 `turn_failed_empty*` 那一族唯一的线索：agent 报告成功、线上没有
+            // 任何错误信息，只有这里带着真正的原因（如 502 / 路由凭据失败）。
+            details: firstString(record.details) || undefined,
           },
         }
       default:
@@ -1471,7 +1479,11 @@ function mapConnectionStatus(status: string) {
     case "error":
       return "error"
     case "disconnected":
-      return "idle"
+      // **不能压成 `idle`。** 「agent 连接已断开」与「空闲」在界面上是两种完全不同的
+      // 处境：前者发消息会失败、需要重连，后者随时可以发。压成 idle 之后
+      // `conversationRuntime` 里那个 `disconnected` 分支永远进不去，成了死代码，
+      // 断连在界面上彻底静默。
+      return "disconnected"
     default:
       return "connected"
   }

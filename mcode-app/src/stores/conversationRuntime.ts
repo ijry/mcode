@@ -88,6 +88,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         status: "idle",
         inputErrorMessage: null,
         inputErrorDetails: null,
+        inputErrorTurnKey: null,
         apiRetry: null,
         pendingPermission: null,
         pendingQuestion: null,
@@ -368,8 +369,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     // 拿一份不含错误的旧快照擦掉刚刚报出来的原因，等于故障又变回静默。
     const snapshotError = deriveSnapshotLastError(snapshot)
     if (snapshotError) {
-      session.inputErrorMessage = snapshotError.message
-      session.inputErrorDetails = snapshotError.details || null
+      recordSessionError(session, snapshotError.message, snapshotError.details)
     }
     session.apiRetry = null
     session.lastAppliedSeq = snapshotSeq ?? session.lastAppliedSeq
@@ -505,8 +505,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
 
     switch (event.type) {
       case "stream_batch":
-        session.inputErrorMessage = null
-        session.inputErrorDetails = null
+        clearStaleTurnError(session)
         session.apiRetry = null
         session.pendingPermission = null
         session.pendingQuestion = null
@@ -527,8 +526,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
 
       case "tool_call": {
         session.status = "running_tool"
-        session.inputErrorMessage = null
-        session.inputErrorDetails = null
+        clearStaleTurnError(session)
         session.apiRetry = null
         session.pendingPermission = null
         session.pendingQuestion = null
@@ -605,12 +603,16 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         if (event.data.scope === "conversation") {
           if (event.data.status === "error") {
             session.status = "error"
-            session.inputErrorMessage =
-              firstString(event.data.message) || session.inputErrorMessage || "会话运行失败"
+            recordSessionError(
+              session,
+              firstString(event.data.message) || session.inputErrorMessage || "会话运行失败",
+              firstString(event.data.details) || session.inputErrorDetails
+            )
           } else if (event.data.status === "idle" && !session.liveMessage && !session.pendingPermission && !session.pendingQuestion) {
             session.status = session.connectionId ? "connected" : "idle"
             session.inputErrorMessage = null
             session.inputErrorDetails = null
+            session.inputErrorTurnKey = null
             session.apiRetry = null
           }
           syncManagedSendPermission(session.conversationId)
@@ -619,21 +621,26 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         const previousStatus = session.status
         session.status = event.data.status
         if (event.data.status === "error") {
-          session.inputErrorMessage =
-            firstString(event.data.message) || session.inputErrorMessage || "连接异常"
-          session.inputErrorDetails =
-            firstString(event.data.details) || session.inputErrorDetails || null
+          recordSessionError(
+            session,
+            firstString(event.data.message) || session.inputErrorMessage || "连接异常",
+            firstString(event.data.details) || session.inputErrorDetails
+          )
         } else if (event.data.status === "disconnected") {
-          // agent 进程已死 / 连接被拆掉。此前它掉进下面的 else 分支：被当成正常状态，
-          // 还会把 `inputErrorMessage` 清空 —— 于是 agent 死了界面上什么都不显示。
+          // agent 进程已死 / 连接被拆掉。此前它在 `api/acp.ts` 的 `mapConnectionStatus`
+          // 里就被压成了 `idle`，所以这个分支曾经是**死代码** —— agent 死了界面上什么
+          // 都不显示。
           //
           // 保留已有的错误文案：`Disconnected` 往往紧跟在一条 `Error` 之后（服务端
           // `run_connection` 先发 Error 再发 Disconnected），那条 Error 才带着真正的
           // 原因。拿不到时才退回通用文案。
-          session.inputErrorMessage =
+          recordSessionError(
+            session,
             firstString(event.data.message)
-            || session.inputErrorMessage
-            || "智能体连接已断开"
+              || session.inputErrorMessage
+              || "智能体连接已断开",
+            session.inputErrorDetails
+          )
         } else {
           const preserveTerminalError =
             event.data.status === "idle"
@@ -642,6 +649,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
           if (!preserveTerminalError) {
             session.inputErrorMessage = null
             session.inputErrorDetails = null
+            session.inputErrorTurnKey = null
           }
           session.apiRetry = null
         }
@@ -669,6 +677,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         session.status = "waiting_permission"
         session.inputErrorMessage = null
         session.inputErrorDetails = null
+        session.inputErrorTurnKey = null
         session.pendingPermission = normalizePermissionRequest(event.data)
         session.pendingQuestion = null
         maybeBackfillMissingHistory(session, "permission_request")
@@ -680,6 +689,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         session.status = "waiting_question"
         session.inputErrorMessage = null
         session.inputErrorDetails = null
+        session.inputErrorTurnKey = null
         session.pendingPermission = null
         session.pendingQuestion = normalizeQuestionRequest(event.data)
         maybeBackfillMissingHistory(session, "question_request")
@@ -689,8 +699,10 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       case "api_retry":
         touchHotConversation(session.conversationId)
         session.apiRetry = normalizeApiRetryEvent(event.data)
-        session.inputErrorMessage = null
-        session.inputErrorDetails = null
+        // `api_retry` 与错误是**同一件事的两面**：502 之后 agent 自动重试，两个事件
+        // 一前一后到达。清掉错误只会让重试横幅取代原因，用户看到「正在重试」却永远
+        // 不知道在重试什么。让 `clearStaleTurnError` 按轮次判断。
+        clearStaleTurnError(session)
         break
 
       case "error": {
@@ -698,8 +710,11 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         const runtimeError = normalizeRuntimeErrorEvent(event.data)
         session.status = "error"
         session.apiRetry = null
-        session.inputErrorMessage = runtimeError?.message || "请求失败"
-        session.inputErrorDetails = runtimeError?.details || null
+        recordSessionError(
+          session,
+          runtimeError?.message || "请求失败",
+          runtimeError?.details
+        )
         break
       }
 
@@ -732,6 +747,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         session.status = session.connectionId ? "connected" : "idle"
         session.inputErrorMessage = null
         session.inputErrorDetails = null
+        session.inputErrorTurnKey = null
         session.apiRetry = null
         resetTurnScopedBackfillState(session)
         releaseHotConversation(session.conversationId)
@@ -829,6 +845,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     }
     session.inputErrorMessage = null
     session.inputErrorDetails = null
+    session.inputErrorTurnKey = null
     session.apiRetry = null
     syncManagedSendPermission(conversationId)
 
@@ -992,6 +1009,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       session.status = "idle"
       session.inputErrorMessage = null
       session.inputErrorDetails = null
+      session.inputErrorTurnKey = null
       session.apiRetry = null
       session.pendingPermission = null
       session.pendingQuestion = null
@@ -1016,6 +1034,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     session.connectionId = null
     session.inputErrorMessage = null
     session.inputErrorDetails = null
+    session.inputErrorTurnKey = null
     session.apiRetry = null
     if (!isSharedInProgressStatus(session.status)) {
       session.status = "idle"
@@ -1064,6 +1083,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       session.liveMessage = null
       session.inputErrorMessage = null
       session.inputErrorDetails = null
+      session.inputErrorTurnKey = null
       session.apiRetry = null
       session.pendingPermission = null
       session.pendingQuestion = null
@@ -1132,6 +1152,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     session.status = "connected"
     session.inputErrorMessage = null
     session.inputErrorDetails = null
+    session.inputErrorTurnKey = null
     session.apiRetry = null
     session.pendingPermission = null
     session.pendingQuestion = null
@@ -1149,6 +1170,12 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     const session = getOrCreateSession(conversationId)
     const normalized = firstString(message)
     session.inputErrorMessage = normalized || null
+    // 手动设置的错误（发送失败等）同样要记轮次，否则下一个 delta 到来时
+    // `clearStaleTurnError` 会当成陈旧错误清掉。清空时把轮次一起清。
+    session.inputErrorTurnKey = normalized ? session.liveMessage?.id || null : null
+    if (!normalized) {
+      session.inputErrorDetails = null
+    }
     session.apiRetry = null
     if (normalized) {
       if (session.status === "idle") {
@@ -1236,6 +1263,14 @@ interface RuntimeSession {
    * 单独存一份而不是拼进文案：它可能有几十行，UI 要默认折叠、按需展开。
    */
   inputErrorDetails: string | null
+  /**
+   * 当前那条错误属于哪一轮（取 `liveMessage.id`）。
+   *
+   * 用来区分「上一轮的陈旧错误」与「本轮刚报出来的错误」：502 这类错误 agent 会自动重试
+   * 并继续输出，`stream_batch` 一到就无条件清空的老写法会把刚报的原因静默抹掉
+   * （见 `clearStaleTurnError`）。`null` 表示轮次未知，此时保守不清。
+   */
+  inputErrorTurnKey: string | null
   apiRetry: ApiRetryEvent | null
   pendingPermission: PermissionRequest | null
   pendingQuestion: PendingQuestionState | null
@@ -1355,6 +1390,7 @@ function handleTurnQueueEvent(
       session.status = "thinking"
       session.inputErrorMessage = null
       session.inputErrorDetails = null
+      session.inputErrorTurnKey = null
       session.apiRetry = null
       break
     case "turn_queue_cancelled":
@@ -1363,6 +1399,7 @@ function handleTurnQueueEvent(
       session.sharedPromptQueue.lastMessage = "队列任务已取消。"
       session.inputErrorMessage = null
       session.inputErrorDetails = null
+      session.inputErrorTurnKey = null
       break
     case "turn_queue_failed":
       removeSharedPromptQueueItem(session.sharedPromptQueue, data.queueItemId)
@@ -2369,6 +2406,54 @@ function normalizeApiRetryEvent(raw: any): ApiRetryEvent | null {
     errorStatus: firstNumber(raw.errorStatus, raw.error_status),
     retryDelayMs: firstNumber(raw.retryDelayMs, raw.retry_delay_ms),
   }
+}
+
+/**
+ * 清掉**上一轮**留下的错误 —— 不清本轮刚报出来的那条。
+ *
+ * 用户报的原话是「Mcode 看不到右侧 PC 端的错误」，截图里 PC 上一条红色的
+ * `unexpected status 502 Bad Gateway ...` 横幅明明挂着，手机端却什么都没有，而且状态还是
+ * 「已连接」。
+ *
+ * 成因：`stream_batch` / `tool_call` 的第一行就是无条件 `inputErrorMessage = null`。
+ * 502 这类错误 agent 会自动重试并继续输出，**只要下一个 delta 到来，错误就被静默抹掉**。
+ * 手机端要么根本来不及渲染，要么闪一下就没了 —— 而 PC 端的横幅是要手动关掉的，所以两边
+ * 看起来完全不同。
+ *
+ * 那三处清空的**本意**是「新一轮开始了，上一轮的错误该退场」，写成无条件清空却变成了
+ * 「任何新内容都能抹掉任何错误」。所以按轮次记账：错误发生时记下它属于哪一轮
+ * （`inputErrorTurnKey`），只有轮次真的换了才清。
+ *
+ * 轮次身份用 `liveMessage.id`：它在 `turn_complete` 时被清空、下一轮重新生成，正好是
+ * 「同一轮」的天然标识。拿不到时（错误发生在 live message 之前）记 `null`，此时不清 ——
+ * 宁可多留一条陈旧错误，也不要把刚报出来的原因弄丢。
+ */
+function clearStaleTurnError(session: RuntimeSession) {
+  if (!session.inputErrorMessage) return
+  const currentTurnKey = session.liveMessage?.id || null
+  // 错误没记轮次（旧状态/快照恢复），或仍在同一轮 —— 都不清。
+  if (!session.inputErrorTurnKey) return
+  if (session.inputErrorTurnKey === currentTurnKey) return
+  session.inputErrorMessage = null
+  session.inputErrorDetails = null
+  session.inputErrorTurnKey = null
+}
+
+/**
+ * 记下一条错误，连带它所属的轮次。所有从**事件/快照**写错误的地方都该走这里。
+ *
+ * 与 store 上那个 `setSessionError(conversationId, message)` 不同：那个是给 UI 层手动
+ * 设置输入框错误用的（发送失败等），入参是 conversationId；这个接的是已经拿到 session
+ * 的内部路径，且必须记 `inputErrorTurnKey`。
+ */
+function recordSessionError(
+  session: RuntimeSession,
+  message: string,
+  details?: string | null
+) {
+  session.inputErrorMessage = message
+  session.inputErrorDetails = details || null
+  session.inputErrorTurnKey = session.liveMessage?.id || null
 }
 
 function normalizeRuntimeErrorEvent(raw: any): RuntimeErrorEvent | null {
