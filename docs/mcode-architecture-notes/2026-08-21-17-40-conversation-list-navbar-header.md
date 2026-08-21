@@ -172,9 +172,21 @@ await page.addStyleTag({ content: '.u-status-bar.u-safe-area-inset-top{padding-t
 它本就是为玻璃导航栏准备的、随主题翻转，比手写 `color-mix` 稳，也符合 AGENTS.md
 「只用主题表里存在的变量」。CSS 与 prop 两处必须同源，否则又是一条接缝。
 
+**prop 必须写成 CSS `var()` 字面量，不能在 script 里求值**：
+
+```ts
+const NAVBAR_GLASS_BG_COLOR = "var(--up-navbar-glass-bg-color, rgba(255, 255, 255, 0.82))"
+```
+
+第一版写的是 `computed(() => upThemeVar("--up-navbar-glass-bg-color", …))`，运行时抛
+`ReferenceError: upThemeVar is not defined` —— 那是 uview 用 **Options API mixin** 注入的方法，
+只有**模板作用域**能调，`<script setup>` 里没有。computed 里抛错的表现是 prop 静默变成空串，
+于是 `u-navbar` 回退到 `navbarBgColor`（`transparent`），状态栏又透了。
+详见 `2026-08-22-01-00-tab-badge-connected-map-reachability.md` 里那一节。
+
 顺带纠正一个我一度写错的判断：**作者样式表里的 `!important` 压得住组件写的行内
 `background-color`**（行内只在自身也带 `!important` 时才更强）。所以玻璃实际是那条 `:deep()`
-规则生效的，prop 是第二道保险 —— 万一 `:deep()` 因作用域变化失效，行内值仍是玻璃色。
+规则在生效，prop 只是让行内值也保持玻璃色而非 `transparent`。
 
 ## 降级契约
 

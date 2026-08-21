@@ -95,6 +95,68 @@ return { instanceKey, count }
 `does not mark a connection that resolves but cannot be reached` 专门锁住上面那个顺序 ——
 把 `markConnectionConnected` 挪回 fetch 之前，它会失败（已反向验证过）。
 
+## 收口：`connectedMapStore` 成为唯一读写入口
+
+修完角标后顺手处理了同一个 map 的另一个隐患：它原先在 **4 个文件**里各写了一遍，
+且**写方和读方用的不是同一个 key 函数**。
+
+- 写：`pages/connections/index.vue` → `buildConnectionRecordKey(conn)`（直接读原始字段）
+- 读：`pages/conversations/index.vue` / `pages/todos/index.vue` /
+      `conversationTabBadgeService` → `buildConnectionKey(conn)`（先归一化再取键）
+
+两者对良构 v2 记录恰好等价，所以一直没炸。但只要记录**无法通过 v2 归一化**就会分叉，
+实测三种（写了个临时 spec 逐一比对得出）：
+
+| 记录 | `buildConnectionRecordKey` | `buildConnectionKey` |
+|---|---|---|
+| `targetAgent: "CodeG"` | `"CodeG::direct::…"` | `""` |
+| `version: 1` | `"codeg::direct::…"` | `""` |
+| 缺 `directBaseUrl` | `"codeg::direct::"` | `""` |
+
+写进去的键读方永远匹配不上 —— 「已连接」状态静默丢失。更糟的是
+`pages/conversations/index.vue` 会按自己的算法**重写整个 map**
+（`pruneConnectedMapBySavedConnections`），把读不出来的条目当成陈旧条目剪掉，造成不可逆丢失。
+
+现在统一走 `src/services/connection/connectedMapStore.ts`：
+
+- 所有键都由 `buildConnectionKey` 生成（归一化失败返回 `""`）。
+- `markConnectionConnected` 遇到空键**什么都不做** —— 宁可不标记，
+  也不要写一个谁都读不到的键。
+- 剪枝（`pruneConnectedMap`）与置位共用同一个 key 函数，不会再自相矛盾。
+- `pages/connections/index.vue` 的 `connectionKey` 也改用 `buildConnectionKey`；
+  它的 `connections.value` 来自 `readStoredConnections()`（已归一化），所以对本页行为无影响。
+
+单测见 `mcode-app/tests/services/connectedMapStore.spec.ts`（12 例），其中三例就是上表那三种分叉。
+
+## 另一个坑：`upThemeVar` 不能在 `<script setup>` 里调
+
+收口过程中撞上一个**我自己在 navbar 改造里埋的**运行时错误：
+
+```
+ReferenceError: upThemeVar is not defined
+```
+
+`upThemeVar` 是 uview 通过 **Options API mixin** 注入的方法（`libs/mixin/mixin.js`），
+只有**模板作用域**能调。在 `<script setup>` 里写 `computed(() => upThemeVar(...))` 会抛错，
+而且是在 computed 求值时抛 —— 表现为 prop 静默变成空串，于是
+`u-navbar` 回退到 `statusBarBgColor ? … : navbarBgColor`，状态栏又变透明。
+
+（这也解释了当时排查状态栏时看到的 `statusBarBgColor: ""`：不是时序问题、不是 TDZ、
+不是 HMR 缓存 —— 就是这个函数在那个作用域里根本不存在。绕了很多探针才定位到。）
+
+正确做法是直接给 CSS `var()` 字面量，交给浏览器求值：
+
+```ts
+const NAVBAR_GLASS_BG_COLOR = "var(--up-navbar-glass-bg-color, rgba(255, 255, 255, 0.82))"
+```
+
+反而更好 —— 主题切换时自动跟随，不需要响应式。**模板里**的
+`:leftIconColor="upThemeVar('--up-main-color', '#191c1e')"` 是合法的，别一起改掉。
+
+**注意**：`vue-tsc` 会把这个报成 `TS2304: Cannot find name 'upThemeVar'`，
+但那个报错对**模板里**的用法是误报（mixin 注入的东西它看不见）。所以不能只看类型检查 ——
+这个错误是靠浏览器控制台的 `pageerror` 抓到的。
+
 ## native iOS / Android 复刻指引
 
 **别把 UI 状态当事实**。这个 bug 的本质是「用户点过连接按钮」被当作「机器可达」使用。
@@ -111,8 +173,17 @@ native 端如果也维护类似的本地连接状态表，要区分两件事：
   （一次网络抖动不该让角标归零，用户会误以为任务都跑完了）。
 - 「标记为已连接」必须发生在拿到响应之后，不是构造完 client 对象就写。
   iOS 上 `URLSession` 的 task 创建同样不代表连通，Android 的 `Retrofit` 实例化亦然。
+- **连接标识必须全局只有一份实现**。web 端这个 bug 的另一半就是同一个 map 有两套 key
+  算法（见上文「收口」），native 端同样容易犯 —— 把「连接 → 唯一键」收敛成一个函数，
+  归一化失败时返回空并拒绝写入，而不是各处 `"\(agent)::\(mode)::\(url)"` 手拼。
 - 角标生命周期不能绑在任何页面上（见
   `2026-08-20-16-05-tabbar-badge-autonomous-service.md`：这套逻辑原先活在会话页的
   `onShow` / `onUnload` 上，而冷启动落在「连接」页、会话页可能整个会话期间都没挂载过）——
   iOS 放 `AppDelegate` / `SceneDelegate`，Android 放 `Application` 或
   `WorkManager` 的周期任务。
+
+## 已知遗留
+
+「待办」页不会触发 `refreshConversationTabBadge`，App 的 `onShow` 也不在应用内 tab
+切换时触发。所以冷启动**直接落在待办页**的话，角标要等到用户切去别的 tab 才出现。
+这与本次根因无关（是同一类「刷新入口覆盖不全」的问题），未在本次改动范围内处理。
