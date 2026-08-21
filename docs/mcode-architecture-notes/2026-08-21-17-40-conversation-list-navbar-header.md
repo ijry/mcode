@@ -107,7 +107,7 @@ function handleNavbarLeftClick() {
 }
 ```
 
-### 4. `.history-scroll` 写死的高度预算会留下空白
+### 4. `.history-scroll` 写死的高度预算会留下空白 —— 但删掉它更糟
 
 **这条 spec 未覆盖，是审计源码时发现的。** 原来写的是：
 
@@ -118,15 +118,31 @@ height: calc(100vh - 390rpx - env(safe-area-inset-bottom));
 那 390rpx 是按**旧的三层顶部**估的。删掉大标题行和模式栏之后，这个预算会多扣约 190rpx，
 历史列表底部凭空空出一块 —— 恰好抵消掉这次改造省下的高度。
 
-改成交给 flex 链算（`.conversations-shell` → `.main-wrap--history` → `.history-list`
-三层本来就都是 `flex: 1; min-height: 0`，链是通的）：
+但**直接删掉它会更糟**：这个 `height` 不只是个估值，它是整条 flex 链上**唯一的确定高度**。
+`.conversations-shell` 只有 `min-height: 100vh`（下界，不是上界），`flex: 1` 没有可解析的父高度
+时会退化成内容高度 —— 实测 `scroll-view` 长到 **5715px**，自身滚动失效、列表钻到 tabbar 底下。
+
+正确做法是把「确定高度」这件事交给历史模式的容器，且不再手写任何层高：
 
 ```scss
-.history-scroll {
-  flex: 1;
+.conversations-shell--history {
+  position: fixed;
+  top: calc(var(--window-top, 0px) + 44px);
+  bottom: 0;              /* 不减 --window-bottom：见下 */
+  left: 0;
+  right: 0;
   min-height: 0;
+  padding: 0 32rpx;       /* fixed 脱流后要补回左右内边距 */
+  overflow: hidden;
 }
 ```
+
+`bottom` 取 `0` 而不是 `--window-bottom`：H5 下 fixed 的包含块本就是**已扣掉 tabbar 的**可视区，
+再减一次会在列表与 tabbar 之间留出一条 50px 空带（并把总高顶到 894 > 844、整页多滚 50px）。
+这一步我连踩了三次（`max-height` → `100vh - tabbar` → `- 44px` 过扣），每次都是「修好一个测量值、
+弄坏另一个」，最后靠逐层量 `getBoundingClientRect` 才定位准。
+
+`.history-scroll` 本身只留 `flex: 1; min-height: 0`。
 
 ### 5. 长标题不会挤压右侧按钮，而是滑到它底下
 
@@ -134,6 +150,31 @@ height: calc(100vh - 390rpx - env(safe-area-inset-bottom));
 所以长组名不会把右侧按钮顶出可视区，而是**滑到按钮下面重叠**。
 `.conversations-navbar__title` 的 `max-width: 420rpx` 是为了防这种重叠，不是防挤压 ——
 `u-line-1` 只做 `nowrap` + `ellipsis`，本身不给宽度，没有 `max-width` 就不会截断。
+
+### 6. 状态栏必须和 navbar 同色，且这条只有真机能验
+
+`up-navbar` 内部把状态栏渲染成
+`<u-status-bar :bgColor="statusBarBgColor ? statusBarBgColor : navbarBgColor">`。
+一开始给 `statusBarBgColor="transparent"` 想「靠 CSS 补玻璃」，真机上顶部就多出一条色差接缝。
+
+**H5 验不出来**：`u-status-bar` 在 `statusBarHeight === 0` 时不写 `style.height`，改挂
+`.u-safe-area-inset-top` 靠 `env(safe-area-inset-top)` 取高 —— 桌面浏览器下该值为 0，整条不可见。
+要在浏览器里复现，得手动给它 `padding-top`：
+
+```js
+await page.addStyleTag({ content: '.u-status-bar.u-safe-area-inset-top{padding-top:44px !important}' })
+```
+
+补上高度后实测，状态栏与 navbar 的 `computedBg` 完全一致（浅色
+`rgba(255,255,255,0.82)`、深色 `rgba(28,28,30,0.82)`），blur 同为 `15.6px`。
+
+底色统一取 uview 运行时主题表里现成的 **`--up-navbar-glass-bg-color`** ——
+它本就是为玻璃导航栏准备的、随主题翻转，比手写 `color-mix` 稳，也符合 AGENTS.md
+「只用主题表里存在的变量」。CSS 与 prop 两处必须同源，否则又是一条接缝。
+
+顺带纠正一个我一度写错的判断：**作者样式表里的 `!important` 压得住组件写的行内
+`background-color`**（行内只在自身也带 `!important` 时才更强）。所以玻璃实际是那条 `:deep()`
+规则生效的，prop 是第二道保险 —— 万一 `:deep()` 因作用域变化失效，行内值仍是玻璃色。
 
 ## 降级契约
 
@@ -159,34 +200,56 @@ height: calc(100vh - 390rpx - env(safe-area-inset-bottom));
 
 ## 验证状态
 
-**已验证**（H5 + Playwright，390×844 @2x，实测数值）：
+**已验证**（H5 + Playwright，390×844 @2x，接本地 CodeG 直连实例、真实 folder/会话数据）：
 
 | 项 | 结果 |
 |---|---|
-| navbar 高度 | `.u-navbar__content` = 44px；`.conversations-searchbar` 起于 `y: 44` —— 无缝隙无重叠 |
-| 玻璃（浅色） | `color(srgb 1 1 1 / 0.55)` + `blur(15.6px)`（30rpx @390px） |
-| 玻璃（深色） | `color(srgb 0.1098 0.1098 0.1176 / 0.55)`，即 `#1c1c1e` 55% |
+| navbar 高度 | `.u-navbar__content` = 44px；搜索框起于 `y: 44` —— 无缝隙无重叠 |
+| 玻璃（浅色） | `rgba(255, 255, 255, 0.82)` + `blur(15.6px)` |
+| 玻璃（深色） | `rgba(28, 28, 30, 0.82)`，标题转 `rgb(245,245,245)`，对比度约 15:1 |
+| 状态栏连续性 | 补上 `padding-top` 模拟真机高度后，状态栏与 navbar `computedBg` 完全一致，无接缝 |
 | `__placeholder` 背景 | `rgba(0, 0, 0, 0)` —— 未被染色，无双层色带 |
-| 概览模式左侧 | `leftIcon` 图标数 = 0，但点击区实测 26×44 且可点 |
+| 概览模式左侧 | `leftIcon` 图标数 = 0，但点击区实测 **26×44 且可点** |
 | 左键守卫 | 点左侧空白后 `.history-list` 仍为 0、标题仍是「会话」—— 守卫生效 |
-| 标题（深色） | `rgb(245, 245, 245)` on `#1c1c1e`，对比度约 15:1（远超 WCAG AA） |
+| 选择态 | 点「选择」→ 右侧转「取消」、`.bulk-action-bar` 浮出、10 张卡出现勾选框 |
+| 历史模式 navbar | 左箭头出现（图标数 1）、标题转组名「本地 CodeG」、右侧转「新建」、`＋` 消失 |
+| 选择态回归点 | 带着选择态进历史模式 → `.bulk-action-bar` 消失、右侧正确变「新建」而非残留「取消」 |
+| 旧模式栏 | `.history-mode-bar` 计数 0 —— 确已删除 |
+| 历史列表滚动 | 内层 `.uni-scroll-view` `scrollHeight 5492 / clientHeight 698`，`scrollTop` 0 → 4794 可达底 |
+| 历史列表底部 | 列表底边与 tabbar 顶边 `gap = 0` —— 无多余空白（Task 4 的目标） |
+| 返回分组 | 点左箭头 → `.history-list` 消失、标题回「会话」、分组恢复 |
 | 控制台 | 无 error、无 pageerror |
+| 单元测试 | 连续 3 次全量 `npm run test:unit` 均 860/860 通过 |
 
-**未验证（需真实 CodeG 连接，H5 环境显示「请先添加连接」）：**
+**仍未验证：**
 
-1. **历史模式**：左箭头出现 / 标题换组名 / 右侧换「新建」/ 长组名截断；
-   以及上文第 4 点的高度修复在视觉上是否真的消除了底部空白。
-2. **选择态回归点**：进历史模式时 `showSelectionEntry` 变化会连带触发
-   `exitSelectionMode()`（`index.vue` 的 watch）。需确认选择态被自动清掉、
-   navbar 右侧从「取消」正确变回「新建」而非残留。
-3. **下拉刷新**：本页是 `enablePullDownRefresh: true` 的 custom nav 页。fixed navbar 不参与
-   页面滚动，系统刷新圈从页面顶部下来，会从 navbar 玻璃层底下钻出。
-   **若刷新圈被完全遮住**，退路是给 `.conversations-navbar-shell :deep(.u-navbar--fixed)`
-   加 `z-index: 9`（低于 `u-navbar--fixed` 默认的 `11`）。本页 `.bulk-action-bar` 用的是
-   `z-index: 30`，下调 navbar 不影响它。
+- **下拉刷新**：本页是 `enablePullDownRefresh: true` 的 custom nav 页。fixed navbar 不参与页面
+  滚动，系统刷新圈从页面顶部下来，会从 navbar 玻璃层底下钻出。Playwright 触发不了 uni-app 的
+  下拉手势，需真机确认刷新圈位置。
+  **若被完全遮住**，退路是给 `.conversations-navbar-shell :deep(.u-navbar--fixed)` 加
+  `z-index: 9`（低于 `u-navbar--fixed` 默认的 `11`）。本页 `.bulk-action-bar` 用 `z-index: 30`，
+  下调 navbar 不影响它。
+- **H5 Safari 的 blur + fixed**：降级分支（`@supports not`）只做了静态代码验证，
+  未在真 Safari 上跑过。
 
-源码契约测试见 `mcode-app/tests/pages/conversations/conversationListNavbarHeader.spec.ts`（8 例）。
-注意这类测试只断言源码字符串，**证明不了视觉与手势** —— 上面那三条只能靠实机。
+源码契约测试见 `mcode-app/tests/pages/conversations/conversationListNavbarHeader.spec.ts`（9 例）。
+注意这类测试只断言源码字符串，**证明不了视觉与手势** —— 上面那张表是靠 Playwright 量 DOM
+几何 + 截图得到的，而状态栏那条连真机特性都得手动模拟才看得见。
+
+### 复现验证环境
+
+浏览器里造数据需要注意两点，否则会白跑：
+
+1. **uni-app H5 的 storage 有包装**：`setStorageSync` 对非字符串值写的是
+   `{"type":"object","data":...}`（见 `@dcloudio/uni-h5` 的 `setStorageSync` / `parseValue`）。
+   直接 `localStorage.setItem(k, JSON.stringify(obj))` 的话 `getStorageSync` 反序列化不出来，
+   `readStoredConnections()` 会因为 `Array.isArray(raw)` 为假而返回空数组 —— 页面一直显示
+   「请先添加连接」。
+2. **连接键格式**：`buildConnectionRecordKey` = `` `${targetAgent}::${routeMode}::${directBaseUrl}` ``，
+   例如 `codeg::direct::http://127.0.0.1:3089`。`mcode_connected_map` 要用这个键。
+
+另外首启的宠物选择弹层（pinia store id `pet`，`initialized` 为假时弹出）会拦截点击，
+预置 `initialized: true` 即可跳过。
 
 ## native iOS / Android 复刻指引
 
@@ -206,3 +269,14 @@ height: calc(100vh - 390rpx - env(safe-area-inset-bottom));
 
 **两端共同**：不支持模糊时一律退到不透明表面色 + 1dp 分隔线，保证文字对比度 ——
 与上面的 web 降级契约一致。
+
+**状态栏**：iOS / Android 都要让状态栏与导航栏共用同一片材质。这一条在 web 端是靠
+`--up-navbar-glass-bg-color` 同时喂给 CSS 与 `statusBarBgColor` 实现的；native 上对应
+iOS 的 `UINavigationBar` 默认已延伸到状态栏下（别额外加 `safeAreaInset` 背景），
+Android 需 `WindowCompat.setDecorFitsSystemWindows(window, false)` +
+`statusBarColor = Color.TRANSPARENT`，让 toolbar 的材质自己铺到状态栏。
+
+**历史模式的高度**：native 上不要照搬 web 的 `position: fixed` —— 直接用
+`UITableView` / `RecyclerView` 填充「导航栏下沿到 tabbar 上沿」的约束区间即可
+（iOS 用 safeArea 约束，Android 用 `layout_constraintTop/Bottom`）。
+web 端绕这一圈是因为 `flex: 1` 需要确定高度祖先，native 的约束系统没这个问题。
