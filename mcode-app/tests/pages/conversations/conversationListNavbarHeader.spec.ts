@@ -62,7 +62,8 @@ describe("conversation list navbar header contract", () => {
     const source = read("../../../src/pages/conversations/index.vue")
 
     expect(source).toContain('v-if="showHistoryPanel"')
-    expect(source).toContain("{{ historyGroupTitle }}")
+    // 标题与右侧按钮都只读既有状态，不引入新的 ref。
+    expect(source).toContain('showHistoryPanel ? historyGroupTitle : "会话"')
     expect(source).toContain('v-if="canCreateInHistory"')
   })
 

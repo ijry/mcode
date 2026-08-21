@@ -7,45 +7,71 @@
       <view class="liquid-blob liquid-blob--three"></view>
     </view>
     <view class="conversations-shell">
-      <up-sticky class="conversations-sticky" :offset-top="0" :custom-nav-height="0" bg-color="transparent" z-index="20">
-        <up-status-bar></up-status-bar>
-        <view class="conversations-header">
-          <text class="conversations-header__title">会话</text>
-          <view class="conversations-header__actions">
-            <view
-              v-if="showSelectionEntry"
-              class="conversations-header__select"
-              @click="toggleSelectionMode"
-            >
-              <text class="conversations-header__select-text">{{ selectionMode ? "取消" : "选择" }}</text>
-            </view>
-            <view
-              v-if="!selectionMode"
-              class="conversations-header__action"
-              @click="createConversation()"
-            >
-              <up-icon name="plus" size="20" :color="upThemeVar('--up-primary', '#2f7cf6')"></up-icon>
-            </view>
+      <up-navbar
+        customClass="conversations-navbar-shell"
+        :fixed="true"
+        :placeholder="true"
+        :border="false"
+        :autoBack="false"
+        height="44px"
+        :leftIcon="showHistoryPanel ? 'arrow-left' : ''"
+        :leftIconColor="upThemeVar('--up-main-color', '#191c1e')"
+        bgColor="transparent"
+        statusBarBgColor="transparent"
+        @leftClick="handleNavbarLeftClick"
+      >
+        <template #center>
+          <text class="conversations-navbar__title u-line-1">
+            {{ showHistoryPanel ? historyGroupTitle : "会话" }}
+          </text>
+        </template>
+        <template #right>
+          <view class="conversations-navbar__actions">
+            <template v-if="showHistoryPanel">
+              <view
+                v-if="canCreateInHistory"
+                class="conversations-navbar__select"
+                @click="createConversation()"
+              >
+                <text class="conversations-navbar__select-text">新建</text>
+              </view>
+            </template>
+            <template v-else>
+              <view
+                v-if="showSelectionEntry"
+                class="conversations-navbar__select"
+                @click="toggleSelectionMode"
+              >
+                <text class="conversations-navbar__select-text">{{ selectionMode ? "取消" : "选择" }}</text>
+              </view>
+              <view
+                v-if="!selectionMode"
+                class="conversations-navbar__action"
+                @click="createConversation()"
+              >
+                <up-icon name="plus" size="18" :color="upThemeVar('--up-primary', '#2f7cf6')"></up-icon>
+              </view>
+            </template>
           </view>
-        </view>
+        </template>
+      </up-navbar>
 
-        <view class="conversations-searchbar">
-          <up-search
-            v-model="searchKeyword"
-            placeholder="搜索会话..."
-            :show-action="false"
-            shape="round"
-            :bgColor="upThemeVar('--up-hover-bg-color', '#e9eaee')"
-            borderColor="transparent"
-            :color="upThemeVar('--up-main-color', '#1a1b1f')"
-            :placeholderColor="upThemeVar('--up-tips-color', '#9ca3af')"
-            :searchIconColor="upThemeVar('--up-tips-color', '#8b93a5')"
-            :height="40"
-            @search="() => {}"
-            @clear="() => {}"
-          ></up-search>
-        </view>
-      </up-sticky>
+      <view class="conversations-searchbar">
+        <up-search
+          v-model="searchKeyword"
+          placeholder="搜索会话..."
+          :show-action="false"
+          shape="round"
+          :bgColor="upThemeVar('--up-hover-bg-color', '#e9eaee')"
+          borderColor="transparent"
+          :color="upThemeVar('--up-main-color', '#1a1b1f')"
+          :placeholderColor="upThemeVar('--up-tips-color', '#9ca3af')"
+          :searchIconColor="upThemeVar('--up-tips-color', '#8b93a5')"
+          :height="40"
+          @search="() => {}"
+          @clear="() => {}"
+        ></up-search>
+      </view>
 
       <!-- 无连接 -->
       <view v-if="!hasActiveConnection" class="empty-fullpage conversations-empty-fullpage">
@@ -222,22 +248,6 @@
 
         <!-- 历史模式：项目分组列表 -->
         <view v-else class="history-list">
-          <view class="history-mode-bar" :style="upThemeCardStyle">
-            <view class="history-mode-back" @click="closeHistoryPanel">
-              <up-icon name="arrow-left" size="14" color="#2979ff"></up-icon>
-              <text class="history-mode-back__text">返回分组</text>
-            </view>
-            <text class="history-mode-title u-line-1">{{ historyGroupTitle }}</text>
-            <view
-              v-if="canCreateInHistory"
-              class="history-mode-create"
-              @click="createConversation()"
-            >
-              <up-icon name="plus" size="14" color="#2979ff"></up-icon>
-              <text class="history-mode-create__text">新建</text>
-            </view>
-          </view>
-
           <view v-if="historyLoading && historyProjectSections.length === 0" class="inline-loading">
             <up-loading-icon color="#2979ff" size="28"></up-loading-icon>
             <text class="inline-loading__text">加载中...</text>
@@ -2722,6 +2732,16 @@ function closeHistoryPanel() {
   historyGroupKey.value = ""
   historyGroupTitle.value = ""
   projects.value = []
+}
+
+/**
+ * `up-navbar` 的 `.u-navbar__content__left` 是个固定尺寸的点击区，`leftIcon` 为空时它依然
+ * 存在且可点（见 uview-plus `u-navbar.vue` 模板）。概览模式下没有返回目标，少了这道守卫，
+ * 点左上角空白会静默清掉一遍历史状态。
+ */
+function handleNavbarLeftClick() {
+  if (!showHistoryPanel.value) return
+  closeHistoryPanel()
 }
 
 async function ensureHistoryProjectsLoaded(group: ConnectionGroup) {
