@@ -3998,11 +3998,12 @@ function formatTime(time?: string): string {
   flex-direction: column;
 }
 
+/* 高度交给 flex 链算（.conversations-shell → .main-wrap--history → .history-list）。
+   这里曾写死 calc(100vh - 390rpx)，那是按「大标题 + 搜索框 + 模式栏」三层顶部估的预算；
+   navbar 改造删掉了其中两层，继续写死会让列表底部空出约 190rpx。 */
 .history-scroll {
   flex: 1;
   min-height: 0;
-  height: calc(100vh - 390rpx - env(safe-area-inset-bottom));
-  max-height: calc(100vh - 390rpx - env(safe-area-inset-bottom));
 }
 
 .history-collapse {

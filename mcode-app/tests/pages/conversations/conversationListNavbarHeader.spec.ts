@@ -91,4 +91,19 @@ describe("conversation list navbar header contract", () => {
     expect(source).toContain(".conversations-navbar__title")
     expect(source).toContain("color: var(--up-main-color, #191c1e);")
   })
+
+  // 390rpx 是按旧的三层顶部估的预算。navbar 改造后再写死它，历史列表底部会空出约 190rpx。
+  // 高度改由 flex 链决定（.conversations-shell → .main-wrap--history → .history-list）。
+  it("lets the history scroll area size itself through flex", () => {
+    const source = read("../../../src/pages/conversations/index.vue")
+
+    // 写死的 calc() 规则必须消失（允许出现在注释里，但不能是活跃 CSS 值）。
+    expect(source).not.toContain("height: calc(100vh - 390rpx")
+    const block = source.slice(
+      source.indexOf(".history-scroll {"),
+      source.indexOf("}", source.indexOf(".history-scroll {")) + 1
+    )
+    expect(block).toContain("flex: 1")
+    expect(block).toContain("min-height: 0")
+  })
 })
