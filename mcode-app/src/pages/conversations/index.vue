@@ -6,7 +6,7 @@
       <view class="liquid-blob liquid-blob--two"></view>
       <view class="liquid-blob liquid-blob--three"></view>
     </view>
-    <view class="conversations-shell">
+    <view :class="['conversations-shell', showHistoryPanel && 'conversations-shell--history']">
       <up-navbar
         customClass="conversations-navbar-shell"
         :fixed="true"
@@ -17,7 +17,7 @@
         :leftIcon="showHistoryPanel ? 'arrow-left' : ''"
         :leftIconColor="upThemeVar('--up-main-color', '#191c1e')"
         bgColor="transparent"
-        statusBarBgColor="transparent"
+        :statusBarBgColor="navbarGlassBgColor"
         @leftClick="handleNavbarLeftClick"
       >
         <template #center>
@@ -1444,6 +1444,27 @@ const conversationActions = [
   { name: "重命名", color: "#2979ff" },
   { name: "删除",   color: "#fa3534" },
 ]
+
+/**
+ * 状态栏那块的底色。
+ *
+ * 真机上（`statusBarHeight > 0`）这条状态栏是有真实高度的，浅色下必须和 navbar 同色，
+ * 否则顶部会出现一条色差接缝。H5 上 `statusBarHeight === 0`，`u-status-bar` 走
+ * `.u-safe-area-inset-top` 靠 `env(safe-area-inset-top)` 取高，桌面浏览器下为 0、
+ * 整条不可见 —— 所以这个问题只有真机能暴露，当初就是这么漏掉的。
+ *
+ * 值取 uview 运行时主题表里现成的 `--up-navbar-glass-bg-color`
+ * （浅色 `rgba(255,255,255,.82)` / 深色 `rgba(28,28,30,.82)`），它本就是为玻璃导航栏
+ * 准备的、且随主题翻转，符合 AGENTS.md「只用主题表里存在的变量」。
+ *
+ * 注：玻璃效果实际由 `.conversations-navbar-shell :deep(.u-status-bar)` 那条
+ * `!important` 规则提供（作者样式表里的 `!important` 压得住组件写的行内
+ * `background-color`）。这个 prop 是第二道保险 —— 万一 `:deep()` 因作用域变化失效，
+ * 行内值仍是玻璃色而不是 `transparent`。
+ */
+const navbarGlassBgColor = computed(() =>
+  upThemeVar("--up-navbar-glass-bg-color", "rgba(255, 255, 255, 0.82)")
+)
 
 const hasActiveConnection = computed(() => {
   if (hasConversationOverviewConnections()) return true
@@ -3415,13 +3436,18 @@ function formatTime(time?: string): string {
 /* .u-navbar__content 自带 background-color: $u-bg-color，仅靠 bgColor="transparent"
    只能覆盖 inline style，容器层仍不透明 —— 必须 :deep() 穿透。
    写法沿用 pages/conversation-detail/index.scss:66-76 的既有做法。
-   刻意不照搬详情页的**不透明** --up-card-bg-color：那条笔记
+
+   底色用 uview 运行时主题表里现成的 --up-navbar-glass-bg-color（它随浅/深色翻转），
+   与 navbarGlassBgColor 传给状态栏的值是同一个 —— 两块必须一致，否则状态栏与 navbar
+   会出现一条色差接缝。
+
+   刻意不照搬会话详情页的**不透明** --up-card-bg-color：那条笔记
    (2026-07-02-detail-navbar-status-bar-bg.md) 要的是「别让消息区透到状态图标后面」，
    而本页要的正是背景光斑透上来。 */
 .conversations-navbar-shell :deep(.u-navbar--fixed),
 .conversations-navbar-shell :deep(.u-status-bar),
 .conversations-navbar-shell :deep(.u-navbar__content) {
-  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 55%, transparent) !important;
+  background: var(--up-navbar-glass-bg-color, rgba(255, 255, 255, 0.82)) !important;
   backdrop-filter: blur(30rpx);
   -webkit-backdrop-filter: blur(30rpx);
 }
@@ -3538,6 +3564,32 @@ function formatTime(time?: string): string {
   display: block;
 }
 
+/* 历史模式下必须给 shell 一个**确定高度**（而不仅是 min-height 这个下界），
+   否则内部 `flex: 1` 无从解析，会一路退化成内容高度 —— scroll-view 长到几千 px、
+   自身滚动失效、列表钻到 tabbar 底下。
+
+   用 `position: fixed` + 四边定位表达「从 navbar 底下铺到可视区底部」，而不是 `100vh`
+   减一串数字：顶部层数将来再变也不会失准 —— 写死的 390rpx 当初就是这么估错的。
+
+   bottom 取 0 而不是 --window-bottom：H5 下 fixed 的包含块本就是**已扣掉 tabbar 的**
+   可视区，再减一次会在列表和 tabbar 之间留出一条 50px 空带（并把总高顶到 894 > 844
+   导致整页多滚 50px）。 */
+.conversations-shell--history {
+  position: fixed;
+  top: calc(var(--window-top, 0px) + 44px);
+  bottom: 0;
+  left: 0;
+  right: 0;
+  min-height: 0;
+  /* fixed 脱离了原来的文档流，shell 的 padding-bottom 不再有意义；
+     左右内边距要保留，否则卡片贴到屏幕边缘。 */
+  padding: 0 32rpx;
+  overflow: hidden;
+}
+
+/* 历史模式要让内层 scroll-view 自己滚，就必须有一个**确定高度**的祖先。
+   这里只做 flex 收缩，真正的高度上界由 .conversations-shell--history 给。
+   不用写死的 390rpx —— 那个数会随顶部层数变化而失准，这也正是它当初估错的原因。 */
 .main-wrap--history {
   flex: 1;
   min-height: 0;

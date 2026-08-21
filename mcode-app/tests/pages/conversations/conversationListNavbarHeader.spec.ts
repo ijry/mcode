@@ -77,7 +77,14 @@ describe("conversation list navbar header contract", () => {
     expect(source).toContain("backdrop-filter: blur(30rpx)")
     expect(source).toContain("-webkit-backdrop-filter: blur(30rpx)")
     expect(source).toContain('bgColor="transparent"')
-    expect(source).toContain('statusBarBgColor="transparent"')
+    // 状态栏必须和 navbar 同色，否则真机上顶部有一条色差接缝。
+    // H5 下 statusBarHeight=0、该条不可见，所以这个问题只有真机能暴露。
+    expect(source).toContain(':statusBarBgColor="navbarGlassBgColor"')
+    expect(source).toContain("const navbarGlassBgColor = computed(")
+    expect(source).toContain('upThemeVar("--up-navbar-glass-bg-color"')
+    expect(source).not.toContain('statusBarBgColor="transparent"')
+    // 玻璃底色两处必须同源，否则状态栏与 navbar 会不一致
+    expect(source).toContain("var(--up-navbar-glass-bg-color, rgba(255, 255, 255, 0.82)) !important")
     // __placeholder 是 u-navbar--fixed 之外的独立兄弟节点，一旦被染上玻璃色
     // 顶部会出现「占位块 + fixed 层」双层色带。
     expect(source).toContain(".conversations-navbar-shell :deep(.u-navbar__placeholder)")
