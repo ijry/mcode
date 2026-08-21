@@ -173,4 +173,82 @@ describe("conversationTabBadgeService", () => {
     // App onShow、页面下拉刷新、新建会话可能同时触发，不该打三次网络。
     expect(mockFetchCount).toHaveBeenCalledTimes(1)
   })
+
+  /**
+   * `mcode_connected_map` 只在用户于「连接」页**手动点过「连接」**时才写入
+   * （`pages/connections/index.vue` 的 `persistConnectedMap`）——
+   * 它是「用户点过没」的 UI 交互标记，不是「这台机器现在可达」的事实。
+   *
+   * 角标服务却拿它当唯一门禁。于是清缓存 / 换设备 / 重装之后这个 map 是空的，
+   * `pet_list_active_sessions` **一次都不会发出**，角标永远不出现；而且所有刷新路径
+   * （onLaunch / onShow / 下拉刷新 / pet://sessions / 重连补拉）都走同一道门，
+   * 所以它**自己永远不会恢复** —— 只有回「连接」页再点一次连接才好。
+   *
+   * 修法：门禁放宽成「有保存的连接就试」，resolve 成功即视为已连上并补写该标记。
+   */
+  it("counts saved connections even when the connected map is empty", async () => {
+    mockGetStorageSync.mockReturnValue({})
+    mockReadStoredConnections.mockReturnValue([{ key: "conn-a" }])
+    mockFetchCount.mockResolvedValue(4)
+
+    const service = await import("@/services/conversation/conversationTabBadgeService")
+    await service.refreshConversationTabBadge()
+
+    expect(mockResolveConnectionContext).toHaveBeenCalled()
+    expect(mockSetTabBarBadge).toHaveBeenCalledWith(
+      expect.objectContaining({ index: 1, text: "4" })
+    )
+  })
+
+  it("marks a connection as connected once it resolves", async () => {
+    mockGetStorageSync.mockReturnValue({})
+    mockReadStoredConnections.mockReturnValue([{ key: "conn-a" }])
+    mockFetchCount.mockResolvedValue(1)
+
+    const service = await import("@/services/conversation/conversationTabBadgeService")
+    await service.refreshConversationTabBadge()
+
+    // 事实回填标记：下次「连接」页与会话列表页读到的 map 就不再是空的。
+    expect(globalThis.uni.setStorageSync).toHaveBeenCalledWith(
+      "mcode_connected_map",
+      expect.objectContaining({ "conn-a": true })
+    )
+  })
+
+  /**
+   * direct 模式下 `resolveConnectionContext` 只是用存储里的 baseUrl + token 拼出 gateway
+   * 对象，**不碰网络** —— 所以 resolve 成功证明不了机器可达。标记必须等到
+   * `pet_list_active_sessions` 真的返回之后再写，否则一台早已下线的机器
+   * 会被永久标成 connected，把假事实喂给会话列表页。
+   */
+  it("does not mark a connection that resolves but cannot be reached", async () => {
+    mockGetStorageSync.mockReturnValue({})
+    mockReadStoredConnections.mockReturnValue([{ key: "conn-a" }])
+    // resolve 成功（不碰网络），但真正的请求失败
+    mockResolveConnectionContext.mockResolvedValue(gatewayFor("direct::a"))
+    mockFetchCount.mockRejectedValue(new Error("ECONNREFUSED"))
+
+    const service = await import("@/services/conversation/conversationTabBadgeService")
+    await service.refreshConversationTabBadge()
+
+    const wroteMap = (globalThis.uni.setStorageSync as jest.Mock).mock.calls
+      .some((call) => call[0] === "mcode_connected_map")
+    expect(wroteMap).toBe(false)
+    expect(mockSetTabBarBadge).not.toHaveBeenCalled()
+  })
+
+  it("does not mark a connection that fails to resolve", async () => {
+    mockGetStorageSync.mockReturnValue({})
+    mockReadStoredConnections.mockReturnValue([{ key: "conn-a" }])
+    mockResolveConnectionContext.mockRejectedValue(new Error("unreachable"))
+
+    const service = await import("@/services/conversation/conversationTabBadgeService")
+    await service.refreshConversationTabBadge()
+
+    const wroteMap = (globalThis.uni.setStorageSync as jest.Mock).mock.calls
+      .some((call) => call[0] === "mcode_connected_map")
+    expect(wroteMap).toBe(false)
+    // 连不上就别显示假角标，但也不能因此清掉别人的计数
+    expect(mockSetTabBarBadge).not.toHaveBeenCalled()
+  })
 })

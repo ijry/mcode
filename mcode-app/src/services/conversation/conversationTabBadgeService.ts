@@ -51,11 +51,36 @@ function readConnectedMap(): Record<string, boolean> {
   return raw as Record<string, boolean>
 }
 
-function getConnectedConnections() {
+/**
+ * 把「这条连接确实连上过」这个**事实**回填进 `mcode_connected_map`。
+ *
+ * 这个 map 原本只由「连接」页在用户手动点「连接」时写入，语义是「用户点过没」。
+ * 角标（以及会话列表）却拿它当「是否可达」用 —— 清缓存 / 换设备 / 重装之后它是空的，
+ * 于是请求一次都不发、角标永不出现，且因为所有刷新路径都走同一道门而**永不自愈**。
+ *
+ * 这里在 resolve 成功后补写，把它升级成「曾经成功连上过」。只在缺失时写，避免每次
+ * 刷新都碰一次 storage。
+ */
+function markConnectionConnected(connectionKey: string) {
+  if (!connectionKey) return
   const connectedMap = readConnectedMap()
-  return readStoredConnections().filter((conn) =>
-    Boolean(connectedMap[buildConnectionKey(conn)])
-  )
+  if (connectedMap[connectionKey]) return
+  uni.setStorageSync("mcode_connected_map", {
+    ...connectedMap,
+    [connectionKey]: true,
+  })
+}
+
+/**
+ * 参与计数的连接。
+ *
+ * 刻意**不**按 `mcode_connected_map` 过滤：那个标记只反映用户在「连接」页的操作，
+ * 空值不代表连接不可用（见 `markConnectionConnected` 的说明）。这里对所有已保存的
+ * 连接都试一次，连不上的由 `Promise.allSettled` 静默跳过 —— 失败的实例会保留上一次
+ * 的计数，不会把角标清零。
+ */
+function getCountableConnections() {
+  return readStoredConnections()
 }
 
 /**
@@ -100,7 +125,7 @@ function ensureInstanceSubscriptions(instanceKey: string) {
 }
 
 async function refreshInternal() {
-  const conns = getConnectedConnections()
+  const conns = getCountableConnections()
   if (conns.length === 0) {
     countByInstance.clear()
     await pushBadge()
@@ -112,10 +137,12 @@ async function refreshInternal() {
       const resolved = await resolveConnectionContext(conn)
       const instanceKey = resolved.gateway.getRemoteInstanceDescriptor().instanceKey
       ensureInstanceSubscriptions(instanceKey)
-      return {
-        instanceKey,
-        count: await fetchOngoingActiveSessionCount(resolved.gateway),
-      }
+      // 先真的问一次服务端 —— direct 模式下 `resolveConnectionContext` 只是用存储里的
+      // baseUrl + token 拼出 gateway 对象，**不碰网络**，所以 resolve 成功证明不了可达。
+      // 只有这个调用返回了，才算「确实连上过」。
+      const count = await fetchOngoingActiveSessionCount(resolved.gateway)
+      markConnectionConnected(buildConnectionKey(conn))
+      return { instanceKey, count }
     })
   )
 
