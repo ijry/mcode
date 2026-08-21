@@ -17,7 +17,7 @@
         :leftIcon="showHistoryPanel ? 'arrow-left' : ''"
         :leftIconColor="upThemeVar('--up-main-color', '#191c1e')"
         bgColor="transparent"
-        :statusBarBgColor="navbarGlassBgColor"
+        :statusBarBgColor="NAVBAR_GLASS_BG_COLOR"
         @leftClick="handleNavbarLeftClick"
       >
         <template #center>
@@ -652,6 +652,11 @@ import {
   resolveConnectionContext,
   type ConnectionContext,
 } from "@/services/connectionContext"
+import {
+  filterConnectedConnections,
+  isConnectionConnected,
+  pruneConnectedMap,
+} from "@/services/connection/connectedMapStore"
 import { ensureConversationSchema } from "@/services/db/migrations"
 import {
   buildAgentConfigContextKey,
@@ -1446,25 +1451,19 @@ const conversationActions = [
 ]
 
 /**
- * 状态栏那块的底色。
+ * 状态栏那块的底色，必须和 navbar 同色，否则真机上顶部会出现一条色差接缝。
+ * H5 上 `statusBarHeight === 0`、`u-status-bar` 靠 `env(safe-area-inset-top)` 取高
+ * （桌面浏览器下为 0、整条不可见），所以这个问题只有真机能暴露。
  *
- * 真机上（`statusBarHeight > 0`）这条状态栏是有真实高度的，浅色下必须和 navbar 同色，
- * 否则顶部会出现一条色差接缝。H5 上 `statusBarHeight === 0`，`u-status-bar` 走
- * `.u-safe-area-inset-top` 靠 `env(safe-area-inset-top)` 取高，桌面浏览器下为 0、
- * 整条不可见 —— 所以这个问题只有真机能暴露，当初就是这么漏掉的。
+ * 直接给 CSS `var()` 字符串，而**不是**在 script 里求值：
+ * `upThemeVar` 是 uview 通过 Options API mixin 注入的**方法**，只有模板作用域能调 ——
+ * 在 `<script setup>` 里调会抛 `ReferenceError: upThemeVar is not defined`
+ * （computed 里静默失败，prop 就变成空串，于是 uview 回退到 navbarBgColor=transparent）。
+ * 交给 CSS 反而更好：`var()` 由浏览器求值，主题切换时自动跟随，不需要响应式。
  *
- * 值取 uview 运行时主题表里现成的 `--up-navbar-glass-bg-color`
- * （浅色 `rgba(255,255,255,.82)` / 深色 `rgba(28,28,30,.82)`），它本就是为玻璃导航栏
- * 准备的、且随主题翻转，符合 AGENTS.md「只用主题表里存在的变量」。
- *
- * 注：玻璃效果实际由 `.conversations-navbar-shell :deep(.u-status-bar)` 那条
- * `!important` 规则提供（作者样式表里的 `!important` 压得住组件写的行内
- * `background-color`）。这个 prop 是第二道保险 —— 万一 `:deep()` 因作用域变化失效，
- * 行内值仍是玻璃色而不是 `transparent`。
+ * 值与 `.conversations-navbar-shell` 那条玻璃规则同源，两处必须一致。
  */
-const navbarGlassBgColor = computed(() =>
-  upThemeVar("--up-navbar-glass-bg-color", "rgba(255, 255, 255, 0.82)")
-)
+const NAVBAR_GLASS_BG_COLOR = "var(--up-navbar-glass-bg-color, rgba(255, 255, 255, 0.82))"
 
 const hasActiveConnection = computed(() => {
   if (hasConversationOverviewConnections()) return true
@@ -1728,11 +1727,10 @@ async function prepareOverviewLinkedConnectionsInternal() {
   const savedConnections = readStoredConnections()
   if (!savedConnections.length) return
 
-  const connectedMap = readConnectedMap()
-  const prunedConnectedMap = pruneConnectedMapBySavedConnections(savedConnections, connectedMap)
-  const linkedConnections = savedConnections.filter((conn) =>
-    Boolean(prunedConnectedMap[connectionKey(conn)])
-  )
+  // 先剪掉已删连接留下的陈旧条目，再按标记挑出要预连的连接。
+  // 两步都走 connectedMapStore，与置位共用同一个 key 函数。
+  pruneConnectedMap(savedConnections)
+  const linkedConnections = filterConnectedConnections(savedConnections)
   if (!linkedConnections.length) return
 
   const results = await Promise.allSettled(
@@ -1757,29 +1755,6 @@ async function prepareOverviewLinkedConnectionsInternal() {
       })
     }
   })
-}
-
-function pruneConnectedMapBySavedConnections(
-  savedConnections: ConnectionItem[],
-  connectedMap: Record<string, boolean>
-) {
-  const validKeys = new Set(savedConnections.map((conn) => connectionKey(conn)))
-  const next: Record<string, boolean> = {}
-  Object.entries(connectedMap || {}).forEach(([key, value]) => {
-    if (validKeys.has(key) && Boolean(value)) {
-      next[key] = true
-    }
-  })
-  if (JSON.stringify(next) !== JSON.stringify(connectedMap || {})) {
-    uni.setStorageSync("mcode_connected_map", next)
-  }
-  return next
-}
-
-function readConnectedMap(): Record<string, boolean> {
-  const raw = uni.getStorageSync("mcode_connected_map")
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {}
-  return raw as Record<string, boolean>
 }
 
 async function loadOverviewData(options?: { force?: boolean }) {
@@ -1818,10 +1793,9 @@ async function loadOverviewDataInternal() {
       void refreshConversationTabBadge()
       return
     }
-    const connectedMap = readConnectedMap()
     const groups = await Promise.all(
       savedConnections.map(async (conn) => {
-        if (!connectedMap[connectionKey(conn)]) {
+        if (!isConnectionConnected(conn)) {
           return buildConnectionErrorGroup(conn, "连接离线")
         }
         try {
@@ -1866,8 +1840,7 @@ async function loadOverviewDataInternal() {
 
 function getConnectedConnections(): ConnectionItem[] {
   const savedConnections = readStoredConnections()
-  const connectedMap = readConnectedMap()
-  return savedConnections.filter((conn) => Boolean(connectedMap[connectionKey(conn)]))
+  return filterConnectedConnections(savedConnections)
 }
 
 async function loadConnectionGroup(conn: ConnectionItem): Promise<ConnectionGroup> {

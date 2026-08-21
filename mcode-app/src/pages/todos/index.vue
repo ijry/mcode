@@ -206,6 +206,7 @@ import {
   resolveConnectionContext,
   type ConnectionContext,
 } from "@/services/connectionContext"
+import { filterConnectedConnections } from "@/services/connection/connectedMapStore"
 import type { CodegGateway } from "@/services/gateway"
 import type { ConnectionInfo } from "@/types/acp"
 import { usePetStore } from "@/stores/pet"
@@ -653,9 +654,7 @@ function findConnectedConnectionByKey(key: string): ConnectionItem | undefined {
 }
 
 function getConnectedConnections(): ConnectionItem[] {
-  const savedConnections = readStoredConnections()
-  const connectedMap = (uni.getStorageSync("mcode_connected_map") || {}) as Record<string, boolean>
-  return savedConnections.filter((conn) => Boolean(connectedMap[connectionKey(conn)]))
+  return filterConnectedConnections(readStoredConnections())
 }
 
 async function createConnectionGateway(conn: ConnectionItem): Promise<CodegGateway> {

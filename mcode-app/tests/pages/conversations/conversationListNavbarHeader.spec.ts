@@ -79,9 +79,13 @@ describe("conversation list navbar header contract", () => {
     expect(source).toContain('bgColor="transparent"')
     // 状态栏必须和 navbar 同色，否则真机上顶部有一条色差接缝。
     // H5 下 statusBarHeight=0、该条不可见，所以这个问题只有真机能暴露。
-    expect(source).toContain(':statusBarBgColor="navbarGlassBgColor"')
-    expect(source).toContain("const navbarGlassBgColor = computed(")
-    expect(source).toContain('upThemeVar("--up-navbar-glass-bg-color"')
+    expect(source).toContain(':statusBarBgColor="NAVBAR_GLASS_BG_COLOR"')
+    // 必须是 CSS var() 字面量，不能在 script 里调 upThemeVar ——
+    // 它是 uview 用 Options API mixin 注入的方法，只有模板作用域能调，
+    // 在 <script setup> 里会抛 ReferenceError（prop 于是变成空串）。
+    expect(source).toContain(
+      'const NAVBAR_GLASS_BG_COLOR = "var(--up-navbar-glass-bg-color, rgba(255, 255, 255, 0.82))"'
+    )
     expect(source).not.toContain('statusBarBgColor="transparent"')
     // 玻璃底色两处必须同源，否则状态栏与 navbar 会不一致
     expect(source).toContain("var(--up-navbar-glass-bg-color, rgba(255, 255, 255, 0.82)) !important")

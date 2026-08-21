@@ -430,16 +430,21 @@ import { buildConnectionConfigCode, parseConnectionConfigCodeToConnection } from
 import { assertPairTargetAgentMatchesSelection } from "@/services/connectionPairValidation"
 import { DEFAULT_CONNECTION_HOST_MODEL_ID } from "@/services/connectionHostCatalog"
 import {
+  buildConnectionKey,
   readStoredConnections,
   type ConnectionContext,
 } from "@/services/connectionContext"
+import {
+  readConnectedMap,
+  replaceConnectedMap,
+  pruneConnectedMap,
+} from "@/services/connection/connectedMapStore"
 import {
   buildConnectionDetailRoute,
   type ConnectionDetailTab,
 } from "@/services/connectionDetail"
 import { migrateLegacyStoredConnectionsToV2 } from "@/services/connectionMigration"
 import {
-  buildConnectionRecordKey,
   normalizeConnectionRecordV2,
   type ConnectionRecordV2,
   type ConnectionGatewayProvider,
@@ -645,7 +650,7 @@ function getConnectionStatusClass(conn: ConnectionItem) {
 
 onMounted(() => {
   migrateLegacyStoredConnectionsToV2()
-  connectedMap.value = uni.getStorageSync("mcode_connected_map") || {}
+  connectedMap.value = readConnectedMap()
   loadConnections()
 })
 
@@ -1265,8 +1270,20 @@ function buildConnectionItem(input: ConnectionRecordV2 | Record<string, unknown>
   return record
 }
 
+/**
+ * 连接在各个 map 里的键。
+ *
+ * 必须和 `services/connection/connectedMapStore` 用同一个函数 —— 那里用的是
+ * `buildConnectionKey`（先归一化再取键）。本页原先用 `buildConnectionRecordKey`
+ * （直接读原始字段），两者对良构 v2 记录等价，但记录无法通过归一化时会分叉
+ * （targetAgent 大小写 / version 不是 2 / 缺 directBaseUrl），
+ * 于是本页写进 `mcode_connected_map` 的键，其它页面永远匹配不上。
+ *
+ * `connections.value` 来自 `readStoredConnections()`（已归一化），所以这里换成
+ * `buildConnectionKey` 对本页的行为无影响，只是把跨页的键统一了。
+ */
 function connectionKey(conn: ConnectionItem): string {
-  return buildConnectionRecordKey(conn)
+  return buildConnectionKey(conn)
 }
 
 function isConnectionConnected(conn: ConnectionItem): boolean {
@@ -1371,15 +1388,9 @@ function resolveActionName(e: any): string {
 }
 
 function pruneConnectedMapByConnections() {
-  const validKeys = new Set(connections.value.map((conn) => connectionKey(conn)))
-  const next: Record<string, boolean> = {}
-  Object.entries(connectedMap.value || {}).forEach(([key, value]) => {
-    if (validKeys.has(key) && Boolean(value)) {
-      next[key] = true
-    }
-  })
-  connectedMap.value = next
-  persistConnectedMap()
+  // 剪枝交给 connectedMapStore（它与置位共用 buildConnectionKey），
+  // 再把结果同步回本页的响应式副本。
+  connectedMap.value = pruneConnectedMap(connections.value)
 }
 
 async function refreshOnlineStatus() {
@@ -1710,7 +1721,8 @@ function createH5StatusSocket(url: string, token: string): StatusSocket {
 }
 
 function persistConnectedMap() {
-  uni.setStorageSync("mcode_connected_map", connectedMap.value)
+  // 走 connectedMapStore，保证与其它页面读写的是同一份、同一套键。
+  replaceConnectedMap(connectedMap.value)
 }
 </script>
 
