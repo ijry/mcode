@@ -18,7 +18,9 @@ describe("P67 conversation list bulk send contract", () => {
   it("renders selection controls only on top-level live cards", () => {
     const source = read("../../../src/pages/conversations/index.vue")
 
-    expect(source).toContain('class="conversations-header__select"')
+    // 顶部改用 up-navbar 后，「选择」按钮从 .conversations-header__select
+    // 移到了 navbar 的 right 槽（见 conversationListNavbarHeader.spec.ts）。
+    expect(source).toContain('class="conversations-navbar__select"')
     expect(source).toContain('{{ selectionMode ? "取消" : "选择" }}')
     expect(source).toContain('v-if="selectionMode && isSelectableLiveCard(card)"')
     expect(source).toContain("bulk-select-check")

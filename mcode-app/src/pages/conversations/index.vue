@@ -3412,39 +3412,58 @@ function formatTime(time?: string): string {
   padding: 0 32rpx 40rpx;
 }
 
-.conversations-sticky {
-  position: relative;
-  z-index: 20;
+/* .u-navbar__content 自带 background-color: $u-bg-color，仅靠 bgColor="transparent"
+   只能覆盖 inline style，容器层仍不透明 —— 必须 :deep() 穿透。
+   写法沿用 pages/conversation-detail/index.scss:66-76 的既有做法。
+   刻意不照搬详情页的**不透明** --up-card-bg-color：那条笔记
+   (2026-07-02-detail-navbar-status-bar-bg.md) 要的是「别让消息区透到状态图标后面」，
+   而本页要的正是背景光斑透上来。 */
+.conversations-navbar-shell :deep(.u-navbar--fixed),
+.conversations-navbar-shell :deep(.u-status-bar),
+.conversations-navbar-shell :deep(.u-navbar__content) {
+  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 55%, transparent) !important;
+  backdrop-filter: blur(30rpx);
+  -webkit-backdrop-filter: blur(30rpx);
 }
 
-.conversations-sticky :deep(.u-sticky__content) {
-  padding-top: 40rpx;
-  background: transparent;
+/* 降级：不支持 backdrop-filter 时退到半透卡片色 + 1rpx 浅边框，保证文字可读
+   （docs/mcode-architecture-notes/2026-06-28-conversations-liquid-glass.md 立的规矩）。 */
+@supports not (backdrop-filter: blur(1px)) {
+  .conversations-navbar-shell :deep(.u-navbar__content) {
+    background: var(--up-card-bg-color, #ffffff) !important;
+    border-bottom: 1rpx solid var(--up-border-color, #dadbde);
+  }
+
+  .conversations-navbar-shell :deep(.u-status-bar) {
+    background: var(--up-card-bg-color, #ffffff) !important;
+  }
 }
 
-.conversations-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 18rpx;
+/* __placeholder 是 u-navbar--fixed 之外的独立兄弟节点，组件没给它背景、上面的玻璃规则也
+   没选中它。这条显式 transparent 是护栏：一旦它被误染上玻璃色，顶部会出现
+   「占位块 + fixed 层」的双层色带。 */
+.conversations-navbar-shell :deep(.u-navbar__placeholder) {
+  background: transparent !important;
 }
 
-.conversations-header__title {
-  font-size: 68rpx;
-  font-weight: 800;
-  line-height: 1.08;
-  letter-spacing: -0.04em;
+/* .u-navbar__content__left / __right 都是 position: absolute，所以长标题不会把右侧按钮
+   挤出去，而是滑到它们**底下**。max-width 是为了防这种重叠，不是防挤压。 */
+.conversations-navbar__title {
+  max-width: 420rpx;
+  font-size: 32rpx;
+  font-weight: 600;
   color: var(--up-main-color, #191c1e);
 }
 
-.conversations-header__actions {
+/* .u-navbar__content__right 自带 padding: 0 13px，故这里不再另加外边距。 */
+.conversations-navbar__actions {
   display: flex;
   align-items: center;
   gap: 12rpx;
   flex-shrink: 0;
 }
 
-.conversations-header__select {
+.conversations-navbar__select {
   min-width: 84rpx;
   height: 56rpx;
   padding: 0 18rpx;
@@ -3455,16 +3474,16 @@ function formatTime(time?: string): string {
   justify-content: center;
 }
 
-.conversations-header__select-text {
+.conversations-navbar__select-text {
   font-size: 24rpx;
   line-height: 1;
   font-weight: 700;
   color: var(--up-primary, #2f7cf6);
 }
 
-.conversations-header__action {
-  width: 64rpx;
-  height: 64rpx;
+.conversations-navbar__action {
+  width: 56rpx;
+  height: 56rpx;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3478,7 +3497,7 @@ function formatTime(time?: string): string {
   transition: transform 0.2s ease;
 }
 
-.conversations-header__action:active {
+.conversations-navbar__action:active {
   transform: scale(0.9);
 }
 
@@ -4014,61 +4033,6 @@ function formatTime(time?: string): string {
   margin: 0;
   padding: 24rpx 16rpx 16rpx !important;
   background: transparent;
-}
-
-.history-mode-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12rpx;
-  padding: 14rpx 16rpx;
-  border-radius: 22rpx;
-  background: var(--up-card-bg-color, #ffffff) !important;
-  border: 1rpx solid var(--up-border-color, #dadbde);
-  box-shadow: 0 10rpx 26rpx rgba(15, 23, 42, 0.08) !important;
-  flex-shrink: 0;
-}
-
-.history-mode-back {
-  display: flex;
-  align-items: center;
-  gap: 6rpx;
-  flex-shrink: 0;
-}
-
-.history-mode-back__text {
-  font-size: 24rpx;
-  color: var(--up-primary, #2979ff);
-}
-
-.history-mode-title {
-  flex: 1;
-  min-width: 0;
-  text-align: center;
-  font-size: 24rpx;
-  font-weight: 600;
-  color: var(--up-main-color, #303133);
-}
-
-.history-mode-create {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4rpx;
-  min-width: 92rpx;
-  min-height: 44rpx;
-  padding: 0 14rpx;
-  border-radius: 999rpx;
-  background: color-mix(in srgb, var(--up-primary, #2979ff) 12%, var(--up-card-bg-color, #ffffff) 88%);
-  flex-shrink: 0;
-}
-
-.history-mode-create__text {
-  display: block;
-  font-size: 22rpx;
-  line-height: 1;
-  font-weight: 600;
-  color: var(--up-primary, #2979ff);
 }
 
 .history-section__header {
