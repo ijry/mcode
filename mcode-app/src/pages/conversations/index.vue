@@ -3501,6 +3501,7 @@ function formatTime(time?: string): string {
 }
 
 .conversations-searchbar {
+  margin-top: 16rpx;
   margin-bottom: 28rpx;
 }
 

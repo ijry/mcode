@@ -94,6 +94,16 @@ describe("conversation list navbar header contract", () => {
     expect(source).toContain(".conversations-navbar-shell :deep(.u-navbar__placeholder)")
   })
 
+  it("keeps visual spacing between the navbar and search bar", () => {
+    const source = read("../../../src/pages/conversations/index.vue")
+    const block = source.slice(
+      source.indexOf(".conversations-searchbar {"),
+      source.indexOf("}", source.indexOf(".conversations-searchbar {")) + 1
+    )
+
+    expect(block).toContain("margin-top: 16rpx;")
+    expect(block).toContain("margin-bottom: 28rpx;")
+  })
   it("keeps theme colors as var() fallbacks only", () => {
     const source = read("../../../src/pages/conversations/index.vue")
     const navbarStyles = source.slice(source.indexOf(".conversations-navbar-shell"))
