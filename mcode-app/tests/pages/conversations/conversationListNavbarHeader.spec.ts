@@ -94,6 +94,14 @@ describe("conversation list navbar header contract", () => {
     expect(source).toContain(".conversations-navbar-shell :deep(.u-navbar__placeholder)")
   })
 
+  it("keeps Android WebView content under the system status bar", () => {
+    const manifest = JSON.parse(read("../../../src/manifest.json"))
+    expect(manifest["app-plus"]?.statusbar).toMatchObject({
+      background: "#00000000",
+      immersed: true,
+      style: "dark",
+    })
+  })
   it("keeps visual spacing between the navbar and search bar", () => {
     const source = read("../../../src/pages/conversations/index.vue")
     const block = source.slice(

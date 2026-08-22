@@ -2,8 +2,8 @@
     "name" : "mcode-app",
     "appid" : "__UNI__A105FB7",
     "description" : "MCode mobile client",
-    "versionName" : "0.2.0",
-    "versionCode" : "2",
+    "versionName" : "0.3.0",
+    "versionCode" : "3",
     "vueVersion" : "3",
     "app-plus" : {
         "usingComponents" : true,
@@ -50,6 +50,11 @@
         },
         "modules" : {
             "SQLite" : {}
+        },
+        "statusbar" : {
+            "background" : "#00000000",
+            "immersed" : true,
+            "style" : "dark"
         }
     },
     "mp-weixin" : {
