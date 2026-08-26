@@ -8,3 +8,5 @@ declare module '@vue/runtime-core' {
 
   }
 }
+
+declare const __APP_BUILD_TIME__: string

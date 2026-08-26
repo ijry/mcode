@@ -1,10 +1,10 @@
+import { readAppVersionInfo } from "@/services/appVersion"
+
 const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000
 const UPDATE_CHECKED_AT_KEY = "mcode_app_update_checked_at"
 const APPBETA_API_BASE_URL = "https://app.lingyun.net/api"
 const APPBETA_CHANNEL_KEY = "qH5w"
 const APPBETA_DOWNLOAD_URL = "https://app.lingyun.net/appbeta/qH5w"
-const APP_VERSION = "0.3.0"
-const APP_VERSION_CODE = "3"
 
 type UpdateCheckResponse = {
   code?: number | string
@@ -18,11 +18,6 @@ type UpdateCheckResponse = {
       description?: string
     }
   }
-}
-
-type AppRuntimeInfo = {
-  appVersion?: string
-  appVersionCode?: string | number
 }
 
 declare const plus: { runtime?: { openWeb?: (url: string) => void; openURL?: (url: string) => void } } | undefined
@@ -57,11 +52,11 @@ export function startAppUpdateCheck(force = false): void {
 }
 
 async function checkForAppUpdate(): Promise<void> {
-  const runtimeInfo = readAppRuntimeInfo()
+  const runtimeInfo = readAppVersionInfo()
   const query = [
     ["key", APPBETA_CHANNEL_KEY],
-    ["version", runtimeInfo.appVersion],
-    ["versionCode", runtimeInfo.appVersionCode],
+    ["version", runtimeInfo.version],
+    ["versionCode", runtimeInfo.versionCode],
   ]
     .map(([key, value]) => `${key}=${encodeURIComponent(String(value || ""))}`)
     .join("&")
@@ -92,18 +87,6 @@ async function checkForAppUpdate(): Promise<void> {
       fail: () => resolve(),
     })
   })
-}
-
-function readAppRuntimeInfo(): Required<AppRuntimeInfo> {
-  try {
-    const info = uni.getAppBaseInfo?.() as AppRuntimeInfo | undefined
-    return {
-      appVersion: String(info?.appVersion || APP_VERSION),
-      appVersionCode: String(info?.appVersionCode || APP_VERSION_CODE),
-    }
-  } catch {
-    return { appVersion: APP_VERSION, appVersionCode: APP_VERSION_CODE }
-  }
 }
 
 function openDownloadPage(): void {

@@ -6,6 +6,7 @@ import UnoCss from "unocss/vite"
 import UniUpRoot from "uview-plus/libs/root/index.js";
 
 const uni = uniPlugin?.default || uniPlugin
+const appBuildTime = new Date().toISOString()
 const alias = []
 const localUviewPlusSource = path.resolve(
   "D:/Repos/xyito/open/uview-plus/src/uni_modules/uview-plus",
@@ -22,6 +23,9 @@ if (
 }
 
 export default defineConfig({
+  define: {
+    __APP_BUILD_TIME__: JSON.stringify(appBuildTime),
+  },
   plugins: [
     UniUpRoot({
 	  rootFileName: "App.up",

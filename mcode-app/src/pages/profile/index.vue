@@ -158,10 +158,11 @@ import {
   inspectClearableCache,
   type CacheInventoryItem,
 } from "@/services/cache/cacheManager"
+import { buildAppVersionLabel } from "@/services/appVersion"
 
 const petStore = usePetStore()
 const account = useAccountStore()
-const version = ref("1.0.0")
+const version = ref(buildAppVersionLabel())
 const themePreference = ref<ThemePreference>("system")
 const showThemeSheet = ref(false)
 const showPetPanel = ref(false)
@@ -216,6 +217,7 @@ const showAchievementEntry = computed(() => isLoggedIn.value && loggedInUserId.v
 
 onMounted(async () => {
   loadThemePreference()
+  version.value = buildAppVersionLabel()
 })
 
 watch(showAchievementEntry, (enabled) => {

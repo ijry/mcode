@@ -205,8 +205,8 @@
 
       <template #status>
         <view
+          class="input-status-row"
           :class="[
-            'input-status-row',
             `input-status-row--${runtimeStatusClass}`,
             runtimeStatus === 'thinking' && 'input-status-row--thinking',
             runtimeStatus === 'running_tool' && 'input-status-row--running-tool',
