@@ -111,7 +111,7 @@
                 src="/static/icons/brain.svg"
                 mode="aspectFit"
               />
-              <text class="thinking-hd__label">深度思考</text>
+              <text class="thinking-hd__label">思考</text>
               <up-icon
                 :name="isThinkingCollapsed(index) ? 'arrow-down' : 'arrow-up'"
                 size="13"
@@ -700,6 +700,8 @@ function normalizeAgentType(raw?: string) {
 }
 
 .part-text {
+  min-width: 0;
+  max-width: 100%;
   font-size: 13px;
   line-height: 1.2;
   color: var(--up-main-color, #303133);
@@ -735,6 +737,32 @@ function normalizeAgentType(raw?: string) {
 
   :deep(.up-markdown ._a) {
     color: inherit !important;
+  }
+
+  :deep(.up-markdown) {
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+  }
+
+  :deep(.up-markdown ._root) {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  :deep(.up-markdown-code) {
+    width: max-content;
+    min-width: 100%;
+    max-width: none;
+    overflow: visible;
+    white-space: pre;
+    word-break: normal;
+    overflow-wrap: normal;
+    box-sizing: border-box;
   }
 
   // 用户消息文本颜色（up-markdown 在 user 气泡内需白色）
@@ -1092,10 +1120,15 @@ function normalizeAgentType(raw?: string) {
 
 /* ===== 思考块 ===== */
 .part-thinking {
+  display: flex;
+  flex-direction: column;
+  align-self: flex-start;
+  width: fit-content;
+  max-width: 100%;
   padding: 16rpx 20rpx;
   background-color: color-mix(in srgb, var(--up-warning, #f9ae3d) 12%, var(--up-card-bg-color, #ffffff) 88%);
-  border-radius: 12rpx;
-  border-left: 4rpx solid var(--up-warning, #f9ae3d);
+  border-radius: 999rpx;
+  border: 1rpx solid color-mix(in srgb, var(--up-warning, #f9ae3d) 20%, transparent 80%);
   transition: all 0.2s ease;
 }
 
@@ -1106,7 +1139,6 @@ function normalizeAgentType(raw?: string) {
 .part-thinking--translucent {
   background: color-mix(in srgb, var(--up-warning, #f9ae3d) 10%, transparent 90%);
   border: 1rpx solid color-mix(in srgb, var(--up-warning, #f9ae3d) 20%, transparent 80%);
-  border-left: 4rpx solid var(--up-warning, #f9ae3d);
 }
 
 .part-tool-result {
@@ -1145,7 +1177,6 @@ function normalizeAgentType(raw?: string) {
   display: flex;
   align-items: center;
   gap: 10rpx;
-  margin-bottom: 12rpx;
   cursor: pointer;
   user-select: none;
 }
@@ -1168,6 +1199,7 @@ function normalizeAgentType(raw?: string) {
 
 .thinking-bd {
   overflow: hidden;
+  margin-top: 10rpx;
   transition: max-height 0.25s ease;
 }
 

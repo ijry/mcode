@@ -36,6 +36,30 @@ describe("P48 conversation detail tool call status styles", () => {
     expect(assistantBubbleRule).not.toContain("border:")
   })
 
+  it("renders thinking as a compact pill with the shorter label", () => {
+    const source = readComponent("MessageBubble.vue")
+    const thinkingRule = source.match(/\n\.part-thinking\s*\{[\s\S]*?\n\}/)?.[0] || ""
+
+    expect(source).toContain("<text class=\"thinking-hd__label\">思考</text>")
+    expect(source).not.toContain("深度思考")
+    expect(thinkingRule).toContain("align-self: flex-start;")
+    expect(thinkingRule).toContain("width: fit-content;")
+    expect(thinkingRule).toContain("border-radius: 999rpx;")
+    expect(thinkingRule).not.toContain("border-left: 4rpx solid")
+  })
+
+  it("keeps message code blocks horizontally scrollable", () => {
+    const source = readComponent("MessageBubble.vue")
+    const codeRule = source.match(/\.part-text\s*\{[\s\S]*?\n\}/)?.[0] || ""
+
+    expect(codeRule).toContain("min-width: 0;")
+    expect(source).toContain(":deep(.up-markdown ._root)")
+    expect(source).toContain("overflow-x: auto;")
+    expect(source).toContain(":deep(.up-markdown-code)")
+    expect(source).toContain("white-space: pre;")
+    expect(source).toContain("width: max-content;")
+  })
+
   it("renders the context-compaction system note as the same neutral pill", () => {
     // 用户报「会话已压缩样式太难看，应该跟普通胶囊一样」：早先那版是橙色告警卡
     // （warning 边框 + 橙底 + info 图标 + 600 字重橙字）。它只是背景信息，

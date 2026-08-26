@@ -78,4 +78,25 @@ describe("detailCyberLayout", () => {
     expect(sweet).toContain("sweet-bubbles__item")
     expect(sweet).toContain("@keyframes sweetBubbleFloat")
   })
+
+  it("animates the cyber status capsule with state-aware motion and reduced-motion fallback", () => {
+    const interactive = fs.readFileSync(
+      path.resolve(__dirname, "../../../src/pages/conversation-detail/ConversationDetailInteractivePane.vue"),
+      "utf8"
+    )
+    const body = fs.readFileSync(
+      path.resolve(__dirname, "../../../src/pages/conversation-detail/ConversationDetailBody.vue"),
+      "utf8"
+    )
+
+    expect(interactive).toContain("input-status-row--${runtimeStatusClass}")
+    expect(interactive).toContain("input-status-row--thinking")
+    expect(interactive).toContain("input-status-row--running-tool")
+    expect(body).toContain("input-status-wrap__content::before")
+    expect(body).toContain("@keyframes cyberStatusSweep")
+    expect(body).toContain("@keyframes cyberStatusDotPulse")
+    expect(body).toContain("@keyframes cyberStatusTextFlicker")
+    expect(body).toContain("prefers-reduced-motion: reduce")
+    expect(body).toContain("animation: none !important")
+  })
 })

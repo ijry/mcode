@@ -420,16 +420,6 @@
         </view>
 
         <view class="form-group">
-          <text class="form-label">标题（可选）</text>
-          <up-input
-            v-model="newConversationTitle"
-            placeholder="输入会话标题"
-            border="surround"
-            shape="circle"
-          ></up-input>
-        </view>
-
-        <view class="form-group">
           <text class="form-label">本次任务内容</text>
           <up-textarea
             v-model="newTaskContent"

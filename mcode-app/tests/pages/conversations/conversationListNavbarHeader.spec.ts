@@ -58,6 +58,16 @@ describe("conversation list navbar header contract", () => {
     expect(source).toContain('@click="createConversation()"')
   })
 
+  it("hides the title field from the create sheet", () => {
+    const source = read("../../../src/pages/conversations/index.vue")
+    const createSheetStart = source.indexOf("<!-- 创建会话底部弹层 -->")
+    const createSheetEnd = source.indexOf("<!-- 批量发送 -->", createSheetStart)
+    const createSheetBlock = source.slice(createSheetStart, createSheetEnd)
+
+    expect(createSheetBlock).not.toContain("标题（可选）")
+    expect(createSheetBlock).not.toContain("placeholder=\"输入会话标题\"")
+  })
+
   it("switches the navbar into history mode without new reactive state", () => {
     const source = read("../../../src/pages/conversations/index.vue")
 

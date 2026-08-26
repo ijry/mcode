@@ -32,6 +32,8 @@
       :detail-theme="detailTheme"
       :cyber-effect-phase="active ? cyberEffectPhase : 'idle'"
       :cyber-active="Boolean(detailTheme === 'matrix' && active)"
+      :runtime-status-class="runtimeStatusClass"
+      :runtime-status="runtimeStatus"
       @message-scroll="handleMessageListScroll"
       @message-scroll-upper="handleMessageListScrollUpper"
       @refresher-refresh="handleHistoryRefresherRefresh"
@@ -202,7 +204,14 @@
       </template>
 
       <template #status>
-        <view class="input-status-row">
+        <view
+          :class="[
+            'input-status-row',
+            `input-status-row--${runtimeStatusClass}`,
+            runtimeStatus === 'thinking' && 'input-status-row--thinking',
+            runtimeStatus === 'running_tool' && 'input-status-row--running-tool',
+          ]"
+        >
           <view class="input-status-row__main">
             <view
               class="runtime-dot runtime-dot--compact"

@@ -36,7 +36,14 @@
     </scroll-view>
     <view class="composer-safe-area"></view>
     <view class="composer-stack">
-      <view :class="['input-status-wrap', translucentMessageList && 'input-status-wrap--translucent']">
+      <view
+        :class="[
+          'input-status-wrap',
+          translucentMessageList && 'input-status-wrap--translucent',
+          `input-status-wrap--status-${resolvedRuntimeStatusClass}`,
+          `input-status-wrap--runtime-${resolvedRuntimeStatus}`,
+        ]"
+      >
         <view class="input-status-wrap__content">
           <slot name="status"></slot>
         </view>
@@ -73,7 +80,16 @@ const props = defineProps<{
   detailTheme?: DetailThemeId
   cyberEffectPhase?: CyberEffectPhase
   cyberActive?: boolean
+  runtimeStatusClass?: string
+  runtimeStatus?: string
 }>()
+
+const resolvedRuntimeStatusClass = computed(() =>
+  String(props.runtimeStatusClass || 'idle').replace(/_/g, '-')
+)
+const resolvedRuntimeStatus = computed(() =>
+  String(props.runtimeStatus || 'idle').replace(/_/g, '-')
+)
 
 const resolvedInputWrapStyle = computed(() =>
   props.translucentMessageList ? undefined : props.inputWrapStyle
@@ -200,7 +216,34 @@ const emit = defineEmits<{
   min-height: 30rpx;
   padding: 8rpx 12rpx;
   border-radius: inherit;
+  overflow: hidden;
   box-sizing: border-box;
+}
+
+.input-status-wrap__content::before {
+  content: "";
+  position: absolute;
+  top: 1rpx;
+  bottom: 1rpx;
+  left: 0;
+  width: 22%;
+  border-radius: inherit;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(173, 255, 196, 0.72) 48%,
+    rgba(0, 255, 65, 0.1) 72%,
+    transparent
+  );
+  opacity: 0;
+  pointer-events: none;
+  z-index: 0;
+  transform: translate3d(-160%, 0, 0);
+}
+
+:deep(.input-status-row) {
+  position: relative;
+  z-index: 1;
 }
 
 .input-status-wrap--translucent {
@@ -251,6 +294,216 @@ const emit = defineEmits<{
 .detail-body--cyber-active.detail-body--ramp .input-status-wrap::before,
 .detail-body--cyber-active.detail-body--streaming .input-status-wrap::before {
   animation-duration: 0.95s;
+}
+
+.detail-body--cyber-active .input-status-wrap--status-running .input-status-wrap__content::before {
+  opacity: 0.78;
+  animation: cyberStatusSweep 1.8s linear infinite;
+}
+
+.detail-body--cyber-active.detail-body--ramp
+  .input-status-wrap--status-running
+  .input-status-wrap__content::before {
+  animation-duration: 1.55s;
+}
+
+.detail-body--cyber-active.detail-body--streaming
+  .input-status-wrap--status-running
+  .input-status-wrap__content::before {
+  animation-duration: 1.05s;
+}
+
+.detail-body--cyber-active.detail-body--settle
+  .input-status-wrap--status-running
+  .input-status-wrap__content::before {
+  opacity: 0.42;
+  animation-duration: 2.8s;
+}
+
+.detail-body--cyber-active
+  .input-status-wrap--status-idle::before,
+.detail-body--cyber-active
+  .input-status-wrap--status-online::before {
+  opacity: 0.3;
+  transform: rotate(72deg);
+  animation: none;
+}
+
+.detail-body--cyber-active .input-status-wrap--status-pending::before {
+  background:
+    conic-gradient(
+      from 0deg,
+      transparent 0deg,
+      rgba(255, 214, 102, 0.62) 78deg,
+      transparent 132deg,
+      transparent 224deg,
+      rgba(255, 173, 51, 0.3) 286deg,
+      transparent 342deg,
+      transparent 360deg
+    );
+  opacity: 0.74;
+  animation-duration: 2.4s;
+}
+
+.detail-body--cyber-active
+  .input-status-wrap--runtime-thinking
+  :deep(.input-status-row__text) {
+  animation: cyberStatusTextFlicker 2.6s steps(1, end) infinite;
+}
+
+.detail-body--cyber-active
+  .input-status-wrap--runtime-running-tool
+  :deep(.input-status-row__text) {
+  animation: cyberStatusTextFlicker 1.45s steps(1, end) infinite;
+}
+
+.detail-body--cyber-active
+  .input-status-wrap--runtime-thinking
+  :deep(.runtime-dot) {
+  background-color: #8dffb4;
+  box-shadow:
+    0 0 0 3rpx rgba(141, 255, 180, 0.14),
+    0 0 14rpx rgba(0, 255, 65, 0.44);
+  animation: cyberStatusDotPulse 1.55s ease-in-out infinite;
+}
+
+.detail-body--cyber-active
+  .input-status-wrap--runtime-running-tool
+  :deep(.runtime-dot) {
+  background-color: #00ff41;
+  box-shadow:
+    0 0 0 3rpx rgba(0, 255, 65, 0.16),
+    0 0 18rpx rgba(0, 255, 65, 0.62);
+  animation: cyberStatusDotPulse 0.86s ease-in-out infinite;
+}
+
+.detail-body--cyber-active
+  .input-status-wrap--status-pending
+  .input-status-wrap__content::before {
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 214, 102, 0.56) 48%,
+    rgba(255, 173, 51, 0.08) 72%,
+    transparent
+  );
+  opacity: 0.38;
+  animation: cyberStatusSweep 2.8s ease-in-out infinite;
+}
+
+.detail-body--cyber-active
+  .input-status-wrap--status-pending
+  :deep(.runtime-dot) {
+  background-color: #ffd166;
+  box-shadow:
+    0 0 0 3rpx rgba(255, 209, 102, 0.14),
+    0 0 12rpx rgba(255, 173, 51, 0.38);
+  animation: cyberStatusDotPulse 2.2s ease-in-out infinite;
+}
+
+.detail-body--cyber-active .input-status-wrap--status-error::before {
+  background:
+    conic-gradient(
+      from 0deg,
+      transparent 0deg,
+      rgba(255, 83, 112, 0.7) 72deg,
+      transparent 126deg,
+      transparent 220deg,
+      rgba(255, 83, 112, 0.34) 286deg,
+      transparent 340deg,
+      transparent 360deg
+    );
+  opacity: 0.72;
+  animation: none;
+}
+
+.detail-body--cyber-active
+  .input-status-wrap--status-error
+  .input-status-wrap__content::before {
+  opacity: 0;
+  animation: none;
+}
+
+.detail-body--cyber-active
+  .input-status-wrap--status-error
+  :deep(.runtime-dot) {
+  background-color: #ff5370;
+  box-shadow: 0 0 0 3rpx rgba(255, 83, 112, 0.16), 0 0 14rpx rgba(255, 83, 112, 0.5);
+  animation: none;
+}
+
+.detail-body--cyber-active
+  .input-status-wrap--status-error
+  :deep(.input-status-row__text) {
+  color: #ff9aaa !important;
+  text-shadow: 0 0 12rpx rgba(255, 83, 112, 0.42);
+  animation: none;
+}
+
+@keyframes cyberStatusSweep {
+  0% {
+    transform: translate3d(-160%, 0, 0);
+    opacity: 0;
+  }
+  12% {
+    opacity: 0.9;
+  }
+  58% {
+    opacity: 0.68;
+  }
+  78%,
+  100% {
+    transform: translate3d(560%, 0, 0);
+    opacity: 0;
+  }
+}
+
+@keyframes cyberStatusDotPulse {
+  0%,
+  100% {
+    transform: scale(0.82);
+    opacity: 0.72;
+  }
+  46% {
+    transform: scale(1.18);
+    opacity: 1;
+  }
+  62% {
+    transform: scale(0.98);
+    opacity: 0.92;
+  }
+}
+
+@keyframes cyberStatusTextFlicker {
+  0%,
+  100% {
+    opacity: 1;
+    text-shadow: 0 0 12rpx rgba(0, 255, 65, 0.34);
+  }
+  8% {
+    opacity: 0.68;
+    text-shadow: 0 0 4rpx rgba(0, 255, 65, 0.16);
+  }
+  10% {
+    opacity: 1;
+    text-shadow: 0 0 14rpx rgba(141, 255, 180, 0.52);
+  }
+  54% {
+    opacity: 0.86;
+  }
+  56% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .input-status-wrap,
+  .input-status-wrap::before,
+  .input-status-wrap__content::before,
+  :deep(.input-status-row__text),
+  :deep(.input-status-row .runtime-dot) {
+    animation: none !important;
+  }
 }
 
 @keyframes inputStatusLedSpin {
