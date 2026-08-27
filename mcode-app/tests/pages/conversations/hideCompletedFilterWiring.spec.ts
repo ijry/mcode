@@ -8,45 +8,46 @@ function read(relativePath: string) {
 /**
  * 「隐藏已完成会话」的接线契约。
  *
- * 这个过滤有一个结构性陷阱：可见卡片在页面里有**两处独立派生**，各自算一份
- * `displayStatus`：
+ * **历史**：可见卡片曾经在页面里有两处独立派生（渲染用的 `filteredConnectionGroups` 与喂
+ * 订阅/批量选择的 `getDisplayCandidateCards()`），各自算一份 `displayStatus`、各自做一遍
+ * 过滤。只在第一处过滤的话，界面上看不见的卡仍会被订阅实时流、仍能被「全选」勾中 ——
+ * 用户于是对着一个看不见的会话发消息。这份 spec 原本用源码扫描（数函数出现次数）来防
+ * 那种漏改。
  *
- * 1. `filteredConnectionGroups`（computed）—— 喂模板渲染
- * 2. `getDisplayCandidateCards()`（函数）—— 喂实时预览订阅签名、批量可选集、三个 watcher
- *
- * 只在第 1 处过滤的话，界面上看不见的卡**仍然会被订阅实时流、仍然能被「全选」勾中** ——
- * 用户于是对着一个看不见的会话发消息。这类 bug 不报错、也不容易在手测里发现。
- *
- * 所以这里用源码扫描把「两处都得有」钉死。沿用
- * `conversationLivePreviewLayout.spec.ts` 的同款手法（那条防的是排序退回拼接写法）。
+ * **现在**两条派生已收口成 `buildOverviewDisplayModel()` 的两个字段，分叉在结构上不可能
+ * 发生，那些计数断言的前提也就消失了。行为断言搬去了
+ * `conversationOverviewPresentation.spec.ts`；这里只保留**防退化**的结构断言 ——
+ * 页面不得再自己算一遍派生，以及响应式必须挡在纯模块外面。
  */
 describe("hide-completed filter wiring contract", () => {
-  it("filters completed cards in BOTH derivations, not just the rendered one", () => {
+  // 原先这里有两条断言，用「`shouldHideCompletedOverviewCard` 至少出现 3 次」和「两个派生
+  // 函数体里各出现一次」来防漏改。收口成 `buildOverviewDisplayModel` 之后那个前提消失了
+  // —— 两个消费者读的是同一次计算的两个字段，结构上不可能分叉。
+  //
+  // 过滤本身的行为断言已经搬到 `conversationOverviewPresentation.spec.ts` 的
+  // `buildOverviewDisplayModel` 一组（包括「同时作用于两份输出」那条）。这里只留下**防
+  // 退化**的结构断言：页面不能再自己算一遍派生。
+  it("derives both outputs from one model, never re-deriving in the page", () => {
     const source = read("../../../src/pages/conversations/index.vue")
 
-    // 两处派生各一次调用，加一次 import —— 少于 3 次说明有一处漏了。
-    const occurrences = source.split("shouldHideCompletedOverviewCard").length - 1
-    expect(occurrences).toBeGreaterThanOrEqual(3)
+    // 唯一的派生入口。
+    expect(source).toContain("buildOverviewDisplayModel({")
+    expect(source).toContain("overviewDisplayModel.value.groups")
+    expect(source).toContain("overviewDisplayModel.value.candidates")
 
-    // 分别确认两处派生的函数体里都出现了它：把源码按派生入口切段再查，
-    // 避免「3 次调用全挤在同一处」也能通过。
-    const candidateFnStart = source.indexOf("function getDisplayCandidateCards()")
-    expect(candidateFnStart).toBeGreaterThan(-1)
-    const candidateFnBody = source.slice(candidateFnStart, candidateFnStart + 1400)
-    expect(candidateFnBody).toContain("shouldHideCompletedOverviewCard")
-
-    const groupsStart = source.indexOf("const filteredConnectionGroups = computed")
-    expect(groupsStart).toBeGreaterThan(-1)
-    const groupsBody = source.slice(groupsStart, groupsStart + 1800)
-    expect(groupsBody).toContain("shouldHideCompletedOverviewCard")
+    // 页面里不能再出现过滤/状态解析的本地实现 —— 那正是收口前的形态。
+    expect(source).not.toContain("shouldHideCompletedOverviewCard(")
+    expect(source).not.toContain("resolveOverviewCardDisplayStatus(")
+    // 也不能再有第二处关键词匹配（历史面板那份是独立问题，不在本文件）。
+    expect(source).not.toContain("function liveCardMatchesSearch")
   })
 
-  it("filters on displayStatus, never on the raw summary status", () => {
-    // 用 `card.status` 判会把「状态是 completed 但此刻正在跑」的会话藏掉。
+  it("hands the runtime lookup in as a callback so the module stays pure", () => {
+    // 直接把 `runtime.sessions` 这个响应式 Map 传进纯模块，会让模块在 jest 里没法裸测
+    // （要么 mock pinia，要么把 Vue 拖进来）。回调把响应式挡在页面这一侧。
     const source = read("../../../src/pages/conversations/index.vue")
 
-    expect(source).toContain("shouldHideCompletedOverviewCard(\n            card.displayStatus,")
-    expect(source).not.toContain("shouldHideCompletedOverviewCard(card.status")
+    expect(source).toContain("resolveRuntimeSession: (conversationId) => runtime.sessions.get(conversationId)")
   })
 
   it("reads the preference on both mount and show", () => {

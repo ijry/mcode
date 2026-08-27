@@ -199,17 +199,17 @@
                     <view
                       :class="[
                         'agent-logo',
-                        agentLogoClass(card.agentType),
-                        agentLogoPath(card.agentType) && 'agent-logo--real',
+                        overviewAgentLogoClass(card.agentType),
+                        overviewAgentLogoPath(card.agentType) && 'agent-logo--real',
                       ]"
                     >
                       <image
-                        v-if="agentLogoPath(card.agentType)"
+                        v-if="overviewAgentLogoPath(card.agentType)"
                         class="agent-logo__img"
-                        :src="agentLogoPath(card.agentType)"
+                        :src="overviewAgentLogoPath(card.agentType)"
                         mode="aspectFit"
                       />
-                      <text v-else class="agent-logo__text">{{ agentLogoText(card.agentType) }}</text>
+                      <text v-else class="agent-logo__text">{{ overviewAgentLogoText(card.agentType) }}</text>
                     </view>
 
                     <view class="live-card__body">
@@ -221,8 +221,8 @@
                       <view class="live-card__badges">
                         <!-- 列表已改为纯按时间排序，「PC 上开着」只能靠这枚角标表达。 -->
                         <text v-if="card.isOpenTab" class="live-card__tab-flag">标签</text>
-                        <view :class="['status-chip', `status-chip--${statusClass(card.displayStatus)}` ]">
-                          <text class="status-chip__text">{{ statusLabel(card.displayStatus) }}</text>
+                        <view :class="['status-chip', `status-chip--${overviewStatusClass(card.displayStatus)}` ]">
+                          <text class="status-chip__text">{{ overviewStatusLabel(card.displayStatus) }}</text>
                         </view>
                       </view>
                       <text class="live-card__stamp">{{ formatTime(card.updatedAt) }}</text>
@@ -392,17 +392,17 @@
                 <view
                   :class="[
                     'agent-card__logo',
-                    agentLogoClass(agent.value),
-                    agentLogoPath(agent.value) && 'agent-card__logo--real',
+                    overviewAgentLogoClass(agent.value),
+                    overviewAgentLogoPath(agent.value) && 'agent-card__logo--real',
                   ]"
                 >
                   <image
-                    v-if="agentLogoPath(agent.value)"
+                    v-if="overviewAgentLogoPath(agent.value)"
                     class="agent-card__logo-img"
-                    :src="agentLogoPath(agent.value)"
+                    :src="overviewAgentLogoPath(agent.value)"
                     mode="aspectFit"
                   />
-                  <text v-else class="agent-card__logo-text">{{ agentLogoText(agent.value) }}</text>
+                  <text v-else class="agent-card__logo-text">{{ overviewAgentLogoText(agent.value) }}</text>
                 </view>
                 <text class="agent-card__label">{{ agent.label }}</text>
               </view>
@@ -643,13 +643,18 @@ import { acpApi } from "@/api/acp"
 import RemoteDirectoryBrowser from "@/components/remote/RemoteDirectoryBrowser.vue"
 import MarqueeText from "@/components/MarqueeText.vue"
 import {
-  resolveOverviewCardDisplayStatus,
-  shouldHideCompletedOverviewCard,
+  buildOverviewDisplayModel,
+  formatOverviewAgentLabel,
+  overviewAgentLogoClass,
+  overviewAgentLogoPath,
+  overviewAgentLogoText,
+  overviewStatusClass,
+  overviewStatusLabel,
+  resolveGroupEmptyText,
+  resolveOverviewEmptyText,
+  type OverviewCandidateCard,
 } from "@/pages/conversations/conversationOverviewPresentation"
-import {
-  resolveConversationLivePreviewText,
-  selectConversationLivePreviewIds,
-} from "@/pages/conversations/conversationLivePreview"
+import { selectConversationLivePreviewIds } from "@/pages/conversations/conversationLivePreview"
 import { getDirectToken } from "@/services/gateway/directTokenStore"
 import { toErrorMessage } from "@/services/gateway/error"
 import { openRemoteFolder } from "@/services/remoteDirectoryBrowser"
@@ -900,84 +905,31 @@ const bulkSending = ref(false)
 const BULK_SEND_QUICK_TEXT = "继续"
 
 
-const filteredConnectionGroups = computed<DisplayConnectionGroup[]>(() => {
-  const kw = searchKeyword.value.trim().toLowerCase()
-  const groups = connectionGroups.value.map((group) => ({
-    ...group,
-    cards: sortLiveSessionCardsByRunning(
-      group.cards
-        .map((card) => {
-          const runtimeSession = runtime.sessions.get(card.conversationId || 0)
-          const displayStatus = resolveOverviewCardDisplayStatus(card.status, runtimeSession?.status)
-          return {
-            ...card,
-            displayStatus,
-            livePreviewText: livePreviewEnabled.value
-              ? resolveConversationLivePreviewText(runtimeSession)
-              : "",
-          }
-        })
-        // 过滤放在 displayStatus 算完之后：正在跑的 completed 会话此时已被提升成
-        // in_progress，不会被藏。**同样的过滤必须出现在 getDisplayCandidateCards 里** ——
-        // 那是并行的第二处派生（喂实时预览订阅与批量选择集），漏一处就会让被隐藏的卡
-        // 仍然被订阅、仍然能被批量选中。
-        .filter(
-          (card) =>
-            !shouldHideCompletedOverviewCard(
-              card.displayStatus,
-              hideCompletedConversations.value
-            )
-        )
-    ),
-  }))
-  if (!kw) return groups
-  return groups
-    .map((group) => ({
-      ...group,
-      cards: group.cards.filter((card) =>
-        [
-          card.title || "",
-          card.projectName || "",
-          formatAgentType(card.agentType),
-        ]
-          .join(" ")
-          .toLowerCase()
-          .includes(kw)
-      ),
-    }))
-    .filter(
-      (group) =>
-        group.cards.length > 0 ||
-        group.name.toLowerCase().includes(kw) ||
-        group.baseUrl.toLowerCase().includes(kw)
-    )
-})
-
 /**
- * 分组空态文案。
+ * 会话列表的**唯一**可见派生。
  *
- * 开着过滤时不能再说「暂无打开中或 24 小时内活跃的会话」—— 那句话在「有会话、只是全被
- * 过滤掉了」的情况下是错的，会让用户以为会话丢了。这时要点明是过滤造成的，并告诉他
- * 开关在哪。
+ * 渲染结构与订阅/选择集从**同一次计算**里出来（`buildOverviewDisplayModel` 的两个字段），
+ * 所以结构上不可能像收口前那样分叉 —— 那时它们是两条独立派生，任何判据改动都必须同时改
+ * 两处，漏改候选那条会让看不见的卡仍被订阅、仍能被「全选」勾中。
  */
-const groupEmptyText = computed(() =>
-  hideCompletedConversations.value
-    ? "没有进行中的会话；已完成的已隐藏，可点上方「已完成」查看"
-    : "暂无打开中或 24 小时内活跃的会话"
+const overviewDisplayModel = computed(() =>
+  buildOverviewDisplayModel({
+    groups: connectionGroups.value,
+    // 回调而不是直接传 Map：让纯模块与 Vue 响应式解耦（模块因此能在 jest 里裸测）。
+    resolveRuntimeSession: (conversationId) => runtime.sessions.get(conversationId),
+    instanceKeyByGroupKey: Object.fromEntries(connectionInstanceKeyMap),
+    keyword: searchKeyword.value,
+    hideCompleted: hideCompletedConversations.value,
+    livePreviewEnabled: livePreviewEnabled.value,
+  })
 )
 
-/**
- * 整页空态文案。
- *
- * 同 `groupEmptyText` 的理由：搜索时说「暂无分组会话」已经有点含糊，再叠上过滤就成了
- * 纯误导。两种成因分别点明，用户才知道该清关键词还是该关过滤。
- */
-const overviewEmptyText = computed(() => {
-  if (searchKeyword.value.trim()) return "没有匹配的会话"
-  return hideCompletedConversations.value
-    ? "已完成的会话已隐藏，可点上方「已完成」查看"
-    : "暂无分组会话"
-})
+const filteredConnectionGroups = computed(() => overviewDisplayModel.value.groups)
+
+const groupEmptyText = computed(() => resolveGroupEmptyText(hideCompletedConversations.value))
+const overviewEmptyText = computed(() =>
+  resolveOverviewEmptyText(searchKeyword.value, hideCompletedConversations.value)
+)
 
 const showSelectionEntry = computed(() => {
   if (showHistoryPanel.value) return false
@@ -1195,10 +1147,6 @@ const AGENT_LABELS: Record<string, string> = {
   gemini:      "Gemini CLI",
   open_claw:   "OpenClaw",
   cline:       "Cline",
-}
-
-function formatAgentType(t?: string) {
-  return t ? (AGENT_LABELS[t] ?? t) : "未知"
 }
 
 function resetCreateAgentConfig(message = "") {
@@ -1732,42 +1680,14 @@ function buildLivePreviewRuntimeSignature() {
     .join("|")
 }
 
-function getDisplayCandidateCards() {
-  const kw = searchKeyword.value.trim().toLowerCase()
-  return connectionGroups.value.flatMap((group) =>
-    group.cards
-      .filter((card) => !kw || liveCardMatchesSearch(card, kw))
-      .map((card) => {
-        const runtimeSession = runtime.sessions.get(card.conversationId || 0)
-        return {
-          ...card,
-          groupKey: group.key,
-          instanceKey: connectionInstanceKeyMap.get(group.key) || "",
-          displayStatus: resolveOverviewCardDisplayStatus(card.status, runtimeSession?.status),
-        }
-      })
-      // 与 `filteredConnectionGroups` 保持同一道过滤。**这两处必须同时改** ——
-      // 这条派生喂的是实时预览订阅签名、批量可选集和三个 watcher；只改渲染那条会让
-      // 被隐藏的卡仍被订阅实时流、仍能被「全选」勾中，用户于是对着看不见的会话发消息。
-      .filter(
-        (card) =>
-          !shouldHideCompletedOverviewCard(
-            card.displayStatus,
-            hideCompletedConversations.value
-          )
-      )
-  )
-}
-
-function liveCardMatchesSearch(card: LiveSessionCard, kw: string) {
-  return [
-    card.title || "",
-    card.projectName || "",
-    formatAgentType(card.agentType),
-  ]
-    .join(" ")
-    .toLowerCase()
-    .includes(kw)
+/**
+ * 喂实时预览订阅与批量选择集的展平候选集。
+ *
+ * 与 `filteredConnectionGroups` 读的是**同一次计算**的另一个字段 —— 见
+ * `overviewDisplayModel` 的说明。它此前是一条独立派生，与渲染那条各算一遍。
+ */
+function getDisplayCandidateCards(): OverviewCandidateCard<LiveSessionCard>[] {
+  return overviewDisplayModel.value.candidates
 }
 
 function buildLivePreviewCandidateSignature() {
@@ -2554,63 +2474,6 @@ function normalizeConversationStatus(value?: string): string {
   return normalizeConversationSummaryStatus(value)
 }
 
-function statusLabel(status: string): string {
-  if (status === "in_progress") return "远程运行中"
-  if (status === "completed") return "已完成"
-  if (status === "cancelled" || status === "canceled") return "已停止"
-  if (status === "pending_review") return "待处理"
-  if (status === "error" || status === "failed") return "异常"
-  return "空闲"
-}
-
-function sortLiveSessionCardsByRunning(
-  cards: DisplayLiveSessionCard[]
-): DisplayLiveSessionCard[] {
-  return cards
-    .map((card, index) => ({ card, index }))
-    .sort((a, b) => {
-      const aRunning = statusClass(a.card.displayStatus) === "running" ? 0 : 1
-      const bRunning = statusClass(b.card.displayStatus) === "running" ? 0 : 1
-      if (aRunning !== bRunning) return aRunning - bRunning
-      return a.index - b.index
-    })
-    .map((item) => item.card)
-}
-
-function statusClass(status: string): string {
-  if (status === "in_progress") return "running"
-  if (status === "completed") return "completed"
-  if (status === "cancelled" || status === "canceled") return "stopped"
-  if (status === "error" || status === "failed") return "error"
-  return "idle"
-}
-
-function agentLogoText(agentType: string): string {
-  const key = normalizeAgentType(agentType)
-  if (key === "claude_code") return "CC"
-  if (key === "codex") return "CX"
-  if (key === "open_code") return "OC"
-  if (key === "gemini") return "GM"
-  if (key === "open_claw") return "CL"
-  if (key === "cline") return "CN"
-  return "AI"
-}
-
-function agentLogoClass(agentType: string): string {
-  return `agent-logo--${normalizeAgentType(agentType).replace(/[^a-z0-9_]/g, "")}`
-}
-
-function agentLogoPath(agentType: string): string {
-  const key = normalizeAgentType(agentType)
-  if (key === "claude_code") return "/static/agent-logos/claude-code.svg"
-  if (key === "codex") return "/static/agent-logos/codex.svg"
-  if (key === "gemini") return "/static/agent-logos/gemini.svg"
-  if (key === "cline") return "/static/agent-logos/cline.svg"
-  if (key === "open_code") return "/static/agent-logos/open-code.svg"
-  if (key === "open_claw") return "/static/agent-logos/open-claw.svg"
-  return ""
-}
-
 async function createConnectionGateway(conn: ConnectionItem): Promise<CodegGateway> {
   const resolved = await resolveConnectionContext(conn)
   Object.assign(conn, resolved.connection)
@@ -2697,7 +2560,7 @@ function handleHistoryCollapseClose(name: string | number) {
   }
 }
 function getHistoryConversationMeta(conversation: Conversation): string {
-  return formatHistoryConversationMeta(conversation, formatAgentType, formatTime)
+  return formatHistoryConversationMeta(conversation, formatOverviewAgentLabel, formatTime)
 }
 function goToConnections() {
   uni.switchTab({ url: "/pages/connections/index" })

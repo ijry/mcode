@@ -1,4 +1,5 @@
 import {
+  buildOverviewDisplayModel,
   resolveOverviewCardDisplayStatus,
   shouldHideCompletedOverviewCard,
 } from "@/pages/conversations/conversationOverviewPresentation"
@@ -56,5 +57,200 @@ describe("hiding completed cards", () => {
     // 未知值），所以这里必须和 displayStatus 用同一套归一化，否则 " Completed " 之类
     // 的漂移写法会绕过过滤。
     expect(shouldHideCompletedOverviewCard(" COMPLETED ", true)).toBe(true)
+  })
+})
+
+describe("buildOverviewDisplayModel", () => {
+  // 这一组取代了原先 `hideCompletedFilterWiring.spec.ts` 的源码扫描断言。
+  //
+  // 那份 spec 存在的唯一理由是「可见卡片有两条并行派生（渲染用的 computed 与喂订阅/批量
+  // 选择的函数），必须同时改」——它靠数字符串出现次数来防漏改。收口成单一纯函数之后，
+  // 那个前提消失了：两个消费者读的是同一次计算的两个字段，结构上不可能分叉。
+  // 于是断言可以从「源码里出现了几次」变成「行为对不对」。
+  const card = (patch: Record<string, unknown> = {}) => ({
+    tabId: 1,
+    conversationId: 101,
+    folderId: 7,
+    projectName: "demo",
+    agentType: "claude_code",
+    title: "会话 A",
+    activityAt: 1000,
+    status: "pending_review",
+    isActive: false,
+    isOpenTab: false,
+    ...patch,
+  })
+
+  const group = (patch: Record<string, unknown> = {}) => ({
+    key: "conn-a",
+    name: "本机",
+    targetAgent: "codeg",
+    routeMode: "direct" as const,
+    baseUrl: "http://127.0.0.1:8080",
+    projects: [],
+    openTabCards: [],
+    recentActiveCards: [],
+    cards: [card()],
+    loadError: null,
+    ...patch,
+  })
+
+  const build = (patch: Record<string, unknown> = {}) =>
+    buildOverviewDisplayModel({
+      groups: [group()],
+      resolveRuntimeSession: () => undefined,
+      instanceKeyByGroupKey: { "conn-a": "direct::local" },
+      keyword: "",
+      hideCompleted: false,
+      livePreviewEnabled: false,
+      ...patch,
+    })
+
+  it("returns the rendered groups and the flat candidates from one pass", () => {
+    const model = build()
+
+    expect(model.groups).toHaveLength(1)
+    expect(model.groups[0].cards.map((item) => item.conversationId)).toEqual([101])
+    expect(model.candidates.map((item) => item.conversationId)).toEqual([101])
+  })
+
+  it("gives candidates the group key and instance key the subscriptions need", () => {
+    const model = build()
+
+    expect(model.candidates[0]).toMatchObject({
+      groupKey: "conn-a",
+      instanceKey: "direct::local",
+    })
+    // 分组结构那一份不带这两个字段（模板不需要），但两份的 displayStatus 必须同源。
+    expect(model.candidates[0].displayStatus).toBe(model.groups[0].cards[0].displayStatus)
+  })
+
+  it("falls back to an empty instance key for an unmapped group", () => {
+    // prepare 完成但 loadConnectionGroup 还没跑的窗口里，映射表里确实没有这个 key。
+    const model = build({ instanceKeyByGroupKey: {} })
+    expect(model.candidates[0].instanceKey).toBe("")
+  })
+
+  it("applies the completed filter to BOTH outputs, never to just one", () => {
+    // 这是原先那条源码扫描测试真正想保证的事。只藏渲染那一份会让看不见的卡仍被订阅
+    // 实时流、仍能被「全选」勾中 —— 用户于是对着一个看不见的会话发消息。
+    const model = build({
+      groups: [group({ cards: [card({ status: "completed" })] })],
+      hideCompleted: true,
+    })
+
+    expect(model.groups[0].cards).toHaveLength(0)
+    expect(model.candidates).toHaveLength(0)
+  })
+
+  it("keeps a completed card that runtime says is running", () => {
+    const model = build({
+      groups: [group({ cards: [card({ status: "completed" })] })],
+      hideCompleted: true,
+      resolveRuntimeSession: () => ({ status: "thinking" }),
+    })
+
+    expect(model.groups[0].cards).toHaveLength(1)
+    expect(model.candidates).toHaveLength(1)
+    expect(model.candidates[0].displayStatus).toBe("in_progress")
+  })
+
+  it("filters both outputs by keyword, matching the agent label too", () => {
+    // 「Claude Code」是 label，卡片上存的是 `claude_code`。不过 label 映射，用户搜
+    // 界面上看到的那串字就搜不到 —— 历史面板至今是这个毛病（见 C2）。
+    const model = build({ keyword: "claude code" })
+    expect(model.groups[0].cards).toHaveLength(1)
+    expect(model.candidates).toHaveLength(1)
+
+    const miss = build({ keyword: "codex" })
+    expect(miss.groups).toHaveLength(0)
+    expect(miss.candidates).toHaveLength(0)
+  })
+
+  it("keeps a group whose own name matches even when no card does", () => {
+    // 组级兜底：搜连接名/地址时该看到那个组（哪怕它的会话都不匹配），否则用户会以为
+    // 这台机器不存在。**但候选集不能跟着保留** —— 那些卡在界面上是不可见的。
+    const model = build({ keyword: "本机" })
+
+    expect(model.groups).toHaveLength(1)
+    expect(model.groups[0].cards).toHaveLength(0)
+    expect(model.candidates).toHaveLength(0)
+  })
+
+  it("matches a group by base url as well", () => {
+    const model = build({ keyword: "127.0.0.1" })
+    expect(model.groups).toHaveLength(1)
+    expect(model.groups[0].cards).toHaveLength(0)
+  })
+
+  it("sorts running cards ahead of idle ones while keeping snapshot order otherwise", () => {
+    const model = build({
+      groups: [
+        group({
+          cards: [
+            card({ conversationId: 1, title: "闲置一", activityAt: 3000 }),
+            card({ conversationId: 2, title: "闲置二", activityAt: 2000 }),
+            card({ conversationId: 3, title: "在跑", activityAt: 1000, status: "in_progress" }),
+          ],
+        }),
+      ],
+    })
+
+    // 在跑的提到最前；其余保持传入顺序（快照已经按活跃时间排好，这里不得重排）。
+    expect(model.groups[0].cards.map((item) => item.conversationId)).toEqual([3, 1, 2])
+    // 候选集**不排序** —— 它喂的是订阅与选择集，顺序只需稳定。
+    expect(model.candidates.map((item) => item.conversationId)).toEqual([1, 2, 3])
+  })
+
+  it("fills livePreviewText only when the preference is on", () => {
+    const session = { status: "waiting_permission" as const }
+
+    const off = build({ resolveRuntimeSession: () => session, livePreviewEnabled: false })
+    expect(off.groups[0].cards[0].livePreviewText).toBe("")
+
+    const on = build({ resolveRuntimeSession: () => session, livePreviewEnabled: true })
+    expect(on.groups[0].cards[0].livePreviewText).toBe("等待确认")
+  })
+
+  it("looks the runtime session up by conversation id", () => {
+    const seen: number[] = []
+    build({
+      resolveRuntimeSession: (conversationId) => {
+        seen.push(conversationId)
+        return undefined
+      },
+    })
+    expect(seen).toContain(101)
+  })
+
+  it("resolves each runtime session once per card, not once per consumer", () => {
+    // 收口前：两条派生 + 三个 watcher + 订阅对账 + Promise.all 里的逐个复查，单个
+    // runtime tick 会把同一批卡遍历 8 次。合成一次计算之后，每张卡只查一次 session。
+    let calls = 0
+    build({
+      groups: [
+        group({
+          cards: [card({ conversationId: 1 }), card({ conversationId: 2 })],
+        }),
+      ],
+      resolveRuntimeSession: () => {
+        calls += 1
+        return undefined
+      },
+    })
+    expect(calls).toBe(2)
+  })
+
+  it("drops a group with no matching cards only when the keyword misses the group too", () => {
+    const model = build({
+      groups: [
+        group({ key: "a", name: "甲机", cards: [card({ conversationId: 1, title: "命中" })] }),
+        group({ key: "b", name: "乙机", cards: [card({ conversationId: 2, title: "无关" })] }),
+      ],
+      keyword: "命中",
+    })
+
+    expect(model.groups.map((item) => item.key)).toEqual(["a"])
+    expect(model.candidates.map((item) => item.conversationId)).toEqual([1])
   })
 })

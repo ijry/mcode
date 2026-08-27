@@ -1,6 +1,11 @@
 import fs from "node:fs"
 import path from "node:path"
 
+import {
+  isRunningOverviewCard,
+  sortRunningOverviewCardsFirst,
+} from "@/pages/conversations/conversationOverviewPresentation"
+
 function read(relativePath: string) {
   return fs.readFileSync(path.resolve(__dirname, relativePath), "utf8")
 }
@@ -14,12 +19,37 @@ describe("conversation live preview layout contract", () => {
     expect(source).toContain(".live-card__preview-row")
   })
 
+  // 排序实现已搬进 `conversationOverviewPresentation.ts`（`sortRunningOverviewCardsFirst`），
+  // 并且**不再绕道 CSS 类名判断**「在跑」——那份实现原先写的是
+  // `statusClass(...) === "running"`，让排序隐式依赖了样式修饰符的取值。
+  //
+  // 所以这条从源码扫描改成行为断言：直接验「运行中置顶 + 其余保持传入顺序」。
+  // tiebreak 必须是数组下标而不是任何时间字段 —— 传进来的顺序已经是快照按活跃时间排好
+  // 的，用时间重排会与那层打架（见 2026-08-20-09-05 那篇笔记）。
   it("keeps running live session cards ahead of idle cards", () => {
-    const source = read("../../../src/pages/conversations/index.vue")
+    const cards = [
+      { id: "idle-a", displayStatus: "pending_review" },
+      { id: "idle-b", displayStatus: "completed" },
+      { id: "running", displayStatus: "in_progress" },
+      { id: "idle-c", displayStatus: "failed" },
+    ]
 
-    expect(source).toContain("sortLiveSessionCardsByRunning(")
-    expect(source).toContain('statusClass(a.card.displayStatus) === "running" ? 0 : 1')
-    expect(source).toContain("return a.index - b.index")
+    expect(sortRunningOverviewCardsFirst(cards).map((card) => card.id)).toEqual([
+      "running",
+      "idle-a",
+      "idle-b",
+      "idle-c",
+    ])
+  })
+
+  it("does not decide running-ness through the CSS modifier", () => {
+    // `overviewStatusClass` 把 in_progress 映射成 "running"，但排序不该依赖那层映射 ——
+    // 改 CSS 类名的取值不应该改变排序结果。这条断言锁住两者解耦。
+    expect(isRunningOverviewCard("in_progress")).toBe(true)
+    expect(isRunningOverviewCard("completed")).toBe(false)
+    expect(isRunningOverviewCard("pending_review")).toBe(false)
+    // 大小写/空白归一化与 displayStatus 那套同源。
+    expect(isRunningOverviewCard(" IN_PROGRESS ")).toBe(true)
   })
 
   // 顺序必须完全由 `buildConnectionConversationSnapshot` 决定（纯按活跃时间降序）。
