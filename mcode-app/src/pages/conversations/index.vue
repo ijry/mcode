@@ -56,40 +56,11 @@
         </template>
       </up-navbar>
 
-      <view class="conversations-searchbar">
-        <up-search
-          v-model="searchKeyword"
-          placeholder="搜索会话..."
-          :show-action="false"
-          shape="round"
-          :bgColor="upThemeVar('--up-hover-bg-color', '#e9eaee')"
-          borderColor="transparent"
-          :color="upThemeVar('--up-main-color', '#1a1b1f')"
-          :placeholderColor="upThemeVar('--up-tips-color', '#9ca3af')"
-          :searchIconColor="upThemeVar('--up-tips-color', '#8b93a5')"
-          :height="40"
-          @search="() => {}"
-          @clear="() => {}"
-        ></up-search>
-        <view
-          :class="[
-            'conversations-filter-chip',
-            hideCompletedConversations && 'conversations-filter-chip--active',
-          ]"
-          @click="toggleHideCompletedConversations"
-        >
-          <up-icon
-            :name="hideCompletedConversations ? 'eye-off' : 'eye'"
-            size="14"
-            :color="
-              hideCompletedConversations
-                ? upThemeVar('--up-primary', '#2979ff')
-                : upThemeVar('--up-tips-color', '#909193')
-            "
-          ></up-icon>
-          <text class="conversations-filter-chip__text">已完成</text>
-        </view>
-      </view>
+      <ConversationsSearchBar
+        v-model="searchKeyword"
+        :hide-completed="hideCompletedConversations"
+        @toggle-hide-completed="toggleHideCompletedConversations"
+      />
 
       <!-- 无连接 -->
       <view v-if="!hasActiveConnection" class="empty-fullpage conversations-empty-fullpage">
@@ -642,6 +613,7 @@ import { useConversationRuntimeStore } from "@/stores/conversationRuntime"
 import { acpApi } from "@/api/acp"
 import RemoteDirectoryBrowser from "@/components/remote/RemoteDirectoryBrowser.vue"
 import MarqueeText from "@/components/MarqueeText.vue"
+import ConversationsSearchBar from "@/pages/conversations/components/ConversationsSearchBar.vue"
 import {
   buildBulkSelectionItem,
   buildBulkSelectionKey,
@@ -3372,75 +3344,6 @@ function formatTime(time?: string): string {
 
 .conversations-navbar__action:active {
   transform: scale(0.9);
-}
-
-.conversations-searchbar {
-  margin-top: 16rpx;
-  margin-bottom: 28rpx;
-  display: flex;
-  align-items: center;
-  gap: 12rpx;
-}
-
-/* 搜索框占满剩余宽度，筛选胶囊按内容收缩 —— 否则 up-search 的默认 100% 宽度会把
-   胶囊挤出屏幕。 */
-.conversations-searchbar :deep(.u-search) {
-  flex: 1;
-  min-width: 0;
-}
-
-/* 「已完成」筛选胶囊。形制与搜索框同款（半透明 + 毛玻璃 + 全圆角），这样它读起来是
-   搜索行的一部分，而不是一个飘在旁边的按钮。 */
-.conversations-filter-chip {
-  flex-shrink: 0;
-  height: 80rpx;
-  padding: 0 20rpx;
-  display: flex;
-  align-items: center;
-  gap: 6rpx;
-  border: 1rpx solid rgba(255, 255, 255, 0.5);
-  border-radius: 999rpx;
-  background-color: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 40%, transparent);
-  backdrop-filter: blur(25rpx);
-  -webkit-backdrop-filter: blur(25rpx);
-  box-shadow: 0 4rpx 16rpx rgba(31, 38, 135, 0.05);
-}
-
-.conversations-filter-chip--active {
-  border-color: color-mix(in srgb, var(--up-primary, #2979ff) 32%, transparent);
-  background-color: color-mix(in srgb, var(--up-primary, #2979ff) 12%, var(--up-card-bg-color, #ffffff) 88%);
-}
-
-.conversations-filter-chip__text {
-  font-size: 22rpx;
-  color: var(--up-content-color, #606266);
-}
-
-.conversations-filter-chip--active .conversations-filter-chip__text {
-  color: var(--up-primary, #2979ff);
-}
-
-.conversations-searchbar :deep(.u-search__content) {
-  height: 80rpx;
-  display: flex;
-  align-items: center;
-  border: 1rpx solid rgba(255, 255, 255, 0.5) !important;
-  border-radius: 999rpx !important;
-  background-color: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 40%, transparent) !important;
-  backdrop-filter: blur(25rpx);
-  -webkit-backdrop-filter: blur(25rpx);
-  box-shadow: 0 4rpx 16rpx rgba(31, 38, 135, 0.05) !important;
-}
-
-.conversations-searchbar :deep(.u-search__content__input) {
-  height: 80rpx;
-  font-size: 26rpx;
-  color: var(--up-main-color, #303133);
-  background-color: transparent !important;
-}
-
-.conversations-searchbar :deep(.u-search__content__icon) {
-  margin-right: 8rpx;
 }
 
 .main-wrap {

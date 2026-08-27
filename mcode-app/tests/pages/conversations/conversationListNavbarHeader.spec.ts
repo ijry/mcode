@@ -113,7 +113,11 @@ describe("conversation list navbar header contract", () => {
     })
   })
   it("keeps visual spacing between the navbar and search bar", () => {
-    const source = read("../../../src/pages/conversations/index.vue")
+    // 搜索行已抽成 ConversationsSearchBar.vue，间距样式跟着搬过去了 —— 检查对象换到
+    // 子组件，否则这条会锁住一段不存在的样式。
+    const source = read(
+      "../../../src/pages/conversations/components/ConversationsSearchBar.vue"
+    )
     const block = source.slice(
       source.indexOf(".conversations-searchbar {"),
       source.indexOf("}", source.indexOf(".conversations-searchbar {")) + 1
