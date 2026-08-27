@@ -1,5 +1,9 @@
 import {
+  buildBulkSelectionItem,
+  buildBulkSelectionKey,
   buildOverviewDisplayModel,
+  formatOverviewRelativeTime,
+  isSelectableOverviewCard,
   resolveOverviewCardDisplayStatus,
   shouldHideCompletedOverviewCard,
 } from "@/pages/conversations/conversationOverviewPresentation"
@@ -252,5 +256,87 @@ describe("buildOverviewDisplayModel", () => {
 
     expect(model.groups.map((item) => item.key)).toEqual(["a"])
     expect(model.candidates.map((item) => item.conversationId)).toEqual([1])
+  })
+})
+
+describe("bulk selection identity", () => {
+  const card = (patch: Record<string, unknown> = {}) => ({
+    tabId: 1,
+    conversationId: 42,
+    folderId: 7,
+    projectName: "demo",
+    agentType: "codex_cli",
+    title: "会话 A",
+    activityAt: 1000,
+    status: "pending_review",
+    isActive: false,
+    isOpenTab: false,
+    ...patch,
+  })
+
+  it("keys a selection by connection and conversation", () => {
+    expect(buildBulkSelectionKey("conn-a", 42)).toBe("conn-a:42")
+  })
+
+  // 「这张卡能不能选」此前在页面里有五处各自的判据（isSelectableLiveCard、
+  // buildBulkSelectionItem、isConversationSelected、openLiveSession、以及
+  // selectConversationLivePreviewIds）。收成一个判据，其余都读它。
+  it("requires a real conversation id", () => {
+    expect(isSelectableOverviewCard(card())).toBe(true)
+    expect(isSelectableOverviewCard(card({ conversationId: 0 }))).toBe(false)
+    expect(isSelectableOverviewCard(card({ conversationId: undefined }))).toBe(false)
+    // 标签卡还没关联会话时 conversationId 是负数（tabId 取的 -id），绝不能选。
+    expect(isSelectableOverviewCard(card({ conversationId: -3 }))).toBe(false)
+  })
+
+  it("builds a selection item with a normalized agent type", () => {
+    // `codex_cli` 是服务端可能给的别名，落进批量发送载荷前必须归一化 —— 否则
+    // ensureBulkSendConnection 拿它去匹配连接会失败。
+    expect(buildBulkSelectionItem(card(), "conn-a")).toEqual({
+      key: "conn-a:42",
+      connectionKey: "conn-a",
+      conversationId: 42,
+      folderId: 7,
+      agentType: "codex",
+      title: "会话 A",
+      projectName: "demo",
+    })
+  })
+
+  it("refuses to build an item without a usable identity", () => {
+    expect(buildBulkSelectionItem(card(), "")).toBeNull()
+    expect(buildBulkSelectionItem(card({ conversationId: 0 }), "conn-a")).toBeNull()
+  })
+
+  it("falls back to placeholder labels rather than empty strings", () => {
+    // 批量发送弹层要列出已选会话名。空串会渲染成一行空白，看起来像少了一条。
+    const item = buildBulkSelectionItem(card({ title: "", projectName: "" }), "conn-a")
+    expect(item).toMatchObject({ title: "未命名会话", projectName: "未命名项目" })
+  })
+})
+
+describe("formatOverviewRelativeTime", () => {
+  const at = (offsetMs: number) => new Date(Date.now() - offsetMs).toISOString()
+
+  it("renders the coarse buckets the card stamp uses", () => {
+    expect(formatOverviewRelativeTime(at(30 * 1000))).toBe("刚刚")
+    expect(formatOverviewRelativeTime(at(5 * 60 * 1000))).toBe("5分钟前")
+    expect(formatOverviewRelativeTime(at(3 * 60 * 60 * 1000))).toBe("3小时前")
+    expect(formatOverviewRelativeTime(at(26 * 60 * 60 * 1000))).toBe("昨天")
+    expect(formatOverviewRelativeTime(at(3 * 24 * 60 * 60 * 1000))).toBe("3天前")
+  })
+
+  it("falls back to a date once past a week", () => {
+    const old = formatOverviewRelativeTime(at(30 * 24 * 60 * 60 * 1000))
+    expect(old).not.toContain("天前")
+    expect(old.length).toBeGreaterThan(0)
+  })
+
+  it("returns an empty string for missing or unparsable input", () => {
+    // 卡片的 updatedAt 是可选字段（标签还没关联会话时没有活跃时间）。这里返回空串让
+    // 模板自然不渲染，而不是显示 "Invalid Date"。
+    expect(formatOverviewRelativeTime(undefined)).toBe("")
+    expect(formatOverviewRelativeTime("")).toBe("")
+    expect(formatOverviewRelativeTime("不是时间")).toBe("")
   })
 })

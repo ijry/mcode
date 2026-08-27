@@ -308,3 +308,87 @@ export function buildOverviewDisplayModel<G extends OverviewGroupLike>(input: {
 
   return { groups, candidates }
 }
+
+/** 批量选择项（选中会话的最小载荷，批量发送时逐条发出）。 */
+export interface BulkSelectionItem {
+  key: string
+  connectionKey: string
+  conversationId: number
+  folderId: number
+  agentType: string
+  title: string
+  projectName: string
+}
+
+/** 选中项的唯一键：会话号在不同连接上会重复，所以必须带连接键。 */
+export function buildBulkSelectionKey(connectionKey: string, conversationId: number): string {
+  return `${connectionKey}:${conversationId}`
+}
+
+/**
+ * 这张卡能不能被选中 / 打开。
+ *
+ * **唯一判据**：必须有一个真实的会话号。此前这个判断在页面里有五处各自的实现
+ * （`isSelectableLiveCard`、`buildBulkSelectionItem` 里再判一次、`isConversationSelected`
+ * 里再判一次、`openLiveSession` 里判 `!card.conversationId`、以及
+ * `selectConversationLivePreviewIds` 里判 `!Number.isFinite || <= 0`）。
+ *
+ * 负数也不行：标签卡还没关联会话时 `tabId` 取的是 `-conversation.id`，那种卡不可选。
+ */
+export function isSelectableOverviewCard(
+  card: Pick<OverviewCardLike, "conversationId">
+): boolean {
+  const conversationId = Number(card.conversationId || 0)
+  return Number.isFinite(conversationId) && conversationId > 0
+}
+
+/**
+ * 把一张卡变成批量选择项；不可选时返回 null。
+ *
+ * `agentType` 在这里**归一化**：服务端可能给 `codex_cli` 这类别名，而批量发送时
+ * `ensureBulkSendConnection` 要用它去匹配连接 —— 不归一化会匹配不上。
+ *
+ * 标题/项目名兜底成占位文案而不是空串：批量发送弹层要列出已选会话，空串会渲染成一行空白，
+ * 看起来像少了一条。
+ */
+export function buildBulkSelectionItem(
+  card: Pick<OverviewCardLike, "conversationId" | "folderId" | "agentType" | "title" | "projectName">,
+  connectionKey: string
+): BulkSelectionItem | null {
+  if (!connectionKey || !isSelectableOverviewCard(card)) return null
+  const conversationId = Number(card.conversationId || 0)
+  return {
+    key: buildBulkSelectionKey(connectionKey, conversationId),
+    connectionKey,
+    conversationId,
+    folderId: Number(card.folderId || 0),
+    agentType: normalizeAgentType(card.agentType),
+    title: card.title || "未命名会话",
+    projectName: card.projectName || "未命名项目",
+  }
+}
+
+/**
+ * 卡片时间戳的粗粒度相对文案（「5分钟前」/「昨天」/ 日期）。
+ *
+ * 解析不出来时返回空串让模板自然不渲染 —— 卡片的 `updatedAt` 是可选字段（标签还没关联
+ * 会话时没有活跃时间），返回 "Invalid Date" 比不显示更糟。
+ *
+ * 注意仓库里还有几份各自的相对时间实现（`services/circle.ts` 的 `formatRelativeTime`
+ * 用的是「X 分钟前」带空格、粒度也不同）。本次只收口会话列表这一处，没有强行统一 ——
+ * 那几处的文案风格是各自页面定的，合并需要先对齐设计。
+ */
+export function formatOverviewRelativeTime(time?: string): string {
+  if (!time) return ""
+  const at = new Date(time).getTime()
+  if (!Number.isFinite(at)) return ""
+  const minutes = Math.floor((Date.now() - at) / 60000)
+  if (minutes < 1) return "刚刚"
+  if (minutes < 60) return `${minutes}分钟前`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}小时前`
+  const days = Math.floor(hours / 24)
+  if (days === 1) return "昨天"
+  if (days < 7) return `${days}天前`
+  return new Date(at).toLocaleDateString("zh-CN")
+}

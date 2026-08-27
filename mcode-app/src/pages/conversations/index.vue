@@ -174,14 +174,14 @@
                   :key="`${group.key}-${card.tabId}`"
                   :class="[
                     'live-card',
-                    selectionMode && isSelectableLiveCard(card) && 'live-card--selecting',
+                    selectionMode && isSelectableOverviewCard(card) && 'live-card--selecting',
                     isConversationSelected(card, group.key) && 'live-card--selected',
                   ]"
                   :style="upThemeCardStyle"
                   @click="handleLiveCardClick(card, group.key)"
                 >
                   <view
-                    v-if="selectionMode && isSelectableLiveCard(card)"
+                    v-if="selectionMode && isSelectableOverviewCard(card)"
                     :class="[
                       'bulk-select-check',
                       isConversationSelected(card, group.key) && 'bulk-select-check--active',
@@ -643,8 +643,12 @@ import { acpApi } from "@/api/acp"
 import RemoteDirectoryBrowser from "@/components/remote/RemoteDirectoryBrowser.vue"
 import MarqueeText from "@/components/MarqueeText.vue"
 import {
+  buildBulkSelectionItem,
+  buildBulkSelectionKey,
   buildOverviewDisplayModel,
   formatOverviewAgentLabel,
+  formatOverviewRelativeTime,
+  isSelectableOverviewCard,
   overviewAgentLogoClass,
   overviewAgentLogoPath,
   overviewAgentLogoText,
@@ -652,6 +656,7 @@ import {
   overviewStatusLabel,
   resolveGroupEmptyText,
   resolveOverviewEmptyText,
+  type BulkSelectionItem,
   type OverviewCandidateCard,
 } from "@/pages/conversations/conversationOverviewPresentation"
 import { selectConversationLivePreviewIds } from "@/pages/conversations/conversationLivePreview"
@@ -885,16 +890,6 @@ interface ConnectionGroup extends ConnectionConversationSnapshot {
   cards: LiveSessionCard[]
 }
 
-interface BulkSelectionItem {
-  key: string
-  connectionKey: string
-  conversationId: number
-  folderId: number
-  agentType: string
-  title: string
-  projectName: string
-}
-
 const projects = ref<Project[]>([])
 const connectionGroups = ref<ConnectionGroup[]>([])
 const selectionMode = ref(false)
@@ -934,7 +929,7 @@ const overviewEmptyText = computed(() =>
 const showSelectionEntry = computed(() => {
   if (showHistoryPanel.value) return false
   return filteredConnectionGroups.value.some((group) =>
-    group.cards.some((card) => isSelectableLiveCard(card))
+    group.cards.some((card) => isSelectableOverviewCard(card))
   )
 })
 
@@ -1698,7 +1693,7 @@ function buildLivePreviewCandidateSignature() {
 
 function getSelectableLiveCardKeys() {
   return getDisplayCandidateCards()
-    .filter((card) => isSelectableLiveCard(card))
+    .filter((card) => isSelectableOverviewCard(card))
     .map((card) => buildBulkSelectionKey(card.groupKey, Number(card.conversationId || 0)))
 }
 
@@ -2201,34 +2196,31 @@ async function reconcileMissingConversationSummaries(
   }
 }
 
-function toConnectionGroup(snapshot: ConnectionConversationSnapshot): ConnectionGroup {
-  // 顺序完全由 `buildConnectionConversationSnapshot` 定（纯按活跃时间降序）。
-  // 这里曾经写成 `[...openTabCards, ...recentActiveCards]`，于是一个几天前的标签会被
-  // 钉在 5 分钟前的会话上面 —— 用户看到的就是「24H 顺序不对」。
-  return {
-    ...snapshot,
-    cards: snapshot.cards,
-  }
-}
-
 function buildConnectionGroupSnapshot(input: {
   conn: ConnectionItem
   folders: Project[]
   tabs: OpenedTabItem[]
   conversations: Conversation[]
-}) {
-  return toConnectionGroup(
-    buildConnectionConversationSnapshot({
-      connectionKey: connectionKey(input.conn),
-      connectionName: input.conn.name,
-      targetAgent: input.conn.targetAgent,
-      routeMode: input.conn.routeMode,
-      baseUrl: connectionBaseUrl(input.conn),
-      folders: input.folders,
-      tabs: input.tabs,
-      conversations: input.conversations,
-    })
-  )
+}): ConnectionGroup {
+  const snapshot = buildConnectionConversationSnapshot({
+    connectionKey: connectionKey(input.conn),
+    connectionName: input.conn.name,
+    targetAgent: input.conn.targetAgent,
+    routeMode: input.conn.routeMode,
+    baseUrl: connectionBaseUrl(input.conn),
+    folders: input.folders,
+    tabs: input.tabs,
+    conversations: input.conversations,
+  })
+  // `cards` 直接透传 snapshot 的顺序（纯按活跃时间降序，见
+  // `buildConnectionConversationSnapshot`）。这里曾经写成
+  // `[...openTabCards, ...recentActiveCards]`，把标签整体钉在前面 —— 于是几天前的
+  // 标签压在 5 分钟前的会话上面，看着像没排序。`conversationLivePreviewLayout.spec`
+  // 用 `cards: snapshot.cards` 这个字面量把它钉死。
+  return {
+    ...snapshot,
+    cards: snapshot.cards,
+  }
 }
 
 function rememberConnectionRemoteState(
@@ -2391,14 +2383,6 @@ async function seedCreatedConversationSummary(input: {
   }
 }
 
-function parseTimestamp(value?: string | number): number {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value
-  }
-  const time = value ? new Date(value).getTime() : Date.now()
-  return Number.isFinite(time) ? time : Date.now()
-}
-
 function firstString(...values: unknown[]) {
   for (const value of values) {
     if (typeof value === "string" && value.trim()) {
@@ -2406,10 +2390,6 @@ function firstString(...values: unknown[]) {
     }
   }
   return ""
-}
-
-function formatTimestamp(value: number): string {
-  return new Date(value).toISOString()
 }
 
 function normalizeList(input: unknown): any[] {
@@ -2566,31 +2546,6 @@ function goToConnections() {
   uni.switchTab({ url: "/pages/connections/index" })
 }
 
-function buildBulkSelectionKey(connectionKeyValue: string, conversationId: number): string {
-  return `${connectionKeyValue}:${conversationId}`
-}
-
-function isSelectableLiveCard(card: LiveSessionCard): boolean {
-  return Number(card.conversationId || 0) > 0
-}
-
-function buildBulkSelectionItem(
-  card: LiveSessionCard,
-  connectionKeyValue: string
-): BulkSelectionItem | null {
-  const conversationId = Number(card.conversationId || 0)
-  if (!connectionKeyValue || conversationId <= 0) return null
-  return {
-    key: buildBulkSelectionKey(connectionKeyValue, conversationId),
-    connectionKey: connectionKeyValue,
-    conversationId,
-    folderId: Number(card.folderId || 0),
-    agentType: normalizeAgentType(card.agentType),
-    title: card.title || "未命名会话",
-    projectName: card.projectName || "未命名项目",
-  }
-}
-
 function isConversationSelected(
   card: LiveSessionCard,
   connectionKeyValue: string
@@ -2725,20 +2680,10 @@ function openLiveSession(card: LiveSessionCard, groupKey?: string) {
   }, groupKey)
 }
 
-function syncAuthToConnectionKey(connKey?: string) {
-  if (!connKey) return
-  const conn = findConnectedConnectionByKey(connKey)
-  if (conn) {
-    syncAuthToConnection(conn)
-  }
-}
-
 async function openConversation(conv: Conversation, connKey?: string) {
   const conn = connKey ? findConnectedConnectionByKey(connKey) : undefined
   if (conn) {
     syncAuthToConnection(conn)
-  } else {
-    syncAuthToConnectionKey(connKey)
   }
   const targetFolderId = Number(conv.folder_id || 0)
   if (conn && targetFolderId > 0 && Number(conv.id || 0) > 0) {
@@ -3252,22 +3197,7 @@ async function handleActionSelect(e: any) {
 }
 
 function formatTime(time?: string): string {
-  if (!time) return ""
-  try {
-    const date = new Date(time)
-    const diff = Date.now() - date.getTime()
-    const min = Math.floor(diff / 60000)
-    if (min < 1)  return "刚刚"
-    if (min < 60) return `${min}分钟前`
-    const h = Math.floor(min / 60)
-    if (h < 24)   return `${h}小时前`
-    const d = Math.floor(h / 24)
-    if (d === 1)  return "昨天"
-    if (d < 7)    return `${d}天前`
-    return date.toLocaleDateString("zh-CN")
-  } catch {
-    return ""
-  }
+  return formatOverviewRelativeTime(time)
 }
 </script>
 

@@ -22,7 +22,10 @@ describe("P67 conversation list bulk send contract", () => {
     // 移到了 navbar 的 right 槽（见 conversationListNavbarHeader.spec.ts）。
     expect(source).toContain('class="conversations-navbar__select"')
     expect(source).toContain('{{ selectionMode ? "取消" : "选择" }}')
-    expect(source).toContain('v-if="selectionMode && isSelectableLiveCard(card)"')
+    // 「可选中」判据已收口到 conversationOverviewPresentation.ts 的
+    // isSelectableOverviewCard（此前页面内有五处各自的实现）。模板仍在顶层卡上门控
+    // 选择控件，只是判据换了名字。
+    expect(source).toContain('v-if="selectionMode && isSelectableOverviewCard(card)"')
     expect(source).toContain("bulk-select-check")
     expect(source).toContain('@click="handleLiveCardClick(card, group.key)"')
 
