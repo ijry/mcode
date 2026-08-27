@@ -2702,6 +2702,40 @@ async function shouldSkipCreatePromptReplay(
   return false
 }
 
+/**
+ * 重置新建弹层自己的状态。**归弹层所有** —— 抽成子组件后这段跟着走。
+ */
+function resetCreateSheetState() {
+  clearPendingCreateRequest()
+  newConversationTitle.value = ""
+  newTaskContent.value = ""
+  resetCreateAgentConfig("")
+  selectedAgentType.value = "claude_code"
+  createAgentOptions.value = []
+  createAgentListError.value = ""
+}
+
+/**
+ * 会话创建成功后的页面级收尾：刷新列表、更新角标、跳详情页。
+ *
+ * **永远归页面**，不能搬进弹层 —— 它依赖 `loadOverviewData`（列表数据源）与
+ * `openConversation`（路由 + PC 标签预热）。子组件只负责把创建做到「拿到
+ * conversationId」为止，然后把这三个字段交出来。
+ */
+async function handleConversationCreated(payload: {
+  conversationId: number
+  folderId: number
+  connectionKey: string
+}) {
+  markConversationListDirty()
+  await loadOverviewData({ force: true })
+  await refreshConversationTabBadge()
+  openConversation(
+    { id: payload.conversationId, folder_id: payload.folderId },
+    payload.connectionKey
+  )
+}
+
 async function confirmCreate() {
   if (creating.value) return
 
@@ -2843,20 +2877,17 @@ async function confirmCreate() {
 
     uni.showToast({ title: "创建成功", icon: "success" })
     showCreateDialog.value = false
-    clearPendingCreateRequest()
-    newConversationTitle.value = ""
-    newTaskContent.value = ""
-    resetCreateAgentConfig("")
-    selectedAgentType.value = "claude_code"
-    createAgentOptions.value = []
-    createAgentListError.value = ""
-    markConversationListDirty()
-    await loadOverviewData({ force: true })
-    await refreshConversationTabBadge()
-    openConversation(
-      { id: newConversationId, folder_id: selectedProjectId.value },
-      selectedConnectionKey.value
-    )
+    // 收尾分两段，这是抽 CreateConversationSheet 子组件的接缝：
+    //   ① 弹层自己的状态重置 —— 搬进子组件后归它所有；
+    //   ② 页面级的刷新与导航 —— 永远归页面（它持有列表数据源与路由）。
+    // 不分开的话，子组件用 v-if 控制显示时这段会跑在**已卸载**的组件上：弹层在上面
+    // 第 42 行就关了，这里还在写它的 ref。
+    resetCreateSheetState()
+    await handleConversationCreated({
+      conversationId: newConversationId,
+      folderId: selectedProjectId.value,
+      connectionKey: selectedConnectionKey.value,
+    })
   } catch (error) {
     const msg = toErrorMessage(error)
     uni.showToast({ title: `创建失败: ${msg}`, icon: "none", duration: 3000 })
