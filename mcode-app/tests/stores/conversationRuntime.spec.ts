@@ -2307,6 +2307,297 @@ describe('conversationRuntime ACP error handling', () => {
     })
   })
 
+  describe('snapshot native steering capability', () => {
+    // `native_steering_available` 是服务端合成的权威位（三道闸：adapter 声明 +
+    // registry 策略 + 运行中适配器版本 ≥0.65.0），用来决定运行中能不能「插入当前
+    // 回合」。前端**不得**用 agentType 重新推导 —— codex 也声明 steering，但会把
+    // 当前回合变成 detached turn，服务端因此不给它开。
+    it('latches the capability from a snapshot that reports it', () => {
+      const { store, session } = prepareSession()
+      expect(session.nativeSteeringAvailable).toBe(false)
+
+      store.hydrateLiveSnapshot(1, {
+        status: 'prompting',
+        native_steering_available: true,
+      })
+
+      expect(session.nativeSteeringAvailable).toBe(true)
+    })
+
+    it('accepts the camelCase alias', () => {
+      const { store, session } = prepareSession()
+
+      store.hydrateLiveSnapshot(1, {
+        status: 'prompting',
+        nativeSteeringAvailable: true,
+      })
+
+      expect(session.nativeSteeringAvailable).toBe(true)
+    })
+
+    it('never downgrades a latched capability back to false', () => {
+      // 单调升级的理由：connectionId 在连接还在 connecting 时就存在，那一刻服务端
+      // 尚未在 initialize 里写这个字段，读回来必然是 false。无条件赋值会让入口在
+      // 一次早到的快照之后永久消失。
+      const { store, session } = prepareSession()
+      store.hydrateLiveSnapshot(1, {
+        status: 'prompting',
+        native_steering_available: true,
+      })
+      expect(session.nativeSteeringAvailable).toBe(true)
+
+      store.hydrateLiveSnapshot(1, {
+        status: 'prompting',
+        native_steering_available: false,
+      })
+
+      expect(session.nativeSteeringAvailable).toBe(true)
+    })
+
+    it('treats a missing field as no evidence, not as unsupported', () => {
+      // 旧后端根本不发这个字段，与「明确报 false」在这里是同一件事：都不构成
+      // 「这条会话不支持」的证据，所以既不置位也不清零。
+      const { store, session } = prepareSession()
+      store.hydrateLiveSnapshot(1, {
+        status: 'prompting',
+        native_steering_available: true,
+      })
+
+      store.hydrateLiveSnapshot(1, { status: 'prompting' })
+
+      expect(session.nativeSteeringAvailable).toBe(true)
+    })
+
+    it('ignores a stringly-typed true', () => {
+      // 只认真正的布尔 true。字符串 "true" 是协议漂移的信号，宁可不显示入口，
+      // 也不要给一个后端会拒的按钮。
+      const { store, session } = prepareSession()
+
+      store.hydrateLiveSnapshot(1, {
+        status: 'prompting',
+        native_steering_available: 'true',
+      })
+
+      expect(session.nativeSteeringAvailable).toBe(false)
+    })
+
+    it('clears the capability when the connection is invalidated', () => {
+      // 能力位描述的是「这条连接的 adapter 支持什么」。下一条连接可能是另一个
+      // agent / 另一个版本 —— 留着它会让重连到 codex 后仍然显示插入入口。
+      const { store, session } = prepareSession()
+      store.hydrateLiveSnapshot(1, {
+        status: 'prompting',
+        native_steering_available: true,
+      })
+
+      store.invalidateConnection(1, 'conn-1')
+
+      expect(session.nativeSteeringAvailable).toBe(false)
+    })
+  })
+
+  describe('turn feedback notes', () => {
+    // 便签是轮次级瞬态 steering，服务端刻意不持久化，并在下一轮 UserMessage 清表。
+    // mcode 走 native 通道，自己的便签**出生即 delivered** —— 所以本地插入后不会再
+    // 收到自己的 feedback_consumed。接 consumed 是为了别人（桌面端 pull 通道）的便签。
+    const submitted = (id: string, text: string, patch: Record<string, unknown> = {}) => ({
+      type: 'feedback_submitted',
+      connectionId: 'conn-1',
+      data: {
+        item: {
+          id,
+          text,
+          created_at: '2026-08-27T00:00:00.000Z',
+          status: 'delivered',
+          delivered_at: '2026-08-27T00:00:00.000Z',
+          ...patch,
+        },
+      },
+    })
+
+    it('records a submitted note', () => {
+      const { store, session } = prepareSession()
+
+      store.handleEvent(submitted('f1', '用 UserService') as any)
+
+      expect(session.feedbackNotes).toEqual([
+        {
+          id: 'f1',
+          text: '用 UserService',
+          createdAt: Date.parse('2026-08-27T00:00:00.000Z'),
+          status: 'delivered',
+          deliveredAt: Date.parse('2026-08-27T00:00:00.000Z'),
+        },
+      ])
+    })
+
+    it('dedupes a replayed submit by id', () => {
+      // 本地乐观 append 之后紧跟着到达的同 id 广播必须是 no-op；事件重放、双 attach 同理。
+      const { store, session } = prepareSession()
+
+      store.handleEvent(submitted('f1', '用 UserService') as any)
+      store.handleEvent(submitted('f1', '用 UserService') as any)
+
+      expect(session.feedbackNotes).toHaveLength(1)
+    })
+
+    it('flips a pending note to delivered on consume', () => {
+      const { store, session } = prepareSession()
+      store.handleEvent(submitted('f1', '桌面端发的', {
+        status: 'pending',
+        delivered_at: undefined,
+      }) as any)
+      expect(session.feedbackNotes[0]).toMatchObject({ status: 'pending' })
+
+      store.handleEvent({
+        type: 'feedback_consumed',
+        connectionId: 'conn-1',
+        data: { ids: ['f1'], deliveredAt: '2026-08-27T00:00:05.000Z' },
+      } as any)
+
+      expect(session.feedbackNotes[0]).toMatchObject({
+        status: 'delivered',
+        deliveredAt: Date.parse('2026-08-27T00:00:05.000Z'),
+      })
+    })
+
+    it('honors a consume that arrives before its submit', () => {
+      // 广播乱序 / 快照未水合。没有墓碑表，这条便签落地时会以 pending 复活在 agent
+      // 已经读过之后 —— 界面显示「等待读取」，而它其实早就送到了。
+      const { store, session } = prepareSession()
+
+      store.handleEvent({
+        type: 'feedback_consumed',
+        connectionId: 'conn-1',
+        data: { ids: ['f1'], deliveredAt: '2026-08-27T00:00:05.000Z' },
+      } as any)
+      store.handleEvent(submitted('f1', '桌面端发的', {
+        status: 'pending',
+        delivered_at: undefined,
+      }) as any)
+
+      expect(session.feedbackNotes[0]).toMatchObject({
+        status: 'delivered',
+        deliveredAt: Date.parse('2026-08-27T00:00:05.000Z'),
+      })
+    })
+
+    it('clears notes when the next turn starts', () => {
+      // 服务端就在 UserMessage 里清表（session_state.rs 的
+      // user_message_clears_feedback_for_new_turn 锁着这个契约）。
+      const { store, session } = prepareSession()
+      store.handleEvent(submitted('f1', '用 UserService') as any)
+
+      store.handleEvent({
+        type: 'user_message',
+        connectionId: 'conn-1',
+        data: { messageId: 'm-2', blocks: [{ type: 'text', text: '下一轮' }] },
+      } as any)
+
+      expect(session.feedbackNotes).toEqual([])
+    })
+
+    it('keeps notes across turn_complete', () => {
+      // **不能跟着 turn_complete 清**：回合刚结束、下一轮还没开始时，你插进去的那句
+      // 仍然属于刚才那轮的上下文，提前抹掉会让你以为没插进去。
+      const { store, session } = prepareSession()
+      store.handleEvent(submitted('f1', '用 UserService') as any)
+
+      store.handleEvent({
+        type: 'turn_complete',
+        connectionId: 'conn-1',
+        data: {},
+      } as any)
+
+      expect(session.feedbackNotes).toHaveLength(1)
+    })
+
+    it('clears notes on a cancelled turn', () => {
+      // 被取消的回合不会有下一条 user_message 来清表，所以必须在这里清 ——
+      // 否则便签会一直挂着直到用户真的发下一条。
+      const { store, session } = prepareSession()
+      store.handleEvent(submitted('f1', '用 UserService') as any)
+
+      store.handleEvent({
+        type: 'turn_cancelled',
+        connectionId: 'conn-1',
+        data: {},
+      } as any)
+
+      expect(session.feedbackNotes).toEqual([])
+    })
+
+    it('hydrates notes from a mid-turn attach snapshot', () => {
+      // 冷启动 / 重连进一个进行中的会话：一次性的 feedback_submitted 不会为你重放，
+      // 快照是唯一来源（服务端注释写明了这个用意）。
+      const { store, session } = prepareSession()
+
+      store.hydrateLiveSnapshot(1, {
+        status: 'prompting',
+        feedback: [
+          {
+            id: 'f1',
+            text: '快照里的便签',
+            created_at: '2026-08-27T00:00:00.000Z',
+            status: 'delivered',
+            delivered_at: '2026-08-27T00:00:00.000Z',
+          },
+        ],
+      })
+
+      expect(session.feedbackNotes.map((note: any) => note.id)).toEqual(['f1'])
+    })
+
+    it('does not let an empty snapshot erase live notes', () => {
+      // 服务端在列表为空时不上线这个字段（skip_serializing_if），所以「缺失」是常态。
+      // 当成「服务端说没有便签」而清掉本地的，就会让刚插入的便签闪一下就消失。
+      const { store, session } = prepareSession()
+      store.handleEvent(submitted('f1', '刚插入的') as any)
+
+      store.hydrateLiveSnapshot(1, { status: 'prompting' })
+
+      expect(session.feedbackNotes).toHaveLength(1)
+    })
+
+    it('prefers the live entry over a staler snapshot one', () => {
+      // 与 nativeSteeringAvailable 相反：便签状态**实时优先**。快照可能停在 pending，
+      // 而 consumed 事件已经到了。
+      const { store, session } = prepareSession()
+      store.handleEvent(submitted('f1', '桌面端发的', {
+        status: 'pending',
+        delivered_at: undefined,
+      }) as any)
+      store.handleEvent({
+        type: 'feedback_consumed',
+        connectionId: 'conn-1',
+        data: { ids: ['f1'], deliveredAt: '2026-08-27T00:00:05.000Z' },
+      } as any)
+
+      store.hydrateLiveSnapshot(1, {
+        status: 'prompting',
+        feedback: [
+          {
+            id: 'f1',
+            text: '桌面端发的',
+            created_at: '2026-08-27T00:00:00.000Z',
+            status: 'pending',
+          },
+        ],
+      })
+
+      expect(session.feedbackNotes[0]).toMatchObject({ status: 'delivered' })
+    })
+
+    it('clears notes when the connection is invalidated', () => {
+      const { store, session } = prepareSession()
+      store.handleEvent(submitted('f1', '用 UserService') as any)
+
+      store.invalidateConnection(1, 'conn-1')
+
+      expect(session.feedbackNotes).toEqual([])
+    })
+  })
+
   describe('error retention across a retried turn', () => {
     // 用户报「Mcode 看不到右侧 PC 端的错误」：PC 上一条红色的
     // `unexpected status 502 Bad Gateway` 横幅挂着，手机端什么都没有，状态还是「已连接」。

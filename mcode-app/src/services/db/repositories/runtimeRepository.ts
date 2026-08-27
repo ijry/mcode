@@ -90,6 +90,52 @@ export async function saveRuntime(input: ConversationRuntimeRecord) {
   )
 }
 
+/**
+ * 只写「断点」列（连接、live message、seq、活跃标记），**草稿三列从当前行原样继承**。
+ *
+ * 为什么必须与 `saveDraftState` 分开：这一行里有**两个不同组件各自负责的一半**。
+ *
+ * | 列 | 谁写 | 在哪 |
+ * | --- | --- | --- |
+ * | `composer_text` / `attachments_json` / `draft_queue_json` | 持有输入框的那个组件 | `ConversationDetailInteractivePane.vue` |
+ * | `live_message_json` / `last_applied_seq` / `is_active` | 持有 runtime session 的那个组件 | `pages/conversation-detail/index.vue` |
+ *
+ * `saveDraftState` 对草稿三列是**无条件覆盖**（它的语义就是「我来写草稿」）。详情页用它写
+ * 断点时，会顺带把自己手里那份**永远为空**的 composer 状态写进去 —— 输入框早就抽到 pane
+ * 了 —— 于是每次 `onHide` / `onUnload` 都把用户刚打的草稿擦成空串。
+ *
+ * 这个函数是那个 bug 的收口：调用方只声明自己真正拥有的列，其余的读回来再写回去。
+ */
+export async function saveRuntimeCheckpoint(input: {
+  conversationId: number
+  instanceKey: string
+  connectionId?: string | null
+  liveMessageJson?: string | null
+  lastAppliedSeq?: number | null
+  isActive?: boolean
+}) {
+  const current = await getRuntime(input.instanceKey, input.conversationId)
+  await saveRuntime({
+    conversationId: input.conversationId,
+    instanceKey: input.instanceKey || current?.instanceKey || "",
+    connectionId: input.connectionId ?? current?.connectionId ?? null,
+    liveMessageJson: input.liveMessageJson ?? current?.liveMessageJson ?? null,
+    // 草稿三列：只继承，绝不接受入参 —— 签名里根本没有它们，所以「顺手传个空串」
+    // 这种写法在类型层面就不可能。
+    draftQueueJson: current?.draftQueueJson ?? null,
+    attachmentsJson: current?.attachmentsJson ?? null,
+    composerText: current?.composerText ?? null,
+    scrollAnchor: current?.scrollAnchor ?? null,
+    lastAppliedSeq: input.lastAppliedSeq ?? current?.lastAppliedSeq ?? null,
+    lastSnapshotAt: current?.lastSnapshotAt ?? null,
+    isActive: input.isActive ?? current?.isActive ?? true,
+  })
+}
+
+/**
+ * 只写草稿三列，断点列从当前行继承。与 `saveRuntimeCheckpoint` 互为镜像 ——
+ * 见那个函数的注释里的分工表。
+ */
 export async function saveDraftState(input: {
   conversationId: number
   instanceKey: string

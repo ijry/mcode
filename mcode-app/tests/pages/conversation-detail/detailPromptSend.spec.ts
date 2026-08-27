@@ -3,10 +3,12 @@ import {
   buildPromptStartWatchSignature,
   isConnectionNotFoundError,
   isQueuedPromptResponse,
+  isTurnInProgressRejection,
   resolvePromptStartSnapshotOutcome,
   resolvePromptStartTimeoutFailure,
   resolvePromptStartWatchOutcome,
   resolveDraftSendFailure,
+  resolveRunningSendAction,
   sendPromptWithConnectionRecovery,
 } from "@/pages/conversation-detail/detailPromptSend"
 import type { QueuedDraft, UploadedAttachment } from "@/pages/conversation-detail/detailDataNormalization"
@@ -224,4 +226,77 @@ describe("detailPromptSend", () => {
     })
   })
 
+})
+
+describe("running send interception", () => {
+  it("sends normally when no turn is running", () => {
+    expect(resolveRunningSendAction({
+      isBusy: false,
+      nativeSteeringAvailable: false,
+      hasAttachments: false,
+    })).toBe("send")
+
+    // native 能力与是否有附件都只在「运行中」这条路上才有意义 —— 空闲时一律直发。
+    expect(resolveRunningSendAction({
+      isBusy: false,
+      nativeSteeringAvailable: true,
+      hasAttachments: true,
+    })).toBe("send")
+  })
+
+  it("offers the steer sheet only on sessions whose feedback channel is native", () => {
+    expect(resolveRunningSendAction({
+      isBusy: true,
+      nativeSteeringAvailable: true,
+      hasAttachments: false,
+    })).toBe("steer_sheet")
+
+    // 非 native（codex / 旧版 claude / mcode-desktop）：弹一个唯一选项还点不动的面板
+    // 是纯噪音，直接走拦截提示。
+    expect(resolveRunningSendAction({
+      isBusy: true,
+      nativeSteeringAvailable: false,
+      hasAttachments: false,
+    })).toBe("blocked")
+  })
+
+  it("blocks instead of offering the sheet when the draft carries attachments", () => {
+    // 服务端 steering 是 text-only：给一个会静默丢掉附件的按钮，比不给更糟。
+    expect(resolveRunningSendAction({
+      isBusy: true,
+      nativeSteeringAvailable: true,
+      hasAttachments: true,
+    })).toBe("blocked")
+  })
+
+  it("recognizes the busy rejection from both backends", () => {
+    // codeg-plus：`AcpError::TurnInProgress` 的 Display 串（error.rs:20），
+    // web 传输另带稳定错误码 `turn_in_progress`（app_error.rs:92）。
+    expect(isTurnInProgressRejection(
+      "acp_prompt: turn already in progress for this connection"
+    )).toBe(true)
+    expect(isTurnInProgressRejection({ code: "turn_in_progress" })).toBe(true)
+    expect(isTurnInProgressRejection({
+      message: "turn already in progress for this connection",
+    })).toBe(true)
+    expect(isTurnInProgressRejection(
+      new Error("acp_prompt: turn already in progress for this connection")
+    )).toBe(true)
+
+    // mcode-desktop：同一语义换了个名字（runtime/mod.rs:1760 的 turn_busy_error）。
+    expect(isTurnInProgressRejection({ code: "turn_busy" })).toBe(true)
+    expect(isTurnInProgressRejection(
+      'acp_prompt: {"code":"turn_busy","message":"another device is running a turn"}'
+    )).toBe(true)
+  })
+
+  it("does not mistake other failures for the busy rejection", () => {
+    expect(isTurnInProgressRejection("network request failed")).toBe(false)
+    expect(isTurnInProgressRejection({ code: "target_offline" })).toBe(false)
+    expect(isTurnInProgressRejection(
+      "acp_prompt: connection not found: conn-1"
+    )).toBe(false)
+    expect(isTurnInProgressRejection(null)).toBe(false)
+    expect(isTurnInProgressRejection(undefined)).toBe(false)
+  })
 })

@@ -1,3 +1,15 @@
+/* 输入框上方的自动补全面板（`/` 命令、`@` 引用）的最大高度。
+ *
+ * 两个面板出现在**同一位置、同一场景**，所以共用一个上限 —— 取不同值会看起来像 bug。
+ * 超出后各自内部 `scroll-view` 滚动，绝不让面板把消息区顶掉。
+ *
+ * **590rpx 是量出来的，不是凑的整数。** `.slash-item` 实测行高 31px（375px 视口下），
+ * 560rpx = 280px 恰好等于 9 行，底边切在行间隙上 —— 面板看起来是个平底的块，完全看不出
+ * 下面还有内容。590rpx 让第 10 行露出约半行，那截被切掉的文字本身就是「可以滚」的提示。
+ *
+ * 所以调这个值时**不要随手取整**：先确认它不是行高的整数倍。改这一处即可同时调整两个面板。 */
+$composer-panel-max-height: 590rpx;
+
 .page {
   height: 100%;
   min-height: 100%;
@@ -229,6 +241,7 @@
 :deep(.detail-interactive-pane--theme-sweet .mention-panel),
 :deep(.detail-interactive-pane--theme-sweet .attachments-preview),
 :deep(.detail-interactive-pane--theme-sweet .upload-queue),
+:deep(.detail-interactive-pane--theme-sweet .feedback-notes),
 :deep(.detail-interactive-pane--theme-sweet .pending-response-card),
 :deep(.detail-interactive-pane--theme-sweet .permission-card),
 :deep(.detail-interactive-pane--theme-sweet .ask-question-card),
@@ -279,6 +292,7 @@
 :deep(.detail-interactive-pane--theme-summer .mention-panel),
 :deep(.detail-interactive-pane--theme-summer .attachments-preview),
 :deep(.detail-interactive-pane--theme-summer .upload-queue),
+:deep(.detail-interactive-pane--theme-summer .feedback-notes),
 :deep(.detail-interactive-pane--theme-summer .pending-response-card),
 :deep(.detail-interactive-pane--theme-summer .permission-card),
 :deep(.detail-interactive-pane--theme-summer .ask-question-card),
@@ -337,7 +351,8 @@
 .page--cyber .mention-panel,
 .page--cyber .pending-response-card,
 .page--cyber .permission-card,
-.page--cyber .ask-question-card {
+.page--cyber .ask-question-card,
+.page--cyber .feedback-notes {
   background: rgba(7, 24, 13, 0.78);
   border-color: rgba(103, 255, 167, 0.16);
   box-shadow: 0 0 0 1rpx rgba(79, 255, 151, 0.08), 0 16rpx 34rpx rgba(0, 0, 0, 0.28);
@@ -503,6 +518,7 @@
 :deep(.detail-interactive-pane--cyber .mention-panel),
 :deep(.detail-interactive-pane--cyber .attachments-preview),
 :deep(.detail-interactive-pane--cyber .upload-queue),
+:deep(.detail-interactive-pane--cyber .feedback-notes),
 :deep(.detail-interactive-pane--cyber .pending-response-card),
 :deep(.detail-interactive-pane--cyber .permission-card),
 :deep(.detail-interactive-pane--cyber .ask-question-card),
@@ -2168,6 +2184,12 @@
   backdrop-filter: blur(10rpx);
 }
 
+/* 命令列表的滚动容器。**必须与 `.slash-panel__close` 分层** —— 那个关闭按钮是相对
+   面板绝对定位的，放进滚动容器会跟着列表一起滚走。 */
+.slash-panel__scroll {
+  max-height: $composer-panel-max-height;
+}
+
 .mention-panel {
   margin-bottom: 12rpx;
   border: 1rpx solid var(--up-border-color, #dadbde);
@@ -2252,40 +2274,16 @@
 }
 
 .mention-panel__scroll {
-  max-height: 430rpx;
+  max-height: $composer-panel-max-height;
 }
 
 .mention-panel__body {
   padding: 8rpx;
 }
 
-.mention-group + .mention-group {
-  margin-top: 8rpx;
-  padding-top: 8rpx;
-  border-top: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 60%, transparent 40%);
-}
-
-.mention-group__header {
-  display: flex;
-  align-items: center;
-  gap: 8rpx;
-  padding: 6rpx 8rpx;
-}
-
-.mention-group__title {
-  font-size: 20rpx;
-  color: var(--up-tips-color, #909193);
-}
-
-.mention-group__count {
-  min-width: 28rpx;
-  padding: 1rpx 8rpx;
-  border-radius: 999rpx;
-  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
-  color: var(--up-tips-color, #909193);
-  font-size: 18rpx;
-  text-align: center;
-}
+/* 分组头（`.mention-group__header` / `__title` / `__count`）与组间分隔线随「改用
+   up-tabs 分栏」一起删除：组名和计数现在都在 tab 标签上，一次只渲染一组，不再需要
+   组内标题，也不存在相邻组。`.mention-group__more`（截断提示）仍在用，见下。 */
 
 .mention-item {
   display: flex;
@@ -2482,6 +2480,61 @@
 
   &--error {
     color: #fa3534;
+  }
+}
+
+/* 本轮补充意见便签（只读回显）。形制照 `.upload-queue` —— 同为「本轮临时状态清单」，
+   都不是需要用户操作的卡片，所以是轻底色 + 无边框，而不是 permission-card 那种带
+   强调色边框的形制。 */
+.feedback-notes {
+  margin-bottom: 10rpx;
+  padding: 10rpx 14rpx;
+  border-radius: 14rpx;
+  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+
+.feedback-notes--translucent {
+  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 38%, transparent 62%);
+  border: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 34%, transparent 66%);
+  backdrop-filter: blur(10rpx);
+}
+
+.feedback-notes__item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10rpx;
+}
+
+.feedback-notes__left {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 8rpx;
+}
+
+/* 正文可能是一整句话，允许折行（这是与 upload-queue 的文件名唯一的形制差别 ——
+   文件名截断没损失，补充意见截断了就看不出插了什么）。 */
+.feedback-notes__text {
+  flex: 1;
+  min-width: 0;
+  font-size: 22rpx;
+  line-height: 1.4;
+  color: var(--up-content-color, #606266);
+  word-break: break-word;
+}
+
+.feedback-notes__status {
+  flex-shrink: 0;
+  font-size: 21rpx;
+  color: var(--up-tips-color, #909193);
+
+  &--delivered {
+    color: #19be6b;
   }
 }
 

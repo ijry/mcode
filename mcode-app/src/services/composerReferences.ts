@@ -158,6 +158,77 @@ export function buildMentionReferenceGroups(
   })
 }
 
+export interface MentionTabItem {
+  /** `up-tabs` 的 `keyName="title"` 读这个字段。带计数。 */
+  title: string
+  kind: MentionReferenceKind
+  count: number
+  /** 空组置灰不可点（`up-action-sheet`/`up-tabs` 的 disabled 项不触发 change）。 */
+  disabled: boolean
+}
+
+/**
+ * 把四个引用分组变成 `up-tabs` 的 list。
+ *
+ * **四组恒显、位置固定**（用户选的形制）。这顺带消掉了一个坑：`buildMentionReferenceGroups`
+ * 每次按 query 重新过滤，如果只显示非空组，tab 集合会**随每一次按键变短** —— 下标停在
+ * 第 3 个 tab、新结果只剩 2 组时内容区就是空白。固定四组之后下标不会漂移。
+ *
+ * 标签带计数：分栏之后用户看不到其他组里有没有东西，计数是唯一线索。`truncated` 时加
+ * `+`（如 `文件 20+`）—— 不标出来的话 20 看起来就是全部，而它其实是 `maxPerGroup` 截断后
+ * 的数字。
+ */
+export function buildMentionTabItems(
+  groups: MentionReferenceGroup[]
+): MentionTabItem[] {
+  return groups.map((group) => {
+    const count = group.items.length
+    const countText = count > 0 ? ` ${count}${group.truncated ? "+" : ""}` : ""
+    return {
+      title: `${group.label}${countText}`,
+      kind: group.kind,
+      count,
+      disabled: count === 0,
+    }
+  })
+}
+
+/**
+ * 当前该激活哪一组。
+ *
+ * **用 kind 而不是下标记录「当前是哪个 tab」**：下标是 `up-tabs` 的输入，但身份是 kind。
+ * 混用会在组集合变化时错位（问题分栏那次踩过同样的坑，见
+ * `detailInteractionPresentation.ts` 的 `askQuestionTabIndex` 注释）。
+ *
+ * `pinned` 区分两种**从状态本身无法区分**的处境 —— 两者的输入长得一模一样
+ * （当前 kind 那组是空的），但正确答案相反：
+ *
+ * - `pinned: false`（面板刚打开、用户还没点过 tab）：当前 kind 只是个默认值，用户对
+ *   「我正在看哪一组」没有预期。落回**第一个非空组**，让他直接看到有内容的那组。
+ * - `pinned: true`（用户点过 tab，那是他的选择）：**留在原地，绝不自动跳组。** 他正在看
+ *   「文件」组、继续敲字让它变空时，把他弹到「智能体」组会让他以为自己点错了。留在原地
+ *   显示空态，他自己决定是改关键词还是切组。
+ *
+ * 只有当前 kind 压根不在这批分组里（组件状态被写坏 / 旧版本遗留值）时，`pinned` 也救不了
+ * 它 —— 那时一律走非空回退。
+ *
+ * 全空时回到第一组，让 tab 条与内容区状态自洽（都是空）。
+ */
+export function resolveActiveMentionKind(
+  groups: MentionReferenceGroup[],
+  currentKind: MentionReferenceKind | null | undefined,
+  options: { pinned?: boolean } = {}
+): MentionReferenceKind {
+  const fallback = groups[0]?.kind ?? "agent"
+  const current = groups.find((group) => group.kind === currentKind)
+  // 用户亲手选过这一组：留在原地，空了也留着。
+  if (current && options.pinned) return current.kind
+  // 未 pin：当前组有内容就用它，否则挑第一个有内容的组。
+  if (current && current.items.length > 0) return current.kind
+  const firstWithItems = groups.find((group) => group.items.length > 0)
+  return firstWithItems?.kind ?? fallback
+}
+
 function normalizeFiles(
   files?: MentionFileSource[] | null,
   projectPath?: string | null

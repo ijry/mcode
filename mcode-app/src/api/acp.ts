@@ -328,6 +328,30 @@ class AcpApiClient {
   }
 
   /**
+   * 把一段文本注入**正在运行**的回合（原生 `_session/steering`）。
+   *
+   * 只在 `RuntimeSession.nativeSteeringAvailable` 为真时调用 —— 那是服务端合成的权威
+   * 能力位。服务端接口是 `submit_session_feedback`（codeg-plus
+   * `web/handlers/feedback.rs:56`），成功时返回一条 `FeedbackItem`。
+   *
+   * **text-only**：服务端 steering 的 params 只有一个 text block
+   * （`acp/connection.rs:2577`），附件不能走这条路。
+   *
+   * 可恢复的拒绝会映射成 4xx：`no active turn`（点按钮那几百毫秒里回合结束了）、
+   * `live feedback is disabled`、`invalid feedback`（空/超长）。调用方要分别处理，
+   * 尤其不能把 no-active-turn 当普通失败 —— 那种情况下文本没被消费，可以直接发送。
+   *
+   * relay 模式无需改动：`/v1/proxy/:command` 是透传的。mcode-desktop 目标不支持这条
+   * 命令，但它的快照里 `native_steering_available` 恒为 false，走不到这里。
+   */
+  async acpSubmitSessionFeedback(connectionId: string, text: string): Promise<any> {
+    return await this.request("/submit_session_feedback", {
+      connectionId,
+      text,
+    })
+  }
+
+  /**
    * 列出所有连接
    */
   async acpListConnections(): Promise<ConnectionInfo[]> {
@@ -1399,6 +1423,42 @@ class AcpApiClient {
             title: firstString(source.title) || "",
             details: firstString(source.details) || undefined,
             actions: Array.isArray(source.actions) ? source.actions : [],
+          },
+        }
+      }
+      case "feedback_submitted": {
+        // 一条「本轮补充意见」便签落地。载荷是**平铺**的（服务端 `EventEnvelope` 用
+        // `#[serde(flatten)]`，线上是 `{seq, connection_id, type, item}`），所以这里必须
+        // 显式建 case —— `normalizeEventEnvelope` 那条兜底透传要求 `"data" in record`，
+        // 这两个事件永远不满足，不建 case 就会被静默丢掉。
+        //
+        // 原样透传整条 item，归一化交给
+        // `services/conversation/feedbackNotes.ts` —— 与快照那条路共用一份实现。
+        const item = toRecord(record.item)
+        if (!item) return null
+        return {
+          connectionId,
+          type: "feedback_submitted",
+          data: { item },
+        }
+      }
+      case "feedback_consumed": {
+        // agent 通过 `check_user_feedback` 读走了若干条便签。同样是平铺载荷
+        // （`{ids, delivered_at}`）。
+        //
+        // 注意这个事件**几乎不会**是为 mcode 自己的便签发的：mcode 走 native
+        // `_session/steering`，便签出生即 delivered。它承载的是桌面端走 pull 通道
+        // 发的那些 —— 见 `FeedbackNote` 类型说明里的通道对照表。
+        const ids = Array.isArray(record.ids)
+          ? record.ids.map((id) => firstString(id)).filter(Boolean)
+          : []
+        if (ids.length === 0) return null
+        return {
+          connectionId,
+          type: "feedback_consumed",
+          data: {
+            ids,
+            deliveredAt: firstString(record.delivered_at, record.deliveredAt) || undefined,
           },
         }
       }

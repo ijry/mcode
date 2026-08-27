@@ -216,6 +216,7 @@
               :cyber-effect-phase="cyberEffectPhase"
               :initial-loading="isActiveDetailTabPage(index) && detailContentInitialLoading"
               :load-error-message="isActiveDetailTabPage(index) ? detailLoadErrorMessage : ''"
+              :on-before-send-prompt="ensurePcTabReadyForPrompt"
               @layout-change="measureMessageListHeight"
               @reload="reloadDetailContent"
             />
@@ -329,7 +330,7 @@ import {
 import {
   clearRuntime,
   getRuntime,
-  saveDraftState,
+  saveRuntimeCheckpoint,
   type ConversationRuntimeRecord,
 } from "@/services/db/repositories/runtimeRepository"
 import { connectionSessionManager } from "@/services/conversation/connectionSessionManager"
@@ -3974,14 +3975,14 @@ function persistDetailRuntimeState() {
     queueExpanded: draftSnapshot.queueExpanded,
   })
   const currentSession = session.value
-  void saveDraftState({
+  // **只写断点，不碰草稿。** 草稿由持有输入框的 `ConversationDetailInteractivePane.vue`
+  // 负责；这个组件手里的 `inputText` / `attachments` 是抽离时留下的空 ref，用
+  // `saveDraftState` 写断点会把它们一起写进去，于是每次 onHide / onUnload 都把用户刚打的
+  // 草稿擦成空串。`saveRuntimeCheckpoint` 的签名里没有草稿三列，从类型上排除了这种写法。
+  void saveRuntimeCheckpoint({
     conversationId: conversationId.value,
     instanceKey: resolveDetailInstanceKey(),
     connectionId: currentSession?.connectionId ?? null,
-    composerText: inputText.value,
-    draftQueueJson: JSON.stringify(draftQueue.value),
-    attachmentsJson: JSON.stringify(attachments.value),
-    scrollAnchor: anchorMessageId.value || null,
     liveMessageJson: currentSession?.liveMessage ? JSON.stringify(currentSession.liveMessage) : null,
     lastAppliedSeq: currentSession?.lastAppliedSeq ?? null,
     isActive: Boolean(currentSession?.connectionId),
@@ -4782,6 +4783,16 @@ async function ensureConversationReadyForSend(resumeSessionId?: string) {
   return firstString(recovered?.id, session.value?.connectionId) || ""
 }
 
+/**
+ * 发送前确保 PC 端开着这个会话的 opened-tab。
+ *
+ * **通过 `:on-before-send-prompt` 传给 pane 调用** —— 输入框在那边，这里只提供能力。
+ * 它依赖 `getDetailGateway`（进而依赖 `resolveDetailDescriptor` 那一整套连接解析）与
+ * `detailTabMultitaskMode` 偏好，两者都归详情页所有，所以留在这里比搬到 pane 更合理。
+ *
+ * 抽离 pane 时这个调用曾经丢过：它留在了详情页那条已经没有输入框的 `sendDraft` 上，
+ * 于是手机端发消息不再帮 PC 打开对应标签，而且没有任何报错。
+ */
 async function ensurePcTabReadyForPrompt() {
   if (!detailTabsUsePcSync.value) return
   if (!conversationId.value || !folderId.value) return

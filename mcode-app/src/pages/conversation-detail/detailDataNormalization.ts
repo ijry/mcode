@@ -480,6 +480,43 @@ export function cloneAttachments(source: UploadedAttachment[]) {
   return source.map((item) => ({ ...item }))
 }
 
+/**
+ * 落库前清洗附件：**剔除 `data`（base64 全量图片数据）**。
+ *
+ * 这不是可选的优化，是必须的：
+ *
+ * - `data` 单张就可能几 MB（上限见 `PROMPT_IMAGE_MAX_BYTES`）。写进 `uni.storage` 会直接
+ *   撞平台配额（通常 10MB 总量）。
+ * - 写进 SQLite 更糟：H5 侧每次 `execute` 都会 `h5Db.export()` **把整库 dump 重写进
+ *   IndexedDB**（`services/db/sqlite.ts`）。草稿是**每敲一个字**就防抖落盘的，带着几 MB
+ *   base64 等于每次按键拷贝一遍整个数据库。
+ *
+ * 读回那侧本来就不认 `data`（`normalizeAttachment` 的返回对象里没有这个字段），所以这里
+ * 剔除**不损失任何能恢复的信息** —— 它补上的是写入侧一直缺的那道对称过滤。
+ *
+ * 图片数据在发送时按需重读：`prepareDraftForSend` 用 `localPath` / `url` 走
+ * `readLocalImageBase64`，读不到就报「本地缓存已失效，请重新选择图片」。所以只存路径是
+ * 与既有降级策略配套的，不是偷工减料。
+ *
+ * **不修改入参**：composer 里那份 attachments 是响应式的、还要继续用来发送，顺手删掉它的
+ * `data` 会让紧接着的发送直接失败。
+ */
+export function sanitizeAttachmentsForPersist(
+  source: UploadedAttachment[]
+): UploadedAttachment[] {
+  return source.map((item) => ({
+    id: item.id,
+    url: item.url,
+    name: item.name,
+    size: item.size,
+    type: item.type,
+    kind: item.kind,
+    // 缺失时**不写 undefined 键**，保持与 `normalizeAttachment` 输出同形。
+    ...(item.localPath ? { localPath: item.localPath } : {}),
+    ...(item.remoteUrl ? { remoteUrl: item.remoteUrl } : {}),
+  }))
+}
+
 export function cloneDraftQueue(source: QueuedDraft[]) {
   return source.map((item) => ({
     ...item,

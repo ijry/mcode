@@ -516,19 +516,21 @@
               :color="upThemeVar('--up-tips-color', '#909193')"
             ></up-icon>
           </view>
-          <view
-            v-for="item in filteredSlashCommands"
-            :key="item.key"
-            class="slash-item"
-            @click="applySlashCommand(item)"
-          >
-            <view class="slash-item__left">
-              <text class="slash-item__key">{{ item.key }}</text>
+          <scroll-view scroll-y class="slash-panel__scroll">
+            <view
+              v-for="item in filteredSlashCommands"
+              :key="item.key"
+              class="slash-item"
+              @click="applySlashCommand(item)"
+            >
+              <view class="slash-item__left">
+                <text class="slash-item__key">{{ item.key }}</text>
+              </view>
+              <text class="slash-item__desc">{{
+                getSlashCommandDesc(item)
+              }}</text>
             </view>
-            <text class="slash-item__desc">{{
-              getSlashCommandDesc(item)
-            }}</text>
-          </view>
+          </scroll-view>
         </view>
 
         <view
@@ -573,22 +575,34 @@
               >继续输入以过滤文件、会话、提交或智能体</text
             >
           </view>
-          <scroll-view v-else scroll-y class="mention-panel__scroll">
-            <view class="mention-panel__body">
-              <view
-                v-for="group in mentionVisibleGroups"
-                :key="group.kind"
-                class="mention-group"
+          <template v-else>
+            <up-tabs
+              :current="activeMentionTabIndex"
+              :list="mentionTabItems"
+              keyName="title"
+              :scrollable="false"
+              lineWidth="24"
+              :activeStyle="{
+                color: upThemeVar('--up-primary', '#2979ff'),
+                fontWeight: '600',
+              }"
+              :inactiveStyle="{ color: upThemeVar('--up-tips-color', '#909193') }"
+              @change="handleMentionTabChange"
+            ></up-tabs>
+
+            <view
+              v-if="!activeMentionGroup || activeMentionGroup.items.length === 0"
+              class="mention-panel__state"
+            >
+              <text class="mention-panel__state-text"
+                >这一组没有匹配项，换个关键词或切到其他分组</text
               >
-                <view class="mention-group__header">
-                  <text class="mention-group__title">{{ group.label }}</text>
-                  <text class="mention-group__count">{{
-                    group.items.length
-                  }}</text>
-                </view>
+            </view>
+            <scroll-view v-else scroll-y class="mention-panel__scroll">
+              <view class="mention-panel__body">
                 <view
-                  v-for="item in group.items"
-                  :key="`${group.kind}:${item.id}`"
+                  v-for="item in activeMentionGroup.items"
+                  :key="`${activeMentionGroup.kind}:${item.id}`"
                   class="mention-item"
                   @click="insertMentionReference(item)"
                 >
@@ -611,12 +625,15 @@
                     >
                   </view>
                 </view>
-                <text v-if="group.truncated" class="mention-group__more">
+                <text
+                  v-if="activeMentionGroup.truncated"
+                  class="mention-group__more"
+                >
                   结果较多，继续输入可缩小范围
                 </text>
               </view>
-            </view>
-          </scroll-view>
+            </scroll-view>
+          </template>
         </view>
 
         <view
@@ -659,6 +676,41 @@
                 失败
               </text>
             </view>
+          </view>
+        </view>
+
+        <view
+          v-if="showFeedbackNotes"
+          :class="[
+            'feedback-notes',
+            translucentMessageList && 'feedback-notes--translucent',
+          ]"
+        >
+          <view
+            v-for="note in feedbackNotes"
+            :key="note.id"
+            class="feedback-notes__item"
+          >
+            <view class="feedback-notes__left">
+              <up-icon
+                :name="note.status === 'delivered' ? 'checkmark' : 'clock'"
+                size="14"
+                :color="
+                  note.status === 'delivered'
+                    ? '#19be6b'
+                    : upThemeVar('--up-tips-color', '#909193')
+                "
+              ></up-icon>
+              <text class="feedback-notes__text">{{ note.text }}</text>
+            </view>
+            <text
+              :class="[
+                'feedback-notes__status',
+                note.status === 'delivered' && 'feedback-notes__status--delivered',
+              ]"
+            >
+              {{ note.status === "delivered" ? "已插入本轮" : "等待读取" }}
+            </text>
           </view>
         </view>
 
@@ -748,12 +800,12 @@
               'send-btn',
               translucentMessageList && 'send-btn--translucent',
               canSend && 'send-btn--active',
-              sending && 'send-btn--loading',
+              (sending || steeringIntoTurn) && 'send-btn--loading',
             ]"
             @click="sendMessage"
           >
             <up-loading-icon
-              v-if="sending"
+              v-if="sending || steeringIntoTurn"
               color="#ffffff"
               size="20"
             ></up-loading-icon>
@@ -1122,6 +1174,8 @@ import {
   computed,
   getCurrentInstance,
   nextTick,
+  onMounted,
+  onUnmounted,
   ref,
   watch,
   type StyleValue,
@@ -1151,6 +1205,8 @@ import { touchHotConversation } from "@/services/conversation/hotConversationCoo
 import {
   applyMentionReference,
   buildMentionReferenceGroups,
+  buildMentionTabItems,
+  resolveActiveMentionKind,
   resolveMentionTrigger,
   type MentionAgentSource,
   type MentionCommitSource,
@@ -1193,9 +1249,16 @@ import {
   normalizeAgentType,
   normalizeList,
   normalizeTurns,
+  resolveConversationDraftRestoreState,
+  sanitizeAttachmentsForPersist,
   type QueuedDraft,
   type UploadedAttachment,
 } from "./detailDataNormalization";
+import {
+  getRuntime,
+  saveDraftState,
+} from "@/services/db/repositories/runtimeRepository";
+import { ensureConversationSchema } from "@/services/db/migrations";
 import {
   createComposerDraft,
   createStandaloneDraft,
@@ -1205,6 +1268,8 @@ import {
   buildDraftSendPayload,
   buildPromptStartWatchSignature,
   isQueuedPromptResponse,
+  isTurnInProgressRejection,
+  resolveRunningSendAction,
   sendPromptWithConnectionRecovery,
   resolveDraftSendFailure,
   resolvePromptStartSnapshotOutcome,
@@ -1314,6 +1379,17 @@ const props = defineProps<{
   cyberEffectPhase?: CyberEffectPhase;
   initialLoading?: boolean;
   loadErrorMessage?: string;
+  /**
+   * 发送前的准备钩子（目前用途：确保 PC 端已经开着这个会话的 opened-tab）。
+   *
+   * 做成回调 prop 而不是在 pane 里重新实现一遍：它需要 gateway + descriptor +
+   * `detailTabMultitaskMode` 偏好三样东西，全都归详情页所有（`getDetailGateway`
+   * 依赖 `resolveDetailDescriptor` 那一整套连接解析）。在 pane 里重建等于把连接解析
+   * 复制第二份 —— 那正是本轮反复踩的坑。
+   *
+   * 缺省时（比如别处复用这个 pane）什么都不做，所以它是可选的。
+   */
+  onBeforeSendPrompt?: () => Promise<void> | void;
 }>();
 
 const emit = defineEmits<{
@@ -1371,6 +1447,9 @@ const attachments = ref<UploadedAttachment[]>([]);
 const uploadQueue = ref<UploadQueueItem[]>([]);
 const uploadingCount = ref(0);
 const sending = ref(false);
+// 插入当前回合在途：这条链路是「等后端确认后才清输入框」，不单独上锁的话连点两次会
+// 把同一段文本注入两遍。
+const steeringIntoTurn = ref(false);
 const stoppingSession = ref(false);
 const toolRowExpanded = ref(false);
 const detailProjectEntries = ref<DetailProjectEntry[]>([]);
@@ -1627,6 +1706,39 @@ const mentionResultCount = computed(() =>
     0,
   ),
 );
+// 用户亲手选的分组 kind。**记 kind 而不是 tab 下标** —— 下标是 up-tabs 的输入，身份是
+// kind；混用会在分组内容变化时错位（问题分栏那次踩过，见 askQuestionTabIndex 的注释）。
+// null 表示「还没点过」，此时 resolveActiveMentionKind 会帮他落到第一个有内容的组。
+const pinnedMentionKind = ref<MentionReferenceKind | null>(null);
+const mentionTabItems = computed(() =>
+  buildMentionTabItems(mentionReferenceGroups.value),
+);
+const activeMentionKind = computed(() =>
+  resolveActiveMentionKind(mentionReferenceGroups.value, pinnedMentionKind.value, {
+    pinned: pinnedMentionKind.value != null,
+  }),
+);
+const activeMentionTabIndex = computed(() =>
+  Math.max(
+    0,
+    mentionTabItems.value.findIndex((item) => item.kind === activeMentionKind.value),
+  ),
+);
+// 分栏后只渲染当前那一组 —— 这是「用 tabs 区分」的实质。
+const activeMentionGroup = computed(
+  () =>
+    mentionReferenceGroups.value.find(
+      (group) => group.kind === activeMentionKind.value,
+    ) ?? null,
+);
+function handleMentionTabChange(payload: any) {
+  const index = Number(payload?.index ?? payload);
+  const item = mentionTabItems.value[index];
+  // disabled 项理论上不触发 change，但 up-tabs 各版本行为不完全一致 —— 这里再挡一次，
+  // 否则点空组会把用户 pin 到一个永远没内容的 tab 上。
+  if (!item || item.disabled) return;
+  pinnedMentionKind.value = item.kind;
+}
 const showMentionPanel = computed(() => Boolean(mentionTrigger.value));
 const mentionPanelHint = computed(() => {
   if (mentionSourceStatus.value === "loading") return "正在搜索引用...";
@@ -1689,6 +1801,18 @@ const isBusyForSend = computed(
     runtimeStatus.value === "running_tool" ||
     runtimeStatus.value === "waiting_permission" ||
     runtimeStatus.value === "waiting_question",
+);
+// 「插入当前回合」是否可用。读的是服务端合成的权威位，**不看 agentType** ——
+// 见 `RuntimeSession.nativeSteeringAvailable` 的说明。
+const nativeSteeringAvailable = computed(() =>
+  Boolean(session.value.nativeSteeringAvailable),
+);
+const feedbackNotes = computed(() => session.value.feedbackNotes || []);
+// 只在**运行中**且非空时显示（桌面端同判据）。回合结束后便签仍在 store 里（要等下一轮
+// user_message 才清，见那处注释），但那时它已经没有「正在影响这一轮」的含义，挂在
+// 输入框上方只会挤占空间。
+const showFeedbackNotes = computed(
+  () => feedbackNotes.value.length > 0 && isStoppableRuntimeStatus(runtimeStatus.value),
 );
 const questionAnsweredCount = computed(() => {
   const pending = pendingQuestionCard.value;
@@ -2208,6 +2332,9 @@ function syncMentionTrigger() {
 
 function closeMentionPanel() {
   mentionTrigger.value = null;
+  // 清掉 pin：下一次打开 @ 面板应该重新落到「第一个有内容的组」，而不是上一次停在的
+  // 那一组 —— 那一组对新的查询可能完全没有结果。
+  pinnedMentionKind.value = null;
 }
 
 function clearMentionSources() {
@@ -2697,6 +2824,120 @@ function applySlashCommand(item: SlashCommandItem) {
   scheduleViewportSync();
 }
 
+/**
+ * 草稿按会话落库。
+ *
+ * **这条链路此前整段缺失。** SQLite 那张 `conversation_runtime` 表早就有
+ * `composer_text` / `attachments_json` 两列、主键就是 `(instance_key, conversation_id)`，
+ * `saveDraftState` 也早就是 read-modify-write（只覆盖草稿三列、不冲掉 live/seq）——
+ * 但唯一的接线在 `index.vue` 上，而那个组件的输入框在抽离本 pane 时就没了。于是整套
+ * 基础设施在往一个永远为空的 ref 上写。这个 pane 原本**连生命周期钩子都没有**。
+ *
+ * 切 tab 不是隐藏而是**销毁**：`mountedDetailConversationIds` 每次切换都重置为 ±1 滑动
+ * 窗口（`detailTabsPresentation.ts` 的 `resolveDetailMountedWindowConversationIds`），
+ * 从 tab0 跳到 tab3 时 tab0 的 pane 连组件带 ref 一起蒸发。所以落盘时机必须包含
+ * `onUnmounted`，只靠防抖 watch 会丢掉最后一次输入。
+ */
+const DRAFT_PERSIST_DEBOUNCE_MS = 800;
+let draftPersistTimer: ReturnType<typeof setTimeout> | null = null;
+// 恢复完成前不落盘：否则 mount 那一刻的空值会把上一次存的草稿覆盖掉。
+const draftRestored = ref(false);
+
+function resolvePaneInstanceKey() {
+  return firstString(props.instanceKey) || "anonymous";
+}
+
+function clearDraftPersistTimer() {
+  if (draftPersistTimer) {
+    clearTimeout(draftPersistTimer);
+    draftPersistTimer = null;
+  }
+}
+
+async function persistPaneDraft() {
+  const conversationId = Number(props.conversationId || 0);
+  if (!conversationId || !draftRestored.value) return;
+  try {
+    // 建表必须自己保证：pane 可能是**第一个**碰 SQLite 的组件（详情页的
+    // `hydrateLocalConversationState` 只在有本地缓存那条路上跑）。少这一句就会在
+    // 干净安装上直接 `no such table: conversation_runtime` —— 这是实测撞出来的。
+    // `ensureConversationSchema` 自带 promise 去重，重复调用没有代价。
+    await ensureConversationSchema();
+    await saveDraftState({
+      conversationId,
+      instanceKey: resolvePaneInstanceKey(),
+      connectionId: firstString(session.value.connectionId) || null,
+      composerText: inputText.value,
+      // pane 没有本地待发送队列（那套仍留在 index.vue 的死代码里），存空数组占位 ——
+      // `saveDraftState` 会原样覆盖这一列，写 "[]" 而不是留旧值才是诚实的。
+      draftQueueJson: "[]",
+      // **必须过 sanitize**：base64 `data` 不能落库，见 sanitizeAttachmentsForPersist。
+      attachmentsJson: JSON.stringify(
+        sanitizeAttachmentsForPersist(attachments.value),
+      ),
+    });
+  } catch (error) {
+    // 落盘失败不该影响输入 —— 用户正在打字，弹 toast 只会打断他。
+    console.warn("persist pane draft skipped", error);
+  }
+}
+
+function scheduleDraftPersist() {
+  clearDraftPersistTimer();
+  draftPersistTimer = setTimeout(() => {
+    draftPersistTimer = null;
+    void persistPaneDraft();
+  }, DRAFT_PERSIST_DEBOUNCE_MS);
+}
+
+async function restorePaneDraft() {
+  const conversationId = Number(props.conversationId || 0);
+  if (!conversationId) {
+    draftRestored.value = true;
+    return;
+  }
+  try {
+    await ensureConversationSchema();
+    const persistedRuntime = await getRuntime(
+      resolvePaneInstanceKey(),
+      conversationId,
+    );
+    // 输入框已经有内容就不覆盖：恢复是异步的，用户可能在它返回前就开始打字了。
+    if (!inputText.value && !attachments.value.length) {
+      const restored = resolveConversationDraftRestoreState({
+        persistedRuntime,
+        createId: createLocalId,
+      });
+      inputText.value = restored.composerText;
+      attachments.value = restored.attachments;
+    }
+  } catch (error) {
+    console.warn("restore pane draft skipped", error);
+  } finally {
+    // 无论成败都要放开落盘闸门，否则一次读失败会让这条会话再也存不进草稿。
+    draftRestored.value = true;
+  }
+}
+
+watch(
+  () => [inputText.value, JSON.stringify(attachments.value)],
+  () => {
+    if (!draftRestored.value) return;
+    scheduleDraftPersist();
+  },
+);
+
+onMounted(() => {
+  void restorePaneDraft();
+});
+
+onUnmounted(() => {
+  // 切 tab / 退出详情页都会销毁本组件（见上方说明）。防抖里还压着的那次必须**同步
+  // 立即**落盘 —— 等它自己触发的话组件已经没了。
+  clearDraftPersistTimer();
+  void persistPaneDraft();
+});
+
 function createDraftFromComposer(): QueuedDraft | null {
   const draft = createComposerDraft({
     text: inputText.value,
@@ -2716,6 +2957,8 @@ async function sendQuickReply(text: string) {
     showSharedLiveBlockedToast();
     return;
   }
+  // 快捷回复也过同一道门：它同样调 sendDraft，没有拦截就同样会撞上服务端并发闸。
+  if (interceptRunningSend({ text, hasAttachments: false })) return;
   const draft = createStandaloneDraft({
     text,
     createId: createLocalId,
@@ -2737,9 +2980,114 @@ async function sendMessage() {
     uni.showToast({ title: "文件上传中，请稍后发送", icon: "none" });
     return;
   }
+  // **必须在 createDraftFromComposer 之前**：那个函数会把 inputText / attachments
+  // 清空，放在它之后拦截等于把用户刚打的字吞掉。
+  if (
+    interceptRunningSend({
+      text: inputText.value,
+      hasAttachments: attachments.value.length > 0,
+    })
+  ) {
+    return;
+  }
   const draft = createDraftFromComposer();
   if (!draft) return;
   await sendDraft(draft);
+}
+
+/**
+ * 运行中点发送时的分流。返回 true 表示「已经处理掉了，调用方不要再发」。
+ *
+ * 这道门此前在从 index.vue 抽离到本组件时整块丢了（`isBusyForSend` 有定义、零引用），
+ * 于是第二条 prompt 真的打到 `/acp_prompt`，被服务端并发闸拒掉并提示
+ * `turn already in progress`。
+ */
+function interceptRunningSend(input: { text: string; hasAttachments: boolean }) {
+  const action = resolveRunningSendAction({
+    isBusy: isBusyForSend.value,
+    nativeSteeringAvailable: nativeSteeringAvailable.value,
+    hasAttachments: input.hasAttachments,
+  });
+  if (action === "send") return false;
+
+  if (action === "steer_sheet") {
+    openSteerActionSheet(input.text);
+    return true;
+  }
+
+  // blocked：草稿原样留在输入框里，用户可以等回合结束后直接点发送。
+  uni.showToast({
+    title: "当前回合进行中，请等待结束后再发送",
+    icon: "none",
+    duration: 2500,
+  });
+  return true;
+}
+
+/**
+ * 「插入当前回合 / 取消」底部面板。
+ *
+ * 用原生 `uni.showActionSheet` 而不是 `up-action-sheet`：详情页现有的三处底部菜单
+ * （背景图、主题、会话状态）都用它，且它自带取消项，不必手写「取消」这一栏。
+ */
+function openSteerActionSheet(rawText: string) {
+  const text = String(rawText || "").trim();
+  if (!text) return;
+  uni.showActionSheet({
+    itemList: ["插入当前回合"],
+    success: (result) => {
+      if (Number(result.tapIndex) !== 0) return;
+      void steerIntoCurrentTurn(text);
+    },
+  });
+}
+
+/**
+ * 把文本注入正在运行的回合。
+ *
+ * 三条失败语义各不相同，不能合成一个 catch：
+ * - `no active turn`：点按钮那几百毫秒里回合结束了。文本**没有**被消费，所以保留草稿
+ *   并提示可以直接发送 —— 替用户自动发出去是越权（他可能已经改主意）。
+ * - 其它失败：同样保留草稿，报错原文。
+ * - 成功：清空输入框。**只在成功后清**，这是与 sendMessage 相反的顺序，因为这里是
+ *   异步确认而非即时发送。
+ */
+async function steerIntoCurrentTurn(text: string) {
+  if (steeringIntoTurn.value) return;
+  const connectionId = firstString(session.value.connectionId);
+  if (!connectionId) {
+    uni.showToast({ title: "未连接到代理", icon: "none" });
+    return;
+  }
+  steeringIntoTurn.value = true;
+  try {
+    const item = await acpApi.acpSubmitSessionFeedback(connectionId, text);
+    // 乐观回显：接口返回的就是那条便签。随后到达的 `feedback_submitted` 广播按 id
+    // 幂等，所以这里先 append 不会变成两条 —— 而不 append 的话，在广播回来之前
+    // （relay 链路上是几百毫秒）界面上没有任何插入成功的痕迹。
+    runtime.recordFeedbackNote(Number(props.conversationId || 0), item);
+    inputText.value = "";
+    composerCursor.value = null;
+    closeMentionPanel();
+    uni.showToast({ title: "已插入当前回合", icon: "none" });
+  } catch (error) {
+    const message = toErrorMessage(error);
+    if (/no active turn/i.test(message)) {
+      uni.showToast({
+        title: "当前回合已结束，可直接发送",
+        icon: "none",
+        duration: 2500,
+      });
+      return;
+    }
+    uni.showToast({
+      title: `插入失败: ${message}`,
+      icon: "none",
+      duration: 3000,
+    });
+  } finally {
+    steeringIntoTurn.value = false;
+  }
 }
 
 async function prepareDraftForSend(draft: QueuedDraft): Promise<QueuedDraft> {
@@ -2842,6 +3190,10 @@ async function sendDraft(draft: QueuedDraft): Promise<boolean> {
 
   try {
     touchHotConversation(Number(props.conversationId || 0));
+    // 发送前的准备（PC 端 opened-tab 就绪）。**这一步在抽离本组件时丢过一次** ——
+    // `ensurePcTabReadyForPrompt` 留在了详情页那条已经没有输入框的发送链路上，于是
+    // 手机端发消息不再帮 PC 打开对应标签。失败不阻断发送：它是体验优化，不是前置条件。
+    await props.onBeforeSendPrompt?.();
     const conn = await ensureConversationReadyForSend();
     if (!conn) throw new Error("未连接到代理");
 
@@ -2910,6 +3262,19 @@ async function sendDraft(draft: QueuedDraft): Promise<boolean> {
   } catch (error) {
     runtime.clearLiveMessage(Number(props.conversationId || 0));
     const message = toErrorMessage(error);
+    // 兜底：本地判定为空闲、服务端却在跑。runtimeStatus 靠推送事件驱动，断线期间会
+    // 滞后，所以这个窗口一直存在（两个后端的拒绝码不同，见 isTurnInProgressRejection）。
+    // 草稿已经被 createDraftFromComposer 从输入框里取走了，这里必须还回去 ——
+    // 否则用户刚打的字直接蒸发。
+    if (isTurnInProgressRejection(error)) {
+      restoreDraftToComposer(draft);
+      uni.showToast({
+        title: "当前回合进行中，请等待结束后再发送",
+        icon: "none",
+        duration: 2500,
+      });
+      return false;
+    }
     const failure = resolveDraftSendFailure({ errorMessage: message });
     draft.status = failure.status;
     draft.error = failure.error;
@@ -2918,6 +3283,22 @@ async function sendDraft(draft: QueuedDraft): Promise<boolean> {
     return false;
   } finally {
     sending.value = false;
+  }
+}
+
+/**
+ * 把一份未能发出的草稿还回输入框。
+ *
+ * 只在输入框仍是空的时候覆盖：拒绝到达前用户可能已经开始打下一条，那份新内容比这份
+ * 失败的草稿更该留着。附件同理，用合并而不是替换。
+ */
+function restoreDraftToComposer(draft: QueuedDraft) {
+  if (!inputText.value.trim()) {
+    inputText.value = draft.text || "";
+    composerCursor.value = null;
+  }
+  if (draft.attachments.length > 0 && attachments.value.length === 0) {
+    attachments.value = draft.attachments.map((att) => ({ ...att }));
   }
 }
 

@@ -239,6 +239,16 @@ export interface EventEnvelope {
     | "question_resolved"
     | "api_retry"
     | "session_failure"
+    /**
+     * 本轮补充意见便签的提交 / 被读取（见 `FeedbackNote`）。
+     *
+     * 线上载荷是**平铺**的（服务端 `EventEnvelope` 用 `#[serde(flatten)]`：
+     * `{seq, connection_id, type, item}` / `{..., ids, delivered_at}`），所以
+     * `normalizeAcpEventRecord` 里**必须**有显式 case —— `normalizeEventEnvelope` 的兜底
+     * 透传要求 `"data" in record`，这两个事件永远不满足。
+     */
+    | "feedback_submitted"
+    | "feedback_consumed"
     | "error"
   connectionId: string
   seq?: number
@@ -445,6 +455,39 @@ export interface SessionFailureRecord {
   actions: string[]
   /** 客户端推断的生命周期，不在线上。见类型说明第 3 条。 */
   resolved: boolean
+}
+
+/**
+ * 一条「本轮补充意见」便签（服务端 `acp/feedback.rs` 的 `FeedbackItem`）。
+ *
+ * **它是轮次级的瞬态 steering，不是历史。** 服务端刻意不持久化
+ * （`feedback.rs:6`：「are real-time steering, not durable history, so they are
+ * intentionally NOT persisted」），并在下一轮的 `UserMessage` 事件里整表清空。
+ * mcode 跟着这个契约走：不进时间线、不进 SQLite、不参与轮次去重。
+ *
+ * 两态的含义要看**通道**，这是最容易接错线的地方：
+ *
+ * | 通道 | 出生状态 | 谁把它翻成 delivered |
+ * | --- | --- | --- |
+ * | native `_session/steering`（mcode 走这条） | **`delivered`**（`new_delivered`，`feedback.rs:76`） | 没有人 —— 出生即已送达 |
+ * | pull `check_user_feedback` | `pending`（`new_pending`） | agent 主动调工具时的 `FeedbackConsumed` |
+ *
+ * 所以 **mcode 自己插入的便签永远不会收到 `feedback_consumed`**。native 便签必须
+ * 从出生就是 `delivered`，否则 `read_pending_feedback`（只返回 `Pending`，
+ * `manager.rs:2585`）会把同一段文本再喂给 agent 一遍 —— 那个「只读 Pending」正是
+ * 推/拉两条通道之间的互斥。
+ *
+ * 那还接 `feedback_consumed` 做什么：**别人的便签**。桌面端在同一会话里走 pull 通道
+ * 发的便签会广播过来，它才有「等待读取 → 已读取」这两帧。
+ */
+export interface FeedbackNote {
+  id: string
+  text: string
+  /** 毫秒时间戳（线上是 ISO 串）。 */
+  createdAt: number
+  status: "pending" | "delivered"
+  /** agent 读到它的时刻；`pending` 时为 null。 */
+  deliveredAt: number | null
 }
 
 export interface RuntimeErrorEvent {

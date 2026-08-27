@@ -14,6 +14,7 @@ import type {
   PermissionOption,
   PendingQuestionState,
   ApiRetryEvent,
+  FeedbackNote,
   RuntimeErrorEvent,
   SessionFailureRecord,
   TurnQueueEvent,
@@ -59,6 +60,13 @@ import {
   isWindowedConversationDetail,
 } from "@/services/conversation/conversationHistoryWindowContract"
 import { readLocalTurnCacheEnabled } from "@/services/conversation/localTurnCachePreference"
+import {
+  appendFeedbackNote,
+  markFeedbackNotesDelivered,
+  mergeFeedbackSnapshot,
+  normalizeFeedbackNote,
+  parseFeedbackInstant,
+} from "@/services/conversation/feedbackNotes"
 import { getRelayClientId } from "@/services/gateway/relayClientIdentity"
 import {
   buildConversationTimeline,
@@ -102,6 +110,9 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         pendingQuestion: null,
         sharedPromptQueue: createSharedPromptQueueState(),
         inFlightUserTurnId: null,
+        nativeSteeringAvailable: false,
+        feedbackNotes: [],
+        consumedFeedbackIds: new Map<string, number>(),
         lastAppliedSeq: null,
         lastCompletedTurnKey: null,
         lastCompletedTurnAt: 0,
@@ -363,6 +374,26 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     }
     session.pendingPermission = normalizePendingPermission(snapshot?.pending_permission)
     session.pendingQuestion = normalizePendingQuestion(snapshot?.pending_question)
+    // 「插入当前回合」的能力位。**只升不降**：`connectionId` 在连接还在 connecting 时
+    // 就已经存在，那一刻服务端尚未在 initialize 里写 `native_steering_available`，第一次
+    // 读回来必然是 false —— 无条件赋值会把入口永久关掉。false 与字段缺失（旧后端）在这里
+    // 是同一件事：都不构成「这条会话不支持」的证据。真正的清零在 disconnect / 换连接。
+    if (readSnapshotNativeSteering(snapshot)) {
+      session.nativeSteeringAvailable = true
+    }
+    // 本轮便签也在快照里（`session_state.rs:1653`，注释写明是为「mid-turn attach 的
+    // 客户端渲染那些一次性 feedback_submitted 不会重放的便签」准备的）。冷启动 /
+    // 重连进一个进行中的会话时，这是唯一来源。
+    //
+    // 合并方向与上面的能力位**相反**：这里实时优先。快照可能停在 `pending`，而
+    // `feedback_consumed` 事件已经到了。空数组（服务端不上线该字段时的常态）在
+    // mergeFeedbackSnapshot 里原样返回本地表，不会误清。
+    const snapshotNotes = (
+      Array.isArray(snapshot?.feedback) ? snapshot.feedback : []
+    )
+      .map((raw: unknown) => normalizeFeedbackNote(raw))
+      .filter(Boolean) as FeedbackNote[]
+    session.feedbackNotes = mergeFeedbackSnapshot(session.feedbackNotes, snapshotNotes)
     session.status = deriveRuntimeStatus(
       snapshot,
       shouldIgnoreSnapshotLiveMessage
@@ -566,7 +597,53 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         // 后端广播的 user_message 是所有客户端当前用户轮次的唯一来源；无论消息
         // 是否由本机发送，都先按 messageId 合成已确认轮次，再等待流式事件。
         applyRealtimeUserMessage(session, event.data)
+        // 便签是**轮次级**的，服务端就在这个事件里清表（`session_state.rs:4084` 那条
+        // 测试锁着这个契约），跟着它走。
+        //
+        // **不能用 turn_complete 清**：回合刚结束、下一轮还没开始时，你插进去的那句
+        // 仍然属于刚才那轮的上下文，提前抹掉会让你以为没插进去。
+        session.feedbackNotes = []
+        session.consumedFeedbackIds = new Map()
         break
+
+      case "feedback_submitted": {
+        // 一条便签落地。按 id 幂等 —— 本地乐观 append 之后紧跟着到达的同 id 广播
+        // 必须是 no-op，事件重放和双 attach 同理。
+        const note = normalizeFeedbackNote(event.data?.item)
+        if (!note) break
+        session.feedbackNotes = appendFeedbackNote(
+          session.feedbackNotes,
+          note,
+          session.consumedFeedbackIds
+        )
+        break
+      }
+
+      case "feedback_consumed": {
+        // agent 通过 `check_user_feedback` 读走了若干条便签。
+        //
+        // **这个事件几乎不会是为 mcode 自己的便签发的**：mcode 走 native 通道，便签
+        // 出生即 delivered（见 `FeedbackNote` 类型说明）。它承载的是**别人的便签**
+        // —— 桌面端在同一会话里走 pull 通道发的那些。
+        const ids: string[] = Array.isArray(event.data?.ids) ? event.data.ids : []
+        if (ids.length === 0) break
+        // 服务端一定会带 delivered_at；解析不出来时退回「现在」，因为这个事件的语义
+        // 本身就是「刚刚读走」——「已读取但没有时刻」会让 UI 显示不出读取时间。
+        const deliveredAt = parseFeedbackInstant(event.data?.deliveredAt) ?? Date.now()
+        // 墓碑先记：对应的 submitted 可能还在路上（广播乱序 / 快照未水合），
+        // 不记的话那条便签落地时会以 pending 复活在 agent 已经读过之后。
+        for (const id of ids) {
+          if (!session.consumedFeedbackIds.has(id)) {
+            session.consumedFeedbackIds.set(id, deliveredAt)
+          }
+        }
+        session.feedbackNotes = markFeedbackNotesDelivered(
+          session.feedbackNotes,
+          ids,
+          deliveredAt
+        )
+        break
+      }
 
       case "tool_call": {
         session.status = "running_tool"
@@ -807,6 +884,10 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         session.pendingPermission = null
         session.pendingQuestion = null
         session.inFlightUserTurnId = null
+        // 被取消的回合不会有下一条 `user_message` 来清便签（那条清空挂在**新一轮开始**
+        // 上）。不在这里清，上一轮的便签会一直挂在输入框上方，直到用户真的发下一条。
+        session.feedbackNotes = []
+        session.consumedFeedbackIds = new Map()
         session.status = session.connectionId ? "connected" : "idle"
         session.inputErrorMessage = null
         session.inputErrorDetails = null
@@ -992,6 +1073,10 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         session.lastAppliedSeq = null
         session.lastCompletedTurnKey = null
         session.lastCompletedTurnAt = 0
+        // 会话被别的连接接管了：能力位属于旧那条，必须清掉等新快照重新声明。
+        session.nativeSteeringAvailable = false
+        session.feedbackNotes = []
+        session.consumedFeedbackIds = new Map()
         resetTurnScopedBackfillState(session)
       }
 
@@ -1078,6 +1163,12 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       session.pendingQuestion = null
       session.sharedPromptQueue = createSharedPromptQueueState()
       session.inFlightUserTurnId = null
+      // 能力位随连接消亡：它描述的是「这条连接的 adapter 支持什么」，下一条连接可能
+      // 是另一个 agent / 另一个版本。留着它会让重连到 codex 后仍然显示插入入口。
+      session.nativeSteeringAvailable = false
+      // 便签同理：它们属于那条已经断掉的连接的当前回合。
+      session.feedbackNotes = []
+      session.consumedFeedbackIds = new Map()
       session.lastCompletedTurnKey = null
       session.lastCompletedTurnAt = 0
       resetTurnScopedBackfillState(session)
@@ -1099,6 +1190,10 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     session.inputErrorDetails = null
     session.inputErrorTurnKey = null
     session.apiRetry = null
+    // 同 disconnect：能力位属于那条已经作废的连接，不能带到下一条上。
+    session.nativeSteeringAvailable = false
+    session.feedbackNotes = []
+    session.consumedFeedbackIds = new Map()
     if (!isSharedInProgressStatus(session.status)) {
       session.status = "idle"
     }
@@ -1229,6 +1324,25 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     syncManagedSendPermission(input.conversationId)
   }
 
+  /**
+   * 记录一条刚提交成功的补充意见便签（乐观回显）。
+   *
+   * `submit_session_feedback` 的响应体就是那条便签，与随后广播的
+   * `feedback_submitted` 是同一个 `id`，所以走同一条幂等 append —— 先记不会变成两条。
+   * 不先记的话，在广播回来之前（relay 链路上是几百毫秒）界面上没有任何插入成功的痕迹。
+   */
+  function recordFeedbackNote(conversationId: number, raw: unknown) {
+    const session = sessions.value.get(conversationId)
+    if (!session) return
+    const note = normalizeFeedbackNote(raw)
+    if (!note) return
+    session.feedbackNotes = appendFeedbackNote(
+      session.feedbackNotes,
+      note,
+      session.consumedFeedbackIds
+    )
+  }
+
   function setSessionError(conversationId: number, message: string | null) {
     const session = getOrCreateSession(conversationId)
     const normalized = firstString(message)
@@ -1298,6 +1412,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     clearCachedSessionState,
     clearPendingPermission,
     clearPendingQuestion,
+    recordFeedbackNote,
     bindCreatedConversationRuntime,
     setSessionError,
     applyConversationDetailStats,
@@ -1348,6 +1463,38 @@ interface RuntimeSession {
   pendingQuestion: PendingQuestionState | null
   sharedPromptQueue: SharedPromptQueueState
   inFlightUserTurnId: string | null
+  /**
+   * 这条连接的补充意见是否走原生 `_session/steering` 推送通道（服务端合成的
+   * `native_steering_available`，`codeg-plus/src-tauri/src/acp/session_state.rs:1673`）。
+   *
+   * 它是「运行中能不能插入当前回合」的**唯一**判据。服务端已经把三道闸合成进这一个
+   * bool：adapter 声明 `_meta.steering.supported`、registry 认为该 agent 遵守
+   * `promptRequired` opt-in、以及**运行中的适配器版本**达标（claude-agent-acp
+   * ≥ 0.65.0，`registry.rs:298`）。**不要在前端用 agentType 重新推导** —— codex 也
+   * 声明 steering，但它缺少 idle 约定，会把当前回合变成 detached turn，服务端因此
+   * 明确不给它开（`connection.rs:9470` 的注释写了「不暴露原始声明位，否则前端会忍不住
+   * 自己推导」）。
+   *
+   * **单调升级**：只有快照报 `true` 才置位，`false` 与字段缺失都**不回落**。理由与
+   * codeg-plus 前端对 `feedback_tool_available` 的处理相同 —— `connectionId` 在连接刚
+   * 创建（还在 connecting）时就有了，那一刻服务端尚未在 initialize 里写这个字段，第一次
+   * 读必然是 false；无条件覆盖会让入口永久消失。清零只发生在 disconnect / 换连接。
+   */
+  nativeSteeringAvailable: boolean
+  /**
+   * 本轮的补充意见便签（见 `FeedbackNote`）。轮次级瞬态：下一轮 `user_message` 清空，
+   * 不进时间线、不进 SQLite、不参与轮次去重 —— 与服务端「intentionally NOT persisted」
+   * 的立场一致。
+   */
+  feedbackNotes: FeedbackNote[]
+  /**
+   * 已被 agent 读走、但对应 `feedback_submitted` 还没到的便签 id → 读取时刻。
+   *
+   * 广播可能乱序，快照也可能比 `feedback_consumed` 晚水合。没有这张墓碑表，那条便签
+   * 落地时会以 `pending` 复活在 agent 已经读过之后 —— 界面显示「等待读取」，而它其实
+   * 早就送到了。与 `feedbackNotes` 同生同灭。
+   */
+  consumedFeedbackIds: Map<string, number>
   lastAppliedSeq: number | null
   lastCompletedTurnKey: string | null
   lastCompletedTurnAt: number
@@ -2466,6 +2613,21 @@ function deriveSnapshotLastError(snapshot: any): RuntimeErrorEvent | null {
     return { message: "会话运行失败" }
   }
   return null
+}
+
+/**
+ * 快照是否声明这条连接支持原生 steering。
+ *
+ * **只认显式的 `true`**（含 camelCase 别名）。`false`、字段缺失、非布尔值一律返回 false，
+ * 由调用方的单调升级逻辑决定「不置位」而非「置回 false」—— 见
+ * `RuntimeSession.nativeSteeringAvailable` 的说明。
+ */
+function readSnapshotNativeSteering(snapshot: any): boolean {
+  if (!snapshot || typeof snapshot !== "object") return false
+  return (
+    snapshot.native_steering_available === true ||
+    snapshot.nativeSteeringAvailable === true
+  )
 }
 
 function normalizeApiRetryEvent(raw: any): ApiRetryEvent | null {

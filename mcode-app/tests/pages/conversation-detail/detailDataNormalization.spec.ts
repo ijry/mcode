@@ -1,6 +1,7 @@
 import {
   buildConversationDraftSnapshot,
   cloneDraftQueue,
+  sanitizeAttachmentsForPersist,
   firstString,
   getTurnContentParts,
   isConversationDraftSnapshotEmpty,
@@ -402,5 +403,89 @@ describe("detailDataNormalization", () => {
 
     expect(message.content).toEqual([])
     expect(warn).toHaveBeenCalledWith("failed to parse local part payload", expect.any(Error))
+  })
+})
+
+describe("sanitizeAttachmentsForPersist", () => {
+  const imageWithData = {
+    id: "att-1",
+    kind: "image" as const,
+    url: "/tmp/pic.png",
+    name: "pic.png",
+    size: 2048,
+    type: "image/png",
+    localPath: "/tmp/pic.png",
+    remoteUrl: "https://cdn/pic.png",
+    data: "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo=",
+  }
+
+  it("strips the base64 payload", () => {
+    // `data` 是整张图的 base64，单张就可能几 MB。落进 uni.storage 会直接撞平台配额；
+    // 落进 SQLite 会让 H5 侧**每次 execute 都整库 export() 重写 IndexedDB**，
+    // 于是每敲一个字都拷贝一遍整个数据库。
+    const [sanitized] = sanitizeAttachmentsForPersist([imageWithData])
+    expect(sanitized).not.toHaveProperty("data")
+  })
+
+  it("keeps the fields needed to rebuild the attachment", () => {
+    const [sanitized] = sanitizeAttachmentsForPersist([imageWithData])
+    expect(sanitized).toEqual({
+      id: "att-1",
+      kind: "image",
+      url: "/tmp/pic.png",
+      name: "pic.png",
+      size: 2048,
+      type: "image/png",
+      localPath: "/tmp/pic.png",
+      remoteUrl: "https://cdn/pic.png",
+    })
+  })
+
+  it("does not mutate the source array", () => {
+    // composer 里那份 attachments 是响应式的、还要继续用来发送 —— 落库时顺手把它的
+    // `data` 删掉，会让紧接着的发送变成「本地缓存已失效」。
+    const source = [{ ...imageWithData }]
+    sanitizeAttachmentsForPersist(source)
+    expect(source[0].data).toBe(imageWithData.data)
+  })
+
+  it("omits absent optional fields instead of writing undefined", () => {
+    // 写成 `localPath: undefined` 会在 JSON.stringify 后变成缺键（没问题），但在
+    // 内存快照那条路上会留下一个 undefined 值，normalizeAttachment 的
+    // `typeof === "string"` 判据虽然挡得住，形状还是别脏。
+    const [sanitized] = sanitizeAttachmentsForPersist([{
+      id: "att-2",
+      kind: "file" as const,
+      url: "https://cdn/a.txt",
+      name: "a.txt",
+      size: 10,
+      type: "text/plain",
+    }])
+    expect(Object.keys(sanitized).sort()).toEqual(
+      ["id", "kind", "name", "size", "type", "url"]
+    )
+  })
+
+  it("survives a round trip through normalizeAttachments", () => {
+    // 落库 → 读回 的闭环：sanitize 后的形状必须仍能被 normalizeAttachments 收下，
+    // 否则草稿存了却恢复不出来（normalizeAttachment 在缺 url 时会整条丢弃）。
+    const persisted = sanitizeAttachmentsForPersist([imageWithData])
+    const restored = normalizeAttachments(
+      JSON.parse(JSON.stringify(persisted)),
+      (prefix: string) => `${prefix}-generated`
+    )
+    expect(restored).toHaveLength(1)
+    expect(restored[0]).toMatchObject({
+      id: "att-1",
+      kind: "image",
+      url: "/tmp/pic.png",
+      localPath: "/tmp/pic.png",
+      remoteUrl: "https://cdn/pic.png",
+    })
+    expect(restored[0]).not.toHaveProperty("data")
+  })
+
+  it("returns an empty array for an empty input", () => {
+    expect(sanitizeAttachmentsForPersist([])).toEqual([])
   })
 })

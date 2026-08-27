@@ -71,6 +71,24 @@
           @search="() => {}"
           @clear="() => {}"
         ></up-search>
+        <view
+          :class="[
+            'conversations-filter-chip',
+            hideCompletedConversations && 'conversations-filter-chip--active',
+          ]"
+          @click="toggleHideCompletedConversations"
+        >
+          <up-icon
+            :name="hideCompletedConversations ? 'eye-off' : 'eye'"
+            size="14"
+            :color="
+              hideCompletedConversations
+                ? upThemeVar('--up-primary', '#2979ff')
+                : upThemeVar('--up-tips-color', '#909193')
+            "
+          ></up-icon>
+          <text class="conversations-filter-chip__text">已完成</text>
+        </view>
       </view>
 
       <!-- 无连接 -->
@@ -98,7 +116,7 @@
             <text class="inline-loading__text">加载中...</text>
           </view>
           <view v-if="!loading && filteredConnectionGroups.length === 0" class="empty-fullpage">
-            <up-empty mode="list" text="暂无分组会话"></up-empty>
+            <up-empty mode="list" :text="overviewEmptyText"></up-empty>
           </view>
 
           <view v-else class="group-list">
@@ -147,7 +165,7 @@
 
                 <view v-else-if="group.cards.length === 0" class="group-empty">
                   <text class="group-empty__text">
-                    {{ group.loadError || "暂无打开中或 24 小时内活跃的会话" }}
+                    {{ group.loadError || groupEmptyText }}
                   </text>
                 </view>
 
@@ -624,7 +642,10 @@ import { useConversationRuntimeStore } from "@/stores/conversationRuntime"
 import { acpApi } from "@/api/acp"
 import RemoteDirectoryBrowser from "@/components/remote/RemoteDirectoryBrowser.vue"
 import MarqueeText from "@/components/MarqueeText.vue"
-import { resolveOverviewCardDisplayStatus } from "@/pages/conversations/conversationOverviewPresentation"
+import {
+  resolveOverviewCardDisplayStatus,
+  shouldHideCompletedOverviewCard,
+} from "@/pages/conversations/conversationOverviewPresentation"
 import {
   resolveConversationLivePreviewText,
   selectConversationLivePreviewIds,
@@ -665,6 +686,10 @@ import {
 import {
   readConversationListLiveStreamEnabled,
 } from "@/services/conversation/conversationListLiveStreamPreference"
+import {
+  readHideCompletedConversations,
+  writeHideCompletedConversations,
+} from "@/services/conversation/hideCompletedConversationsPreference"
 import {
   ensureGlobalConversationSync,
   subscribeConversationOverviewInvalidation,
@@ -768,6 +793,9 @@ let activeCreateConversationId = 0
 let activeCreatePromptAttempted = false
 let createProgressTimer: ReturnType<typeof setInterval> | null = null
 const livePreviewEnabled = ref(false)
+// 「隐藏已完成会话」开关（默认开，见 hideCompletedConversationsPreference）。
+// 在 onShow 里从存储读取，与 livePreviewEnabled 同一套路。
+const hideCompletedConversations = ref(true)
 const livePreviewPageVisible = ref(false)
 const livePreviewOwnedConversationIds = new Set<number>()
 const livePreviewTransferredConversationIds = new Set<number>()
@@ -877,17 +905,29 @@ const filteredConnectionGroups = computed<DisplayConnectionGroup[]>(() => {
   const groups = connectionGroups.value.map((group) => ({
     ...group,
     cards: sortLiveSessionCardsByRunning(
-      group.cards.map((card) => {
-        const runtimeSession = runtime.sessions.get(card.conversationId || 0)
-        const displayStatus = resolveOverviewCardDisplayStatus(card.status, runtimeSession?.status)
-        return {
-          ...card,
-          displayStatus,
-          livePreviewText: livePreviewEnabled.value
-            ? resolveConversationLivePreviewText(runtimeSession)
-            : "",
-        }
-      })
+      group.cards
+        .map((card) => {
+          const runtimeSession = runtime.sessions.get(card.conversationId || 0)
+          const displayStatus = resolveOverviewCardDisplayStatus(card.status, runtimeSession?.status)
+          return {
+            ...card,
+            displayStatus,
+            livePreviewText: livePreviewEnabled.value
+              ? resolveConversationLivePreviewText(runtimeSession)
+              : "",
+          }
+        })
+        // 过滤放在 displayStatus 算完之后：正在跑的 completed 会话此时已被提升成
+        // in_progress，不会被藏。**同样的过滤必须出现在 getDisplayCandidateCards 里** ——
+        // 那是并行的第二处派生（喂实时预览订阅与批量选择集），漏一处就会让被隐藏的卡
+        // 仍然被订阅、仍然能被批量选中。
+        .filter(
+          (card) =>
+            !shouldHideCompletedOverviewCard(
+              card.displayStatus,
+              hideCompletedConversations.value
+            )
+        )
     ),
   }))
   if (!kw) return groups
@@ -911,6 +951,32 @@ const filteredConnectionGroups = computed<DisplayConnectionGroup[]>(() => {
         group.name.toLowerCase().includes(kw) ||
         group.baseUrl.toLowerCase().includes(kw)
     )
+})
+
+/**
+ * 分组空态文案。
+ *
+ * 开着过滤时不能再说「暂无打开中或 24 小时内活跃的会话」—— 那句话在「有会话、只是全被
+ * 过滤掉了」的情况下是错的，会让用户以为会话丢了。这时要点明是过滤造成的，并告诉他
+ * 开关在哪。
+ */
+const groupEmptyText = computed(() =>
+  hideCompletedConversations.value
+    ? "没有进行中的会话；已完成的已隐藏，可点上方「已完成」查看"
+    : "暂无打开中或 24 小时内活跃的会话"
+)
+
+/**
+ * 整页空态文案。
+ *
+ * 同 `groupEmptyText` 的理由：搜索时说「暂无分组会话」已经有点含糊，再叠上过滤就成了
+ * 纯误导。两种成因分别点明，用户才知道该清关键词还是该关过滤。
+ */
+const overviewEmptyText = computed(() => {
+  if (searchKeyword.value.trim()) return "没有匹配的会话"
+  return hideCompletedConversations.value
+    ? "已完成的会话已隐藏，可点上方「已完成」查看"
+    : "暂无分组会话"
 })
 
 const showSelectionEntry = computed(() => {
@@ -1463,6 +1529,7 @@ const hasActiveConnection = computed(() => {
 
 onMounted(() => {
   loadConversationLivePreviewPreference()
+  loadHideCompletedPreference()
   scheduleLivePreviewReconcile()
   if (!disposeOverviewInvalidation) {
     disposeOverviewInvalidation = subscribeConversationOverviewInvalidation((instanceKey) => {
@@ -1519,6 +1586,7 @@ onShow(() => {
   livePreviewPageVisible.value = true
   livePreviewTransferredConversationIds.clear()
   loadConversationLivePreviewPreference()
+  loadHideCompletedPreference()
   const shouldForceRefresh = consumeConversationListDirty()
   void loadOverviewDataAfterConnectionPrepare(
     shouldForceRefresh ? { force: true } : undefined
@@ -1530,6 +1598,19 @@ onShow(() => {
 
 function loadConversationLivePreviewPreference() {
   livePreviewEnabled.value = readConversationListLiveStreamEnabled()
+}
+
+function loadHideCompletedPreference() {
+  hideCompletedConversations.value = readHideCompletedConversations()
+}
+
+function toggleHideCompletedConversations() {
+  hideCompletedConversations.value = writeHideCompletedConversations(
+    !hideCompletedConversations.value
+  )
+  // 隐藏状态变了 → 可见卡集合变了 → 实时预览订阅要按新集合重新对账。不调这一步，
+  // 刚被取消隐藏的会话不会自动开始订阅实时流（它的预览文案会一直空着）。
+  scheduleLivePreviewReconcile()
 }
 
 function scheduleLivePreviewReconcile() {
@@ -1665,6 +1746,16 @@ function getDisplayCandidateCards() {
           displayStatus: resolveOverviewCardDisplayStatus(card.status, runtimeSession?.status),
         }
       })
+      // 与 `filteredConnectionGroups` 保持同一道过滤。**这两处必须同时改** ——
+      // 这条派生喂的是实时预览订阅签名、批量可选集和三个 watcher；只改渲染那条会让
+      // 被隐藏的卡仍被订阅实时流、仍能被「全选」勾中，用户于是对着看不见的会话发消息。
+      .filter(
+        (card) =>
+          !shouldHideCompletedOverviewCard(
+            card.displayStatus,
+            hideCompletedConversations.value
+          )
+      )
   )
 }
 
@@ -3493,6 +3584,47 @@ function formatTime(time?: string): string {
 .conversations-searchbar {
   margin-top: 16rpx;
   margin-bottom: 28rpx;
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+/* 搜索框占满剩余宽度，筛选胶囊按内容收缩 —— 否则 up-search 的默认 100% 宽度会把
+   胶囊挤出屏幕。 */
+.conversations-searchbar :deep(.u-search) {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 「已完成」筛选胶囊。形制与搜索框同款（半透明 + 毛玻璃 + 全圆角），这样它读起来是
+   搜索行的一部分，而不是一个飘在旁边的按钮。 */
+.conversations-filter-chip {
+  flex-shrink: 0;
+  height: 80rpx;
+  padding: 0 20rpx;
+  display: flex;
+  align-items: center;
+  gap: 6rpx;
+  border: 1rpx solid rgba(255, 255, 255, 0.5);
+  border-radius: 999rpx;
+  background-color: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 40%, transparent);
+  backdrop-filter: blur(25rpx);
+  -webkit-backdrop-filter: blur(25rpx);
+  box-shadow: 0 4rpx 16rpx rgba(31, 38, 135, 0.05);
+}
+
+.conversations-filter-chip--active {
+  border-color: color-mix(in srgb, var(--up-primary, #2979ff) 32%, transparent);
+  background-color: color-mix(in srgb, var(--up-primary, #2979ff) 12%, var(--up-card-bg-color, #ffffff) 88%);
+}
+
+.conversations-filter-chip__text {
+  font-size: 22rpx;
+  color: var(--up-content-color, #606266);
+}
+
+.conversations-filter-chip--active .conversations-filter-chip__text {
+  color: var(--up-primary, #2979ff);
 }
 
 .conversations-searchbar :deep(.u-search__content) {
