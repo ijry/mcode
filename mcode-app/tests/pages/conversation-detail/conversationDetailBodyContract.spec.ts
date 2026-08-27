@@ -426,18 +426,34 @@ describe("ConversationDetailBody", () => {
     );
   });
 
+  // agent 配置面板（模型 / 推理强度 / 权限）整套已随 composer 迁到
+  // `ConversationDetailInteractivePane.vue`，所以这条不变量的检查对象也要跟着换文件 ——
+  // 继续读 index.vue 只会锁住一段已经删掉的死代码。
+  //
+  // 不变量本身没变：连接 attach 时必须**重新拉取**远端配置，不能把本地缓存的选择
+  // 回放进一个活会话（那会把用户在别处改过的模型/权限悄悄改回来）。
   it("does not replay cached config into a live session when the connection attaches", () => {
-    const source = fs.readFileSync(
+    const paneSource = fs.readFileSync(
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/ConversationDetailInteractivePane.vue",
+      ),
+      "utf8",
+    );
+
+    expect(paneSource).toContain("void loadDetailAgentConfig()");
+    expect(paneSource).not.toContain("void applyPendingComposerConfig()");
+
+    // index.vue 只保留仍归它所有的 `/` 命令表，不再持有 agent 配置。
+    const pageSource = fs.readFileSync(
       path.resolve(
         __dirname,
         "../../../src/pages/conversation-detail/index.vue",
       ),
       "utf8",
     );
-
-    expect(source).toContain("void loadDetailAgentConfig()");
-    expect(source).not.toContain("void applyPendingComposerConfig()");
-    expect(source).toContain("conversationId.value || null");
+    expect(pageSource).toContain("conversationId.value || null");
+    expect(pageSource).not.toContain("loadDetailAgentConfig");
   });
 
   it("does not append the route conversation while hydrating detail tabs", () => {

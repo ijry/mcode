@@ -15,13 +15,6 @@ describe("detailTabState", () => {
     })
 
     expect(state).toEqual(expect.objectContaining({
-      draftText: "",
-      attachments: [],
-      draftQueue: [],
-      queueExpanded: false,
-      toolRowExpanded: false,
-      composerPanelMode: "",
-      expandedConfigKey: "",
       askQuestionSelectionsJson: "{}",
       pageScrollTop: 0,
       lastMeasuredScrollTop: 0,
@@ -34,5 +27,14 @@ describe("detailTabState", () => {
     }))
     expect(state).not.toHaveProperty("hasMoreHistory")
     expect(state).not.toHaveProperty("oldestLoadedCursor")
+    // 草稿与 composer UI 状态已随输入框迁到 pane（草稿改为按会话落 SQLite）。
+    // 留在这里会造成两份状态，而其中一份永远是空的 —— 那正是抽离时踩过的坑。
+    expect(state).not.toHaveProperty("draftText")
+    expect(state).not.toHaveProperty("attachments")
+    expect(state).not.toHaveProperty("draftQueue")
+    expect(state).not.toHaveProperty("queueExpanded")
+    expect(state).not.toHaveProperty("toolRowExpanded")
+    expect(state).not.toHaveProperty("composerPanelMode")
+    expect(state).not.toHaveProperty("expandedConfigKey")
   })
 })

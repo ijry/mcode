@@ -366,19 +366,6 @@ import {
 } from "@/services/conversation/globalConversationSync"
 import { touchHotConversation } from "@/services/conversation/hotConversationCoordinator"
 import {
-  applyMentionReference,
-  buildMentionReferenceGroups,
-  resolveMentionTrigger,
-  type MentionAgentSource,
-  type MentionCommitSource,
-  type MentionFileSource,
-  type MentionReferenceGroup,
-  type MentionReferenceItem,
-  type MentionReferenceKind,
-  type MentionSessionSource,
-  type MentionTriggerState,
-} from "@/services/composerReferences"
-import {
   hasInFlightConversationDetail,
   hasRenderableRuntimeState,
   hasVolatileRuntimeState,
@@ -399,13 +386,7 @@ import { usePetStore } from "@/stores/pet"
 import {
   buildAgentConfigContextKey,
   createEmptyDetailAgentConfigState,
-  createReadyDetailAgentConfigState,
-  persistAgentConfigCache,
-  persistAgentConfigSelection,
   projectDetailConfigOptions,
-  readFreshAgentConfigCache,
-  readPersistedAgentConfigSelection,
-  type ComposerConfigKey,
   type DetailAgentConfigState,
 } from "@/services/conversation/composerTools"
 import type {
@@ -457,19 +438,11 @@ import {
   type CyberEffectPhase,
 } from "./detailCyberMode"
 import {
-  buildConversationDraftSnapshot,
   firstString,
-  getTurnContentParts,
-  isConversationDraftSnapshotEmpty,
   mapPersistedTurnToMessage,
   normalizeTurns,
   normalizeAgentType,
-  normalizeConversationDraftSnapshot,
   normalizeList,
-  resolveConversationDraftRestoreState,
-  type ConversationDraftSnapshot,
-  type QueuedDraft,
-  type UploadedAttachment,
 } from "./detailDataNormalization"
 import {
   DEFAULT_CONVERSATION_HISTORY_PAGE_SIZE,
@@ -484,10 +457,8 @@ import { readLocalTurnCacheEnabled } from "@/services/conversation/localTurnCach
 import {
   buildQuestionAnswer as buildPendingQuestionAnswer,
   createQuestionSelectionState,
-  isQuestionRecommended,
   isQuestionSelectionAnswered,
   questionInputValue,
-  questionLabelText,
   splitPermissionDescription,
   type QuestionSelectionState,
 } from "./detailInteractionPresentation"
@@ -501,19 +472,11 @@ import {
 import {
   buildLiveActivitySignature,
   canEditSharedPromptQueue,
-  draftSummary,
-  formatQueueTime,
-  formatTokenCountK,
   hasSharedPromptQueue,
   isSharedPromptQueueCancelDisabled,
   isSharedPromptQueueClearDisabled,
   isStoppableRuntimeStatus,
   looksLikeNetworkFailure,
-  queueStatusText,
-  sharedPromptQueueItemPreview,
-  sharedPromptQueueItemSource,
-  sharedPromptQueuePriorityLabel,
-  sharedPromptQueuePositionLabel,
   sharedPromptQueueSummary,
   sharedPromptQueueTitle,
 } from "./detailRuntimePresentation"
@@ -546,56 +509,15 @@ import {
 } from "./detailLayoutPresentation"
 import {
   activeModelStatusLabel as resolveActiveModelStatusLabel,
-  detailAgentConfigSelectionPayload,
   detailConfigOptionSummary,
   detailPermissionSummary,
-  nextExpandedConfigKey,
-  withSelectedDetailConfigValue,
-  withSelectedDetailMode,
 } from "./detailComposerPresentation"
 import {
-  applySlashCommandText,
-  filterSlashCommands,
-  insertSlashText,
   normalizeSlashCommandsFromSnapshot,
-  resolveSlashState,
-  slashCommandDescription,
   type SlashCommandItem,
 } from "./detailSlashCommands"
 import {
-  appendQueuedDraft,
-  canContinueDraftQueue,
-  canProcessDraftQueue,
-  createComposerDraft,
-  createStandaloneDraft as createStandaloneQueuedDraft,
-  finalizeQueuedDraftAttempt,
-  findQueuedDraftById,
-  hasPromptActuallyStarted as hasPromptStarted,
-  prependFailedQueuedDraft,
-  removeQueuedDraftById,
-} from "./detailDraftQueue"
-import {
-  buildDraftSendPayload,
-  buildPromptStartWatchSignature,
-  isQueuedPromptResponse,
-  sendPromptWithConnectionRecovery,
-  resolvePromptStartSnapshotOutcome,
-  resolvePromptStartTimeoutFailure,
-  resolvePromptStartWatchOutcome,
-  resolveDraftSendFailure,
-  type SendAttemptResult,
-} from "./detailPromptSend"
-import {
   buildUploadTarget,
-  buildUploadedAttachment,
-  estimateBase64DecodedBytes,
-  isPromptImageTooLarge,
-  normalizePickedImages,
-  normalizePickedMessageFiles,
-  parseImageDataUrl,
-  promptImageLimitText,
-  PROMPT_IMAGE_MAX_BYTES,
-  type PickedLocalFile,
 } from "./detailAttachmentUpload"
 import {
   buildDescriptorFromStoredConnection,
@@ -680,22 +602,11 @@ const DEFAULT_DETAIL_TABS_BAR_HEIGHT = 54
 const DEFAULT_DETAIL_TOOLBAR_HEIGHT = 0
 const DEFAULT_DETAIL_COMPOSER_HEIGHT = 156
 const DETAIL_BACKGROUND_STORAGE_PREFIX = "mcode_conversation_detail_background"
-const quickReplyItems: QuickReplyItem[] = [
-  { label: "yes", value: "yes" },
-  { label: "继续", value: "继续" },
-  { label: "1", value: "1" },
-  { label: "2", value: "2" },
-  { label: "A", value: "A" },
-  { label: "B", value: "B" },
-  { label: "C", value: "C" },
-]
 
 const loading = ref(false)
 const preparingDetailContentConversationId = ref(0)
 const detailLoadError = ref<{ conversationId: number; message: string } | null>(null)
-const sending = ref(false)
 const stoppingSession = ref(false)
-const processingQueue = ref(false)
 const refreshTapCount = ref(0)
 const refreshTapTimer = ref<ReturnType<typeof setTimeout> | null>(null)
 const sequence = ref(0)
@@ -710,16 +621,6 @@ const conversationTitle = ref("未命名会话")
 const detailBackgroundImageUrl = ref("")
 const detailTheme = ref<DetailThemeId>("default")
 const lastCyberStreamEndedAt = ref(0)
-const inputText = ref("")
-const composerCursor = ref<number | null>(null)
-const mentionTrigger = ref<MentionTriggerState | null>(null)
-const mentionFiles = ref<MentionFileSource[]>([])
-const mentionAgents = ref<MentionAgentSource[]>([])
-const mentionSessions = ref<MentionSessionSource[]>([])
-const mentionCommits = ref<MentionCommitSource[]>([])
-const mentionSourceStatus = ref<"idle" | "loading" | "ready" | "error">("idle")
-const mentionSourceError = ref("")
-const mentionSourceKey = ref("")
 const pageScrollTop = ref(0)
 const messageScrollTop = ref(0)
 const messageScrollIntoView = ref("")
@@ -737,16 +638,11 @@ const lastMeasuredScrollTop = ref(0)
 const anchorMessageId = ref("")
 const shouldAutoFollowBottom = ref(true)
 const hasUnreadBelow = ref(false)
-const attachments = ref<UploadedAttachment[]>([])
-const uploadQueue = ref<UploadQueueItem[]>([])
-const draftQueue = ref<QueuedDraft[]>([])
-const queueExpanded = ref(false)
 const sharedPromptQueueExpanded = ref(false)
 const cancellingSharedQueueItemIds = ref<Set<string>>(new Set())
 const reorderingSharedQueueItemIds = ref<Set<string>>(new Set())
 const updatingSharedQueuePriorityItemIds = ref<Set<string>>(new Set())
 const clearingSharedPromptQueue = ref(false)
-const uploadingCount = ref(0)
 const showPlanDrawer = ref(false)
 const showDetailMoreMenu = ref(false)
 const composerPanelMode = ref<ComposerPanelMode>("")
@@ -781,7 +677,6 @@ let detailBridgeHealthUnsubscribe: (() => void) | null = null
 let longWaitTimer: ReturnType<typeof setInterval> | null = null
 let bridgeRecoveryTimer: ReturnType<typeof setTimeout> | null = null
 let cyberSettleTimer: ReturnType<typeof setTimeout> | null = null
-const expandedConfigKey = ref<ComposerConfigKey>("")
 const detailAgentConfig = ref<DetailAgentConfigState>(createEmptyDetailAgentConfigState())
 const currentAgentType = ref("claude_code")
 const detailProjectEntries = ref<DetailProjectEntry[]>([])
@@ -797,7 +692,6 @@ const detailTabTitleMap = ref<Record<number, string>>({})
 const activeDetailTabIndex = detailActiveTabIndex
 const hasLoadedOnce = ref(false)
 const needsResumeRefresh = ref(false)
-const hasRestoredDraftState = ref(false)
 const permissionSubmitting = ref(false)
 const pendingPermissionSubmittingOptionId = ref("")
 const questionSubmitting = ref(false)
@@ -1205,34 +1099,6 @@ const detailAgentConfigContextKey = computed(() => {
     conversationId.value || null
   )
 })
-const composerCursorProp = computed(() =>
-  composerCursor.value == null ? undefined : composerCursor.value
-)
-const mentionReferenceGroups = computed<MentionReferenceGroup[]>(() =>
-  buildMentionReferenceGroups({
-    query: mentionTrigger.value?.query || "",
-    projectPath: detailProjectPath.value,
-    files: mentionFiles.value,
-    agents: mentionAgents.value,
-    sessions: mentionSessions.value,
-    commits: mentionCommits.value,
-    maxPerGroup: 20,
-  })
-)
-const mentionVisibleGroups = computed(() =>
-  mentionReferenceGroups.value.filter((group) => group.items.length > 0)
-)
-const mentionResultCount = computed(() =>
-  mentionVisibleGroups.value.reduce((total, group) => total + group.items.length, 0)
-)
-const showMentionPanel = computed(() => Boolean(mentionTrigger.value))
-const mentionPanelHint = computed(() => {
-  if (mentionSourceStatus.value === "loading") return "正在搜索引用..."
-  if (mentionSourceStatus.value === "error") return mentionSourceError.value || "引用加载失败"
-  if (mentionResultCount.value === 0) return "没有匹配的引用"
-  return mentionTrigger.value?.query ? `匹配 ${mentionResultCount.value} 项` : "选择要引用的上下文"
-})
-
 const stats = computed(() => session.value?.stats || {
   inputTokens: 0,
   outputTokens: 0,
@@ -1397,16 +1263,6 @@ const waitingStateFootnote = computed(() =>
   })
 )
 
-const canSend = computed(() => Boolean(inputText.value.trim() || attachments.value.length > 0))
-
-const isBusyForSend = computed(
-  () =>
-    sending.value ||
-    runtimeStatus.value === "thinking" ||
-    runtimeStatus.value === "running_tool" ||
-    runtimeStatus.value === "waiting_permission" ||
-    runtimeStatus.value === "waiting_question"
-)
 const showConnectingOperationBlocker = computed(() => runtimeStatus.value === "connecting")
 
 const runtimeStatusLabel = computed(() =>
@@ -1568,15 +1424,6 @@ watch(
 
 const slashCommands = ref<SlashCommandItem[]>([])
 
-const slashState = computed(() => resolveSlashState(inputText.value || ""))
-const filteredSlashCommands = computed(() =>
-  filterSlashCommands(slashCommands.value, slashState.value)
-)
-
-function getSlashCommandDesc(item: SlashCommandItem) {
-  return slashCommandDescription(item)
-}
-
 function syncDetailNativeStatusBar() {
   const backgroundColor = navbarBgColor.value || "#ffffff"
   const statusBarBackgroundColor = navbarStatusBarBgColor.value || backgroundColor
@@ -1730,13 +1577,8 @@ function captureActiveDetailLocalState() {
   if (!stateTab) return
   const state = ensureDetailLocalTabState(stateTab)
   if (!state) return
-  state.draftText = inputText.value
-  state.attachments = JSON.parse(JSON.stringify(attachments.value || []))
-  state.draftQueue = JSON.parse(JSON.stringify(draftQueue.value || []))
-  state.queueExpanded = queueExpanded.value
-  state.toolRowExpanded = toolRowExpanded.value
-  state.composerPanelMode = composerPanelMode.value
-  state.expandedConfigKey = expandedConfigKey.value
+  // 草稿与 composer UI 状态不在这里 —— 它们归 pane（输入框在那边），草稿另有
+  // SQLite 落盘。这里只存详情页自己拥有的：问题作答、滚动位置、抽屉/提交中标记。
   state.askQuestionSelectionsJson = JSON.stringify(askQuestionSelections.value || {})
   state.pageScrollTop = pageScrollTop.value
   state.lastMeasuredScrollTop = lastMeasuredScrollTop.value
@@ -1751,13 +1593,6 @@ function captureActiveDetailLocalState() {
 function restoreDetailLocalState(tab: DetailShellTabItem | null | undefined) {
   const state = ensureDetailLocalTabState(tab)
   if (!state) return
-  inputText.value = state.draftText || ""
-  attachments.value = JSON.parse(JSON.stringify(state.attachments || []))
-  draftQueue.value = JSON.parse(JSON.stringify(state.draftQueue || []))
-  queueExpanded.value = Boolean(state.queueExpanded)
-  toolRowExpanded.value = Boolean(state.toolRowExpanded)
-  composerPanelMode.value = (state.composerPanelMode || "") as ComposerPanelMode
-  expandedConfigKey.value = (state.expandedConfigKey || "") as ComposerConfigKey
   askQuestionSelections.value = JSON.parse(state.askQuestionSelectionsJson || "{}")
   pageScrollTop.value = Number(state.pageScrollTop || 0)
   lastMeasuredScrollTop.value = Number(state.lastMeasuredScrollTop || 0)
@@ -2929,9 +2764,6 @@ watch(
 watch(
   () => runtimeStatus.value,
   () => {
-    if (!isBusyForSend.value) {
-      void processDraftQueue()
-    }
     syncLongWaitState()
   }
 )
@@ -3019,64 +2851,17 @@ watch(
   { immediate: true }
 )
 
-watch(
-  () => [inputText.value, composerCursor.value] as const,
-  () => {
-    syncMentionTrigger()
-  }
-)
-
-watch(
-  () => [detailConnectionKey.value, folderId.value, detailProjectPath.value] as const,
-  () => {
-    clearMentionSources()
-    if (mentionTrigger.value) {
-      void ensureMentionSourcesLoaded()
-    }
-  }
-)
-
-watch(
-  () => [currentAgentType.value, session.value?.connectionId] as const,
-  ([agentType, connectionId]) => {
-    if (!conversationId.value || !agentType || !connectionId) return
-    void loadDetailAgentConfig()
-  }
-)
-
+// composer 高度变化引起的视口同步现在由 pane 自己处理（它 emit `layout-change`）。
+// 这里只留仍归详情页所有的那几项 —— pending 卡片与问题作答会改变 pane 上方的高度。
 watch(
   () => [
-    attachments.value.length,
-    uploadQueue.value.length,
-    draftQueue.value.length,
-    queueExpanded.value,
     pendingPermissionCard.value?.id || "",
     pendingQuestionCard.value?.question_id || "",
     JSON.stringify(askQuestionSelections.value),
-    slashState.value.visible,
-    filteredSlashCommands.value.length,
-    mentionTrigger.value?.query || "",
-    mentionSourceStatus.value,
-    mentionResultCount.value,
-    composerPanelMode.value,
-    expandedConfigKey.value,
   ],
   () => {
     if (!hasInitialBottomScroll.value) return
     scheduleViewportSync()
-  }
-)
-
-watch(
-  () => [
-    inputText.value,
-    queueExpanded.value,
-    JSON.stringify(attachments.value),
-    JSON.stringify(draftQueue.value),
-  ] as const,
-  () => {
-    if (!hasRestoredDraftState.value) return
-    persistConversationDraftSnapshot()
   }
 )
 
@@ -3464,7 +3249,6 @@ async function loadConversation() {
   loading.value = true
   isRestoringScroll.value = false
   restoredInitialScroll.value = false
-  hasRestoredDraftState.value = false
   const cachedViewState = cacheStore.restore(targetConversationId)
   let persistedRuntime: ConversationRuntimeRecord | null = null
   let initialLoadFinished = false
@@ -3624,7 +3408,8 @@ async function loadConversation() {
       }
     }
     if (isActiveLoad()) {
-      await loadDetailAgentConfig()
+      // agent 配置面板（模型/推理强度/权限）现在整套在 pane 里，这里只保留 `/` 命令表 ——
+      // 它通过 `:slash-commands` 传给 pane，仍归详情页所有。
       hydrateSlashCommandsFromSnapshot(snapshot)
     }
 
@@ -3891,94 +3676,32 @@ function shouldReconcileTurnsFromPersistedRuntime(
   return typeof persistedRuntime.lastAppliedSeq === "number" && persistedRuntime.lastAppliedSeq > 0
 }
 
-function restoreDraftState(
-  cachedViewState: ReturnType<typeof cacheStore.restore>,
-  persistedRuntime: ConversationRuntimeRecord | null
-) {
-  const localSnapshot = readConversationDraftSnapshot()
-  const restored = resolveConversationDraftRestoreState({
-    cachedViewState,
-    localSnapshot,
-    persistedRuntime,
-    createId: createLocalId,
-  })
-  inputText.value = restored.composerText
-  draftQueue.value = restored.draftQueue
-  attachments.value = restored.attachments
-  queueExpanded.value = restored.queueExpanded
-  hasRestoredDraftState.value = true
-}
-
 interface DetailProjectEntry {
   id: number
   path?: string
 }
 
-function buildConversationDraftSnapshotStorageKey() {
-  if (!conversationId.value) return ""
-  const instanceKey = resolveDetailInstanceKey() || "anonymous"
-  return `mcode_conversation_draft_snapshot:${instanceKey}:${conversationId.value}`
-}
-
-function readConversationDraftSnapshot(): ConversationDraftSnapshot | null {
-  const key = buildConversationDraftSnapshotStorageKey()
-  if (!key) return null
-  try {
-    const raw = uni.getStorageSync(key)
-    if (!raw) return null
-    const parsed = typeof raw === "string" ? JSON.parse(raw) : raw
-    return normalizeConversationDraftSnapshot(parsed, createLocalId)
-  } catch (error) {
-    console.warn("restore conversation draft snapshot skipped", error)
-    return null
-  }
-}
-
-function persistConversationDraftSnapshot() {
-  const key = buildConversationDraftSnapshotStorageKey()
-  if (!key) return
-  const snapshot = buildConversationDraftSnapshot({
-    composerText: inputText.value,
-    draftQueue: draftQueue.value,
-    attachments: attachments.value,
-    queueExpanded: queueExpanded.value,
-  })
-  if (isConversationDraftSnapshotEmpty(snapshot)) {
-    uni.removeStorageSync(key)
-    return
-  }
-  try {
-    uni.setStorageSync(key, JSON.stringify(snapshot))
-  } catch (error) {
-    console.warn("persist conversation draft snapshot skipped", error)
-  }
-}
-
+/**
+ * 落盘详情页拥有的那部分状态：**滚动位置**（内存缓存）与**断点**（SQLite）。
+ *
+ * 草稿不在这里 —— 它归持有输入框的 `ConversationDetailInteractivePane.vue`，走它自己的
+ * 防抖 watch + `saveDraftState`。这个组件此前也在写草稿，写的是抽离后留下的空 ref，
+ * 于是每次 onHide / onUnload 都把 pane 刚落的草稿擦成空串。
+ */
 function persistDetailRuntimeState() {
   if (!conversationId.value) return
-  persistConversationDraftSnapshot()
-  const draftSnapshot = buildConversationDraftSnapshot({
-    composerText: inputText.value,
-    draftQueue: draftQueue.value,
-    attachments: attachments.value,
-    queueExpanded: queueExpanded.value,
-  })
   cacheStore.persistViewState({
     conversationId: conversationId.value,
     scrollAnchor: anchorMessageId.value || undefined,
     scrollTop: lastMeasuredScrollTop.value || pageScrollTop.value || 0,
     nearBottom: shouldAutoFollowBottom.value,
     anchorMessageId: anchorMessageId.value || undefined,
-    composerText: draftSnapshot.composerText,
-    draftQueue: draftSnapshot.draftQueue,
-    attachments: draftSnapshot.attachments,
-    queueExpanded: draftSnapshot.queueExpanded,
   })
   const currentSession = session.value
-  // **只写断点，不碰草稿。** 草稿由持有输入框的 `ConversationDetailInteractivePane.vue`
-  // 负责；这个组件手里的 `inputText` / `attachments` 是抽离时留下的空 ref，用
-  // `saveDraftState` 写断点会把它们一起写进去，于是每次 onHide / onUnload 都把用户刚打的
-  // 草稿擦成空串。`saveRuntimeCheckpoint` 的签名里没有草稿三列，从类型上排除了这种写法。
+  // **只写断点，不碰草稿。** 草稿归持有输入框的 `ConversationDetailInteractivePane.vue`。
+  // 这里曾经用 `saveDraftState` 写断点，顺带把详情页手里那份抽离后残留的空 composer
+  // 状态一起写进去，于是每次 onHide / onUnload 都把 pane 刚落的草稿擦成空串。
+  // `saveRuntimeCheckpoint` 的签名里没有草稿三列，从类型上排除了这种写法。
   void saveRuntimeCheckpoint({
     conversationId: conversationId.value,
     instanceKey: resolveDetailInstanceKey(),
@@ -4393,171 +4116,7 @@ function scheduleViewportSync(forceBottom = false) {
   })
 }
 
-function handleComposerLayoutChange() {
-  if (!hasInitialBottomScroll.value) return
-  scheduleViewportSync()
-}
-
-function handleComposerInput(event: unknown) {
-  const cursor = (event as { detail?: { cursor?: number } })?.detail?.cursor
-  composerCursor.value = typeof cursor === "number" && Number.isFinite(cursor)
-    ? cursor
-    : inputText.value.length
-  syncMentionTrigger()
-}
-
-function handleComposerBlur(event: unknown) {
-  const cursor = (event as { detail?: { cursor?: number } })?.detail?.cursor
-  if (typeof cursor === "number" && Number.isFinite(cursor)) {
-    composerCursor.value = cursor
-  }
-}
-
-function syncMentionTrigger() {
-  mentionTrigger.value = resolveMentionTrigger(inputText.value || "", composerCursor.value)
-  if (mentionTrigger.value) {
-    void ensureMentionSourcesLoaded()
-  }
-}
-
 function closeMentionPanel() {
-  mentionTrigger.value = null
-}
-
-function clearMentionSources() {
-  mentionFiles.value = []
-  mentionAgents.value = []
-  mentionSessions.value = []
-  mentionCommits.value = []
-  mentionSourceStatus.value = "idle"
-  mentionSourceError.value = ""
-  mentionSourceKey.value = ""
-}
-
-function currentMentionSourceKey() {
-  return JSON.stringify([
-    resolveDetailInstanceKey(),
-    detailConnectionKey.value,
-    folderId.value,
-    detailProjectPath.value,
-  ])
-}
-
-async function ensureMentionSourcesLoaded() {
-  const key = currentMentionSourceKey()
-  if (mentionSourceStatus.value === "ready" && mentionSourceKey.value === key) return
-  if (mentionSourceStatus.value === "loading" && mentionSourceKey.value === key) return
-
-  const token = ++mentionSourceLoadToken
-  mentionSourceKey.value = key
-  mentionSourceStatus.value = "loading"
-  mentionSourceError.value = ""
-
-  try {
-    const gateway = await getDetailGateway()
-    const projectPath = detailProjectPath.value
-    const activeFolderId = folderId.value
-
-    const [files, agents, sessions, commits] = await Promise.all([
-      loadMentionFiles(gateway, projectPath),
-      loadMentionAgents(gateway),
-      loadMentionSessions(gateway, activeFolderId),
-      loadMentionCommits(gateway, projectPath),
-    ])
-
-    if (token !== mentionSourceLoadToken) return
-    mentionFiles.value = files
-    mentionAgents.value = agents
-    mentionSessions.value = sessions
-    mentionCommits.value = commits
-    mentionSourceStatus.value = "ready"
-  } catch (error) {
-    if (token !== mentionSourceLoadToken) return
-    mentionSourceStatus.value = "error"
-    mentionSourceError.value = toErrorMessage(error, "引用加载失败")
-  }
-}
-
-async function loadMentionFiles(gateway: Awaited<ReturnType<typeof getDetailGateway>>, projectPath: string) {
-  if (!projectPath) return []
-  try {
-    const tree = await getRemoteProjectFileTree(gateway, projectPath, 6)
-    return flattenMentionFileTree(tree)
-  } catch (error) {
-    console.warn("load mention files skipped", error)
-    return []
-  }
-}
-
-async function loadMentionAgents(gateway: Awaited<ReturnType<typeof getDetailGateway>>) {
-  try {
-    const raw = await gateway.call<unknown>("acp_list_agents", {})
-    return normalizeList(raw) as MentionAgentSource[]
-  } catch (error) {
-    console.warn("load mention agents skipped", error)
-    return []
-  }
-}
-
-async function loadMentionSessions(gateway: Awaited<ReturnType<typeof getDetailGateway>>, activeFolderId: number) {
-  if (!activeFolderId) return []
-  try {
-    const sessions = await loadRemoteProjectConversations(gateway, activeFolderId)
-    return sessions.map((item) => ({
-      id: item.id,
-      title: item.title,
-      agentType: item.agentType,
-      status: item.status,
-    }))
-  } catch (error) {
-    console.warn("load mention sessions skipped", error)
-    return []
-  }
-}
-
-async function loadMentionCommits(gateway: Awaited<ReturnType<typeof getDetailGateway>>, projectPath: string) {
-  if (!projectPath) return []
-  try {
-    const result = await getRemoteGitLog(gateway, projectPath)
-    return result.entries as MentionCommitSource[]
-  } catch (error) {
-    console.warn("load mention commits skipped", error)
-    return []
-  }
-}
-
-function flattenMentionFileTree(nodes: ProjectFileNode[]): MentionFileSource[] {
-  const items: MentionFileSource[] = []
-  const walk = (node: ProjectFileNode) => {
-    items.push({
-      name: node.name,
-      path: node.path,
-      kind: node.kind === "directory" ? "directory" : "file",
-    })
-    node.children.forEach(walk)
-  }
-  nodes.forEach(walk)
-  return items
-}
-
-function insertMentionReference(item: MentionReferenceItem) {
-  const trigger = mentionTrigger.value || resolveMentionTrigger(inputText.value || "", composerCursor.value)
-  if (!trigger) return
-  const result = applyMentionReference(inputText.value || "", trigger, item)
-  inputText.value = result.text
-  composerCursor.value = result.cursor
-  closeMentionPanel()
-  nextTick(() => {
-    composerCursor.value = result.cursor
-    handleComposerLayoutChange()
-  })
-}
-
-function mentionKindShortLabel(kind: MentionReferenceKind) {
-  if (kind === "agent") return "AI"
-  if (kind === "file") return "F"
-  if (kind === "session") return "S"
-  return "G"
 }
 
 function handleScrollToBottomFab() {
@@ -4585,159 +4144,6 @@ async function loadDetailProjectEntries() {
   }
 }
 
-async function loadDetailAgentConfig() {
-  if (!conversationId.value || !currentAgentType.value) {
-    detailAgentConfig.value = createEmptyDetailAgentConfigState()
-    return
-  }
-
-  const contextKey = detailAgentConfigContextKey.value
-  const persistedSelection = readPersistedAgentConfigSelection(contextKey) || undefined
-  const cachedSnapshot = readFreshAgentConfigCache(contextKey)
-  if (cachedSnapshot) {
-    detailAgentConfig.value = createReadyDetailAgentConfigState(cachedSnapshot, persistedSelection)
-  }
-
-  const token = ++detailAgentProbeToken
-  if (!cachedSnapshot) {
-    detailAgentConfig.value = {
-      ...createEmptyDetailAgentConfigState(),
-      status: "loading",
-    }
-  }
-
-  try {
-    const gateway = await getDetailGateway()
-    const snapshot = await gateway.call<AgentOptionsSnapshot>("acp_describe_agent_options", {
-      agentType: currentAgentType.value,
-      workingDir: detailProjectPath.value || null,
-    })
-    if (token !== detailAgentProbeToken) return
-    persistAgentConfigCache(contextKey, snapshot)
-    detailAgentConfig.value = createReadyDetailAgentConfigState(snapshot, persistedSelection || {
-      selectedModeId: detailAgentConfig.value.selectedModeId,
-      selectedValues: detailAgentConfig.value.selectedValues,
-    })
-  } catch (error) {
-    if (token !== detailAgentProbeToken) return
-    if (cachedSnapshot) return
-    detailAgentConfig.value = {
-      ...createEmptyDetailAgentConfigState("读取失败，将使用远端默认配置"),
-      status: "failed",
-    }
-  }
-}
-
-function toggleConfigRow(key: ComposerConfigKey) {
-  expandedConfigKey.value = nextExpandedConfigKey({
-    currentKey: expandedConfigKey.value,
-    targetKey: key,
-    availability: {
-      hasModelOptions: hasModelOptions.value,
-      hasReasoningOption: Boolean(reasoningOption.value),
-      hasPermissionOptions: hasPermissionOptions.value,
-    },
-  })
-}
-
-async function selectDetailMode(modeId: string) {
-  if (!modeId) return
-  const conn = session.value?.connectionId
-  if (!conn) {
-    detailAgentConfig.value = withSelectedDetailMode(detailAgentConfig.value, modeId)
-    persistAgentConfigSelection(
-      detailAgentConfigContextKey.value,
-      detailAgentConfigSelectionPayload(detailAgentConfig.value)
-    )
-    return
-  }
-  try {
-    await acpApi.acpSetMode(conn, modeId)
-    detailAgentConfig.value = withSelectedDetailMode(detailAgentConfig.value, modeId)
-    persistAgentConfigSelection(
-      detailAgentConfigContextKey.value,
-      detailAgentConfigSelectionPayload(detailAgentConfig.value)
-    )
-  } catch (error) {
-    uni.showToast({ title: `模型切换失败: ${toErrorMessage(error)}`, icon: "none" })
-  }
-}
-
-async function selectDetailConfigValue(configId: string, valueId: string) {
-  if (!configId || !valueId) return
-  const conn = session.value?.connectionId
-  if (!conn) {
-    detailAgentConfig.value = withSelectedDetailConfigValue({
-      state: detailAgentConfig.value,
-      configId,
-      valueId,
-    })
-    persistAgentConfigSelection(
-      detailAgentConfigContextKey.value,
-      detailAgentConfigSelectionPayload(detailAgentConfig.value)
-    )
-    return
-  }
-  try {
-    await acpApi.acpSetConfigOption(conn, configId, valueId)
-    detailAgentConfig.value = withSelectedDetailConfigValue({
-      state: detailAgentConfig.value,
-      configId,
-      valueId,
-    })
-    persistAgentConfigSelection(
-      detailAgentConfigContextKey.value,
-      detailAgentConfigSelectionPayload(detailAgentConfig.value)
-    )
-  } catch (error) {
-    uni.showToast({ title: `配置切换失败: ${toErrorMessage(error)}`, icon: "none" })
-  }
-}
-
-function toggleComposerPanel(mode: ComposerPanelMode) {
-  toolRowExpanded.value = true
-  composerPanelMode.value = composerPanelMode.value === mode ? "" : mode
-  if (!composerPanelMode.value) {
-    expandedConfigKey.value = ""
-  }
-}
-
-function closeComposerPanel() {
-  composerPanelMode.value = ""
-  expandedConfigKey.value = ""
-}
-
-function toggleInputToolRow() {
-  toolRowExpanded.value = !toolRowExpanded.value
-  if (!toolRowExpanded.value) {
-    closeComposerPanel()
-  }
-}
-
-function createStandaloneDraft(text: string): QueuedDraft | null {
-  return createStandaloneQueuedDraft({
-    text,
-    createId: createLocalId,
-  })
-}
-
-async function submitPreparedDraft(draft: QueuedDraft) {
-  if (isBusyForSend.value) {
-    draftQueue.value = appendQueuedDraft(draftQueue.value, draft)
-    queueExpanded.value = true
-    uni.showToast({ title: "已加入待发送队列", icon: "none" })
-    return
-  }
-
-  const ok = await sendDraft(draft)
-  if (!ok) {
-    draftQueue.value = prependFailedQueuedDraft(draftQueue.value, draft)
-    queueExpanded.value = true
-  } else {
-    void processDraftQueue()
-  }
-}
-
 async function reconcileRemoteTurnsAfterResume(input: {
   conversationId: number
   folderId: number
@@ -4762,25 +4168,6 @@ async function reconcileRemoteTurnsAfterResume(input: {
     })
     console.warn("reconcile remote turns after resume skipped", error)
   }
-}
-
-async function ensureConversationReadyForSend(resumeSessionId?: string) {
-  const connectionId = firstString(session.value?.connectionId)
-  if (connectionId) return connectionId
-  if (!conversationId.value) {
-    throw new Error("未连接到代理")
-  }
-
-  const recovered = await runtime.connect(
-    conversationId.value,
-    currentAgentType.value || "claude_code",
-    undefined,
-    resumeSessionId,
-    session.value?.lastAppliedSeq ?? undefined,
-    resolveDetailInstanceKey()
-  )
-  persistDetailRuntimeState()
-  return firstString(recovered?.id, session.value?.connectionId) || ""
 }
 
 /**
@@ -4811,327 +4198,6 @@ async function ensurePcTabReadyForPrompt() {
   } catch (error) {
     console.warn("ensure pc tab before prompt skipped:", error)
   }
-}
-
-async function sendQuickReply(text: string) {
-  if (!canSendSharedLive.value) {
-    showSharedLiveBlockedToast()
-    return
-  }
-  const draft = createStandaloneDraft(text)
-  if (!draft) return
-  closeComposerPanel()
-  await submitPreparedDraft(draft)
-}
-
-async function sendMessage() {
-  if (!canSend.value) return
-  if (!canSendSharedLive.value) {
-    showSharedLiveBlockedToast()
-    return
-  }
-  if (uploadingCount.value > 0) {
-    uni.showToast({ title: "文件上传中，请稍后发送", icon: "none" })
-    return
-  }
-
-  const draft = createDraftFromComposer()
-  if (!draft) return
-  await submitPreparedDraft(draft)
-}
-
-function createDraftFromComposer(): QueuedDraft | null {
-  const draft = createComposerDraft({
-    text: inputText.value,
-    attachments: attachments.value,
-    createId: createLocalId,
-  })
-  if (!draft) return null
-  inputText.value = ""
-  attachments.value = []
-  return draft
-}
-
-async function prepareDraftForSend(draft: QueuedDraft): Promise<QueuedDraft> {
-  const preparedAttachments: UploadedAttachment[] = []
-  let totalImageBytes = 0
-  for (const att of draft.attachments) {
-    if (att.kind !== "image") {
-      preparedAttachments.push({ ...att })
-      continue
-    }
-
-    const parsedInline = parseImageDataUrl(att.data || att.url)
-    let data = att.data || parsedInline?.data || ""
-    const mimeType = parsedInline?.mimeType || att.type || "image/png"
-    if (!data) {
-      const sourcePath = firstString(att.localPath, att.url)
-      if (!sourcePath || /^https?:\/\//i.test(sourcePath)) {
-        throw new Error(`图片 ${att.name || ""} 本地缓存已失效，请重新选择图片`.trim())
-      }
-      data = await readLocalImageBase64(sourcePath)
-    }
-
-    const decodedBytes = estimateBase64DecodedBytes(data)
-    if (decodedBytes > PROMPT_IMAGE_MAX_BYTES) {
-      throw new Error(`图片 ${att.name || ""} 超过 ${promptImageLimitText()}，请压缩后重新选择`.trim())
-    }
-    totalImageBytes += decodedBytes
-    if (totalImageBytes > PROMPT_IMAGE_MAX_BYTES) {
-      throw new Error(`图片总大小超过 ${promptImageLimitText()}，请减少图片数量或压缩后重试`)
-    }
-
-    preparedAttachments.push({
-      ...att,
-      type: mimeType,
-      data,
-    })
-  }
-
-  return {
-    ...draft,
-    attachments: preparedAttachments,
-  }
-}
-
-async function readLocalImageBase64(filePath: string): Promise<string> {
-  const fs = (uni as any).getFileSystemManager?.()
-  if (!fs || typeof fs.readFile !== "function") {
-    throw new Error("当前平台不支持读取图片数据，请重新选择图片")
-  }
-  return await new Promise<string>((resolve, reject) => {
-    fs.readFile({
-      filePath,
-      encoding: "base64",
-      success: (res: { data?: unknown }) => {
-        const data = typeof res.data === "string" ? res.data : ""
-        if (data) {
-          resolve(data)
-          return
-        }
-        reject(new Error("图片读取结果为空，请重新选择图片"))
-      },
-      fail: (err: { errMsg?: string }) => {
-        reject(new Error(err?.errMsg || "图片读取失败，请重新选择图片"))
-      },
-    })
-  })
-}
-
-async function sendDraft(draft: QueuedDraft): Promise<boolean> {
-  if (!canSendSharedLive.value) {
-    showSharedLiveBlockedToast()
-    return false
-  }
-  sending.value = true
-  draft.status = "sending"
-  draft.error = undefined
-  shouldAutoFollowBottom.value = true
-  anchorMessageId.value = ""
-
-  try {
-    touchHotConversation(conversationId.value)
-    await ensurePcTabReadyForPrompt()
-    const conn = await ensureConversationReadyForSend()
-    if (!conn) throw new Error("未连接到代理")
-
-    const targetAgent = resolveDetailTargetAgent()
-    const preparedDraft = await prepareDraftForSend(draft)
-    const { blocks } = buildDraftSendPayload(preparedDraft, {
-      targetAgent,
-    })
-    scheduleViewportSync(true)
-    if (isViewerMode.value) {
-      const liveInfo = await acpApi
-        .acpFindConnectionForConversation(
-          conversationId.value,
-          currentAgentType.value,
-          managedConversation.value?.externalId || undefined
-        )
-        .catch(() => null)
-      if (liveInfo?.connection_id && liveInfo.connection_id !== conn) {
-        throw new Error("该会话已被其他端重新接管，请等待当前轮结束后再发送")
-      }
-    }
-    const { connectionId: promptConnectionId, response: promptResponse } =
-      await sendPromptWithConnectionRecovery({
-        connectionId: conn,
-        send: (connectionId) =>
-          acpApi.acpPrompt(connectionId, blocks, folderId.value, conversationId.value),
-        reconnect: async (staleConnectionId) => {
-          const resumeSessionId = firstString(
-            managedConversation.value?.externalId,
-            managedConversation.value?.connection.sessionId
-          )
-          runtime.invalidateConnection(conversationId.value, staleConnectionId)
-          return await ensureConversationReadyForSend(resumeSessionId || undefined)
-        },
-      })
-    if (isQueuedPromptResponse(promptResponse)) {
-      runtime.clearLiveMessage(conversationId.value)
-      runtime.handleEventForConversation(conversationId.value, {
-        connectionId: promptConnectionId,
-        type: "turn_queued",
-        data: promptResponse,
-      } as any)
-      usePetStore().addExp('user', 5)
-      return true
-    }
-    const started = await waitForPromptStart(draft)
-    if (!started.started) {
-      runtime.clearLiveMessage(conversationId.value)
-      const failure = resolveDraftSendFailure({
-        startedResult: started,
-        fallbackMessage: "请求已发出，但智能体未开始处理",
-      })
-      draft.status = failure.status
-      draft.error = failure.error
-      runtime.setSessionError(conversationId.value, failure.error)
-      uni.showToast({ title: failure.toastTitle, icon: "none", duration: 3000 })
-      return false
-    }
-    runtime.setSessionError(conversationId.value, null)
-    runtime.beginPlaceholderThinking(conversationId.value)
-    usePetStore().addExp('user', 5)
-    return true
-  } catch (error) {
-    runtime.clearLiveMessage(conversationId.value)
-    const message = toErrorMessage(error)
-    const failure = resolveDraftSendFailure({ errorMessage: message })
-    draft.status = failure.status
-    draft.error = failure.error
-    runtime.setSessionError(conversationId.value, failure.error)
-    uni.showToast({ title: failure.toastTitle, icon: "none", duration: 3000 })
-    return false
-  } finally {
-    sending.value = false
-  }
-}
-
-function hasPromptActuallyStarted() {
-  const currentSession = session.value
-  if (!currentSession) return false
-  return hasPromptStarted({
-    status: currentSession.status,
-    liveContentLength: currentSession.liveMessage?.content.length || 0,
-  })
-}
-
-async function waitForPromptStart(draft: QueuedDraft): Promise<SendAttemptResult> {
-  if (hasPromptActuallyStarted()) {
-    return { started: true }
-  }
-
-  return await new Promise<SendAttemptResult>((resolve) => {
-    let settled = false
-    let stopWatch: (() => void) | null = null
-    let timer: ReturnType<typeof setTimeout> | null = null
-
-    const finish = (result: SendAttemptResult) => {
-      if (settled) return
-      settled = true
-      stopWatch?.()
-      if (timer) clearTimeout(timer)
-      resolve(result)
-    }
-
-    stopWatch = watch(
-      () => buildPromptStartWatchSignature(session.value),
-      () => {
-        const outcome = resolvePromptStartWatchOutcome({
-          hasStarted: hasPromptActuallyStarted(),
-          draftStatus: draft.status,
-          draftError: draft.error,
-          fallbackMessage: "发送失败",
-        })
-        if (outcome) {
-          finish(outcome)
-        }
-      },
-      { flush: "sync" }
-    )
-
-    timer = setTimeout(() => {
-      if (hasPromptActuallyStarted()) {
-        finish({ started: true })
-        return
-      }
-      void confirmPromptStartFromSnapshot()
-        .then((startedBySnapshot) => {
-          finish(resolvePromptStartSnapshotOutcome({
-            startedBySnapshot,
-            hasStartedAfterSnapshot: hasPromptActuallyStarted(),
-            timeoutMessage: "请求已入队，但会话没有进入运行状态",
-          }))
-        })
-        .catch(() => {
-          finish(resolvePromptStartTimeoutFailure("请求已入队，但会话没有进入运行状态"))
-        })
-    }, PROMPT_START_TIMEOUT_MS)
-  })
-}
-
-async function confirmPromptStartFromSnapshot() {
-  if (!conversationId.value) return false
-  try {
-    const snapshot = await acpApi.acpGetSessionSnapshotByConversation(conversationId.value)
-    if (!snapshot || typeof snapshot !== "object") return false
-    hydrateDetailSnapshot(conversationId.value, snapshot)
-    touchHotConversation(conversationId.value)
-    return hasPromptActuallyStarted()
-  } catch {
-    return false
-  }
-}
-
-async function processDraftQueue() {
-  if (!canProcessDraftQueue({
-    processingQueue: processingQueue.value,
-    isBusyForSend: isBusyForSend.value,
-    uploadingCount: uploadingCount.value,
-    canSendSharedLive: canSendSharedLive.value,
-    draftQueueLength: draftQueue.value.length,
-  })) return
-  processingQueue.value = true
-  try {
-    while (canContinueDraftQueue({
-      isBusyForSend: isBusyForSend.value,
-      uploadingCount: uploadingCount.value,
-      canSendSharedLive: canSendSharedLive.value,
-      draftQueueLength: draftQueue.value.length,
-    })) {
-      const item = draftQueue.value[0]
-      const ok = await sendDraft(item)
-      draftQueue.value = finalizeQueuedDraftAttempt(draftQueue.value, item.id, ok)
-      if (!ok) {
-        break
-      }
-    }
-  } finally {
-    processingQueue.value = false
-  }
-}
-
-async function sendQueuedDraft(id: string) {
-  const target = findQueuedDraftById(draftQueue.value, id)
-  if (!target) return
-  if (!canSendSharedLive.value) {
-    showSharedLiveBlockedToast()
-    return
-  }
-  if (isBusyForSend.value || uploadingCount.value > 0) {
-    uni.showToast({ title: "当前正在处理，请稍后", icon: "none" })
-    return
-  }
-  const ok = await sendDraft(target)
-  if (ok) {
-    draftQueue.value = removeQueuedDraftById(draftQueue.value, id)
-    void processDraftQueue()
-  }
-}
-
-function removeDraft(id: string) {
-  draftQueue.value = removeQueuedDraftById(draftQueue.value, id)
 }
 
 function setSharedQueueItemCancelling(queueItemId: string, cancelling: boolean) {
@@ -5277,144 +4343,6 @@ function showSharedLiveBlockedToast() {
     title: "该会话正在其他端处理中，当前仅可旁观，待本轮结束后可发送",
     icon: "none",
     duration: 3000,
-  })
-}
-
-function applySlashCommand(item: SlashCommandItem) {
-  inputText.value = applySlashCommandText(inputText.value || "", item)
-}
-
-function insertSlash() {
-  inputText.value = insertSlashText(inputText.value)
-}
-
-function chooseImages() {
-  uni.chooseImage({
-    count: 9,
-    sizeType: ["compressed"],
-    sourceType: ["album", "camera"],
-    success: async (res) => {
-      const files = normalizePickedImages({
-        tempFilePaths: res.tempFilePaths,
-        tempFiles: res.tempFiles,
-      })
-      await uploadPickedFiles(files)
-    },
-  })
-}
-
-function chooseFiles() {
-  const chooser = (uni as any).chooseMessageFile || (uni as any).chooseFile
-  if (typeof chooser !== "function") {
-    uni.showToast({ title: "当前平台不支持文件选择", icon: "none" })
-    return
-  }
-
-  chooser({
-    count: 9,
-    type: "file",
-    extension: [],
-    success: async (res: any) => {
-      const files = normalizePickedMessageFiles(res?.tempFiles)
-
-      if (files.length === 0) {
-        uni.showToast({ title: "未选择可用文件", icon: "none" })
-        return
-      }
-
-      await uploadPickedFiles(files)
-    },
-    fail: () => {},
-  })
-}
-
-function handleChooseImages() {
-  closeComposerPanel()
-  chooseImages()
-}
-
-function handleChooseFiles() {
-  closeComposerPanel()
-  chooseFiles()
-}
-
-async function uploadPickedFiles(files: PickedLocalFile[]) {
-  for (const file of files) {
-    if (file.kind === "image" && isPromptImageTooLarge({ size: file.size })) {
-      uni.showToast({
-        title: `${file.name} 超过 ${promptImageLimitText()}，请压缩后重新选择`,
-        icon: "none",
-        duration: 3000,
-      })
-      continue
-    }
-
-    const queueItem: UploadQueueItem = {
-      id: createLocalId("upload"),
-      name: file.name,
-      size: file.size,
-      type: file.type,
-      kind: file.kind,
-      progress: 0,
-      status: "uploading",
-    }
-
-    uploadQueue.value.unshift(queueItem)
-    uploadingCount.value += 1
-
-    try {
-      const uploaded = await uploadSingleFile(file, queueItem.id)
-      attachments.value.push(uploaded)
-      queueItem.status = "success"
-      queueItem.progress = 100
-    } catch (error) {
-      queueItem.status = "error"
-      queueItem.error = toErrorMessage(error)
-      uni.showToast({ title: `${file.name} 上传失败`, icon: "none" })
-    } finally {
-      uploadingCount.value = Math.max(0, uploadingCount.value - 1)
-    }
-  }
-}
-
-async function uploadSingleFile(file: PickedLocalFile, queueId: string): Promise<UploadedAttachment> {
-  const target = resolveUploadTarget()
-  const connectionId = session.value?.connectionId || ""
-  const uploadResult = await new Promise<{ path?: string; url?: string; name?: string; size?: number }>((resolve, reject) => {
-    const task = uni.uploadFile({
-      url: target.url,
-      filePath: file.path,
-      name: "file",
-      header: target.header,
-      formData: {
-        sessionId: connectionId,
-      },
-      success: (res) => {
-        if (res.statusCode < 200 || res.statusCode >= 300) {
-          reject(new Error(`上传失败(${res.statusCode})`))
-          return
-        }
-        try {
-          const parsed = typeof res.data === "string" ? JSON.parse(res.data) : res.data
-          resolve(parsed || {})
-        } catch {
-          reject(new Error("上传返回解析失败"))
-        }
-      },
-      fail: (err) => {
-        reject(new Error(err?.errMsg || "上传失败"))
-      },
-    })
-    task.onProgressUpdate((event) => {
-      const item = uploadQueue.value.find((queue) => queue.id === queueId)
-      if (item) item.progress = Number(event.progress || 0)
-    })
-  })
-
-  return buildUploadedAttachment({
-    uploadResult,
-    file,
-    createId: createLocalId,
   })
 }
 
@@ -5581,10 +4509,6 @@ function normalizeStoredBaseUrl(value?: string) {
   return String(value || "").trim().replace(/\/+$/, "")
 }
 
-function removeAttachment(index: number) {
-  attachments.value.splice(index, 1)
-}
-
 async function cancelGeneration() {
   try {
     const conn = session.value?.connectionId
@@ -5594,18 +4518,6 @@ async function cancelGeneration() {
     }
   } catch {
     uni.showToast({ title: "取消失败", icon: "none" })
-  }
-}
-
-async function regenerateLastMessage() {
-  const lastUserMessage = [...messages.value].reverse().find((item) => item.role === "user")
-  if (!lastUserMessage) return
-
-  await cancelGeneration()
-  const textContent = getTurnContentParts(lastUserMessage).find((part) => part.type === "text")
-  if (textContent?.text) {
-    inputText.value = textContent.text
-    await sendMessage()
   }
 }
 
