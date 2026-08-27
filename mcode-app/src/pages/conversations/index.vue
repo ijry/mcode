@@ -7,54 +7,16 @@
       <view class="liquid-blob liquid-blob--three"></view>
     </view>
     <view :class="['conversations-shell', showHistoryPanel && 'conversations-shell--history']">
-      <up-navbar
-        customClass="conversations-navbar-shell"
-        :fixed="true"
-        :placeholder="true"
-        :border="false"
-        :autoBack="false"
-        height="44px"
-        :leftIcon="showHistoryPanel ? 'arrow-left' : ''"
-        :leftIconColor="upThemeVar('--up-main-color', '#191c1e')"
-        bgColor="transparent"
-        :statusBarBgColor="NAVBAR_GLASS_BG_COLOR"
-        @leftClick="handleNavbarLeftClick"
-      >
-        <template #center>
-          <text class="conversations-navbar__title u-line-1">
-            {{ showHistoryPanel ? historyGroupTitle : "会话" }}
-          </text>
-        </template>
-        <template #right>
-          <view class="conversations-navbar__actions">
-            <template v-if="showHistoryPanel">
-              <view
-                v-if="canCreateInHistory"
-                class="conversations-navbar__select"
-                @click="createConversation()"
-              >
-                <text class="conversations-navbar__select-text">新建</text>
-              </view>
-            </template>
-            <template v-else>
-              <view
-                v-if="showSelectionEntry"
-                class="conversations-navbar__select"
-                @click="toggleSelectionMode"
-              >
-                <text class="conversations-navbar__select-text">{{ selectionMode ? "取消" : "选择" }}</text>
-              </view>
-              <view
-                v-if="!selectionMode"
-                class="conversations-navbar__action"
-                @click="createConversation()"
-              >
-                <up-icon name="plus" size="18" :color="upThemeVar('--up-primary', '#2f7cf6')"></up-icon>
-              </view>
-            </template>
-          </view>
-        </template>
-      </up-navbar>
+      <ConversationsNavbar
+        :history-mode="showHistoryPanel"
+        :title="historyGroupTitle"
+        :can-create="canCreateInHistory"
+        :show-selection-entry="showSelectionEntry"
+        :selection-mode="selectionMode"
+        @back="handleNavbarLeftClick"
+        @create="createConversation()"
+        @toggle-selection="toggleSelectionMode"
+      />
 
       <ConversationsSearchBar
         v-model="searchKeyword"
@@ -432,6 +394,7 @@
       </view>
     </up-popup>
 
+    <!-- 批量发送弹层 -->
     <up-popup v-model:show="showBulkSendDialog" mode="bottom" :round="28" @close="closeBulkSendDialog">
       <view class="bulk-send-sheet" :style="upThemeCardStyle">
         <view class="create-sheet__hd">
@@ -614,6 +577,7 @@ import { acpApi } from "@/api/acp"
 import RemoteDirectoryBrowser from "@/components/remote/RemoteDirectoryBrowser.vue"
 import MarqueeText from "@/components/MarqueeText.vue"
 import ConversationsSearchBar from "@/pages/conversations/components/ConversationsSearchBar.vue"
+import ConversationsNavbar from "@/pages/conversations/components/ConversationsNavbar.vue"
 import {
   buildBulkSelectionItem,
   buildBulkSelectionKey,
@@ -1420,21 +1384,6 @@ const conversationActions = [
   { name: "重命名", color: "#2979ff" },
   { name: "删除",   color: "#fa3534" },
 ]
-
-/**
- * 状态栏那块的底色，必须和 navbar 同色，否则真机上顶部会出现一条色差接缝。
- * H5 上 `statusBarHeight === 0`、`u-status-bar` 靠 `env(safe-area-inset-top)` 取高
- * （桌面浏览器下为 0、整条不可见），所以这个问题只有真机能暴露。
- *
- * 直接给 CSS `var()` 字符串，而**不是**在 script 里求值：
- * `upThemeVar` 是 uview 通过 Options API mixin 注入的**方法**，只有模板作用域能调 ——
- * 在 `<script setup>` 里调会抛 `ReferenceError: upThemeVar is not defined`
- * （computed 里静默失败，prop 就变成空串，于是 uview 回退到 navbarBgColor=transparent）。
- * 交给 CSS 反而更好：`var()` 由浏览器求值，主题切换时自动跟随，不需要响应式。
- *
- * 值与 `.conversations-navbar-shell` 那条玻璃规则同源，两处必须一致。
- */
-const NAVBAR_GLASS_BG_COLOR = "var(--up-navbar-glass-bg-color, rgba(255, 255, 255, 0.82))"
 
 const hasActiveConnection = computed(() => {
   if (hasConversationOverviewConnections()) return true
@@ -3250,100 +3199,6 @@ function formatTime(time?: string): string {
   display: flex;
   flex-direction: column;
   padding: 0 32rpx 40rpx;
-}
-
-/* .u-navbar__content 自带 background-color: $u-bg-color，仅靠 bgColor="transparent"
-   只能覆盖 inline style，容器层仍不透明 —— 必须 :deep() 穿透。
-   写法沿用 pages/conversation-detail/index.scss:66-76 的既有做法。
-
-   底色用 uview 运行时主题表里现成的 --up-navbar-glass-bg-color（它随浅/深色翻转），
-   与 navbarGlassBgColor 传给状态栏的值是同一个 —— 两块必须一致，否则状态栏与 navbar
-   会出现一条色差接缝。
-
-   刻意不照搬会话详情页的**不透明** --up-card-bg-color：那条笔记
-   (2026-07-02-detail-navbar-status-bar-bg.md) 要的是「别让消息区透到状态图标后面」，
-   而本页要的正是背景光斑透上来。 */
-.conversations-navbar-shell :deep(.u-navbar--fixed),
-.conversations-navbar-shell :deep(.u-status-bar),
-.conversations-navbar-shell :deep(.u-navbar__content) {
-  background: var(--up-navbar-glass-bg-color, rgba(255, 255, 255, 0.82)) !important;
-  backdrop-filter: blur(30rpx);
-  -webkit-backdrop-filter: blur(30rpx);
-}
-
-/* 降级：不支持 backdrop-filter 时退到半透卡片色 + 1rpx 浅边框，保证文字可读
-   （docs/mcode-architecture-notes/2026-06-28-conversations-liquid-glass.md 立的规矩）。 */
-@supports not (backdrop-filter: blur(1px)) {
-  .conversations-navbar-shell :deep(.u-navbar__content) {
-    background: var(--up-card-bg-color, #ffffff) !important;
-    border-bottom: 1rpx solid var(--up-border-color, #dadbde);
-  }
-
-  .conversations-navbar-shell :deep(.u-status-bar) {
-    background: var(--up-card-bg-color, #ffffff) !important;
-  }
-}
-
-/* __placeholder 是 u-navbar--fixed 之外的独立兄弟节点，组件没给它背景、上面的玻璃规则也
-   没选中它。这条显式 transparent 是护栏：一旦它被误染上玻璃色，顶部会出现
-   「占位块 + fixed 层」的双层色带。 */
-.conversations-navbar-shell :deep(.u-navbar__placeholder) {
-  background: transparent !important;
-}
-
-/* .u-navbar__content__left / __right 都是 position: absolute，所以长标题不会把右侧按钮
-   挤出去，而是滑到它们**底下**。max-width 是为了防这种重叠，不是防挤压。 */
-.conversations-navbar__title {
-  max-width: 420rpx;
-  font-size: 32rpx;
-  font-weight: 600;
-  color: var(--up-main-color, #191c1e);
-}
-
-/* .u-navbar__content__right 自带 padding: 0 13px，故这里不再另加外边距。 */
-.conversations-navbar__actions {
-  display: flex;
-  align-items: center;
-  gap: 12rpx;
-  flex-shrink: 0;
-}
-
-.conversations-navbar__select {
-  min-width: 84rpx;
-  height: 56rpx;
-  padding: 0 18rpx;
-  border-radius: 999rpx;
-  background: color-mix(in srgb, var(--up-primary, #2f7cf6) 10%, var(--up-card-bg-color, #ffffff) 90%);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.conversations-navbar__select-text {
-  font-size: 24rpx;
-  line-height: 1;
-  font-weight: 700;
-  color: var(--up-primary, #2f7cf6);
-}
-
-.conversations-navbar__action {
-  width: 56rpx;
-  height: 56rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 999rpx;
-  border: 1rpx solid rgba(255, 255, 255, 0.5);
-  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 50%, transparent);
-  backdrop-filter: blur(25rpx);
-  -webkit-backdrop-filter: blur(25rpx);
-  box-shadow: 0 6rpx 18rpx rgba(47, 124, 246, 0.08);
-  flex-shrink: 0;
-  transition: transform 0.2s ease;
-}
-
-.conversations-navbar__action:active {
-  transform: scale(0.9);
 }
 
 .main-wrap {

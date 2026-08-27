@@ -18,10 +18,9 @@ describe("P67 conversation list bulk send contract", () => {
   it("renders selection controls only on top-level live cards", () => {
     const source = read("../../../src/pages/conversations/index.vue")
 
-    // 顶部改用 up-navbar 后，「选择」按钮从 .conversations-header__select
-    // 移到了 navbar 的 right 槽（见 conversationListNavbarHeader.spec.ts）。
-    expect(source).toContain('class="conversations-navbar__select"')
-    expect(source).toContain('{{ selectionMode ? "取消" : "选择" }}')
+    // 顶栏的「选择」按钮已随 ConversationsNavbar.vue 抽走（形制断言见
+    // conversationListNavbarHeader.spec.ts）；这里只验页面把选择模式接到了 navbar 上。
+    expect(source).toContain('@toggle-selection="toggleSelectionMode"')
     // 「可选中」判据已收口到 conversationOverviewPresentation.ts 的
     // isSelectableOverviewCard（此前页面内有五处各自的实现）。模板仍在顶层卡上门控
     // 选择控件，只是判据换了名字。

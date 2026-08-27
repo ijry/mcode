@@ -5,9 +5,14 @@ function read(relativePath: string) {
   return fs.readFileSync(path.resolve(__dirname, relativePath), "utf8")
 }
 
+const PAGE = "../../../src/pages/conversations/index.vue"
+const NAVBAR = "../../../src/pages/conversations/components/ConversationsNavbar.vue"
+
 describe("conversation list navbar header contract", () => {
+  // 顶栏已抽成 ConversationsNavbar.vue。navbar 本身的形制断言读子组件，页面侧只断言
+  // 「接线」（传对 prop、接对事件）。旧的三层顶部必须在两个文件里都不存在。
   it("renders the top bar through up-navbar instead of a sticky big title", () => {
-    const source = read("../../../src/pages/conversations/index.vue")
+    const source = read(NAVBAR)
 
     expect(source).toContain('customClass="conversations-navbar-shell"')
     expect(source).toContain(':fixed="true"')
@@ -15,28 +20,45 @@ describe("conversation list navbar header contract", () => {
     // tab 页没有返回目标；一旦误开 autoBack 会 navigateBack 到上一个 tab。
     expect(source).toContain(':autoBack="false"')
     expect(source).toContain('height="44px"')
-    expect(source).toContain(`:leftIcon="showHistoryPanel ? 'arrow-left' : ''"`)
-    expect(source).toContain('@leftClick="handleNavbarLeftClick"')
+    expect(source).toContain(`:leftIcon="historyMode ? 'arrow-left' : ''"`)
+    // 返回动作作为事件上抛，页面接住后再决定是否关历史面板。
+    expect(source).toContain('@leftClick="emit(\'back\')"')
   })
 
-  // 旧的三层顶部必须真的消失，否则「省高度」等于没做。
-  it("drops the sticky big-title header and the history mode bar", () => {
-    const source = read("../../../src/pages/conversations/index.vue")
+  it("wires the navbar to the page's history/selection state and handlers", () => {
+    const source = read(PAGE)
 
-    expect(source).not.toContain("up-sticky")
-    expect(source).not.toContain("conversations-sticky")
-    expect(source).not.toContain("conversations-header")
-    expect(source).not.toContain("history-mode-bar")
-    expect(source).not.toContain("history-mode-back")
-    expect(source).not.toContain("history-mode-title")
-    expect(source).not.toContain("history-mode-create")
+    expect(source).toContain("<ConversationsNavbar")
+    expect(source).toContain(':history-mode="showHistoryPanel"')
+    expect(source).toContain(':title="historyGroupTitle"')
+    expect(source).toContain(':can-create="canCreateInHistory"')
+    expect(source).toContain(':show-selection-entry="showSelectionEntry"')
+    expect(source).toContain(':selection-mode="selectionMode"')
+    expect(source).toContain('@back="handleNavbarLeftClick"')
+    expect(source).toContain('@create="createConversation()"')
+    expect(source).toContain('@toggle-selection="toggleSelectionMode"')
+  })
+
+  // 旧的三层顶部必须真的消失，否则「省高度」等于没做。两个文件都不能有。
+  it("drops the sticky big-title header and the history mode bar", () => {
+    for (const file of [PAGE, NAVBAR]) {
+      const source = read(file)
+      expect(source).not.toContain("up-sticky")
+      expect(source).not.toContain("conversations-sticky")
+      expect(source).not.toContain("conversations-header")
+      expect(source).not.toContain("history-mode-bar")
+      expect(source).not.toContain("history-mode-back")
+      expect(source).not.toContain("history-mode-title")
+      expect(source).not.toContain("history-mode-create")
+    }
   })
 
   // 概览模式 leftIcon 为空，但 .u-navbar__content__left 区域仍然存在且可点
   // （见 node_modules/uview-plus/components/u-navbar/u-navbar.vue 模板与 leftClick 方法）。
-  // 少了这道守卫，点左上角空白会静默清掉一遍历史状态。
+  // 少了这道守卫，点左上角空白会静默清掉一遍历史状态。**守卫留在页面**（它读 showHistoryPanel
+  // 这个页面状态），子组件只负责在历史模式下渲染返回图标。
   it("guards the navbar left hit area outside history mode", () => {
-    const source = read("../../../src/pages/conversations/index.vue")
+    const source = read(PAGE)
 
     expect(source).toContain("function handleNavbarLeftClick() {")
     const block = source.slice(
@@ -48,20 +70,23 @@ describe("conversation list navbar header contract", () => {
   })
 
   it("keeps both right-slot buttons independently clickable", () => {
-    const source = read("../../../src/pages/conversations/index.vue")
+    const source = read(NAVBAR)
 
     // right 槽整块共用一个 @rightClick，两个按钮要分别响应，所以不能用它。
     expect(source).not.toContain("@rightClick")
     expect(source).toContain('class="conversations-navbar__select"')
-    expect(source).toContain('@click="toggleSelectionMode"')
+    expect(source).toContain('@click="emit(\'toggle-selection\')"')
     expect(source).toContain('class="conversations-navbar__action"')
-    expect(source).toContain('@click="createConversation()"')
+    expect(source).toContain('@click="emit(\'create\')"')
   })
 
   it("hides the title field from the create sheet", () => {
-    const source = read("../../../src/pages/conversations/index.vue")
+    const source = read(PAGE)
     const createSheetStart = source.indexOf("<!-- 创建会话底部弹层 -->")
-    const createSheetEnd = source.indexOf("<!-- 批量发送 -->", createSheetStart)
+    const createSheetEnd = source.indexOf("<!-- 批量发送弹层 -->", createSheetStart)
+    // 两个标记都必须存在，否则 slice 会退化成半个文件、把断言变成假绿灯。
+    expect(createSheetStart).toBeGreaterThan(-1)
+    expect(createSheetEnd).toBeGreaterThan(createSheetStart)
     const createSheetBlock = source.slice(createSheetStart, createSheetEnd)
 
     expect(createSheetBlock).not.toContain("标题（可选）")
@@ -69,18 +94,17 @@ describe("conversation list navbar header contract", () => {
   })
 
   it("switches the navbar into history mode without new reactive state", () => {
-    const source = read("../../../src/pages/conversations/index.vue")
+    const source = read(NAVBAR)
 
-    expect(source).toContain('v-if="showHistoryPanel"')
-    // 标题与右侧按钮都只读既有状态，不引入新的 ref。
-    expect(source).toContain('showHistoryPanel ? historyGroupTitle : "会话"')
-    expect(source).toContain('v-if="canCreateInHistory"')
+    // 标题与右侧按钮都只读传入的 prop，子组件不引入新的 ref。
+    expect(source).toContain('historyMode ? title : "会话"')
+    expect(source).toContain('v-if="canCreate"')
   })
 
   // .u-navbar__content 自带 background-color: $u-bg-color，光靠 bgColor="transparent"
   // 只覆盖 inline style，容器层仍不透明，必须 :deep() 穿透。
   it("makes the navbar glassy through deep selectors", () => {
-    const source = read("../../../src/pages/conversations/index.vue")
+    const source = read(NAVBAR)
 
     expect(source).toContain(".conversations-navbar-shell :deep(.u-navbar__content)")
     expect(source).toContain(".conversations-navbar-shell :deep(.u-status-bar)")
@@ -112,9 +136,9 @@ describe("conversation list navbar header contract", () => {
       style: "dark",
     })
   })
+
   it("keeps visual spacing between the navbar and search bar", () => {
-    // 搜索行已抽成 ConversationsSearchBar.vue，间距样式跟着搬过去了 —— 检查对象换到
-    // 子组件，否则这条会锁住一段不存在的样式。
+    // 搜索行已抽成 ConversationsSearchBar.vue，间距样式跟着搬过去了。
     const source = read(
       "../../../src/pages/conversations/components/ConversationsSearchBar.vue"
     )
@@ -126,8 +150,9 @@ describe("conversation list navbar header contract", () => {
     expect(block).toContain("margin-top: 16rpx;")
     expect(block).toContain("margin-bottom: 28rpx;")
   })
+
   it("keeps theme colors as var() fallbacks only", () => {
-    const source = read("../../../src/pages/conversations/index.vue")
+    const source = read(NAVBAR)
     const navbarStyles = source.slice(source.indexOf(".conversations-navbar-shell"))
 
     expect(navbarStyles).toContain("var(--up-card-bg-color, #ffffff)")
@@ -138,7 +163,7 @@ describe("conversation list navbar header contract", () => {
   // 390rpx 是按旧的三层顶部估的预算。navbar 改造后再写死它，历史列表底部会空出约 190rpx。
   // 高度改由 flex 链决定（.conversations-shell → .main-wrap--history → .history-list）。
   it("lets the history scroll area size itself through flex", () => {
-    const source = read("../../../src/pages/conversations/index.vue")
+    const source = read(PAGE)
 
     // 写死的 calc() 规则必须消失（允许出现在注释里，但不能是活跃 CSS 值）。
     expect(source).not.toContain("height: calc(100vh - 390rpx")
