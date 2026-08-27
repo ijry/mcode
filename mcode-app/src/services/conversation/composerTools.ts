@@ -3,6 +3,7 @@ import type {
   SessionConfigOptionInfo,
   SessionModeStateInfo,
 } from "@/types/acp"
+import { normalizeAgentType } from "@/services/conversation/agentType"
 
 export type ComposerConfigKey = "model" | "reasoning" | "permission" | ""
 
@@ -43,7 +44,29 @@ const REASONING_KEYWORDS = ["reasoning", "thinking", "effort"]
 const PERMISSION_KEYWORDS = ["permission", "approval", "sandbox", "auth"]
 const CREATE_AGENT_CONFIG_CACHE_STORAGE_KEY = "mcode_create_agent_config_cache_v1"
 const CREATE_AGENT_CONFIG_SELECTION_STORAGE_KEY = "mcode_create_agent_config_selection_v1"
+/**
+ * agent **配置**（modes / configOptions / selectedValues）缓存的 TTL。
+ *
+ * 短，因为它描述的是「这个 agent 此刻支持哪些选项」—— 远端换个版本就变了，拿旧的去渲染
+ * 会给出已经不存在的模型选项。
+ *
+ * 与下面的 {@link AGENT_LIST_CACHE_TTL_MS} 刻意不同，见那条注释。
+ */
 const CREATE_AGENT_CACHE_TTL_MS = 5 * 60 * 1000
+const CREATE_AGENT_LIST_CACHE_STORAGE_KEY = "mcode_create_agent_list_cache_v1"
+const CREATE_AGENT_SELECTION_STORAGE_KEY = "mcode_create_agent_selection_v1"
+/**
+ * agent **列表**（这台连接上装了哪些智能体）缓存的 TTL —— **24 小时，不是 5 分钟**。
+ *
+ * 两个 TTL 差 288 倍，是有意的：装了哪些 agent 是用户在电脑上手动改的，一天内几乎不变；
+ * 而配置项会随适配器版本变。列表缓存短了的表现是「每次打开新建弹层都要重新拉一遍列表」，
+ * 弹层于是每次都先空一下 —— 不报错，只是慢。
+ *
+ * **这两个常量原本同名**（各自文件里都叫 `CREATE_AGENT_CACHE_TTL_MS`），列表那份在
+ * `pages/conversations/index.vue`。合并到本模块时若让列表复用上面那个默认值，24 小时会
+ * 静默缩成 5 分钟。所以这里显式导出，并在读取处显式传参。
+ */
+export const AGENT_LIST_CACHE_TTL_MS = 24 * 60 * 60 * 1000
 
 export function createEmptyDetailAgentConfigState(message = ""): DetailAgentConfigState {
   return {
@@ -185,6 +208,98 @@ export function persistAgentConfigSelection(
     selectedValues: normalizeSelectionValues(input.selectedValues),
   }
   writeCreateAgentConfigSelectionMap(selectionMap)
+}
+
+// ─── agent 列表缓存与「上次选了哪个 agent」记忆 ──────────────────────────────
+//
+// 这两组从 `pages/conversations/index.vue` 搬来（新建会话弹层用）。它们与上面的 agent
+// **配置**缓存是不同的东西，注意 TTL 差 288 倍（见 AGENT_LIST_CACHE_TTL_MS 的说明）。
+
+/** 一个可选 agent 在新建弹层里的展示项。 */
+export interface AgentListOption {
+  label: string
+  value: string
+  description?: string
+}
+
+interface CachedAgentListEntry {
+  updatedAt: number
+  options: AgentListOption[]
+}
+
+interface StoredSelectedAgentEntry {
+  updatedAt: number
+  agentType: string
+}
+
+function readAgentListCacheMap() {
+  return normalizeStorageRecord<CachedAgentListEntry>(
+    uni.getStorageSync(CREATE_AGENT_LIST_CACHE_STORAGE_KEY)
+  )
+}
+
+function writeAgentListCacheMap(next: Record<string, CachedAgentListEntry>) {
+  uni.setStorageSync(CREATE_AGENT_LIST_CACHE_STORAGE_KEY, next)
+}
+
+function readSelectedAgentMap() {
+  return normalizeStorageRecord<StoredSelectedAgentEntry>(
+    uni.getStorageSync(CREATE_AGENT_SELECTION_STORAGE_KEY)
+  )
+}
+
+function writeSelectedAgentMap(next: Record<string, StoredSelectedAgentEntry>) {
+  uni.setStorageSync(CREATE_AGENT_SELECTION_STORAGE_KEY, next)
+}
+
+/**
+ * 读这台连接上缓存的 agent 列表；过期或没有则返回 null（调用方去拉远端）。
+ *
+ * TTL **显式传 {@link AGENT_LIST_CACHE_TTL_MS}**，不吃 `isFreshCache` 的默认值 ——
+ * 那个默认值是给 agent 配置用的 5 分钟。
+ */
+export function readFreshAgentListCache(connectionKey: string): AgentListOption[] | null {
+  if (!connectionKey) return null
+  const cacheMap = readAgentListCacheMap()
+  const hit = cacheMap[connectionKey]
+  if (!hit) return null
+  if (!isFreshCache(Number(hit.updatedAt || 0), AGENT_LIST_CACHE_TTL_MS)) {
+    delete cacheMap[connectionKey]
+    writeAgentListCacheMap(cacheMap)
+    return null
+  }
+  return Array.isArray(hit.options) ? hit.options : null
+}
+
+export function persistAgentListCache(connectionKey: string, options: AgentListOption[]) {
+  // 空 key 会把所有连接的缓存塌到同一个槽位上 —— 宁可不缓存。
+  if (!connectionKey) return
+  const cacheMap = readAgentListCacheMap()
+  cacheMap[connectionKey] = { updatedAt: Date.now(), options }
+  writeAgentListCacheMap(cacheMap)
+}
+
+/**
+ * 读这台连接上「用户上次选的 agent」。
+ *
+ * **没有 TTL**：上次挑的智能体不该因为放了一天就被忘掉。与列表缓存刻意不同。
+ * 读写两侧都归一化 —— 不然存进去的别名（`codex_cli`）与下次比对用的 canonical 值
+ * （`codex`）对不上，「记住上次选择」会静默失效。
+ */
+export function readPersistedSelectedAgentType(connectionKey: string): string {
+  if (!connectionKey) return ""
+  const hit = readSelectedAgentMap()[connectionKey]
+  return hit?.agentType ? normalizeAgentType(hit.agentType) : ""
+}
+
+export function persistSelectedAgentType(connectionKey: string, agentType: string) {
+  if (!connectionKey || !agentType) return
+  const selectionMap = readSelectedAgentMap()
+  selectionMap[connectionKey] = {
+    updatedAt: Date.now(),
+    agentType: normalizeAgentType(agentType),
+  }
+  writeSelectedAgentMap(selectionMap)
 }
 
 function normalizeLabel(value: unknown) {

@@ -1,5 +1,6 @@
 import type { OpenedTabItem } from "@/types/acp"
 import { normalizeOpenedTabsList } from "@/services/conversation/pcTabSyncService"
+import { normalizeAgentType } from "@/services/conversation/agentType"
 
 export const MOBILE_DETAIL_TABS_STORAGE_PREFIX = "mcode_mobile_detail_tabs"
 
@@ -107,7 +108,3 @@ function resolveNextTabId(items: OpenedTabItem[]) {
   return items.reduce((max, item) => Math.max(max, Number(item.id || 0)), 0) + 1
 }
 
-function normalizeAgentType(value?: string) {
-  const normalized = String(value || "").trim().toLowerCase().replace(/[\s-]/g, "_")
-  return normalized || "claude_code"
-}

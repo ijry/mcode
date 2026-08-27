@@ -16,6 +16,7 @@ import {
   normalizeTurnRole,
 } from "./conversationTurnIdentity";
 import { clampSubagentStats } from "./subagentToolCall";
+import { normalizeAgentType } from "@/services/conversation/agentType"
 
 // 去重键算法集中在 conversationTurnIdentity（纯函数、不依赖 SQLite 驱动），这里
 // 继续 re-export 以保持既有引用点不变，并确保「落库时算的键」与「归一化/时间线
@@ -515,29 +516,6 @@ function toObject(text: string): Record<string, any> | null {
 function recordFromUnknown(value: unknown): Record<string, any> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value as Record<string, any>;
-}
-
-function normalizeAgentType(raw?: string): string {
-  const value = String(raw || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[\s-]/g, "_");
-  if (!value) return "claude_code";
-  if (value === "claudecode") return "claude_code";
-  if (value === "codex_cli") return "codex";
-  if (
-    value === "gemini_cli" ||
-    value === "google_gemini" ||
-    value === "gemini_code"
-  ) {
-    return "gemini";
-  }
-  if (value === "cline_cli") return "cline";
-  if (value === "opencode") return "open_code";
-  if (value === "open_code_cli") return "open_code";
-  if (value === "openclaw") return "open_claw";
-  if (value === "open_claw_cli") return "open_claw";
-  return value;
 }
 
 function firstString(...values: unknown[]) {

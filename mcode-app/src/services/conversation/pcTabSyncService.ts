@@ -5,6 +5,7 @@ import {
 } from "@/services/conversation/openedTabsRealtimeCache"
 import { readDetailTabMultitaskMode } from "@/services/conversation/detailTabMultitaskPreference"
 import type { OpenedTabItem, OpenedTabsSnapshot } from "@/types/acp"
+import { normalizeAgentType } from "@/services/conversation/agentType"
 
 type TabActivationMode = "allow" | "preserve"
 
@@ -231,11 +232,6 @@ function sameTabSnapshot(left: OpenedTabItem[], right: OpenedTabItem[]) {
 
 function resolveNextTabId(items: OpenedTabItem[]) {
   return items.reduce((max, item) => Math.max(max, Number(item.id || 0)), 0) + 1
-}
-
-function normalizeAgentType(value?: string) {
-  const normalized = normalizeString(value).toLowerCase().replace(/[\s-]/g, "_")
-  return normalized || "claude_code"
 }
 
 function normalizeString(...values: unknown[]) {

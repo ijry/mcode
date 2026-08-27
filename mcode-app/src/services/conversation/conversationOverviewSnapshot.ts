@@ -1,5 +1,6 @@
 import type { ConversationSummaryRecord } from "@/services/db/repositories/conversationRepository"
 import { normalizeConversationSummaryStatus } from "@/services/conversation/conversationSummaryStatus"
+import { normalizeAgentType } from "@/services/conversation/agentType"
 
 const RECENT_ACTIVE_WINDOW_MS = 24 * 60 * 60 * 1000
 
@@ -308,20 +309,6 @@ function getRecentActiveThreshold(now: number) {
   if (!Number.isFinite(now)) return 0
   // Keep late-night activity visible after midnight instead of resetting at 00:00.
   return Math.max(0, now - RECENT_ACTIVE_WINDOW_MS)
-}
-
-function normalizeAgentType(value?: string): string {
-  const raw = String(value || "").trim().toLowerCase().replace(/[\s-]/g, "_")
-  if (!raw) return "claude_code"
-  if (raw === "claudecode") return "claude_code"
-  if (raw === "codex_cli") return "codex"
-  if (raw === "gemini_cli" || raw === "google_gemini" || raw === "gemini_code") return "gemini"
-  if (raw === "cline_cli") return "cline"
-  if (raw === "opencode") return "open_code"
-  if (raw === "open_code_cli") return "open_code"
-  if (raw === "openclaw") return "open_claw"
-  if (raw === "open_claw_cli") return "open_claw"
-  return raw
 }
 
 function normalizeConversationStatus(value?: string): string {

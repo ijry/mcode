@@ -5,6 +5,13 @@ import type {
 } from "@/services/db/repositories/conversationRepository"
 import { buildTurnDedupeKey, dropEmptyThinkingParts, normalizeTurnRole } from "@/services/conversation/conversationTurnIdentity"
 import { clampSubagentStats } from "@/services/conversation/subagentToolCall"
+import { normalizeAgentType } from "@/services/conversation/agentType"
+
+/**
+ * agent 类型归一化。实现已收口到 `services/conversation/agentType`（此前全仓库有 7 份副本，
+ * 其中 2 份是不映射别名的弱化版）。这里 re-export 保持既有引用点不变。
+ */
+export { normalizeAgentType }
 
 export interface UploadedAttachment {
   id: string
@@ -289,20 +296,6 @@ function mapPersistedPartToContent(part: PersistedTurnPartRow): ContentPart | nu
     console.warn("failed to parse local part payload", error)
   }
   return null
-}
-
-export function normalizeAgentType(raw?: string): string {
-  const value = String(raw || "").trim().toLowerCase().replace(/[\s-]/g, "_")
-  if (!value) return "claude_code"
-  if (value === "claudecode") return "claude_code"
-  if (value === "codex_cli") return "codex"
-  if (value === "gemini_cli" || value === "google_gemini" || value === "gemini_code") return "gemini"
-  if (value === "cline_cli") return "cline"
-  if (value === "opencode") return "open_code"
-  if (value === "open_code_cli") return "open_code"
-  if (value === "openclaw") return "open_claw"
-  if (value === "open_claw_cli") return "open_claw"
-  return value
 }
 
 function normalizeBlocks(rawBlocks: unknown[]): ContentPart[] {

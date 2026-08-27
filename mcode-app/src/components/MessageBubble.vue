@@ -268,6 +268,7 @@ import GoalToolCallBlock from "./GoalToolCallBlock.vue"
 import SubagentCapsuleBlock from "./SubagentCapsuleBlock.vue"
 import ToolCallBlock from "./ToolCallBlock.vue"
 import ToolCallGroupBlock from "./ToolCallGroupBlock.vue"
+import { normalizeAgentType } from "@/services/conversation/agentType"
 
 const props = defineProps<{
   message: MessageTurn
@@ -496,19 +497,6 @@ function renderCyberDecodeText(text: string, index: number) {
   })
 }
 
-function normalizeAgentType(raw?: string) {
-  const value = String(raw || "").trim().toLowerCase().replace(/[\s-]/g, "_")
-  if (!value) return "claude_code"
-  if (value === "claudecode") return "claude_code"
-  if (value === "codex_cli") return "codex"
-  if (value === "gemini_cli" || value === "google_gemini" || value === "gemini_code") return "gemini"
-  if (value === "cline_cli") return "cline"
-  if (value === "opencode") return "open_code"
-  if (value === "open_code_cli") return "open_code"
-  if (value === "openclaw") return "open_claw"
-  if (value === "open_claw_cli") return "open_claw"
-  return value
-}
 </script>
 
 <style scoped lang="scss">

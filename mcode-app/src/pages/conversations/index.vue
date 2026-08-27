@@ -621,8 +621,13 @@ import {
   hasSessionModeOptions,
   persistAgentConfigCache,
   persistAgentConfigSelection,
+  persistAgentListCache,
+  persistSelectedAgentType,
   readFreshAgentConfigCache,
+  readFreshAgentListCache,
   readPersistedAgentConfigSelection,
+  readPersistedSelectedAgentType,
+  type AgentListOption,
 } from "@/services/conversation/composerTools"
 import {
   consumeConversationListDirty,
@@ -673,6 +678,7 @@ import {
 } from "@/services/db/repositories/conversationRepository"
 import { getRegisteredRemoteInstanceDescriptor } from "@/services/realtime/remoteInstanceRegistry"
 import type { CodegGateway } from "@/services/gateway"
+import { normalizeAgentType } from "@/services/conversation/agentType"
 import type {
   AgentOptionsSnapshot,
   AcpAgentInfo,
@@ -748,12 +754,6 @@ const livePreviewTransferredConversationIds = new Set<number>()
 const livePreviewConnectPromiseMap = new Map<number, Promise<void>>()
 let livePreviewReconcileTimer: ReturnType<typeof setTimeout> | null = null
 
-interface CreateAgentOption {
-  label: string
-  value: string
-  description?: string
-}
-
 interface CreateAgentConfigState {
   status: "idle" | "loading" | "ready" | "failed"
   modes: SessionModeStateInfo | null
@@ -763,17 +763,7 @@ interface CreateAgentConfigState {
   message: string
 }
 
-interface CachedCreateAgentListEntry {
-  updatedAt: number
-  options: CreateAgentOption[]
-}
-
-interface StoredCreateAgentSelectionEntry {
-  updatedAt: number
-  agentType: string
-}
-
-const createAgentOptions = ref<CreateAgentOption[]>([])
+const createAgentOptions = ref<AgentListOption[]>([])
 const createAgentConfig = ref<CreateAgentConfigState>({
   status: "idle",
   modes: null,
@@ -782,9 +772,6 @@ const createAgentConfig = ref<CreateAgentConfigState>({
   selectedValues: {},
   message: "",
 })
-const CREATE_AGENT_CACHE_TTL_MS = 24 * 60 * 60 * 1000
-const CREATE_AGENT_LIST_CACHE_STORAGE_KEY = "mcode_create_agent_list_cache_v1"
-const CREATE_AGENT_SELECTION_STORAGE_KEY = "mcode_create_agent_selection_v1"
 const CREATE_PROGRESS_STAGES = [
   "准备连接信息",
   "拉起智能体会话",
@@ -1140,17 +1127,6 @@ function resolveCreateRequestId() {
   return activeCreateRequestId
 }
 
-function normalizeStorageRecord<T>(raw: unknown): Record<string, T> {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-    return {}
-  }
-  return raw as Record<string, T>
-}
-
-function isFreshCache(updatedAt: number, ttlMs = CREATE_AGENT_CACHE_TTL_MS): boolean {
-  return Number.isFinite(updatedAt) && updatedAt > 0 && Date.now() - updatedAt < ttlMs
-}
-
 function currentCreateAgentConfigContextKey(): string {
   if (!selectedConnectionKey.value || !selectedAgentType.value) return ""
   return buildAgentConfigContextKey(
@@ -1158,66 +1134,6 @@ function currentCreateAgentConfigContextKey(): string {
     selectedAgentType.value,
     selectedProjectPath.value
   )
-}
-
-function readCreateAgentListCacheMap() {
-  return normalizeStorageRecord<CachedCreateAgentListEntry>(
-    uni.getStorageSync(CREATE_AGENT_LIST_CACHE_STORAGE_KEY)
-  )
-}
-
-function writeCreateAgentListCacheMap(next: Record<string, CachedCreateAgentListEntry>) {
-  uni.setStorageSync(CREATE_AGENT_LIST_CACHE_STORAGE_KEY, next)
-}
-
-function readCreateAgentSelectionMap() {
-  return normalizeStorageRecord<StoredCreateAgentSelectionEntry>(
-    uni.getStorageSync(CREATE_AGENT_SELECTION_STORAGE_KEY)
-  )
-}
-
-function writeCreateAgentSelectionMap(next: Record<string, StoredCreateAgentSelectionEntry>) {
-  uni.setStorageSync(CREATE_AGENT_SELECTION_STORAGE_KEY, next)
-}
-
-function readFreshCreateAgentListCache(connectionKeyValue: string): CreateAgentOption[] | null {
-  if (!connectionKeyValue) return null
-  const cacheMap = readCreateAgentListCacheMap()
-  const hit = cacheMap[connectionKeyValue]
-  if (!hit) return null
-  if (!isFreshCache(Number(hit.updatedAt || 0))) {
-    delete cacheMap[connectionKeyValue]
-    writeCreateAgentListCacheMap(cacheMap)
-    return null
-  }
-  return Array.isArray(hit.options) ? hit.options : null
-}
-
-function persistCreateAgentListCache(connectionKeyValue: string, options: CreateAgentOption[]) {
-  if (!connectionKeyValue) return
-  const cacheMap = readCreateAgentListCacheMap()
-  cacheMap[connectionKeyValue] = {
-    updatedAt: Date.now(),
-    options,
-  }
-  writeCreateAgentListCacheMap(cacheMap)
-}
-
-function readPersistedSelectedAgentType(connectionKeyValue: string): string {
-  if (!connectionKeyValue) return ""
-  const selectionMap = readCreateAgentSelectionMap()
-  const hit = selectionMap[connectionKeyValue]
-  return hit?.agentType ? normalizeAgentType(hit.agentType) : ""
-}
-
-function persistSelectedAgentType(connectionKeyValue: string, agentType: string) {
-  if (!connectionKeyValue || !agentType) return
-  const selectionMap = readCreateAgentSelectionMap()
-  selectionMap[connectionKeyValue] = {
-    updatedAt: Date.now(),
-    agentType: normalizeAgentType(agentType),
-  }
-  writeCreateAgentSelectionMap(selectionMap)
 }
 
 function persistCurrentCreateAgentConfigSelection() {
@@ -1237,7 +1153,7 @@ function applyCreateAgentSnapshot(snapshot: AgentOptionsSnapshot, contextKey: st
   )
 }
 
-function normalizeCreateAgentOptions(raw: unknown): CreateAgentOption[] {
+function normalizeCreateAgentOptions(raw: unknown): AgentListOption[] {
   const list = normalizeList(raw) as AcpAgentInfo[]
   return list
     .filter((item) => item && item.enabled !== false && item.available !== false)
@@ -1271,7 +1187,7 @@ async function loadCreateAgents() {
   loadingCreateAgents.value = true
   createAgentListError.value = ""
   try {
-    const cachedOptions = readFreshCreateAgentListCache(selectedConnectionKey.value)
+    const cachedOptions = readFreshAgentListCache(selectedConnectionKey.value)
     if (cachedOptions && cachedOptions.length > 0) {
       if (token !== createAgentListToken) return
       createAgentOptions.value = cachedOptions
@@ -1290,7 +1206,7 @@ async function loadCreateAgents() {
     if (token !== createAgentListToken) return
     const nextOptions = normalizeCreateAgentOptions(remoteAgents)
     createAgentOptions.value = nextOptions
-    persistCreateAgentListCache(selectedConnectionKey.value, nextOptions)
+    persistAgentListCache(selectedConnectionKey.value, nextOptions)
     if (!nextOptions.some((item) => item.value === selectedAgentType.value)) {
       const fallback = nextOptions[0]
       if (fallback) {
@@ -2357,20 +2273,6 @@ function findConnectedConnectionByKey(key: string): ConnectionItem | undefined {
   return getConnectedConnections().find((item) => connectionKey(item) === key)
 }
 
-function normalizeAgentType(value?: string): string {
-  const raw = String(value || "").trim().toLowerCase().replace(/[\s-]/g, "_")
-  if (!raw) return "claude_code"
-  if (raw === "claudecode") return "claude_code"
-  if (raw === "codex_cli") return "codex"
-  if (raw === "gemini_cli" || raw === "google_gemini" || raw === "gemini_code") return "gemini"
-  if (raw === "cline_cli") return "cline"
-  if (raw === "opencode") return "open_code"
-  if (raw === "open_code_cli") return "open_code"
-  if (raw === "openclaw") return "open_claw"
-  if (raw === "open_claw_cli") return "open_claw"
-  return raw
-}
-
 function normalizeConversationStatus(value?: string): string {
   return normalizeConversationSummaryStatus(value)
 }
@@ -2398,7 +2300,7 @@ function applySelectedConnection(connectionKeyValue: string) {
   selectedConnectionName.value = group.name
   selectedProjectId.value = 0
   selectedProjectName.value = ""
-  const cachedOptions = readFreshCreateAgentListCache(group.key)
+  const cachedOptions = readFreshAgentListCache(group.key)
   if (cachedOptions && cachedOptions.length > 0) {
     createAgentOptions.value = cachedOptions
     createAgentListError.value = ""
@@ -2651,7 +2553,7 @@ function createConversation(projectId?: number) {
   newConversationTitle.value = ""
   newTaskContent.value = ""
   resetCreateAgentConfig("")
-  const cachedOptions = readFreshCreateAgentListCache(selectedConnectionKey.value)
+  const cachedOptions = readFreshAgentListCache(selectedConnectionKey.value)
   createAgentOptions.value = cachedOptions && cachedOptions.length > 0
     ? cachedOptions
     : []
