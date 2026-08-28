@@ -92,11 +92,27 @@ describe("detailCyberLayout", () => {
     expect(interactive).toContain("input-status-row--${runtimeStatusClass}")
     expect(interactive).toContain("input-status-row--thinking")
     expect(interactive).toContain("input-status-row--running-tool")
-    expect(body).toContain("input-status-wrap__content::before")
-    expect(body).toContain("@keyframes cyberStatusSweep")
     expect(body).toContain("@keyframes cyberStatusDotPulse")
     expect(body).toContain("@keyframes cyberStatusTextFlicker")
     expect(body).toContain("prefers-reduced-motion: reduce")
     expect(body).toContain("animation: none !important")
+  })
+
+  it("drops the inner left-to-right sweep and keeps the border animation", () => {
+    const body = fs.readFileSync(
+      path.resolve(__dirname, "../../../src/pages/conversation-detail/ConversationDetailBody.vue"),
+      "utf8"
+    )
+    const styles = fs.readFileSync(path.resolve(__dirname, "../../../src/pages/conversation-detail/index.scss"), "utf8")
+
+    // 用户要求：胶囊内部那条从左到右扫过的高光不要了，边框动画留着。
+    // `.input-status-wrap__content` 本身是布局容器，保留；被删的是挂在它上面的 ::before 高光层。
+    expect(body).not.toContain("input-status-wrap__content::before")
+    expect(body).not.toContain("cyberStatusSweep")
+    // 边框动画 = ::before 的旋转 conic-gradient + wrap 自身的外发光脉冲。
+    expect(body).toContain("@keyframes inputStatusLedSpin")
+    expect(body).toContain("animation: inputStatusLedSpin")
+    expect(styles).toContain("@keyframes cyberScanPulse")
+    expect(styles).toContain("animation: cyberScanPulse")
   })
 })

@@ -220,27 +220,6 @@ const emit = defineEmits<{
   box-sizing: border-box;
 }
 
-.input-status-wrap__content::before {
-  content: "";
-  position: absolute;
-  top: 1rpx;
-  bottom: 1rpx;
-  left: 0;
-  width: 22%;
-  border-radius: inherit;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(173, 255, 196, 0.72) 48%,
-    rgba(0, 255, 65, 0.1) 72%,
-    transparent
-  );
-  opacity: 0;
-  pointer-events: none;
-  z-index: 0;
-  transform: translate3d(-160%, 0, 0);
-}
-
 :deep(.input-status-row) {
   position: relative;
   z-index: 1;
@@ -294,30 +273,6 @@ const emit = defineEmits<{
 .detail-body--cyber-active.detail-body--ramp .input-status-wrap::before,
 .detail-body--cyber-active.detail-body--streaming .input-status-wrap::before {
   animation-duration: 0.95s;
-}
-
-.detail-body--cyber-active .input-status-wrap--status-running .input-status-wrap__content::before {
-  opacity: 0.78;
-  animation: cyberStatusSweep 1.8s linear infinite;
-}
-
-.detail-body--cyber-active.detail-body--ramp
-  .input-status-wrap--status-running
-  .input-status-wrap__content::before {
-  animation-duration: 1.55s;
-}
-
-.detail-body--cyber-active.detail-body--streaming
-  .input-status-wrap--status-running
-  .input-status-wrap__content::before {
-  animation-duration: 1.05s;
-}
-
-.detail-body--cyber-active.detail-body--settle
-  .input-status-wrap--status-running
-  .input-status-wrap__content::before {
-  opacity: 0.42;
-  animation-duration: 2.8s;
 }
 
 .detail-body--cyber-active
@@ -379,20 +334,6 @@ const emit = defineEmits<{
 
 .detail-body--cyber-active
   .input-status-wrap--status-pending
-  .input-status-wrap__content::before {
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(255, 214, 102, 0.56) 48%,
-    rgba(255, 173, 51, 0.08) 72%,
-    transparent
-  );
-  opacity: 0.38;
-  animation: cyberStatusSweep 2.8s ease-in-out infinite;
-}
-
-.detail-body--cyber-active
-  .input-status-wrap--status-pending
   :deep(.runtime-dot) {
   background-color: #ffd166;
   box-shadow:
@@ -419,13 +360,6 @@ const emit = defineEmits<{
 
 .detail-body--cyber-active
   .input-status-wrap--status-error
-  .input-status-wrap__content::before {
-  opacity: 0;
-  animation: none;
-}
-
-.detail-body--cyber-active
-  .input-status-wrap--status-error
   :deep(.runtime-dot) {
   background-color: #ff5370;
   box-shadow: 0 0 0 3rpx rgba(255, 83, 112, 0.16), 0 0 14rpx rgba(255, 83, 112, 0.5);
@@ -438,24 +372,6 @@ const emit = defineEmits<{
   color: #ff9aaa !important;
   text-shadow: 0 0 12rpx rgba(255, 83, 112, 0.42);
   animation: none;
-}
-
-@keyframes cyberStatusSweep {
-  0% {
-    transform: translate3d(-160%, 0, 0);
-    opacity: 0;
-  }
-  12% {
-    opacity: 0.9;
-  }
-  58% {
-    opacity: 0.68;
-  }
-  78%,
-  100% {
-    transform: translate3d(560%, 0, 0);
-    opacity: 0;
-  }
 }
 
 @keyframes cyberStatusDotPulse {
@@ -499,7 +415,6 @@ const emit = defineEmits<{
 @media (prefers-reduced-motion: reduce) {
   .input-status-wrap,
   .input-status-wrap::before,
-  .input-status-wrap__content::before,
   :deep(.input-status-row__text),
   :deep(.input-status-row .runtime-dot) {
     animation: none !important;
