@@ -1052,8 +1052,9 @@ function renderCyberDecodeText(text: string, index: number) {
 }
 
 .bubble-wrap--theme-sweet .dot {
-  background-color: #f472b6;
-  box-shadow: 0 0 12rpx rgba(244, 114, 182, 0.54);
+  /* 原 #f472b6 在近白气泡上峰值对比度只有 2.59，动画谷值 1.53，实测几乎看不见。 */
+  background-color: #db2777;
+  box-shadow: 0 0 12rpx rgba(219, 39, 119, 0.54);
 }
 
 .bubble-wrap--theme-sweet .action-btn {
@@ -1199,8 +1200,9 @@ function renderCyberDecodeText(text: string, index: number) {
 }
 
 .bubble-wrap--theme-summer .dot {
-  background-color: #fb7185;
-  box-shadow: 0 0 12rpx rgba(244, 63, 94, 0.42);
+  /* 同 sweet：#fb7185 在浅暖气泡上峰值 2.62，压不住背景。 */
+  background-color: #e11d48;
+  box-shadow: 0 0 12rpx rgba(225, 29, 72, 0.42);
 }
 
 .bubble-wrap--theme-summer .action-btn {
@@ -1628,14 +1630,18 @@ function renderCyberDecodeText(text: string, index: number) {
 /* ===== 流式动画 ===== */
 .typing-dots {
   display: flex;
+  align-items: center;
   gap: 8rpx;
   padding-top: 8rpx;
+  /* 点原本紧贴气泡下沿（.bubble 只有 4px 6px 内距），视觉上像被裁掉半个。 */
+  padding-bottom: 16rpx;
 }
 
 .dot {
-  width: 10rpx;
-  height: 10rpx;
-  background-color: var(--up-border-color, #dadbde);
+  width: 12rpx;
+  height: 12rpx;
+  /* --up-border-color 是分割线级别的浅灰，在气泡背景上几乎看不见；改走强调色。 */
+  background-color: var(--up-primary, #2979ff);
   border-radius: 50%;
   animation: blink 1.2s infinite ease-in-out;
 
@@ -1645,7 +1651,7 @@ function renderCyberDecodeText(text: string, index: number) {
 }
 
 @keyframes blink {
-  0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
+  0%, 80%, 100% { opacity: 0.45; transform: scale(0.8); }
   40%            { opacity: 1;   transform: scale(1); }
 }
 
