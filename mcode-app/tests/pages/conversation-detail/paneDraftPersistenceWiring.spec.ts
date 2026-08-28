@@ -117,6 +117,31 @@ describe("pane draft persistence wiring contract", () => {
     expect(connAt).toBeGreaterThan(hookAt)
   })
 
+  // 删死代码时漏掉了一个调用点：`restoreDraftState` 的定义被删了，`loadConversation`
+  // 里那句调用留着 —— 详情页一进就 `ReferenceError: restoreDraftState is not defined`，
+  // toast 显示「加载失败」。
+  //
+  // tsc 与 uni build **都没报**：Vue SFC 的 `<script setup>` 里，模板可见的顶层标识符
+  // 在类型检查时被当作可能来自宏/全局注入，未定义的函数调用不产生 TS2304。这条空缺只能
+  // 靠运行时或这种源码级断言补上。
+  it("has no dangling calls to the deleted draft helpers", () => {
+    const page = read("../../../src/pages/conversation-detail/index.vue")
+
+    // 这些函数随 composer 一起删了/搬走了，页面里不能再有调用。
+    for (const gone of [
+      "restoreDraftState(",
+      "persistConversationDraftSnapshot(",
+      "readConversationDraftSnapshot(",
+      "buildConversationDraftSnapshotStorageKey(",
+      "submitPreparedDraft(",
+      "processDraftQueue(",
+      "sendQueuedDraft(",
+      "prepareDraftForSend(",
+    ]) {
+      expect(page).not.toContain(gone)
+    }
+  })
+
   it("keys the row by instance so two hosts do not share a draft", () => {
     // `conversation_runtime` 的主键是 (instance_key, conversation_id)。传空 instanceKey
     // 会让不同主机上同号会话的草稿互相覆盖。

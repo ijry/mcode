@@ -3287,10 +3287,6 @@ async function loadConversation() {
       forceRemoteTurnReconcileOnLoad.value ||
       shouldReconcileTurnsFromPersistedRuntime(persistedRuntime)
 
-    if (isActiveLoad()) {
-      restoreDraftState(cachedViewState, persistedRuntime)
-    }
-
     let agentType =
       firstString(managed?.connection.agentType, localSummary?.agentType) || "claude_code"
     let resumeSessionId =
