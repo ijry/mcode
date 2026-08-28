@@ -58,12 +58,22 @@ describe("P48 conversation detail tool call status styles", () => {
     // 高度度量必须一致，否则同一条消息里几枚胶囊会高低不齐。
     const source = readComponent("MessageBubble.vue")
     const collapsedRule = source.match(/\.part-thinking--collapsed\s*\{[\s\S]*?\n\}/)?.[0] || ""
+    const baseRule = source.match(/\n\.part-thinking\s*\{[\s\S]*?\n\}/)?.[0] || ""
 
     expect(collapsedRule).toContain("min-height: 48rpx;")
     expect(collapsedRule).toContain("padding: 10rpx 18rpx;")
     expect(collapsedRule).toContain("border-radius: 999rpx;")
     // 旧的 16rpx 上下内距是把展开态的内距套在了药丸上，收缩后偏高。
     expect(collapsedRule).not.toContain("padding-bottom: 16rpx;")
+
+    // 没有 border-box，`min-height: 48rpx` 会被当成内容盒高度，再叠 20rpx 内距
+    // 与 2rpx 边框 —— 实测 72rpx，比同类药丸高 50%。
+    expect(baseRule).toContain("box-sizing: border-box;")
+    // 药丸态无边框，与 `tool-group__summary` / `subagent__summary` 的约定一致；
+    // 留着 1rpx 边框会让药丸比同类高出约 2rpx。
+    expect(collapsedRule).toContain("border: none;")
+    // 半透明变体排在折叠态之后且同为单类选择器，必须显式复位，否则边框回来。
+    expect(source).toContain(".part-thinking--collapsed.part-thinking--translucent")
 
     const iconRule = source.match(/\.thinking-hd__icon\s*\{[\s\S]*?\n\}/)?.[0] || ""
     expect(iconRule).toContain("width: 24rpx;")

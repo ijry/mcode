@@ -1301,6 +1301,7 @@ function renderCyberDecodeText(text: string, index: number) {
   align-self: flex-start;
   width: fit-content;
   max-width: 100%;
+  box-sizing: border-box;
   padding: 16rpx 20rpx;
   background-color: color-mix(in srgb, var(--up-warning, #f9ae3d) 12%, var(--up-card-bg-color, #ffffff) 88%);
   border-radius: 999rpx;
@@ -1312,12 +1313,18 @@ function renderCyberDecodeText(text: string, index: number) {
   折叠态与 `tool-group__summary` / `subagent__summary` / `system-note__summary`
   共用一套药丸度量（min-height 48rpx + 10rpx/18rpx 内距），否则同一条消息里
   几枚摘要胶囊会高低不齐 —— 基础 `.part-thinking` 的 16rpx 内距是给展开态卡片用的。
+
+  另外两点必须一起给，否则 48rpx 形同虚设（实测 375px 视口：72rpx → 50rpx → 48rpx）：
+  - `box-sizing: border-box`（在基础规则上），不然 min-height 只约束内容盒，
+    上下内距和边框会额外累加上去；
+  - `border: none`，同类摘要药丸都无边框，留着 1rpx 会高出约 2rpx。
 */
 .part-thinking--collapsed {
   min-height: 48rpx;
   padding: 10rpx 18rpx;
   width: fit-content;
   border-radius: 999rpx;
+  border: none;
   justify-content: center;
 }
 
@@ -1331,6 +1338,11 @@ function renderCyberDecodeText(text: string, index: number) {
 .part-thinking--translucent {
   background: color-mix(in srgb, var(--up-warning, #f9ae3d) 10%, transparent 90%);
   border: 1rpx solid color-mix(in srgb, var(--up-warning, #f9ae3d) 20%, transparent 80%);
+}
+
+/* `--translucent` 排在 `--collapsed` 之后且同为单类选择器，会把边框重新加回来。 */
+.part-thinking--collapsed.part-thinking--translucent {
+  border: none;
 }
 
 .part-tool-result {
