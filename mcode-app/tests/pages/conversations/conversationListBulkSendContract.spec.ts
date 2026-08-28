@@ -93,7 +93,10 @@ describe("P67 conversation list bulk send contract", () => {
     // （原先 App 冷启动落在「连接」页时本页从未挂载，角标从来不显示）。
     expect(confirmBlock).toContain("await refreshConversationTabBadge()")
 
-    expect(sendBlock).toContain("const conn = findConnectedConnectionByKey(item.connectionKey)")
+    // `findConnectedConnection` 与 `syncAuthToConnection` 现在都走
+    // `services/connection/connectionAccess`（拆 CreateConversationSheet 前的收口 ——
+    // 子组件也要这几件事，否则要么多接函数型 props、要么再复制一份）。
+    expect(sendBlock).toContain("const conn = findConnectedConnection(item.connectionKey)")
     expect(sendBlock).toContain("syncAuthToConnection(conn)")
     expect(sendBlock).toContain("await ensureConversationTab({")
     expect(sendBlock).toContain('activation: "preserve"')

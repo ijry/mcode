@@ -596,12 +596,13 @@ import {
   type OverviewCandidateCard,
 } from "@/pages/conversations/conversationOverviewPresentation"
 import { selectConversationLivePreviewIds } from "@/pages/conversations/conversationLivePreview"
-import { getDirectToken } from "@/services/gateway/directTokenStore"
+import { connectionBaseUrl } from "@/services/connection/connectionLookup"
 import {
-  buildConnectionAuthMode,
-  connectionBaseUrl,
-  findConnectedConnectionByKey as lookupConnectedConnectionByKey,
-} from "@/services/connection/connectionLookup"
+  applyConnectionAuth,
+  findConnectedConnection,
+  normalizeGatewayList,
+  openConnectionGateway,
+} from "@/services/connection/connectionAccess"
 import { toErrorMessage } from "@/services/gateway/error"
 import { openRemoteFolder } from "@/services/remoteDirectoryBrowser"
 import {
@@ -1152,7 +1153,7 @@ function applyCreateAgentSnapshot(snapshot: AgentOptionsSnapshot, contextKey: st
 }
 
 function normalizeCreateAgentOptions(raw: unknown): AgentListOption[] {
-  const list = normalizeList(raw) as AcpAgentInfo[]
+  const list = normalizeGatewayList(raw) as AcpAgentInfo[]
   return list
     .filter((item) => item && item.enabled !== false && item.available !== false)
     .map((item) => {
@@ -1178,7 +1179,7 @@ function normalizeCreateAgentOptions(raw: unknown): AgentListOption[] {
 
 async function loadCreateAgents() {
   if (!showCreateDialog.value || !selectedConnectionKey.value) return
-  const targetConn = findConnectedConnectionByKey(selectedConnectionKey.value)
+  const targetConn = findConnectedConnection(selectedConnectionKey.value)
   if (!targetConn) {
     createAgentOptions.value = []
     createAgentListError.value = "连接不可用，无法读取智能体"
@@ -1203,7 +1204,7 @@ async function loadCreateAgents() {
       return
     }
 
-    const gateway = await createConnectionGateway(targetConn)
+    const gateway = await openConnectionGateway(targetConn)
     const remoteAgents = await gateway.call<unknown>("acp_list_agents", {})
     if (token !== createAgentListToken) return
     const nextOptions = normalizeCreateAgentOptions(remoteAgents)
@@ -1234,7 +1235,7 @@ async function loadCreateAgentConfig() {
     return
   }
 
-  const targetConn = findConnectedConnectionByKey(selectedConnectionKey.value)
+  const targetConn = findConnectedConnection(selectedConnectionKey.value)
   if (!targetConn) {
     resetCreateAgentConfig("连接不可用，将使用远端默认配置")
     return
@@ -1262,7 +1263,7 @@ async function loadCreateAgentConfig() {
   }
 
   try {
-    const gateway = await createConnectionGateway(targetConn)
+    const gateway = await openConnectionGateway(targetConn)
     const snapshot = await gateway.call<AgentOptionsSnapshot>("acp_describe_agent_options", {
       agentType: selectedAgentType.value,
       workingDir: selectedProjectPath.value || null,
@@ -1673,13 +1674,8 @@ async function loadOverviewDataInternal() {
   }
 }
 
-function getConnectedConnections(): ConnectionItem[] {
-  const savedConnections = readStoredConnections()
-  return filterConnectedConnections(savedConnections)
-}
-
 async function loadConnectionGroup(conn: ConnectionItem): Promise<ConnectionGroup> {
-  const gateway = await createConnectionGateway(conn)
+  const gateway = await openConnectionGateway(conn)
   const descriptor = gateway.getRemoteInstanceDescriptor()
   void ensureGlobalConversationSync(descriptor.instanceKey).catch((error) => {
     console.warn("ensure global conversation sync skipped:", error)
@@ -1689,7 +1685,7 @@ async function loadConnectionGroup(conn: ConnectionItem): Promise<ConnectionGrou
   ensureBridgeRecoverySubscription(descriptor.instanceKey)
   ensureBulkChangedSubscription(descriptor.instanceKey)
   const foldersRaw = await gateway.call<unknown>("list_open_folder_details")
-  const folders = normalizeList(foldersRaw) as Project[]
+  const folders = normalizeGatewayList(foldersRaw) as Project[]
   const tabsRaw = await gateway.call<unknown>("list_opened_tabs")
   const tabsSnapshot = normalizeOpenedTabsResponse(descriptor.instanceKey, tabsRaw)
   const tabs = tabsSnapshot.items
@@ -1757,7 +1753,7 @@ async function fetchRemoteConversations(
   const conversationsRaw = await gateway.call<unknown>("list_all_conversations", {
     folderIds: folders.map((folder) => folder.id),
   })
-  return normalizeList(conversationsRaw) as Conversation[]
+  return normalizeGatewayList(conversationsRaw) as Conversation[]
 }
 
 async function loadLocalConversationSummaries(
@@ -1784,7 +1780,7 @@ async function loadRemoteConnectionSnapshot(
   tabs: OpenedTabItem[],
   options?: { reconcile?: boolean }
 ): Promise<ConnectionGroup> {
-  const gateway = await createConnectionGateway(conn)
+  const gateway = await openConnectionGateway(conn)
   const descriptor = gateway.getRemoteInstanceDescriptor()
   const remoteConversations = await fetchRemoteConversations(gateway, folders)
   await persistConversationSummaries(descriptor.instanceKey, remoteConversations, {
@@ -1807,7 +1803,7 @@ async function refreshConnectionGroupFromRemote(
   current: ConnectionGroup,
   options?: { reconcile?: boolean }
 ) {
-  const gateway = await createConnectionGateway(conn)
+  const gateway = await openConnectionGateway(conn)
   const descriptor = gateway.getRemoteInstanceDescriptor()
   void ensureGlobalConversationSync(descriptor.instanceKey).catch((error) => {
     console.warn("ensure global conversation sync skipped:", error)
@@ -1817,7 +1813,7 @@ async function refreshConnectionGroupFromRemote(
   ensureBridgeRecoverySubscription(descriptor.instanceKey)
   ensureBulkChangedSubscription(descriptor.instanceKey)
   const foldersRaw = await gateway.call<unknown>("list_open_folder_details")
-  const folders = normalizeList(foldersRaw) as Project[]
+  const folders = normalizeGatewayList(foldersRaw) as Project[]
   const tabsRaw = await gateway.call<unknown>("list_opened_tabs")
   const tabsSnapshot = normalizeOpenedTabsResponse(descriptor.instanceKey, tabsRaw)
   const tabs = tabsSnapshot.items
@@ -1845,7 +1841,7 @@ async function refreshConnectionGroupAuthoritative(instanceKey: string, reason: 
 
   const mappedConnKey = instanceConnectionKeyMap.get(instanceKey) || ""
   if (!mappedConnKey) return
-  const conn = findConnectedConnectionByKey(mappedConnKey)
+  const conn = findConnectedConnection(mappedConnKey)
   if (!conn) return
   const current = connectionGroups.value.find(
     (group) => connectionKey(group.connection) === mappedConnKey
@@ -1871,7 +1867,7 @@ async function refreshConnectionGroupFromLocalCache(instanceKey: string) {
     await loadOverviewData({ force: true })
     return
   }
-  const conn = findConnectedConnectionByKey(mappedConnKey)
+  const conn = findConnectedConnection(mappedConnKey)
   if (!conn) return
 
   const connKey = connectionKey(conn)
@@ -1913,7 +1909,7 @@ async function refreshOverviewFromRemoteByInstance(instanceKey: string) {
 
   const mappedConnKey = instanceConnectionKeyMap.get(instanceKey) || ""
   if (!mappedConnKey) return
-  const conn = findConnectedConnectionByKey(mappedConnKey)
+  const conn = findConnectedConnection(mappedConnKey)
   if (!conn) return
 
   const connKey = connectionKey(conn)
@@ -1922,7 +1918,7 @@ async function refreshOverviewFromRemoteByInstance(instanceKey: string) {
   if (!folders || !tabs) return
 
   try {
-    const gateway = await createConnectionGateway(conn)
+    const gateway = await openConnectionGateway(conn)
     await scheduleOverviewConversationRefresh({
       conn,
       gateway,
@@ -2166,13 +2162,6 @@ function firstString(...values: unknown[]) {
   return ""
 }
 
-function normalizeList(input: unknown): any[] {
-  if (Array.isArray(input)) return input
-  if (input && typeof input === "object" && Array.isArray((input as any).data))
-    return (input as any).data
-  return []
-}
-
 function normalizeOpenedTabsResponse(instanceKey: string, raw: unknown) {
   const record = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null
   if (record && Array.isArray(record.items)) {
@@ -2206,18 +2195,8 @@ function connectionKey(conn: ConnectionItem): string {
   return buildConnectionKey(conn)
 }
 
-function findConnectedConnectionByKey(key: string): ConnectionItem | undefined {
-  return lookupConnectedConnectionByKey(key, getConnectedConnections, connectionKey)
-}
-
 function normalizeConversationStatus(value?: string): string {
   return normalizeConversationSummaryStatus(value)
-}
-
-async function createConnectionGateway(conn: ConnectionItem): Promise<CodegGateway> {
-  const resolved = await resolveConnectionContext(conn)
-  Object.assign(conn, resolved.connection)
-  return resolved.gateway
 }
 
 function applySelectedConnection(connectionKeyValue: string) {
@@ -2250,20 +2229,11 @@ function applySelectedConnection(connectionKeyValue: string) {
 }
 
 /**
- * 把全局 auth 切到这条连接上。
- *
- * 「切到哪个模式」的判断在 `services/connection/connectionLookup` 里（可裸测）；这里只负责
- * 写 store。返回 null 时**什么都不做** —— 缺凭据却切了 baseUrl，会让后续请求全部 401，
- * 而原来那套可用凭据已经被覆盖。
+ * 把全局 auth 切到这条连接上。薄封装保留是为了让页面里的调用点读起来仍是本地动作 ——
+ * 真正的实现（含「缺凭据时什么都不做」那道守卫）在 `connectionAccess`。
  */
 function syncAuthToConnection(conn: ConnectionItem) {
-  const authMode = buildConnectionAuthMode(conn, getDirectToken)
-  if (!authMode) return
-  if (authMode.mode === "direct") {
-    auth.setDirectMode(authMode.baseUrl, authMode.token)
-    return
-  }
-  auth.setRelayMode(authMode.baseUrl, authMode.session)
+  applyConnectionAuth(conn)
 }
 
 function loadData() {
@@ -2390,7 +2360,7 @@ async function ensureHistoryProjectsLoaded(group: ConnectionGroup) {
   const task = (async () => {
     historyLoading.value = true
     try {
-      const conn = findConnectedConnectionByKey(key)
+      const conn = findConnectedConnection(key)
       if (!conn) return
       await refreshConnectionGroupFromRemote(conn, group)
     } catch (error) {
@@ -2422,14 +2392,14 @@ function openLiveSession(card: LiveSessionCard, groupKey?: string) {
 }
 
 async function openConversation(conv: Conversation, connKey?: string) {
-  const conn = connKey ? findConnectedConnectionByKey(connKey) : undefined
+  const conn = connKey ? findConnectedConnection(connKey) : undefined
   if (conn) {
     syncAuthToConnection(conn)
   }
   const targetFolderId = Number(conv.folder_id || 0)
   if (conn && targetFolderId > 0 && Number(conv.id || 0) > 0) {
     try {
-      const gateway = await createConnectionGateway(conn)
+      const gateway = await openConnectionGateway(conn)
       await ensureConversationTab({
         instanceKey: gateway.getRemoteInstanceDescriptor().instanceKey,
         gateway,
@@ -2507,13 +2477,13 @@ function showGroupError(group: ConnectionGroup) {
 
 async function openAddProjectBrowser(groupKey: string) {
   if (addingProject.value) return
-  const conn = findConnectedConnectionByKey(groupKey)
+  const conn = findConnectedConnection(groupKey)
   if (!conn) {
     uni.showToast({ title: "连接不存在或已断开", icon: "none" })
     return
   }
   try {
-    const gateway = await createConnectionGateway(conn)
+    const gateway = await openConnectionGateway(conn)
     directoryBrowserGateway.value = gateway
     directoryBrowserConnectionKey.value = groupKey
     showDirectoryBrowser.value = true
@@ -2532,7 +2502,7 @@ async function handleRemoteFolderSelected(path: string) {
   try {
     await openRemoteFolder(gateway, path)
     showDirectoryBrowser.value = false
-    const conn = findConnectedConnectionByKey(groupKey)
+    const conn = findConnectedConnection(groupKey)
     const current = connectionGroups.value.find(
       (group) => group.key === groupKey
     )
@@ -2697,14 +2667,14 @@ async function confirmCreate() {
     persistCurrentCreateAgentConfigSelection()
     showCreateDialog.value = false
     showCreateConfigDialog.value = false
-    const targetConn = findConnectedConnectionByKey(selectedConnectionKey.value)
+    const targetConn = findConnectedConnection(selectedConnectionKey.value)
     if (!targetConn) {
       throw new Error("连接不存在或已断开")
     }
-    const gateway = await createConnectionGateway(targetConn)
+    const gateway = await openConnectionGateway(targetConn)
     syncAuthToConnection(targetConn)
     const foldersRaw = await gateway.call<unknown>("list_open_folder_details")
-    const selectedProject = normalizeList(foldersRaw).find(
+    const selectedProject = normalizeGatewayList(foldersRaw).find(
       (project) => Number((project as Project | null | undefined)?.id || 0) === selectedProjectId.value
     ) as Project | undefined
     if (!selectedProject) {
@@ -2861,12 +2831,12 @@ async function confirmBulkSend() {
 }
 
 async function sendBulkSelectionItem(item: BulkSelectionItem, text: string) {
-  const conn = findConnectedConnectionByKey(item.connectionKey)
+  const conn = findConnectedConnection(item.connectionKey)
   if (!conn) {
     throw new Error("连接不存在或已断开")
   }
 
-  const gateway = await createConnectionGateway(conn)
+  const gateway = await openConnectionGateway(conn)
   syncAuthToConnection(conn)
   const instanceKey = gateway.getRemoteInstanceDescriptor().instanceKey
 
