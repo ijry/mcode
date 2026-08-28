@@ -81,16 +81,18 @@ describe("conversation list navbar header contract", () => {
   })
 
   it("hides the title field from the create sheet", () => {
-    const source = read(PAGE)
-    const createSheetStart = source.indexOf("<!-- 创建会话底部弹层 -->")
-    const createSheetEnd = source.indexOf("<!-- 批量发送弹层 -->", createSheetStart)
-    // 两个标记都必须存在，否则 slice 会退化成半个文件、把断言变成假绿灯。
-    expect(createSheetStart).toBeGreaterThan(-1)
-    expect(createSheetEnd).toBeGreaterThan(createSheetStart)
-    const createSheetBlock = source.slice(createSheetStart, createSheetEnd)
+    // 弹层已抽成 CreateConversationSheet.vue，所以读子组件而不是页面。原来靠
+    // 「创建会话底部弹层」/「批量发送弹层」两条注释切块 —— 前者随抽取消失了。现在整个
+    // 文件就是那个弹层，不需要切块，断言范围反而更严（连配置弹层和进度弹层也覆盖）。
+    const source = read(
+      "../../../src/pages/conversations/components/CreateConversationSheet.vue"
+    )
 
-    expect(createSheetBlock).not.toContain("标题（可选）")
-    expect(createSheetBlock).not.toContain("placeholder=\"输入会话标题\"")
+    expect(source).not.toContain("标题（可选）")
+    expect(source).not.toContain("placeholder=\"输入会话标题\"")
+    // 状态也不许留：留着一个永远是空串的 ref，下一个人会以为标题功能还在，
+    // 把它接回 `create_conversation` 的入参。
+    expect(source).not.toContain("newConversationTitle")
   })
 
   it("switches the navbar into history mode without new reactive state", () => {

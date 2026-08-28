@@ -278,121 +278,15 @@
       >批量发送</up-button>
     </view>
 
-    <!-- 创建会话底部弹层 -->
-    <up-popup v-model:show="showCreateDialog" mode="bottom" :round="28">
-      <view class="create-sheet" :style="upThemeCardStyle">
-        <view class="create-sheet__hd">
-          <text class="create-sheet__title">新建会话</text>
-          <view class="create-sheet__close" @click="showCreateDialog = false">
-            <up-icon name="close" size="20" :color="upThemeVar('--up-tips-color', '#909193')"></up-icon>
-          </view>
-        </view>
-
-        <view class="form-group">
-          <text class="form-label">连接</text>
-          <view class="form-readonly" @click="showConnectionPicker = true">
-            <text class="form-readonly__text">{{ selectedConnectionName || '请选择连接' }}</text>
-            <up-icon name="arrow-down" size="14" :color="upThemeVar('--up-light-color', '#c0c4cc')"></up-icon>
-          </view>
-        </view>
-
-        <view class="form-group">
-          <text class="form-label">项目</text>
-          <view class="form-readonly" @click="showProjectPicker = true">
-            <text class="form-readonly__text">{{ selectedProjectName || '请选择' }}</text>
-            <up-icon name="arrow-down" size="14" :color="upThemeVar('--up-light-color', '#c0c4cc')"></up-icon>
-          </view>
-          <text v-if="selectedProjectPath" class="form-helper-text">{{ selectedProjectPath }}</text>
-        </view>
-
-        <view class="form-group">
-          <text class="form-label">智能体</text>
-          <view v-if="loadingCreateAgents" class="config-loading">
-            <up-loading-icon size="18" color="#2979ff"></up-loading-icon>
-            <text class="config-loading__text">正在读取智能体...</text>
-          </view>
-          <scroll-view class="agent-scroll" scroll-x show-scrollbar="false" enhanced>
-            <view class="agent-grid">
-              <view
-                v-for="agent in createAgentOptions"
-                :key="agent.value"
-                :class="[
-                  'agent-card',
-                  selectedAgentType === agent.value && 'agent-card--active',
-                ]"
-                @click="selectAgent(agent.value)"
-              >
-                <view
-                  :class="[
-                    'agent-card__logo',
-                    overviewAgentLogoClass(agent.value),
-                    overviewAgentLogoPath(agent.value) && 'agent-card__logo--real',
-                  ]"
-                >
-                  <image
-                    v-if="overviewAgentLogoPath(agent.value)"
-                    class="agent-card__logo-img"
-                    :src="overviewAgentLogoPath(agent.value)"
-                    mode="aspectFit"
-                  />
-                  <text v-else class="agent-card__logo-text">{{ overviewAgentLogoText(agent.value) }}</text>
-                </view>
-                <text class="agent-card__label">{{ agent.label }}</text>
-              </view>
-            </view>
-          </scroll-view>
-          <text
-            v-if="createAgentListHelperText"
-            class="form-helper-text"
-          >{{ createAgentListHelperText }}</text>
-        </view>
-
-        <view class="form-group">
-          <text class="form-label">智能体配置</text>
-
-          <view v-if="createAgentConfig.status === 'loading'" class="config-loading">
-            <up-loading-icon size="18" color="#2979ff"></up-loading-icon>
-            <text class="config-loading__text">正在读取可用配置...</text>
-          </view>
-
-          <view
-            v-else
-            class="form-readonly form-readonly--config"
-            @click="openCreateConfigDialog"
-          >
-            <view class="form-readonly__stack">
-              <text class="form-readonly__text">{{ createConfigSummary }}</text>
-              <text v-if="createAgentConfig.message" class="form-helper-inline">
-                {{ createAgentConfig.message }}
-              </text>
-            </view>
-            <up-icon name="arrow-right" size="14" :color="upThemeVar('--up-light-color', '#c0c4cc')"></up-icon>
-          </view>
-        </view>
-
-        <view class="form-group">
-          <text class="form-label">本次任务内容</text>
-          <up-textarea
-            v-model="newTaskContent"
-            placeholder="请输入本次任务内容"
-            autoHeight
-            count
-            :maxlength="1200"
-          ></up-textarea>
-        </view>
-
-        <up-button
-          type="primary"
-          :loading="creating"
-          :disabled="createSubmitDisabled"
-          shape="circle"
-          @click="confirmCreate"
-          customStyle="margin-top:16rpx"
-        >创建会话</up-button>
-
-        <view class="safe-bottom"></view>
-      </view>
-    </up-popup>
+    <!-- 新建会话弹层。自带智能体配置弹层、创建进度弹层、连接/项目两个 Picker ——
+         它们的唯一入口都在它内部，状态也完全同源。页面只给两样东西：连接分组（列表
+         数据源，页面拥有）与默认连接键，然后等 `@created` 拿回三个字段做刷新与跳转。 -->
+    <CreateConversationSheet
+      v-model:show="showCreateDialog"
+      :connection-groups="connectionGroups"
+      :default-connection-key="createSheetDefaultConnectionKey"
+      @created="handleConversationCreated"
+    />
 
     <!-- 批量发送弹层 -->
     <up-popup v-model:show="showBulkSendDialog" mode="bottom" :round="28" @close="closeBulkSendDialog">
@@ -447,109 +341,6 @@
       </view>
     </up-popup>
 
-    <up-popup v-model:show="showCreateConfigDialog" mode="bottom" :round="28">
-      <view class="create-sheet" :style="upThemeCardStyle">
-        <view class="create-sheet__hd">
-          <text class="create-sheet__title">智能体配置</text>
-          <view class="create-sheet__close" @click="showCreateConfigDialog = false">
-            <up-icon name="close" size="20" :color="upThemeVar('--up-tips-color', '#909193')"></up-icon>
-          </view>
-        </view>
-
-        <view v-if="createAgentConfig.message" class="config-hint">
-          <text class="config-hint__text">{{ createAgentConfig.message }}</text>
-        </view>
-
-        <view v-if="showCreateModeOptions" class="config-section">
-          <text class="config-section__title">授权类型</text>
-          <view class="config-chip-grid">
-            <view
-              v-for="mode in createAgentConfig.modes?.available_modes || []"
-              :key="mode.id"
-              :class="[
-                'config-chip',
-                createAgentConfig.selectedModeId === mode.id && 'config-chip--active',
-              ]"
-              @click="selectCreateMode(mode.id)"
-            >
-              <text class="config-chip__title">{{ mode.name }}</text>
-            </view>
-          </view>
-        </view>
-
-        <view
-          v-for="option in createAgentConfig.configOptions"
-          :key="option.id"
-          class="config-section"
-        >
-          <text class="config-section__title">{{ option.name }}</text>
-          <text v-if="option.description" class="config-section__desc">{{ option.description }}</text>
-          <view class="config-chip-grid">
-            <view
-              v-for="value in option.kind.options"
-              :key="value.value"
-              :class="[
-                'config-chip',
-                createAgentConfig.selectedValues[option.id] === value.value && 'config-chip--active',
-              ]"
-              @click="selectCreateConfigValue(option.id, value.value)"
-            >
-              <text class="config-chip__title">{{ value.name }}</text>
-            </view>
-          </view>
-        </view>
-
-        <view
-          v-if="!showCreateModeOptions && createAgentConfig.configOptions.length === 0"
-          class="config-hint"
-        >
-          <text class="config-hint__text">该智能体将使用远端默认配置</text>
-        </view>
-
-        <view class="safe-bottom"></view>
-      </view>
-    </up-popup>
-
-    <up-popup
-      :show="creating"
-      mode="center"
-      :round="28"
-      :close-on-click-overlay="false"
-      :safe-area-inset-bottom="false"
-    >
-      <view class="create-progress-dialog" :style="upThemeCardStyle">
-        <view class="create-progress-dialog__visual" aria-hidden="true">
-          <view class="create-progress-dialog__ring"></view>
-          <view class="create-progress-dialog__ring create-progress-dialog__ring--delay"></view>
-          <view class="create-progress-dialog__core">
-            <up-loading-icon mode="circle" size="28" :color="upThemeVar('--up-primary', '#2979ff')"></up-loading-icon>
-          </view>
-        </view>
-        <text class="create-progress-dialog__title">正在创建会话</text>
-        <text class="create-progress-dialog__desc">正在连接智能体并初始化会话，请不要关闭页面。</text>
-        <view class="create-progress-dialog__stage">
-          <view class="create-progress-dialog__stage-dot"></view>
-          <text class="create-progress-dialog__stage-text">{{ createProgressText }}</text>
-        </view>
-      </view>
-    </up-popup>
-
-    <!-- 项目 Picker -->
-    <up-picker
-      :show="showConnectionPicker"
-      :columns="connectionColumns"
-      @confirm="onConnectionConfirm"
-      @cancel="showConnectionPicker = false"
-    ></up-picker>
-
-    <!-- 项目 Picker -->
-    <up-picker
-      :show="showProjectPicker"
-      :columns="projectColumns"
-      @confirm="onProjectConfirm"
-      @cancel="showProjectPicker = false"
-    ></up-picker>
-
     <!-- 会话操作菜单 -->
     <up-action-sheet
       :show="showActionSheet"
@@ -578,6 +369,7 @@ import RemoteDirectoryBrowser from "@/components/remote/RemoteDirectoryBrowser.v
 import MarqueeText from "@/components/MarqueeText.vue"
 import ConversationsSearchBar from "@/pages/conversations/components/ConversationsSearchBar.vue"
 import ConversationsNavbar from "@/pages/conversations/components/ConversationsNavbar.vue"
+import CreateConversationSheet from "@/pages/conversations/components/CreateConversationSheet.vue"
 import {
   buildBulkSelectionItem,
   buildBulkSelectionKey,
@@ -622,20 +414,6 @@ import {
 } from "@/services/connection/connectedMapStore"
 import { ensureConversationSchema } from "@/services/db/migrations"
 import {
-  buildAgentConfigContextKey,
-  createReadyDetailAgentConfigState,
-  hasSessionModeOptions,
-  persistAgentConfigCache,
-  persistAgentConfigSelection,
-  persistAgentListCache,
-  persistSelectedAgentType,
-  readFreshAgentConfigCache,
-  readFreshAgentListCache,
-  readPersistedAgentConfigSelection,
-  readPersistedSelectedAgentType,
-  type AgentListOption,
-} from "@/services/conversation/composerTools"
-import {
   consumeConversationListDirty,
   markConversationListDirty,
   shouldRefetchAfterBridgeRecovered,
@@ -675,7 +453,6 @@ import {
   formatHistoryConversationMeta,
 } from "@/pages/conversations/historyPresentation"
 import { normalizeConversationSummaryStatus } from "@/services/conversation/conversationSummaryStatus"
-import { METADATA_ONLY_CONVERSATION_TAIL_TURNS } from "@/services/conversation/conversationHistoryWindowContract"
 import {
   listConversationSummaries,
   markMissingConversationSummariesDeleted,
@@ -685,45 +462,24 @@ import {
 import { getRegisteredRemoteInstanceDescriptor } from "@/services/realtime/remoteInstanceRegistry"
 import type { CodegGateway } from "@/services/gateway"
 import { normalizeAgentType } from "@/services/conversation/agentType"
-import { parseConversationId } from "@/services/conversation/conversationIdentity"
-import { seedCreatedConversationSummary } from "@/services/conversation/createdConversationSeed"
-import type {
-  AgentOptionsSnapshot,
-  AcpAgentInfo,
-  ConnectionInfo,
-  RealtimeBridgeHealth,
-  SessionConfigOptionInfo,
-  SessionModeStateInfo,
-} from "@/types/acp"
+import type { RealtimeBridgeHealth } from "@/types/acp"
 
 const auth = useAuthStore()
 const runtime = useConversationRuntimeStore()
 const loading = ref(false)
-const creating = ref(false)
 const searchKeyword = ref("")
 const showCreateDialog = ref(false)
-const showCreateConfigDialog = ref(false)
-const showConnectionPicker = ref(false)
-const showProjectPicker = ref(false)
 const showActionSheet = ref(false)
 const showDirectoryBrowser = ref(false)
 const directoryBrowserGateway = ref<CodegGateway | null>(null)
 const directoryBrowserConnectionKey = ref("")
 const addingProject = ref(false)
-const selectedConnectionKey = ref("")
-const selectedConnectionName = ref("")
-const selectedProjectId = ref<number>(0)
-const selectedProjectName = ref("")
-const selectedAgentType = ref("claude_code")
-const newConversationTitle = ref("")
-const newTaskContent = ref("")
 const currentConversation = ref<Conversation | null>(null)
 const showHistoryPanel = ref(false)
 const historyGroupKey = ref("")
 const historyGroupTitle = ref("")
 const historyLoading = ref(false)
 const activeHistoryProjectId = ref<string | number>("")
-const createProgressStageIndex = ref(0)
 let overviewLoadPromise: Promise<void> | null = null
 let lastOverviewLoadedAt = 0
 const historyLoadPromiseMap = new Map<string, Promise<void>>()
@@ -733,10 +489,6 @@ const connectionFolderSnapshotMap = new Map<string, Project[]>()
 const connectionTabSnapshotMap = new Map<string, OpenedTabItem[]>()
 const instanceConnectionKeyMap = new Map<string, string>()
 const connectionInstanceKeyMap = new Map<string, string>()
-const loadingCreateAgents = ref(false)
-const createAgentListError = ref("")
-let createAgentProbeToken = 0
-let createAgentListToken = 0
 let disposeOverviewInvalidation: (() => void) | null = null
 const disposeOpenedTabsChangedMap = new Map<string, () => void>()
 const disposeActiveSessionsChangedMap = new Map<string, () => void>()
@@ -747,11 +499,6 @@ const disposeBulkChangedMap = new Map<string, () => void>()
 const lastBridgeStateMap = new Map<string, RealtimeBridgeHealth["state"]>()
 const activeSessionsRefreshTimerMap = new Map<string, ReturnType<typeof setTimeout>>()
 const ACTIVE_SESSIONS_REFRESH_DEBOUNCE_MS = 400
-let activeCreateRequestId = ""
-let activeCreateRequestFingerprint = ""
-let activeCreateConversationId = 0
-let activeCreatePromptAttempted = false
-let createProgressTimer: ReturnType<typeof setInterval> | null = null
 const livePreviewEnabled = ref(false)
 // 「隐藏已完成会话」开关（默认开，见 hideCompletedConversationsPreference）。
 // 在 onShow 里从存储读取，与 livePreviewEnabled 同一套路。
@@ -761,32 +508,6 @@ const livePreviewOwnedConversationIds = new Set<number>()
 const livePreviewTransferredConversationIds = new Set<number>()
 const livePreviewConnectPromiseMap = new Map<number, Promise<void>>()
 let livePreviewReconcileTimer: ReturnType<typeof setTimeout> | null = null
-
-interface CreateAgentConfigState {
-  status: "idle" | "loading" | "ready" | "failed"
-  modes: SessionModeStateInfo | null
-  configOptions: SessionConfigOptionInfo[]
-  selectedModeId: string | null
-  selectedValues: Record<string, string>
-  message: string
-}
-
-const createAgentOptions = ref<AgentListOption[]>([])
-const createAgentConfig = ref<CreateAgentConfigState>({
-  status: "idle",
-  modes: null,
-  configOptions: [],
-  selectedModeId: null,
-  selectedValues: {},
-  message: "",
-})
-const CREATE_PROGRESS_STAGES = [
-  "准备连接信息",
-  "拉起智能体会话",
-  "应用会话配置",
-  "写入会话记录",
-  "打开新会话",
-]
 
 type Project = ConversationOverviewProject
 type Conversation = ConversationOverviewConversation
@@ -884,16 +605,16 @@ const bulkSendSubmitDisabled = computed(() =>
   bulkSendText.value.trim().length === 0
 )
 
-const selectedConnectionGroup = computed(() =>
-  connectionGroups.value.find((group) => group.key === selectedConnectionKey.value)
+/**
+ * 打开新建弹层时用哪条连接作默认。
+ *
+ * 历史面板里就是那个分组，概览里退回第一条 —— 判断依赖 `showHistoryPanel` /
+ * `historyGroupKey`，两者都归页面，所以由页面算好传给子组件（子组件不该知道历史面板
+ * 这回事）。空串时子组件自己退回 `connectionGroups[0]`。
+ */
+const createSheetDefaultConnectionKey = computed(() =>
+  showHistoryPanel.value ? historyGroupKey.value : ""
 )
-
-const selectedProjectPath = computed(() => {
-  const project = selectedConnectionGroup.value?.projects.find(
-    (item) => item.id === selectedProjectId.value
-  )
-  return project?.path || ""
-})
 
 const canCreateInHistory = computed(() => {
   if (!showHistoryPanel.value || !historyGroupKey.value) return false
@@ -957,347 +678,6 @@ watch(
     }
   }
 )
-
-watch(
-  () => [showCreateDialog.value, selectedConnectionKey.value] as const,
-  ([open]) => {
-    if (!open) {
-      createAgentProbeToken += 1
-      createAgentListToken += 1
-      showCreateConfigDialog.value = false
-      resetCreateAgentConfig("")
-      clearPendingCreateRequest()
-      return
-    }
-    void loadCreateAgents()
-  }
-)
-
-watch(
-  () =>
-    [
-      showCreateDialog.value,
-      selectedConnectionKey.value,
-      selectedAgentType.value,
-      selectedProjectPath.value,
-    ] as const,
-  ([open]) => {
-    if (!open) return
-    void loadCreateAgentConfig()
-  }
-)
-
-const connectionColumns = computed(() => [
-  connectionGroups.value.map((group) => ({
-    text: group.name,
-    value: group.key,
-  })),
-])
-
-const projectColumns = computed(() => [
-  (selectedConnectionGroup.value?.projects || []).map((p) => ({
-    text: p.name || p.path || "未命名项目",
-    value: p.id,
-  })),
-])
-
-const showCreateModeOptions = computed(() => hasSessionModeOptions(createAgentConfig.value.modes))
-
-const createConfigSummary = computed(() => {
-  if (createAgentConfig.value.status === "loading") return "正在读取可用配置..."
-  const parts: string[] = []
-
-  if (showCreateModeOptions.value && createAgentConfig.value.modes) {
-    const activeMode = createAgentConfig.value.modes.available_modes.find(
-      (item) => item.id === createAgentConfig.value.selectedModeId
-    )
-    if (activeMode?.name) {
-      parts.push(activeMode.name)
-    }
-  }
-
-  for (const option of createAgentConfig.value.configOptions) {
-    const selectedValue = option.kind.options.find(
-      (item) => item.value === createAgentConfig.value.selectedValues[option.id]
-    )
-    if (selectedValue?.name) {
-      parts.push(selectedValue.name)
-    }
-  }
-
-  if (parts.length === 0) {
-    return createAgentConfig.value.message || "使用远端默认配置"
-  }
-  return parts.join(" · ")
-})
-
-const selectedCreateAgentAvailable = computed(() =>
-  createAgentOptions.value.some((item) => item.value === selectedAgentType.value)
-)
-
-const createSubmitDisabled = computed(
-  () =>
-    creating.value ||
-    loadingCreateAgents.value ||
-    !selectedProjectId.value ||
-    !selectedConnectionKey.value ||
-    !selectedAgentType.value ||
-    !selectedCreateAgentAvailable.value ||
-    Boolean(createAgentListError.value)
-)
-
-const createAgentListHelperText = computed(() => {
-  if (createAgentListError.value) return createAgentListError.value
-  if (!loadingCreateAgents.value && createAgentOptions.value.length === 0) {
-    return "未读取到可用智能体，请检查远端智能体设置后重试"
-  }
-  return ""
-})
-
-const createProgressText = computed(() => {
-  return CREATE_PROGRESS_STAGES[createProgressStageIndex.value] || CREATE_PROGRESS_STAGES[0]
-})
-
-watch(creating, (active) => {
-  if (active) {
-    startCreateProgressTimer()
-  } else {
-    stopCreateProgressTimer()
-  }
-})
-
-function resetCreateAgentConfig(message = "") {
-  createAgentConfig.value = {
-    status: "idle",
-    modes: null,
-    configOptions: [],
-    selectedModeId: null,
-    selectedValues: {},
-    message,
-  }
-}
-
-function clearPendingCreateRequest() {
-  activeCreateRequestId = ""
-  activeCreateRequestFingerprint = ""
-  activeCreateConversationId = 0
-  activeCreatePromptAttempted = false
-}
-
-function startCreateProgressTimer() {
-  stopCreateProgressTimer()
-  createProgressStageIndex.value = 0
-  createProgressTimer = setInterval(() => {
-    createProgressStageIndex.value =
-      (createProgressStageIndex.value + 1) % CREATE_PROGRESS_STAGES.length
-  }, 1800)
-}
-
-function stopCreateProgressTimer() {
-  if (createProgressTimer) {
-    clearInterval(createProgressTimer)
-    createProgressTimer = null
-  }
-  createProgressStageIndex.value = 0
-}
-
-function createConversationRequestFingerprint() {
-  const selectedValues = Object.entries(createAgentConfig.value.selectedValues)
-    .sort(([left], [right]) => left.localeCompare(right))
-  return JSON.stringify({
-    connectionKey: selectedConnectionKey.value,
-    projectId: selectedProjectId.value,
-    agentType: selectedAgentType.value,
-    title: newConversationTitle.value.trim(),
-    taskContent: newTaskContent.value.trim(),
-    modeId: createAgentConfig.value.selectedModeId || "",
-    selectedValues,
-  })
-}
-
-function resolveCreateRequestId() {
-  const fingerprint = createConversationRequestFingerprint()
-  if (!activeCreateRequestId || activeCreateRequestFingerprint !== fingerprint) {
-    activeCreateRequestId = `mcode-create-${Date.now().toString(36)}-${Math.random()
-      .toString(36)
-      .slice(2, 10)}`
-    activeCreateRequestFingerprint = fingerprint
-  }
-  return activeCreateRequestId
-}
-
-function currentCreateAgentConfigContextKey(): string {
-  if (!selectedConnectionKey.value || !selectedAgentType.value) return ""
-  return buildAgentConfigContextKey(
-    selectedConnectionKey.value,
-    selectedAgentType.value,
-    selectedProjectPath.value
-  )
-}
-
-function persistCurrentCreateAgentConfigSelection() {
-  const contextKey = currentCreateAgentConfigContextKey()
-  if (!contextKey) return
-  persistAgentConfigSelection(contextKey, {
-    selectedModeId: createAgentConfig.value.selectedModeId,
-    selectedValues: createAgentConfig.value.selectedValues,
-  })
-}
-
-function applyCreateAgentSnapshot(snapshot: AgentOptionsSnapshot, contextKey: string) {
-  const persistedSelection = readPersistedAgentConfigSelection(contextKey)
-  createAgentConfig.value = createReadyDetailAgentConfigState(
-    snapshot,
-    persistedSelection || undefined
-  )
-}
-
-function normalizeCreateAgentOptions(raw: unknown): AgentListOption[] {
-  const list = normalizeGatewayList(raw) as AcpAgentInfo[]
-  return list
-    .filter((item) => item && item.enabled !== false && item.available !== false)
-    .map((item) => {
-      const value = normalizeAgentType(item.agent_type)
-      return {
-        value,
-        // 标签取站内唯一那份映射（`remoteSettings.AGENT_LABELS`，经
-        // `formatOverviewAgentLabel` 暴露）。页面此前有本地副本，把 codex 写成
-        // 「Codex CLI」而全局那份是「Codex」—— 同一个 agent 在新建弹层和别处显示成
-        // 两个名字。远端给了 `name` 时仍优先用它。
-        label: String(item.name || formatOverviewAgentLabel(value)),
-        description: item.description ? String(item.description) : "",
-        sortOrder: typeof item.sort_order === "number" ? item.sort_order : Number.MAX_SAFE_INTEGER,
-      }
-    })
-    .filter((item) => Boolean(item.value))
-    .sort((a, b) => {
-      if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder
-      return a.label.localeCompare(b.label)
-    })
-    .map(({ sortOrder: _sortOrder, ...item }) => item)
-}
-
-async function loadCreateAgents() {
-  if (!showCreateDialog.value || !selectedConnectionKey.value) return
-  const targetConn = findConnectedConnection(selectedConnectionKey.value)
-  if (!targetConn) {
-    createAgentOptions.value = []
-    createAgentListError.value = "连接不可用，无法读取智能体"
-    return
-  }
-
-  const token = ++createAgentListToken
-  loadingCreateAgents.value = true
-  createAgentListError.value = ""
-  try {
-    const cachedOptions = readFreshAgentListCache(selectedConnectionKey.value)
-    if (cachedOptions && cachedOptions.length > 0) {
-      if (token !== createAgentListToken) return
-      createAgentOptions.value = cachedOptions
-      if (!cachedOptions.some((item) => item.value === selectedAgentType.value)) {
-        const fallback = cachedOptions[0]
-        if (fallback) {
-          selectedAgentType.value = fallback.value
-          persistSelectedAgentType(selectedConnectionKey.value, fallback.value)
-        }
-      }
-      return
-    }
-
-    const gateway = await openConnectionGateway(targetConn)
-    const remoteAgents = await gateway.call<unknown>("acp_list_agents", {})
-    if (token !== createAgentListToken) return
-    const nextOptions = normalizeCreateAgentOptions(remoteAgents)
-    createAgentOptions.value = nextOptions
-    persistAgentListCache(selectedConnectionKey.value, nextOptions)
-    if (!nextOptions.some((item) => item.value === selectedAgentType.value)) {
-      const fallback = nextOptions[0]
-      if (fallback) {
-        selectedAgentType.value = fallback.value
-        persistSelectedAgentType(selectedConnectionKey.value, fallback.value)
-      }
-    }
-  } catch (error) {
-    if (token !== createAgentListToken) return
-    console.warn("load create agents failed:", error)
-    createAgentOptions.value = []
-    createAgentListError.value = `读取智能体失败：${toErrorMessage(error)}`
-  } finally {
-    if (token === createAgentListToken) {
-      loadingCreateAgents.value = false
-    }
-  }
-}
-
-async function loadCreateAgentConfig() {
-  if (!showCreateDialog.value || !selectedConnectionKey.value || !selectedAgentType.value) {
-    resetCreateAgentConfig("")
-    return
-  }
-
-  const targetConn = findConnectedConnection(selectedConnectionKey.value)
-  if (!targetConn) {
-    resetCreateAgentConfig("连接不可用，将使用远端默认配置")
-    return
-  }
-
-  const token = ++createAgentProbeToken
-  const contextKey = buildAgentConfigContextKey(
-    selectedConnectionKey.value,
-    selectedAgentType.value,
-    selectedProjectPath.value
-  )
-  const cachedSnapshot = readFreshAgentConfigCache(contextKey)
-  if (cachedSnapshot) {
-    applyCreateAgentSnapshot(cachedSnapshot, contextKey)
-    return
-  }
-
-  createAgentConfig.value = {
-    status: "loading",
-    modes: null,
-    configOptions: [],
-    selectedModeId: null,
-    selectedValues: {},
-    message: "",
-  }
-
-  try {
-    const gateway = await openConnectionGateway(targetConn)
-    const snapshot = await gateway.call<AgentOptionsSnapshot>("acp_describe_agent_options", {
-      agentType: selectedAgentType.value,
-      workingDir: selectedProjectPath.value || null,
-    })
-    if (token !== createAgentProbeToken) return
-    persistAgentConfigCache(contextKey, snapshot)
-    applyCreateAgentSnapshot(snapshot, contextKey)
-  } catch (error) {
-    if (token !== createAgentProbeToken) return
-    resetCreateAgentConfig("读取失败，将使用远端默认配置")
-    createAgentConfig.value.status = "failed"
-  }
-}
-
-function selectCreateMode(modeId: string) {
-  createAgentConfig.value.selectedModeId = modeId
-  persistCurrentCreateAgentConfigSelection()
-}
-
-function selectCreateConfigValue(configId: string, valueId: string) {
-  createAgentConfig.value = {
-    ...createAgentConfig.value,
-    selectedValues: {
-      ...createAgentConfig.value.selectedValues,
-      [configId]: valueId,
-    },
-  }
-  persistCurrentCreateAgentConfigSelection()
-}
-
-function openCreateConfigDialog() {
-  if (createAgentConfig.value.status === "loading") return
-  showCreateConfigDialog.value = true
-}
 
 const conversationActions = [
   { name: "重命名", color: "#2979ff" },
@@ -2199,35 +1579,6 @@ function normalizeConversationStatus(value?: string): string {
   return normalizeConversationSummaryStatus(value)
 }
 
-function applySelectedConnection(connectionKeyValue: string) {
-  if (!connectionKeyValue) {
-    selectedConnectionKey.value = ""
-    selectedConnectionName.value = ""
-    selectedProjectId.value = 0
-    selectedProjectName.value = ""
-    createAgentOptions.value = []
-    createAgentListError.value = ""
-    selectedAgentType.value = "claude_code"
-    return
-  }
-  const group = connectionGroups.value.find((item) => item.key === connectionKeyValue)
-  if (!group) return
-  selectedConnectionKey.value = group.key
-  selectedConnectionName.value = group.name
-  selectedProjectId.value = 0
-  selectedProjectName.value = ""
-  const cachedOptions = readFreshAgentListCache(group.key)
-  if (cachedOptions && cachedOptions.length > 0) {
-    createAgentOptions.value = cachedOptions
-    createAgentListError.value = ""
-  } else {
-    createAgentOptions.value = []
-    createAgentListError.value = ""
-  }
-  const persistedAgentType = readPersistedSelectedAgentType(group.key)
-  selectedAgentType.value = persistedAgentType || "claude_code"
-}
-
 /**
  * 把全局 auth 切到这条连接上。薄封装保留是为了让页面里的调用点读起来仍是本地动作 ——
  * 真正的实现（含「缺凭据时什么都不做」那道守卫）在 `connectionAccess`。
@@ -2419,50 +1770,13 @@ async function openConversation(conv: Conversation, connKey?: string) {
   })
 }
 
-function createConversation(projectId?: number) {
-  clearPendingCreateRequest()
-  const defaultConnectionKey = showHistoryPanel.value
-    ? historyGroupKey.value
-    : selectedConnectionKey.value || connectionGroups.value[0]?.key || ""
-  applySelectedConnection(defaultConnectionKey)
-
-  if (projectId) {
-    const list = selectedConnectionGroup.value?.projects || []
-    const p = list.find((x) => x.id === projectId)
-    if (p) {
-      selectedProjectId.value = p.id
-      selectedProjectName.value = p.name || p.path || "未命名项目"
-    }
-  } else {
-    selectedProjectId.value = 0
-    selectedProjectName.value = ""
-  }
-
-  newConversationTitle.value = ""
-  newTaskContent.value = ""
-  resetCreateAgentConfig("")
-  const cachedOptions = readFreshAgentListCache(selectedConnectionKey.value)
-  createAgentOptions.value = cachedOptions && cachedOptions.length > 0
-    ? cachedOptions
-    : []
-  createAgentListError.value = ""
-  if (!createAgentOptions.value.some((item) => item.value === selectedAgentType.value)) {
-    selectedAgentType.value = createAgentOptions.value[0]?.value || "claude_code"
-  }
+/**
+ * 打开新建会话弹层。**只负责打开** —— 弹层内部的初始化（按默认连接选项目、填缓存的
+ * 智能体列表）由子组件在 `show` 变 true 时自己做。页面留着这个函数是因为顶栏的
+ * `@create` 事件要有落点，而 `showCreateDialog` 的所有权在页面（v-model 的那一半）。
+ */
+function createConversation() {
   showCreateDialog.value = true
-}
-
-function onConnectionConfirm(e: any) {
-  const sel = e.value[0]
-  applySelectedConnection(String(sel.value || ""))
-  showConnectionPicker.value = false
-}
-
-function onProjectConfirm(e: any) {
-  const sel = e.value[0]
-  selectedProjectId.value = sel.value
-  selectedProjectName.value = sel.text
-  showProjectPicker.value = false
 }
 
 function showGroupError(group: ConnectionGroup) {
@@ -2523,86 +1837,6 @@ async function handleRemoteFolderSelected(path: string) {
   }
 }
 
-function selectAgent(agentType: string) {
-  selectedAgentType.value = normalizeAgentType(agentType)
-  persistSelectedAgentType(selectedConnectionKey.value, selectedAgentType.value)
-}
-
-async function applyCreateAgentConfig(
-  gateway: CodegGateway,
-  connectionId: string,
-  configOptions: SessionConfigOptionInfo[],
-  selectedValues: Record<string, string>
-) {
-  for (const option of configOptions) {
-    const selectedValueId = selectedValues[option.id]
-    if (!selectedValueId) continue
-    await gateway.call("acp_set_config_option", {
-      connectionId,
-      configId: option.id,
-      valueId: selectedValueId,
-    })
-  }
-}
-
-function resolveConnectedSessionId(connection: ConnectionInfo | null | undefined) {
-  if (!connection || typeof connection !== "object") return ""
-  return String(connection.sessionId || "").trim()
-}
-
-async function shouldSkipCreatePromptReplay(
-  gateway: CodegGateway,
-  conversationId: number,
-  agentType: string
-) {
-  if (!activeCreateRequestId) return false
-  if (activeCreateConversationId !== conversationId) return false
-  if (!activeCreatePromptAttempted) return false
-
-  try {
-    // 只判「有没有轮次」，1 条窗口下 `length > 0` 语义完全不变。
-    const detail = await gateway.call<any>("get_folder_conversation", {
-      conversationId,
-      tailTurns: METADATA_ONLY_CONVERSATION_TAIL_TURNS,
-    })
-    if (Array.isArray(detail?.turns) && detail.turns.length > 0) {
-      return true
-    }
-  } catch (error) {
-    console.warn("create prompt replay detail probe skipped:", error)
-  }
-
-  try {
-    const instanceKey = gateway.getRemoteInstanceDescriptor().instanceKey
-    const existingConnection = await acpApi.acpFindConnectionForConversation(
-      conversationId,
-      agentType,
-      undefined,
-      instanceKey ? { instanceKey } : undefined
-    )
-    if (existingConnection?.connection_id) {
-      return true
-    }
-  } catch (error) {
-    console.warn("create prompt replay connection probe skipped:", error)
-  }
-
-  return false
-}
-
-/**
- * 重置新建弹层自己的状态。**归弹层所有** —— 抽成子组件后这段跟着走。
- */
-function resetCreateSheetState() {
-  clearPendingCreateRequest()
-  newConversationTitle.value = ""
-  newTaskContent.value = ""
-  resetCreateAgentConfig("")
-  selectedAgentType.value = "claude_code"
-  createAgentOptions.value = []
-  createAgentListError.value = ""
-}
-
 /**
  * 会话创建成功后的页面级收尾：刷新列表、更新角标、跳详情页。
  *
@@ -2622,166 +1856,6 @@ async function handleConversationCreated(payload: {
     { id: payload.conversationId, folder_id: payload.folderId },
     payload.connectionKey
   )
-}
-
-async function confirmCreate() {
-  if (creating.value) return
-
-  creating.value = true
-  if (!selectedConnectionKey.value) {
-    uni.showToast({ title: "请选择连接", icon: "none" })
-    creating.value = false
-    return
-  }
-
-  if (!selectedProjectId.value) {
-    uni.showToast({ title: "请选择项目", icon: "none" })
-    creating.value = false
-    return
-  }
-
-  const agentType = selectedAgentType.value
-  if (loadingCreateAgents.value) {
-    uni.showToast({ title: "正在读取智能体，请稍后", icon: "none" })
-    creating.value = false
-    return
-  }
-
-  if (createAgentListError.value) {
-    uni.showToast({ title: createAgentListError.value, icon: "none", duration: 3000 })
-    creating.value = false
-    return
-  }
-
-  if (!agentType || !createAgentOptions.value.some((item) => item.value === agentType)) {
-    uni.showToast({ title: "请选择可用智能体", icon: "none" })
-    creating.value = false
-    return
-  }
-
-  try {
-    const preferredModeId = createAgentConfig.value.selectedModeId || undefined
-    const preferredConfigValues = { ...createAgentConfig.value.selectedValues }
-    const configOptions = [...createAgentConfig.value.configOptions]
-    persistSelectedAgentType(selectedConnectionKey.value, agentType)
-    persistCurrentCreateAgentConfigSelection()
-    showCreateDialog.value = false
-    showCreateConfigDialog.value = false
-    const targetConn = findConnectedConnection(selectedConnectionKey.value)
-    if (!targetConn) {
-      throw new Error("连接不存在或已断开")
-    }
-    const gateway = await openConnectionGateway(targetConn)
-    syncAuthToConnection(targetConn)
-    const foldersRaw = await gateway.call<unknown>("list_open_folder_details")
-    const selectedProject = normalizeGatewayList(foldersRaw).find(
-      (project) => Number((project as Project | null | undefined)?.id || 0) === selectedProjectId.value
-    ) as Project | undefined
-    if (!selectedProject) {
-      throw new Error("项目不存在或列表已过期，请刷新后重试")
-    }
-
-    const connectionInfo = await gateway.call<ConnectionInfo>("acp_connect", {
-      agentType,
-      workingDir: selectedProject.path || undefined,
-      preferredModeId,
-      preferredConfigValues,
-    })
-    const connectionId = typeof connectionInfo === "string"
-      ? connectionInfo
-      : String(connectionInfo?.id || "").trim()
-    if (!connectionId) {
-      throw new Error("智能体连接失败：返回数据异常")
-    }
-
-    await applyCreateAgentConfig(gateway, connectionId, configOptions, preferredConfigValues)
-
-    resolveCreateRequestId()
-    const createResult = await gateway.call<any>("create_conversation", {
-      folderId: selectedProjectId.value,
-      agentType,
-      title: newConversationTitle.value || undefined,
-    })
-    const newConversationId = parseConversationId(createResult)
-    if (!newConversationId) {
-      throw new Error("创建会话失败：返回数据异常")
-    }
-
-    const taskContent = newTaskContent.value.trim()
-    await seedCreatedConversationSummary({
-      gateway,
-      instanceKey: gateway.getRemoteInstanceDescriptor().instanceKey,
-      conversationId: newConversationId,
-      folderId: selectedProjectId.value,
-      title: newConversationTitle.value,
-      agentType,
-      hasTaskContent: Boolean(taskContent),
-    })
-
-    if (taskContent) {
-      const skipPromptReplay = await shouldSkipCreatePromptReplay(
-        gateway,
-        newConversationId,
-        agentType
-      )
-      if (!skipPromptReplay) {
-        activeCreateConversationId = newConversationId
-        activeCreatePromptAttempted = true
-        await gateway.call("acp_prompt", {
-          connectionId,
-          blocks: [{ type: "text", text: taskContent }],
-          folderId: selectedProjectId.value,
-          conversationId: newConversationId,
-        })
-      }
-    }
-
-    runtime.bindCreatedConversationRuntime({
-      conversationId: newConversationId,
-      folderId: selectedProjectId.value,
-      agentType,
-      connectionId,
-      instanceKey: gateway.getRemoteInstanceDescriptor().instanceKey,
-      sessionId: resolveConnectedSessionId(connectionInfo),
-    })
-
-    await ensureConversationTab({
-      instanceKey: gateway.getRemoteInstanceDescriptor().instanceKey,
-      gateway,
-      folderId: selectedProjectId.value,
-      conversationId: newConversationId,
-      agentType,
-      activation: "preserve",
-      origin: "mcode-mobile-create",
-    }).catch((error) => {
-      console.warn("ensure conversation tab after create skipped:", error)
-    })
-
-    await gateway.call("open_folder_by_id", {
-      folderId: selectedProjectId.value,
-    }).catch((error) => {
-      console.warn("open folder by id skipped:", error)
-    })
-
-    uni.showToast({ title: "创建成功", icon: "success" })
-    showCreateDialog.value = false
-    // 收尾分两段，这是抽 CreateConversationSheet 子组件的接缝：
-    //   ① 弹层自己的状态重置 —— 搬进子组件后归它所有；
-    //   ② 页面级的刷新与导航 —— 永远归页面（它持有列表数据源与路由）。
-    // 不分开的话，子组件用 v-if 控制显示时这段会跑在**已卸载**的组件上：弹层在上面
-    // 第 42 行就关了，这里还在写它的 ref。
-    resetCreateSheetState()
-    await handleConversationCreated({
-      conversationId: newConversationId,
-      folderId: selectedProjectId.value,
-      connectionKey: selectedConnectionKey.value,
-    })
-  } catch (error) {
-    const msg = toErrorMessage(error)
-    uni.showToast({ title: `创建失败: ${msg}`, icon: "none", duration: 3000 })
-  } finally {
-    creating.value = false
-  }
 }
 
 async function confirmBulkSend() {
@@ -3789,291 +2863,5 @@ function formatTime(time?: string): string {
   color: var(--up-primary, #2979ff);
 }
 
-.form-readonly {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 20rpx 24rpx;
-  background-color: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
-  border-radius: 56rpx;
-}
-
-.form-readonly__text {
-  font-size: 28rpx;
-  color: var(--up-main-color, #303133);
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.form-readonly--config {
-  gap: 12rpx;
-}
-
-.form-readonly__stack {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6rpx;
-}
-
-.form-helper-inline {
-  font-size: 22rpx;
-  color: var(--up-tips-color, #909193);
-  line-height: 1.4;
-}
-
-.form-helper-text {
-  display: block;
-  margin-top: 12rpx;
-  padding: 0 8rpx;
-  font-size: 22rpx;
-  line-height: 1.4;
-  color: var(--up-tips-color, #909193);
-  word-break: break-all;
-}
-
-.agent-scroll {
-  width: 100%;
-  white-space: nowrap;
-}
-
-.agent-grid {
-  display: flex;
-  align-items: stretch;
-  gap: 16rpx;
-  padding-right: 8rpx;
-}
-
-.agent-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12rpx;
-  width: 180rpx;
-  min-width: 180rpx;
-  flex-shrink: 0;
-  padding: 20rpx 12rpx 18rpx;
-  border-radius: 24rpx;
-  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
-  border: 2rpx solid transparent;
-  transition: all 0.18s ease;
-}
-
-.agent-card--active {
-  background: color-mix(in srgb, var(--up-primary, #2979ff) 10%, var(--up-card-bg-color, #ffffff) 90%);
-  border-color: var(--up-primary, #2979ff);
-  box-shadow: 0 8rpx 24rpx rgba(41, 121, 255, 0.12);
-}
-
-.agent-card__logo {
-  width: 76rpx;
-  height: 76rpx;
-  border-radius: 22rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.agent-card__logo--real {
-  background: var(--up-card-bg-color, #ffffff);
-}
-
-.agent-card__logo-img {
-  width: 48rpx;
-  height: 48rpx;
-}
-
-.agent-card__logo-text {
-  font-size: 24rpx;
-  font-weight: 700;
-  color: var(--up-main-color, #303133);
-}
-
-.agent-card__label {
-  font-size: 22rpx;
-  line-height: 1.3;
-  text-align: center;
-  color: var(--up-main-color, #303133);
-}
-
-.config-loading {
-  display: flex;
-  align-items: center;
-  gap: 12rpx;
-  padding: 12rpx 4rpx;
-}
-
-.config-loading__text,
-.config-hint__text,
-.config-section__desc {
-  font-size: 24rpx;
-  color: var(--up-content-color, #606266);
-}
-
-.config-hint {
-  padding: 8rpx 4rpx;
-}
-
-.config-section {
-  margin-top: 20rpx;
-}
-
-.config-section__title {
-  display: block;
-  margin-bottom: 12rpx;
-  font-size: 24rpx;
-  color: var(--up-content-color, #606266);
-}
-
-.config-section__desc {
-  display: block;
-  margin-bottom: 12rpx;
-  line-height: 1.4;
-}
-
-.config-chip-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12rpx;
-}
-
-.config-chip {
-  padding: 14rpx 20rpx;
-  border-radius: 999rpx;
-  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
-  border: 2rpx solid transparent;
-}
-
-.config-chip--active {
-  background: color-mix(in srgb, var(--up-primary, #2979ff) 10%, var(--up-card-bg-color, #ffffff) 90%);
-  border-color: var(--up-primary, #2979ff);
-}
-
-.config-chip__title {
-  font-size: 24rpx;
-  color: var(--up-main-color, #303133);
-}
-
-.create-progress-dialog {
-  width: 560rpx;
-  max-width: 82vw;
-  padding: 44rpx 36rpx 36rpx;
-  border-radius: 28rpx;
-  background: var(--up-card-bg-color, #ffffff);
-  border: 1rpx solid var(--up-border-color, #dadbde);
-  box-shadow: 0 24rpx 80rpx rgba(15, 23, 42, 0.18);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-.create-progress-dialog__visual {
-  position: relative;
-  width: 136rpx;
-  height: 136rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 28rpx;
-}
-
-.create-progress-dialog__ring {
-  position: absolute;
-  inset: 12rpx;
-  border-radius: 50%;
-  border: 3rpx solid var(--up-primary, #2979ff);
-  opacity: 0.26;
-  animation: createProgressPulse 1.8s ease-out infinite;
-}
-
-.create-progress-dialog__ring--delay {
-  animation-delay: 0.55s;
-}
-
-.create-progress-dialog__core {
-  width: 84rpx;
-  height: 84rpx;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--up-primary, #2979ff) 10%, var(--up-card-bg-color, #ffffff) 90%);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: inset 0 0 0 1rpx color-mix(in srgb, var(--up-primary, #2979ff) 24%, transparent 76%);
-}
-
-.create-progress-dialog__title {
-  font-size: 32rpx;
-  line-height: 1.35;
-  font-weight: 700;
-  color: var(--up-main-color, #303133);
-  text-align: center;
-}
-
-.create-progress-dialog__desc {
-  display: block;
-  margin-top: 12rpx;
-  font-size: 24rpx;
-  line-height: 1.5;
-  color: var(--up-content-color, #606266);
-  text-align: center;
-}
-
-.create-progress-dialog__stage {
-  margin-top: 28rpx;
-  min-height: 56rpx;
-  padding: 0 22rpx;
-  border-radius: 999rpx;
-  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10rpx;
-}
-
-.create-progress-dialog__stage-dot {
-  width: 10rpx;
-  height: 10rpx;
-  border-radius: 50%;
-  background: var(--up-primary, #2979ff);
-  animation: createProgressDot 1.2s ease-in-out infinite;
-}
-
-.create-progress-dialog__stage-text {
-  font-size: 22rpx;
-  line-height: 1.3;
-  color: var(--up-content-color, #606266);
-}
-
-@keyframes createProgressPulse {
-  0% {
-    transform: scale(0.72);
-    opacity: 0.28;
-  }
-  80% {
-    transform: scale(1.25);
-    opacity: 0;
-  }
-  100% {
-    transform: scale(1.25);
-    opacity: 0;
-  }
-}
-
-@keyframes createProgressDot {
-  0%,
-  100% {
-    opacity: 0.35;
-    transform: scale(0.86);
-  }
-  50% {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
 
 </style>

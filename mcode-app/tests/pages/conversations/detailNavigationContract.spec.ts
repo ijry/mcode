@@ -17,10 +17,13 @@ function extractFunctionBlock(source: string, signature: string, nextSignature: 
 describe("conversation detail navigation contract", () => {
   it("ensures a missing remote tab before opening from the overview list", () => {
     const source = read("../../../src/pages/conversations/index.vue")
+    // 终点原来是 `function createConversation(projectId?: number) {` —— 抽
+    // CreateConversationSheet 时那个函数缩成了无参的纯打开器（初始化归子组件），
+    // 签名不再匹配，`extractBlock` 直接抛异常。改成只锚函数名，不锚参数列表。
     const block = extractFunctionBlock(
       source,
       "async function openConversation(conv: Conversation, connKey?: string) {",
-      "\nfunction createConversation(projectId?: number) {"
+      "\nfunction createConversation("
     )
 
     expect(block).toContain("await ensureConversationTab({")

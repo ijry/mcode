@@ -28,10 +28,14 @@ describe("P67 conversation list bulk send contract", () => {
     expect(source).toContain("bulk-select-check")
     expect(source).toContain('@click="handleLiveCardClick(card, group.key)"')
 
+    // 终点用批量操作条的开标签，而不是某条注释：注释会随重构消失（原来那个终点是
+    // 「创建会话底部弹层」的注释，弹层抽成 CreateConversationSheet 后它就没了，
+    // `extractBlock` 直接抛异常）。`v-if="selectionMode"` 这个块是历史列表的下一个
+    // 兄弟节点，且它自己就是选择模式的产物 —— 不会先于选择功能被删掉。
     const historyBlock = extractBlock(
       source,
       '<view v-else class="history-list">',
-      '<!-- 创建会话底部弹层 -->'
+      '<view v-if="selectionMode" class="bulk-action-bar"'
     )
     expect(historyBlock).not.toContain("bulk-select-check")
     expect(historyBlock).not.toContain("toggleConversationSelection")
