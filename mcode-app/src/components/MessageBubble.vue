@@ -1642,8 +1642,13 @@ function renderCyberDecodeText(text: string, index: number) {
 .dot {
   width: 12rpx;
   height: 12rpx;
-  /* --up-border-color 是分割线级别的浅灰，在气泡背景上几乎看不见；改走强调色。 */
-  background-color: var(--up-primary, #2979ff);
+  /*
+   * 走灰色系而不是强调色蓝：三个点是「还在生成」的弱提示，不该抢主色的注意力。
+   * 灰阶里 --up-border-color / --up-tips-color 都太淡（实测白气泡上峰值对比度
+   * 3.15 以下，动画谷值掉到 1.58），--up-content-color 峰值 6.11、谷值 1.98，
+   * 比原先的蓝（3.98 / 1.80）反而更清楚。
+   */
+  background-color: var(--up-content-color, #606266);
   border-radius: 50%;
   animation: blink 1.2s infinite ease-in-out;
 

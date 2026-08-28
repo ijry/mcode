@@ -38,11 +38,16 @@ describe("streaming typing dots contract", () => {
     expect(dots).toContain("padding-left: 4rpx;")
   })
 
-  it("uses an accent color the dots are actually visible in", () => {
+  it("uses a neutral gray the dots are actually visible in", () => {
     const dot = rule(".dot")
-    // --up-border-color 是分割线级别的浅灰，在气泡背景上几乎看不见。
+    // --up-border-color 是分割线级别的浅灰，在气泡背景上几乎看不见；
+    // --up-tips-color 同样太淡（实测峰值 3.15、谷值 1.58）。
     expect(dot).not.toContain("var(--up-border-color, #dadbde)")
-    expect(dot).toContain("var(--up-primary, #2979ff)")
+    expect(dot).not.toContain("var(--up-tips-color")
+    // 用户要求走灰色系而不是蓝色系。--up-content-color 是灰阶里唯一比原来的蓝更亮眼的
+    // （峰值 6.11 vs 3.98，谷值 1.98 vs 1.80）。
+    expect(dot).not.toContain("var(--up-primary, #2979ff)")
+    expect(dot).toContain("var(--up-content-color, #606266)")
     expect(dot).toContain("width: 12rpx;")
     expect(dot).toContain("height: 12rpx;")
   })
