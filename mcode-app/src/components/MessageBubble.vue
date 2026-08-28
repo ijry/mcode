@@ -119,7 +119,7 @@
               <text class="thinking-hd__label">思考</text>
               <up-icon
                 :name="isThinkingCollapsed(index) ? 'arrow-down' : 'arrow-up'"
-                size="13"
+                size="12"
                 :color="upThemeVar('--up-warning', '#f9ae3d')"
                 class="thinking-hd__arrow"
               ></up-icon>
@@ -1308,10 +1308,17 @@ function renderCyberDecodeText(text: string, index: number) {
   transition: all 0.2s ease;
 }
 
+/*
+  折叠态与 `tool-group__summary` / `subagent__summary` / `system-note__summary`
+  共用一套药丸度量（min-height 48rpx + 10rpx/18rpx 内距），否则同一条消息里
+  几枚摘要胶囊会高低不齐 —— 基础 `.part-thinking` 的 16rpx 内距是给展开态卡片用的。
+*/
 .part-thinking--collapsed {
-  padding-bottom: 16rpx;
+  min-height: 48rpx;
+  padding: 10rpx 18rpx;
   width: fit-content;
   border-radius: 999rpx;
+  justify-content: center;
 }
 
 .part-thinking--expanded {
@@ -1371,8 +1378,9 @@ function renderCyberDecodeText(text: string, index: number) {
 }
 
 .thinking-hd__icon {
-  width: 30rpx;
-  height: 30rpx;
+  /* 24rpx 图标 + 上下各 10rpx 内距正好落在 48rpx 药丸里；30rpx 会把药丸顶高。 */
+  width: 24rpx;
+  height: 24rpx;
   flex-shrink: 0;
 }
 
@@ -1389,7 +1397,8 @@ function renderCyberDecodeText(text: string, index: number) {
 }
 
 .thinking-hd__label {
-  font-size: 24rpx;
+  font-size: 22rpx;
+  line-height: 1.2;
   font-weight: 600;
   color: var(--up-warning, #f9ae3d);
 }

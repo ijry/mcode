@@ -53,6 +53,40 @@ describe("P48 conversation detail tool call status styles", () => {
     expect(expandedRule).not.toContain("999rpx")
   })
 
+  it("keeps the collapsed thinking pill on the shared summary pill metrics", () => {
+    // 折叠态的思考胶囊、工具组摘要、子智能体摘要、系统注记是同一类可展开的摘要控件，
+    // 高度度量必须一致，否则同一条消息里几枚胶囊会高低不齐。
+    const source = readComponent("MessageBubble.vue")
+    const collapsedRule = source.match(/\.part-thinking--collapsed\s*\{[\s\S]*?\n\}/)?.[0] || ""
+
+    expect(collapsedRule).toContain("min-height: 48rpx;")
+    expect(collapsedRule).toContain("padding: 10rpx 18rpx;")
+    expect(collapsedRule).toContain("border-radius: 999rpx;")
+    // 旧的 16rpx 上下内距是把展开态的内距套在了药丸上，收缩后偏高。
+    expect(collapsedRule).not.toContain("padding-bottom: 16rpx;")
+
+    const iconRule = source.match(/\.thinking-hd__icon\s*\{[\s\S]*?\n\}/)?.[0] || ""
+    expect(iconRule).toContain("width: 24rpx;")
+    expect(iconRule).toContain("height: 24rpx;")
+
+    const labelRule = source.match(/\.thinking-hd__label\s*\{[\s\S]*?\n\}/)?.[0] || ""
+    expect(labelRule).toContain("font-size: 22rpx;")
+    expect(labelRule).toContain("line-height: 1.2;")
+
+    // 箭头与其它摘要胶囊同为 12 号。
+    const thinkingArrowBlock = source.match(/:name="isThinkingCollapsed\(index\)[\s\S]*?<\/up-icon>/)?.[0] || ""
+    expect(thinkingArrowBlock).toContain('size="12"')
+
+    const pillPeers = [
+      readComponent("ToolCallGroupBlock.vue").match(/\.tool-group__summary\s*\{[\s\S]*?\n\}/)?.[0] || "",
+      readComponent("SubagentCapsuleBlock.vue").match(/\.subagent__summary\s*\{[\s\S]*?\n\}/)?.[0] || "",
+    ]
+    for (const peer of pillPeers) {
+      expect(peer).toContain("min-height: 48rpx;")
+      expect(peer).toContain("padding: 10rpx 18rpx;")
+    }
+  })
+
   it("themes subagent capsules and markdown tables inside every message surface", () => {
     const source = readComponent("MessageBubble.vue")
     // matrix 主题额外挂 `bubble-wrap--cyber`，sweet/summer 走 `bubble-wrap--theme-<name>`。
