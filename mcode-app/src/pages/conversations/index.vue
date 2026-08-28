@@ -2974,6 +2974,10 @@ function formatTime(time?: string): string {
 </script>
 
 <style scoped lang="scss">
+/* 与子组件共用的规则（弹层外壳/头部、表单行、agent logo 修饰符、安全区占位）。
+ * scoped 样式不跨组件边界，所以子组件也 `@import` 同一份 —— 详见该文件头部说明。 */
+@import "./index.scss";
+
 .page {
   min-height: 100vh;
   padding: 0 !important;
@@ -3300,21 +3304,6 @@ function formatTime(time?: string): string {
   width: 56rpx;
   height: 56rpx;
   display: block;
-}
-
-.agent-logo--real {
-  background: var(--up-card-bg-color, #ffffff) !important;
-  border: 1rpx solid var(--up-border-color, #dadbde);
-}
-
-.agent-logo--claude_code,
-.agent-logo--codex,
-.agent-logo--open_code,
-.agent-logo--gemini,
-.agent-logo--open_claw,
-.agent-logo--cline {
-  background: var(--up-card-bg-color, #ffffff);
-  border: 1rpx solid var(--up-border-color, #dadbde);
 }
 
 .agent-logo--history {
@@ -3830,46 +3819,6 @@ function formatTime(time?: string): string {
   color: var(--up-primary, #2979ff);
 }
 
-.create-sheet {
-  padding: 36rpx 20rpx 0;
-  background-color: var(--up-card-bg-color, #ffffff);
-  border-radius: 28rpx 28rpx 0 0;
-}
-
-.create-sheet__hd {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 32rpx;
-}
-
-.create-sheet__title {
-  font-size: 34rpx;
-  font-weight: 600;
-  color: var(--up-main-color, #303133);
-}
-
-.create-sheet__close {
-  width: 56rpx;
-  height: 56rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background-color: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
-  border-radius: 50%;
-}
-
-.form-group {
-  margin-bottom: 28rpx;
-}
-
-.form-label {
-  display: block;
-  font-size: 26rpx;
-  color: var(--up-tips-color, #909193);
-  margin-bottom: 12rpx;
-}
-
 .form-readonly {
   display: flex;
   align-items: center;
@@ -4155,10 +4104,6 @@ function formatTime(time?: string): string {
     opacity: 1;
     transform: scale(1);
   }
-}
-
-.safe-bottom {
-  height: calc(32rpx + env(safe-area-inset-bottom));
 }
 
 </style>

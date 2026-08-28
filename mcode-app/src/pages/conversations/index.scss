@@ -1,0 +1,98 @@
+/* 会话列表页与其子组件共用的样式。
+ *
+ * **为什么单独成文件而不是各自一份**：uni-app 的 `<style scoped>` 按组件加 data 属性，
+ * 父页面的规则**不会命中子组件渲染出的元素**。所以「同一个 class 在页面和子组件里都用」
+ * 这件事，只能靠两边各自 `@import` 同一份源码来实现 —— 各写一份必然漂移，而漂移的症状
+ * 是同一个视觉元素在两处长得不一样，没有任何报错。
+ *
+ * 与详情页同一范式（`pages/conversation-detail/index.scss`，被 `index.vue` 与
+ * `ConversationDetailInteractivePane.vue` 双向 import）。
+ *
+ * **判据是「跨组件边界共用」，不是「看起来像通用样式」。** 只服务单个组件的规则留在那个
+ * 组件里 —— 搬进来只会让这个文件变成又一个大杂烩，而且失去「进了这里就说明有两个以上
+ * 消费者」这条可读性。
+ */
+
+/* ── 底部弹层的外壳与头部 ─────────────────────────────────────────────
+ *
+ * 三个弹层共用：新建会话 / 智能体配置（都在 CreateConversationSheet.vue）、批量发送
+ * （仍在页面）。`.create-sheet` 这个名字来自最早的新建弹层，后两个是复用它的形制 ——
+ * 名字没跟着改，是因为改名要同时动三处模板和一份源码扫描测试，收益不抵风险。 */
+.create-sheet {
+  padding: 36rpx 20rpx 0;
+  background-color: var(--up-card-bg-color, #ffffff);
+  border-radius: 28rpx 28rpx 0 0;
+}
+
+.create-sheet__hd {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 32rpx;
+}
+
+.create-sheet__title {
+  font-size: 34rpx;
+  font-weight: 600;
+  color: var(--up-main-color, #303133);
+}
+
+.create-sheet__close {
+  width: 56rpx;
+  height: 56rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
+  border-radius: 50%;
+}
+
+/* ── 弹层内的表单行 ───────────────────────────────────────────────────
+ *
+ * 新建弹层 5 处 + 批量发送弹层 2 处。 */
+.form-group {
+  margin-bottom: 28rpx;
+}
+
+.form-label {
+  display: block;
+  font-size: 26rpx;
+  color: var(--up-tips-color, #909193);
+  margin-bottom: 12rpx;
+}
+
+/* ── agent logo 的按类型修饰符 ────────────────────────────────────────
+ *
+ * `overviewAgentLogoClass()`（`conversationOverviewPresentation.ts`）返回
+ * `agent-logo--<type>`，**两个消费者的容器 class 完全不同**：概览卡用 `.agent-logo`，
+ * 新建弹层的智能体卡用 `.agent-card__logo`。也就是说这组修饰符是**跨容器**的，只能靠
+ * 共用源码提供。
+ *
+ * 这条曾经差点在拆分时丢掉：`.agent-card__logo--real`（留在子组件里）只设 background，
+ * 边框来自下面这两条。搬走弹层而不搬这里，真机上 logo 的白底描边会**静默消失** ——
+ * 而全是源码字符串扫描的测试套件抓不到这种缺失。
+ *
+ * `--real` 与具名列表的区别：前者由 `overviewAgentLogoPath()` 有返回值时挂上（有 SVG 的
+ * agent），后者是按类型枚举。两者当前样式相同但语义不同，`--real` 带 `!important` 是为了
+ * 盖住 `.agent-logo` 自己那层主题色底。 */
+.agent-logo--real {
+  background: var(--up-card-bg-color, #ffffff) !important;
+  border: 1rpx solid var(--up-border-color, #dadbde);
+}
+
+.agent-logo--claude_code,
+.agent-logo--codex,
+.agent-logo--open_code,
+.agent-logo--gemini,
+.agent-logo--open_claw,
+.agent-logo--cline {
+  background: var(--up-card-bg-color, #ffffff);
+  border: 1rpx solid var(--up-border-color, #dadbde);
+}
+
+/* ── 底部安全区占位 ───────────────────────────────────────────────────
+ *
+ * 四处：历史列表尾部、新建弹层、智能体配置弹层、批量发送弹层。 */
+.safe-bottom {
+  height: calc(32rpx + env(safe-area-inset-bottom));
+}
