@@ -597,6 +597,11 @@ import {
 } from "@/pages/conversations/conversationOverviewPresentation"
 import { selectConversationLivePreviewIds } from "@/pages/conversations/conversationLivePreview"
 import { getDirectToken } from "@/services/gateway/directTokenStore"
+import {
+  buildConnectionAuthMode,
+  connectionBaseUrl,
+  findConnectedConnectionByKey as lookupConnectedConnectionByKey,
+} from "@/services/connection/connectionLookup"
 import { toErrorMessage } from "@/services/gateway/error"
 import { openRemoteFolder } from "@/services/remoteDirectoryBrowser"
 import {
@@ -2270,7 +2275,7 @@ function connectionKey(conn: ConnectionItem): string {
 }
 
 function findConnectedConnectionByKey(key: string): ConnectionItem | undefined {
-  return getConnectedConnections().find((item) => connectionKey(item) === key)
+  return lookupConnectedConnectionByKey(key, getConnectedConnections, connectionKey)
 }
 
 function normalizeConversationStatus(value?: string): string {
@@ -2312,23 +2317,21 @@ function applySelectedConnection(connectionKeyValue: string) {
   selectedAgentType.value = persistedAgentType || "claude_code"
 }
 
+/**
+ * 把全局 auth 切到这条连接上。
+ *
+ * 「切到哪个模式」的判断在 `services/connection/connectionLookup` 里（可裸测）；这里只负责
+ * 写 store。返回 null 时**什么都不做** —— 缺凭据却切了 baseUrl，会让后续请求全部 401，
+ * 而原来那套可用凭据已经被覆盖。
+ */
 function syncAuthToConnection(conn: ConnectionItem) {
-  if (conn.routeMode === "direct") {
-    const baseUrl = connectionBaseUrl(conn)
-    const token = conn.directToken || getDirectToken(baseUrl)
-    if (!token) return
-    auth.setDirectMode(baseUrl, token)
+  const authMode = buildConnectionAuthMode(conn, getDirectToken)
+  if (!authMode) return
+  if (authMode.mode === "direct") {
+    auth.setDirectMode(authMode.baseUrl, authMode.token)
     return
   }
-  if (conn.gatewaySession?.accessToken) {
-    auth.setRelayMode(connectionBaseUrl(conn), conn.gatewaySession)
-  }
-}
-
-function connectionBaseUrl(conn: ConnectionItem): string {
-  return conn.routeMode === "direct"
-    ? String(conn.directBaseUrl || "").trim().replace(/\/+$/, "")
-    : String(conn.gatewayBaseUrl || "").trim().replace(/\/+$/, "")
+  auth.setRelayMode(authMode.baseUrl, authMode.session)
 }
 
 function parseConversationId(input: unknown): number {

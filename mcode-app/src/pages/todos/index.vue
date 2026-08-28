@@ -199,6 +199,11 @@ import TodoSectionBlock from "./components/TodoSectionBlock.vue"
 import { useAuthStore } from "@/stores/auth"
 import { useAccountStore } from "@/stores/account"
 import { getDirectToken } from "@/services/gateway/directTokenStore"
+import {
+  buildConnectionAuthMode,
+  connectionBaseUrl,
+  findConnectedConnectionByKey as lookupConnectedConnectionByKey,
+} from "@/services/connection/connectionLookup"
 import { toErrorMessage } from "@/services/gateway/error"
 import {
   buildConnectionKey,
@@ -650,7 +655,7 @@ function connectionKey(conn: ConnectionItem): string {
 }
 
 function findConnectedConnectionByKey(key: string): ConnectionItem | undefined {
-  return getConnectedConnections().find((item) => connectionKey(item) === key)
+  return lookupConnectedConnectionByKey(key, getConnectedConnections, connectionKey)
 }
 
 function getConnectedConnections(): ConnectionItem[] {
@@ -664,16 +669,15 @@ async function createConnectionGateway(conn: ConnectionItem): Promise<CodegGatew
 }
 
 function syncAuthToConnection(conn: ConnectionItem) {
-  if (conn.routeMode === "direct") {
-    const baseUrl = connectionBaseUrl(conn)
-    const token = conn.directToken || getDirectToken(baseUrl)
-    if (!token) return
-    auth.setDirectMode(baseUrl, token)
+  // 判断在 `services/connection/connectionLookup`（可裸测），这里只写 store。
+  // 返回 null 时什么都不做 —— 见那个模块的说明。
+  const authMode = buildConnectionAuthMode(conn, getDirectToken)
+  if (!authMode) return
+  if (authMode.mode === "direct") {
+    auth.setDirectMode(authMode.baseUrl, authMode.token)
     return
   }
-  if (conn.gatewaySession?.accessToken) {
-    auth.setRelayMode(connectionBaseUrl(conn), conn.gatewaySession)
-  }
+  auth.setRelayMode(authMode.baseUrl, authMode.session)
 }
 
 async function loadConnectionGroups() {
@@ -699,12 +703,6 @@ async function loadConnectionGroups() {
     }
   }
   connectionGroups.value = groups
-}
-
-function connectionBaseUrl(conn: ConnectionItem): string {
-  return conn.routeMode === "direct"
-    ? String(conn.directBaseUrl || "").trim().replace(/\/+$/, "")
-    : String(conn.gatewayBaseUrl || "").trim().replace(/\/+$/, "")
 }
 
 /* ===== 发送到新会话 ===== */

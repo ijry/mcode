@@ -461,6 +461,7 @@ import {
   buildModelProvidersRoute,
 } from "@/services/remoteSettings"
 import { openGuardedExternalUrl } from "@/services/externalLinkGuard"
+import { connectionBaseUrl } from "@/services/connection/connectionLookup"
 
 declare const plus: any
 
@@ -1683,10 +1684,6 @@ async function ensureRelaySession(conn: ConnectionItem): Promise<RelaySessionInf
   conn.gatewaySession = session
   saveConnection(conn)
   return session
-}
-
-function connectionBaseUrl(conn: ConnectionItem): string {
-  return normalizeBaseUrl(conn.routeMode === "direct" ? conn.directBaseUrl || "" : conn.gatewayBaseUrl || "")
 }
 
 function isH5WebSocketRuntime() {
