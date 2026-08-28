@@ -1,6 +1,31 @@
 import type { ContentPart, MessageTurn } from "@/types/acp"
 
 /**
+ * 解析服务端轮次/事件可能使用的时间字段。
+ *
+ * codeg-plus 的历史轮次通常是 ISO 字符串，SQLite 映射后是毫秒 number，
+ * 部分兼容接口则会给 numeric string。统一在纯模块处理，避免不同入口各自
+ * 把 ISO 字符串误判成缺失时间，最后整批退回同一个 `Date.now()`。
+ */
+export function parseTurnTimestamp(...values: unknown[]): number | null {
+  for (const value of values) {
+    if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+      return value
+    }
+    if (typeof value !== "string") continue
+    const text = value.trim()
+    if (!text) continue
+
+    const numeric = Number(text)
+    if (Number.isFinite(numeric) && numeric > 0) return numeric
+
+    const parsed = Date.parse(text)
+    if (Number.isFinite(parsed) && parsed > 0) return parsed
+  }
+  return null
+}
+
+/**
  * 轮次身份（去重键）计算：与来源无关，纯函数，不依赖 SQLite 驱动。
  *
  * 单独成模块的原因：`conversationDetailPersistence` 顶层 import 了 `services/db`

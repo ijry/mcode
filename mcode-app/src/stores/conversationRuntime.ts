@@ -48,6 +48,7 @@ import {
   dropEmptyThinkingParts,
   mergeTailIntoTurns,
   normalizeTurnRole,
+  parseTurnTimestamp,
 } from "@/services/conversation/conversationTurnIdentity"
 import {
   mergeSessionFailure,
@@ -363,6 +364,9 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
           pendingUserMessage.id
         ),
         blocks: pendingUserMessage.blocks,
+        timestamp: pendingUserMessage.timestamp ??
+          pendingUserMessage.createdAt ??
+          pendingUserMessage.created_at,
       })
     }
     const normalizedLiveMessage = mapSnapshotLiveMessage(snapshot, session.liveMessage)
@@ -1856,7 +1860,12 @@ function applyRealtimeUserMessage(session: RuntimeSession, eventData: any) {
     id: messageId,
     role: "user",
     content,
-    timestamp: firstNumber(eventData?.timestamp) || Date.now(),
+    timestamp:
+      parseTurnTimestamp(
+        eventData?.timestamp,
+        eventData?.createdAt,
+        eventData?.created_at,
+      ) ?? Date.now(),
     status: "completed",
   }
   session.localTurns = dedupeTurnsByRoleAndId([...session.localTurns, turn])
@@ -2516,7 +2525,7 @@ function mapSnapshotLiveMessage(
     role: "assistant",
     content: parts,
     isStreaming: true,
-    timestamp: parseTimestamp(rawLiveMessage?.started_at) || Date.now(),
+    timestamp: parseTurnTimestamp(rawLiveMessage?.started_at) ?? Date.now(),
     isPlaceholderThinking: false,
   }
 }
@@ -3010,15 +3019,6 @@ function parsePlanDelta(delta: string, previousSteps?: any[]) {
       status: "pending",
     } as ContentPart["plan"]
   }
-}
-
-function parseTimestamp(value: unknown) {
-  if (typeof value === "number" && Number.isFinite(value)) return value
-  if (typeof value === "string" && value.trim()) {
-    const parsed = Date.parse(value)
-    if (Number.isFinite(parsed)) return parsed
-  }
-  return null
 }
 
 function firstString(...values: unknown[]) {

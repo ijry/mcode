@@ -1781,6 +1781,24 @@ describe('conversationRuntime ACP error handling', () => {
     expect(session.inFlightUserTurnId).toBe('ext-msg-1')
   })
 
+  it('preserves an ISO timestamp supplied by a realtime user_message event', () => {
+    const { store, session } = prepareSession()
+
+    store.handleEvent({
+      type: 'user_message',
+      connectionId: 'conn-1',
+      data: {
+        messageId: 'iso-user-1',
+        blocks: [{ type: 'text', text: '要' }],
+        timestamp: '2026-08-29T00:00:00.000Z',
+      },
+    } as any)
+
+    expect(session.localTurns[0].timestamp).toBe(
+      Date.parse('2026-08-29T00:00:00.000Z'),
+    )
+  })
+
   it('dedupes a repeated user_message with the same message id', () => {
     const { store, session } = prepareSession()
 

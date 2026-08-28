@@ -247,7 +247,10 @@
     </view>
 
     <up-popup v-model:show="showPlanDrawer" mode="bottom" :round="20">
-      <view class="plan-drawer" :style="upThemeCardStyle">
+          <view
+            :class="['plan-drawer', detailTheme && `plan-drawer--theme-${detailTheme}`]"
+            :style="upThemeCardStyle"
+          >
         <view class="plan-drawer__hd">
           <text class="plan-drawer__title">计划任务</text>
           <text class="plan-drawer__count">{{ completedTaskCount }}/{{ planTasks.length }}</text>
@@ -4668,4 +4671,3 @@ async function respondToPermission(optionId: string) {
 <style scoped lang="scss">
 @import "./index.scss";
 </style>
-

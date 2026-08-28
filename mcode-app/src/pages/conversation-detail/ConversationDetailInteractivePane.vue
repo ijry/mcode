@@ -1116,7 +1116,10 @@
     </view>
 
     <up-popup v-model:show="showPlanDrawer" mode="bottom" :round="20">
-      <view class="plan-drawer" :style="cyberPanelStyle">
+      <view
+        :class="['plan-drawer', detailTheme && `plan-drawer--theme-${detailTheme}`]"
+        :style="cyberPanelStyle"
+      >
         <view class="plan-drawer__hd">
           <text class="plan-drawer__title">计划任务</text>
           <text class="plan-drawer__count"
@@ -1241,7 +1244,7 @@ import type {
 } from "@/types/acp";
 import ConversationDetailBody from "./ConversationDetailBody.vue";
 import type { CyberEffectPhase, DetailThemeId } from "./detailCyberMode";
-import { buildRenderMessageItems } from "./detailMessagePresentation";
+import { buildRenderMessageItems, findLatestUserMessage } from "./detailMessagePresentation";
 import {
   advanceConversationHistoryWindow,
   buildOlderHistoryRequest,
@@ -3581,9 +3584,7 @@ async function stopCurrentSession() {
 }
 
 async function regenerateLastMessage() {
-  const lastUserMessage = [...messages.value]
-    .reverse()
-    .find((item) => item.role === "user");
+  const lastUserMessage = findLatestUserMessage(messages.value);
   if (!lastUserMessage) return;
   const textContent = getTurnContentParts(lastUserMessage).find(
     (part) => part.type === "text",

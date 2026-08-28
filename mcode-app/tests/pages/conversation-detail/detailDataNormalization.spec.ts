@@ -89,6 +89,35 @@ describe("detailDataNormalization", () => {
     ])
   })
 
+  it("parses all supported backend turn timestamp spellings", () => {
+    const turns = normalizeTurns([
+      {
+        id: "created-at-iso",
+        role: "user",
+        content: "old",
+        created_at: "2026-06-20T00:00:00.000Z",
+      },
+      {
+        id: "createdAt-number-string",
+        role: "user",
+        content: "new",
+        createdAt: "1781913600000",
+      },
+      {
+        id: "timestamp-iso",
+        role: "assistant",
+        content: "reply",
+        timestamp: "2026-06-21T00:00:00.000Z",
+      },
+    ])
+
+    expect(turns.map((turn) => turn.timestamp)).toEqual([
+      Date.parse("2026-06-20T00:00:00.000Z"),
+      1781913600000,
+      Date.parse("2026-06-21T00:00:00.000Z"),
+    ])
+  })
+
   // 服务端 TurnRole 有三种取值（models/message.rs）。上下文压缩摘要在 JSONL 里是
   // type: "user"，解析器（parsers/claude.rs 的 is_context_continuation）会把它改判成
   // System 再下发。归一化早先写的是 rawRole === "user" ? "user" : "assistant"，

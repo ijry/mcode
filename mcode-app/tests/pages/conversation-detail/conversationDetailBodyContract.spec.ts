@@ -107,6 +107,32 @@ describe("ConversationDetailBody", () => {
     expect(toolButtonBlock).not.toContain("width: 72rpx;");
   });
 
+  it("anchors plan drawer theme styles on the teleported drawer root", () => {
+    const shellSource = fs.readFileSync(
+      path.resolve(__dirname, "../../../src/pages/conversation-detail/index.vue"),
+      "utf8",
+    );
+    const paneSource = fs.readFileSync(
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/ConversationDetailInteractivePane.vue",
+      ),
+      "utf8",
+    );
+    const styles = fs.readFileSync(
+      path.resolve(__dirname, "../../../src/pages/conversation-detail/index.scss"),
+      "utf8",
+    );
+
+    expect(shellSource).toContain("plan-drawer--theme-${detailTheme}");
+    expect(paneSource).toContain("plan-drawer--theme-${detailTheme}");
+    for (const theme of ["matrix", "sweet", "summer"]) {
+      expect(styles).toContain(`.plan-drawer--theme-${theme}`);
+      expect(styles).toContain(`.plan-drawer--theme-${theme} .plan-filter`);
+      expect(styles).toContain(`.plan-drawer--theme-${theme} .plan-task`);
+    }
+  });
+
   it("keeps config and stop controls side by side in the interactive composer", () => {
     const source = fs.readFileSync(
       path.resolve(

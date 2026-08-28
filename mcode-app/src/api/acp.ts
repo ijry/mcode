@@ -27,6 +27,7 @@ import {
   readRelayCheckpoint,
   upsertRelayCheckpoint,
 } from "@/services/gateway/relayCheckpointStore"
+import { parseTurnTimestamp } from "@/services/conversation/conversationTurnIdentity"
 
 type BridgeState = {
   descriptor: RemoteInstanceDescriptor
@@ -1211,6 +1212,11 @@ class AcpApiClient {
           data: {
             messageId: firstString(record.message_id, record.messageId),
             blocks: Array.isArray(record.blocks) ? record.blocks : [],
+            timestamp: parseTurnTimestamp(
+              record.timestamp,
+              record.createdAt,
+              record.created_at,
+            ) ?? undefined,
           },
         }
       case "status_changed":

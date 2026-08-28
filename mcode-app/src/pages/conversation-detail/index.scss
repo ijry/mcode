@@ -3452,3 +3452,152 @@ $composer-panel-max-height: 590rpx;
 .plan-drawer__safe {
   height: calc(24rpx + env(safe-area-inset-bottom));
 }
+
+/*
+ * Popup 内容会 teleport 到 body，主题不能只依赖 `.page--* .plan-drawer` 的父链。
+ * 抽屉根节点自身携带主题类，因此这些规则在 H5、App-Plus 和小程序都能命中。
+ * 颜色继续优先读取 uview runtime 变量；主题色只作为该主题的表面强调色。
+ */
+:deep(.plan-drawer--theme-matrix) {
+  background: var(--up-page-bg-color, #03130a) !important;
+  border-top: 1rpx solid color-mix(in srgb, var(--up-primary, #00ff41) 32%, transparent 68%);
+  color: var(--up-main-color, #baffc8);
+  box-shadow: 0 -12rpx 36rpx rgba(0, 0, 0, 0.58);
+}
+
+:deep(.plan-drawer--theme-matrix .plan-drawer__hd) {
+  border-bottom-color: color-mix(in srgb, var(--up-primary, #00ff41) 30%, transparent 70%);
+}
+
+:deep(.plan-drawer--theme-matrix .plan-drawer__title),
+:deep(.plan-drawer--theme-matrix .plan-drawer__count),
+:deep(.plan-drawer--theme-matrix .plan-filter),
+:deep(.plan-drawer--theme-matrix .plan-task__subject),
+:deep(.plan-drawer--theme-matrix .plan-task__desc) {
+  color: var(--up-main-color, #baffc8) !important;
+}
+
+:deep(.plan-drawer--theme-matrix .plan-filter),
+:deep(.plan-drawer--theme-matrix .plan-task) {
+  background: color-mix(in srgb, var(--up-card-bg-color, #03130a) 72%, var(--up-primary, #00ff41) 8%) !important;
+  border-color: color-mix(in srgb, var(--up-primary, #00ff41) 24%, transparent 76%) !important;
+}
+
+:deep(.plan-drawer--theme-matrix .plan-filter--active) {
+  color: var(--up-primary, #00ff41) !important;
+  background: color-mix(in srgb, var(--up-primary, #00ff41) 16%, var(--up-card-bg-color, #03130a) 84%) !important;
+}
+
+:deep(.plan-drawer--theme-matrix .plan-filter__count),
+:deep(.plan-drawer--theme-matrix .plan-task__badge) {
+  background: color-mix(in srgb, var(--up-primary, #00ff41) 16%, transparent 84%) !important;
+  color: var(--up-primary, #00ff41) !important;
+}
+
+:deep(.plan-drawer--theme-matrix .plan-task__dot--in_progress) {
+  background-color: var(--up-primary, #00ff41) !important;
+}
+
+:deep(.plan-drawer--theme-matrix .plan-task__dot--completed) {
+  background-color: var(--up-success, #19be6b) !important;
+}
+
+:deep(.plan-drawer--theme-matrix .plan-task__dot--failed) {
+  background-color: var(--up-error, #fa3534) !important;
+}
+
+:deep(.plan-drawer--theme-sweet) {
+  background: var(--up-page-bg-color, #fffafc) !important;
+  border-top: 1rpx solid color-mix(in srgb, var(--up-primary, #ec4899) 24%, transparent 76%);
+  color: var(--up-main-color, #7a284f);
+  box-shadow: 0 -12rpx 34rpx rgba(244, 114, 182, 0.12);
+}
+
+:deep(.plan-drawer--theme-sweet .plan-drawer__hd) {
+  border-bottom-color: color-mix(in srgb, var(--up-primary, #ec4899) 22%, transparent 78%);
+}
+
+:deep(.plan-drawer--theme-sweet .plan-drawer__title),
+:deep(.plan-drawer--theme-sweet .plan-drawer__count),
+:deep(.plan-drawer--theme-sweet .plan-filter),
+:deep(.plan-drawer--theme-sweet .plan-task__subject),
+:deep(.plan-drawer--theme-sweet .plan-task__desc) {
+  color: var(--up-main-color, #7a284f) !important;
+}
+
+:deep(.plan-drawer--theme-sweet .plan-filter),
+:deep(.plan-drawer--theme-sweet .plan-task) {
+  background: color-mix(in srgb, var(--up-card-bg-color, #fffafc) 82%, var(--up-primary, #ec4899) 8%) !important;
+  border-color: color-mix(in srgb, var(--up-primary, #ec4899) 18%, transparent 82%) !important;
+}
+
+:deep(.plan-drawer--theme-sweet .plan-filter--active) {
+  color: var(--up-primary, #ec4899) !important;
+  background: color-mix(in srgb, var(--up-primary, #ec4899) 12%, var(--up-card-bg-color, #fffafc) 88%) !important;
+}
+
+:deep(.plan-drawer--theme-sweet .plan-filter__count),
+:deep(.plan-drawer--theme-sweet .plan-task__badge) {
+  background: color-mix(in srgb, var(--up-primary, #ec4899) 14%, transparent 86%) !important;
+  color: var(--up-primary, #ec4899) !important;
+}
+
+:deep(.plan-drawer--theme-sweet .plan-task__dot--in_progress) {
+  background-color: var(--up-primary, #ec4899) !important;
+}
+
+:deep(.plan-drawer--theme-sweet .plan-task__dot--completed) {
+  background-color: var(--up-success, #19be6b) !important;
+}
+
+:deep(.plan-drawer--theme-sweet .plan-task__dot--failed) {
+  background-color: var(--up-error, #fa3534) !important;
+}
+
+:deep(.plan-drawer--theme-summer) {
+  background: var(--up-page-bg-color, #e8faff) !important;
+  border-top: 1rpx solid color-mix(in srgb, var(--up-primary, #0e88a5) 24%, transparent 76%);
+  color: var(--up-main-color, #0b6580);
+  box-shadow: 0 -12rpx 34rpx rgba(11, 101, 128, 0.12);
+}
+
+:deep(.plan-drawer--theme-summer .plan-drawer__hd) {
+  border-bottom-color: color-mix(in srgb, var(--up-primary, #0e88a5) 22%, transparent 78%);
+}
+
+:deep(.plan-drawer--theme-summer .plan-drawer__title),
+:deep(.plan-drawer--theme-summer .plan-drawer__count),
+:deep(.plan-drawer--theme-summer .plan-filter),
+:deep(.plan-drawer--theme-summer .plan-task__subject),
+:deep(.plan-drawer--theme-summer .plan-task__desc) {
+  color: var(--up-main-color, #0b6580) !important;
+}
+
+:deep(.plan-drawer--theme-summer .plan-filter),
+:deep(.plan-drawer--theme-summer .plan-task) {
+  background: color-mix(in srgb, var(--up-card-bg-color, #e8faff) 82%, var(--up-primary, #0e88a5) 8%) !important;
+  border-color: color-mix(in srgb, var(--up-primary, #0e88a5) 18%, transparent 82%) !important;
+}
+
+:deep(.plan-drawer--theme-summer .plan-filter--active) {
+  color: var(--up-primary, #0e88a5) !important;
+  background: color-mix(in srgb, var(--up-primary, #0e88a5) 12%, var(--up-card-bg-color, #e8faff) 88%) !important;
+}
+
+:deep(.plan-drawer--theme-summer .plan-filter__count),
+:deep(.plan-drawer--theme-summer .plan-task__badge) {
+  background: color-mix(in srgb, var(--up-primary, #0e88a5) 14%, transparent 86%) !important;
+  color: var(--up-primary, #0e88a5) !important;
+}
+
+:deep(.plan-drawer--theme-summer .plan-task__dot--in_progress) {
+  background-color: var(--up-primary, #0e88a5) !important;
+}
+
+:deep(.plan-drawer--theme-summer .plan-task__dot--completed) {
+  background-color: var(--up-success, #19be6b) !important;
+}
+
+:deep(.plan-drawer--theme-summer .plan-task__dot--failed) {
+  background-color: var(--up-error, #fa3534) !important;
+}

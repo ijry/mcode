@@ -1,4 +1,7 @@
-import { buildRenderMessageItems } from "@/pages/conversation-detail/detailMessagePresentation"
+import {
+  buildRenderMessageItems,
+  findLatestUserMessage,
+} from "@/pages/conversation-detail/detailMessagePresentation"
 import type { MessageTurn } from "@/types/acp"
 
 const turn = (overrides: Partial<MessageTurn>): MessageTurn => ({
@@ -10,6 +13,30 @@ const turn = (overrides: Partial<MessageTurn>): MessageTurn => ({
 })
 
 describe("detailMessagePresentation", () => {
+  it("selects the newest user turn by timestamp instead of array order", () => {
+    const newest = turn({
+      id: "newest",
+      role: "user",
+      timestamp: 200,
+      content: [{ type: "text", text: "要" }],
+    })
+    const stale = turn({
+      id: "stale",
+      role: "user",
+      timestamp: 100,
+      content: [{ type: "text", text: "继续" }],
+    })
+
+    expect(findLatestUserMessage([newest, stale])).toBe(newest)
+  })
+
+  it("uses source position as a stable tie-break when timestamps match", () => {
+    const first = turn({ id: "first", role: "user", timestamp: 100 })
+    const second = turn({ id: "second", role: "user", timestamp: 100 })
+
+    expect(findLatestUserMessage([first, second])).toBe(second)
+  })
+
   it("keeps a single assistant turn unmerged", () => {
     const items = buildRenderMessageItems([
       turn({ id: "a1", role: "assistant", content: [{ type: "text", text: "one" }] }),

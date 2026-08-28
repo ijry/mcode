@@ -1,6 +1,25 @@
 import { acpApi } from "@/api/acp"
 
 describe("acpApi turn control event normalization", () => {
+  it("keeps a user_message timestamp from flat wire payloads", () => {
+    expect(acpApi.normalizeRealtimeEvent({
+      seq: 7,
+      connection_id: "conn-1",
+      type: "user_message",
+      message_id: "user-1",
+      blocks: [{ type: "text", text: "要" }],
+      created_at: "2026-08-29T00:00:00.000Z",
+    })).toMatchObject({
+      type: "user_message",
+      connectionId: "conn-1",
+      seq: 7,
+      data: {
+        messageId: "user-1",
+        timestamp: Date.parse("2026-08-29T00:00:00.000Z"),
+      },
+    })
+  })
+
   it("normalizes turn_cancel_requested metadata", () => {
     expect(acpApi.normalizeRealtimeEvent({
       type: "turn_cancel_requested",

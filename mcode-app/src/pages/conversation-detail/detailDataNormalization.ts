@@ -3,7 +3,7 @@ import type {
   PersistedTurnPartRow,
   PersistedTurnWithParts,
 } from "@/services/db/repositories/conversationRepository"
-import { buildTurnDedupeKey, dropEmptyThinkingParts, normalizeTurnRole } from "@/services/conversation/conversationTurnIdentity"
+import { buildTurnDedupeKey, dropEmptyThinkingParts, normalizeTurnRole, parseTurnTimestamp } from "@/services/conversation/conversationTurnIdentity"
 import { clampSubagentStats } from "@/services/conversation/subagentToolCall"
 import { normalizeAgentType } from "@/services/conversation/agentType"
 
@@ -96,18 +96,14 @@ export function normalizeTurns(rawTurns: unknown): MessageTurn[] {
  */
 export { normalizeTurnRole }
 
+export { parseTurnTimestamp }
+
 function normalizeTurn(raw: any, index: number): MessageTurn | null {
   if (!raw || typeof raw !== "object") return null
   const role = normalizeTurnRole(raw.role)
   const content = normalizeContentParts(raw.content, raw.blocks)
   const timestamp =
-    typeof raw.timestamp === "number"
-      ? raw.timestamp
-      : typeof raw.timestamp === "string"
-        ? Date.parse(raw.timestamp) || Date.now()
-        : typeof raw.created_at === "number"
-          ? raw.created_at
-          : Date.now()
+    parseTurnTimestamp(raw.timestamp, raw.createdAt, raw.created_at) ?? Date.now()
   // 与 SQLite 落库同源的稳定键：CodeG 解析器的 turn id 是「按下标派生」的
   // （turn-N / grok-turn-N / acp-N），历史被压缩重写时整段会平移，因此它不能
   // 当跨来源身份用。dedupeKey 对 turn- 前缀自动退化成内容指纹，正好覆盖这点。

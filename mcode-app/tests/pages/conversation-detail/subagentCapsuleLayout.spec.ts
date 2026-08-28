@@ -78,6 +78,17 @@ describe("subagent capsule layout contract", () => {
     expect(barePropertyColors).toEqual([])
   })
 
+  it("exposes theme hooks for nested capsule surfaces", () => {
+    const bubble = read("components/MessageBubble.vue")
+    // matrix 主题额外挂 `bubble-wrap--cyber`，sweet/summer 走 `bubble-wrap--theme-<name>`。
+    for (const scope of ["cyber", "theme-sweet", "theme-summer"]) {
+      expect(bubble).toContain(`.bubble-wrap--${scope} :deep(.subagent__summary)`)
+      expect(bubble).toContain(`.bubble-wrap--${scope} :deep(.subagent__body)`)
+      expect(bubble).toContain(`.bubble-wrap--${scope} :deep(.subagent__label)`)
+      expect(bubble).toContain(`.bubble-wrap--${scope} :deep(.subagent__error)`)
+    }
+  })
+
   it("is wired through every timeline that renders bubbles", () => {
     // 少接一处不会报错 —— 胶囊只是永远空着（实时输出那一段不显示）。
     // 两条时间线：可交互面板与只读时间线。

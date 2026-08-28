@@ -46,6 +46,29 @@ describe("P48 conversation detail tool call status styles", () => {
     expect(thinkingRule).toContain("width: fit-content;")
     expect(thinkingRule).toContain("border-radius: 999rpx;")
     expect(thinkingRule).not.toContain("border-left: 4rpx solid")
+
+    const expandedRule = source.match(/\.part-thinking--expanded\s*\{[\s\S]*?\n\}/)?.[0] || ""
+    expect(source).toContain("part-thinking--expanded")
+    expect(expandedRule).toContain("border-radius: 12rpx;")
+    expect(expandedRule).not.toContain("999rpx")
+  })
+
+  it("themes subagent capsules and markdown tables inside every message surface", () => {
+    const source = readComponent("MessageBubble.vue")
+    // matrix 主题额外挂 `bubble-wrap--cyber`，sweet/summer 走 `bubble-wrap--theme-<name>`。
+    for (const scope of ["cyber", "theme-sweet", "theme-summer"]) {
+      expect(source).toContain(`.bubble-wrap--${scope} :deep(.subagent__summary)`)
+      expect(source).toContain(`.bubble-wrap--${scope} :deep(.subagent__body)`)
+      expect(source).toContain(`.bubble-wrap--${scope} :deep(table)`)
+      expect(source).toContain(`.bubble-wrap--${scope} :deep(th)`)
+      expect(source).toContain(`.bubble-wrap--${scope} :deep(td)`)
+    }
+    expect(source).toContain(":deep(table)")
+    expect(source).toContain(":deep(thead)")
+    expect(source).toContain(":deep(tbody)")
+    expect(source).toContain(":deep(tr)")
+    expect(source).toContain(":deep(th)")
+    expect(source).toContain(":deep(td)")
   })
 
   it("keeps message code blocks horizontally scrollable", () => {

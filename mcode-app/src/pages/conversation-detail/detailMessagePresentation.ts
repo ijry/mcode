@@ -7,6 +7,49 @@ export interface RenderMessageItem {
   message: MessageTurn
 }
 
+/**
+ * 返回时间线上最新的用户轮次。
+ *
+ * 轮次数组可能由历史尾窗与实时事件拼接而成，数组末尾不再等价于最新消息。
+ * 有效时间戳优先；同一时间戳或全部缺失时保留原数组位置作为稳定 tie-break，
+ * 以保证连续发送相同文本时不会随机切换目标。
+ */
+export function findLatestUserMessage(messages: MessageTurn[]): MessageTurn | undefined {
+  let latest: MessageTurn | undefined
+  let latestTimestamp: number | null = null
+  let latestIndex = -1
+  let hasTimestamp = false
+
+  messages.forEach((message, index) => {
+    if (message?.role !== "user") return
+    const timestamp = Number(message.timestamp)
+    const validTimestamp = Number.isFinite(timestamp) && timestamp > 0
+
+    if (!latest) {
+      latest = message
+      latestTimestamp = validTimestamp ? timestamp : null
+      hasTimestamp = validTimestamp
+      latestIndex = index
+      return
+    }
+
+    if (validTimestamp && (!hasTimestamp || timestamp >= (latestTimestamp as number))) {
+      latest = message
+      latestTimestamp = timestamp
+      hasTimestamp = true
+      latestIndex = index
+      return
+    }
+
+    if (!hasTimestamp && !validTimestamp && index >= latestIndex) {
+      latest = message
+      latestIndex = index
+    }
+  })
+
+  return latest
+}
+
 function cloneContentParts(parts: ContentPart[]): ContentPart[] {
   return JSON.parse(JSON.stringify(parts || [])) as ContentPart[]
 }

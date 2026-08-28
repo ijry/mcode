@@ -103,7 +103,12 @@
           <!-- 思考 -->
           <view
             v-else-if="part.type === 'thinking'"
-            :class="['part-thinking', isThinkingCollapsed(index) && 'part-thinking--collapsed', translucent && 'part-thinking--translucent']"
+            :class="[
+              'part-thinking',
+              isThinkingCollapsed(index) && 'part-thinking--collapsed',
+              !isThinkingCollapsed(index) && 'part-thinking--expanded',
+              translucent && 'part-thinking--translucent',
+            ]"
           >
             <view class="thinking-hd" @click="toggleThinkingCollapse(index)">
               <image
@@ -742,6 +747,57 @@ function renderCyberDecodeText(text: string, index: number) {
     -webkit-overflow-scrolling: touch;
   }
 
+  /* up-markdown 在 H5 使用真实 table，在 uni 的 up-parse 节点树中使用
+     `._table` / `._td` 这些 view 类；两套节点都要有同一组可读的基础表面。 */
+  :deep(table),
+  :deep(._table) {
+    width: 100%;
+    min-width: 100%;
+    margin: 12rpx 0;
+    border-collapse: collapse;
+    background: var(--up-card-bg-color, #ffffff);
+    color: var(--up-main-color, #303133);
+    overflow-x: auto;
+  }
+
+  :deep(thead),
+  :deep(._thead) {
+    background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
+  }
+
+  :deep(tbody),
+  :deep(._tbody) {
+    background: transparent;
+  }
+
+  :deep(tr),
+  :deep(._tr) {
+    border-bottom: 1rpx solid var(--up-border-color, #dadbde);
+  }
+
+  :deep(th),
+  :deep(td),
+  :deep(._th),
+  :deep(._td) {
+    padding: 10rpx 14rpx;
+    border: 1rpx solid var(--up-border-color, #dadbde);
+    color: inherit;
+    text-align: left;
+    vertical-align: top;
+    word-break: break-word;
+  }
+
+  :deep(th),
+  :deep(._th) {
+    font-weight: 600;
+    color: var(--up-main-color, #303133);
+  }
+
+  :deep(tbody tr:nth-child(even)),
+  :deep(._tbody ._tr:nth-child(even)) {
+    background: color-mix(in srgb, var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6)) 55%, transparent 45%);
+  }
+
   :deep(.up-markdown-code) {
     width: max-content;
     min-width: 100%;
@@ -857,7 +913,10 @@ function renderCyberDecodeText(text: string, index: number) {
 .bubble-wrap--cyber :deep(.goal-card__body),
 .bubble-wrap--cyber :deep(.ask-question-result),
 .bubble-wrap--cyber :deep(.ask-question-result__state),
-.bubble-wrap--cyber :deep(.ask-question-answer) {
+.bubble-wrap--cyber :deep(.ask-question-answer),
+.bubble-wrap--cyber :deep(.subagent__summary),
+.bubble-wrap--cyber :deep(.subagent__body),
+.bubble-wrap--cyber :deep(.subagent__error) {
   background:
     linear-gradient(135deg, rgba(0, 255, 65, 0.08), transparent 44%),
     rgba(0, 20, 7, 0.54) !important;
@@ -882,7 +941,17 @@ function renderCyberDecodeText(text: string, index: number) {
 .bubble-wrap--cyber :deep(.ask-question-result__subtitle),
 .bubble-wrap--cyber :deep(.ask-question-answer__header),
 .bubble-wrap--cyber :deep(.ask-question-answer__question),
-.bubble-wrap--cyber :deep(.ask-question-answer__empty) {
+.bubble-wrap--cyber :deep(.ask-question-answer__empty),
+.bubble-wrap--cyber :deep(.subagent__title),
+.bubble-wrap--cyber :deep(.subagent__status),
+.bubble-wrap--cyber :deep(.subagent__duration),
+.bubble-wrap--cyber :deep(.subagent__label),
+.bubble-wrap--cyber :deep(.subagent__prompt),
+.bubble-wrap--cyber :deep(.subagent__transcript),
+.bubble-wrap--cyber :deep(.subagent__tool-name),
+.bubble-wrap--cyber :deep(.subagent__tool-preview),
+.bubble-wrap--cyber :deep(.subagent__truncated),
+.bubble-wrap--cyber :deep(.subagent__meta) {
   color: var(--message-cyber-text) !important;
   text-shadow: 0 0 10rpx rgba(0, 255, 65, 0.24);
 }
@@ -894,6 +963,37 @@ function renderCyberDecodeText(text: string, index: number) {
 
 .bubble-wrap--cyber :deep(.code-text) {
   color: rgba(216, 255, 228, 0.9) !important;
+}
+
+.bubble-wrap--cyber :deep(table),
+.bubble-wrap--cyber :deep(._table) {
+  background: rgba(0, 13, 4, 0.68) !important;
+  color: var(--message-cyber-text) !important;
+}
+
+.bubble-wrap--cyber :deep(thead),
+.bubble-wrap--cyber :deep(._thead) {
+  background: rgba(0, 255, 65, 0.1) !important;
+}
+
+.bubble-wrap--cyber :deep(tbody),
+.bubble-wrap--cyber :deep(._tbody) {
+  background: transparent !important;
+}
+
+.bubble-wrap--cyber :deep(tr),
+.bubble-wrap--cyber :deep(._tr),
+.bubble-wrap--cyber :deep(th),
+.bubble-wrap--cyber :deep(td),
+.bubble-wrap--cyber :deep(._th),
+.bubble-wrap--cyber :deep(._td) {
+  border-color: rgba(0, 255, 65, 0.26) !important;
+  color: var(--message-cyber-text) !important;
+}
+
+.bubble-wrap--cyber :deep(th),
+.bubble-wrap--cyber :deep(._th) {
+  background: rgba(0, 255, 65, 0.12) !important;
 }
 
 .bubble-wrap--theme-sweet {
@@ -967,7 +1067,10 @@ function renderCyberDecodeText(text: string, index: number) {
 .bubble-wrap--theme-sweet :deep(.goal-card__body),
 .bubble-wrap--theme-sweet :deep(.ask-question-result),
 .bubble-wrap--theme-sweet :deep(.ask-question-result__state),
-.bubble-wrap--theme-sweet :deep(.ask-question-answer) {
+.bubble-wrap--theme-sweet :deep(.ask-question-answer),
+.bubble-wrap--theme-sweet :deep(.subagent__summary),
+.bubble-wrap--theme-sweet :deep(.subagent__body),
+.bubble-wrap--theme-sweet :deep(.subagent__error) {
   background:
     radial-gradient(circle at 20% 16%, rgba(255, 255, 255, 0.78), transparent 28%),
     linear-gradient(135deg, rgba(255, 221, 239, 0.28), rgba(255, 255, 255, 0.2)),
@@ -994,8 +1097,49 @@ function renderCyberDecodeText(text: string, index: number) {
 .bubble-wrap--theme-sweet :deep(.ask-question-answer__header),
 .bubble-wrap--theme-sweet :deep(.ask-question-answer__question),
 .bubble-wrap--theme-sweet :deep(.ask-question-answer__empty),
-.bubble-wrap--theme-sweet :deep(.code-text) {
+.bubble-wrap--theme-sweet :deep(.code-text),
+.bubble-wrap--theme-sweet :deep(.subagent__title),
+.bubble-wrap--theme-sweet :deep(.subagent__status),
+.bubble-wrap--theme-sweet :deep(.subagent__duration),
+.bubble-wrap--theme-sweet :deep(.subagent__label),
+.bubble-wrap--theme-sweet :deep(.subagent__prompt),
+.bubble-wrap--theme-sweet :deep(.subagent__transcript),
+.bubble-wrap--theme-sweet :deep(.subagent__tool-name),
+.bubble-wrap--theme-sweet :deep(.subagent__tool-preview),
+.bubble-wrap--theme-sweet :deep(.subagent__truncated),
+.bubble-wrap--theme-sweet :deep(.subagent__meta) {
   color: var(--message-sweet-text) !important;
+}
+
+.bubble-wrap--theme-sweet :deep(table),
+.bubble-wrap--theme-sweet :deep(._table) {
+  background: rgba(255, 248, 252, 0.64) !important;
+  color: var(--message-sweet-text) !important;
+}
+
+.bubble-wrap--theme-sweet :deep(thead),
+.bubble-wrap--theme-sweet :deep(._thead) {
+  background: rgba(236, 72, 153, 0.1) !important;
+}
+
+.bubble-wrap--theme-sweet :deep(tbody),
+.bubble-wrap--theme-sweet :deep(._tbody) {
+  background: transparent !important;
+}
+
+.bubble-wrap--theme-sweet :deep(tr),
+.bubble-wrap--theme-sweet :deep(._tr),
+.bubble-wrap--theme-sweet :deep(th),
+.bubble-wrap--theme-sweet :deep(td),
+.bubble-wrap--theme-sweet :deep(._th),
+.bubble-wrap--theme-sweet :deep(._td) {
+  border-color: rgba(236, 72, 153, 0.2) !important;
+  color: var(--message-sweet-text) !important;
+}
+
+.bubble-wrap--theme-sweet :deep(th),
+.bubble-wrap--theme-sweet :deep(._th) {
+  background: rgba(236, 72, 153, 0.1) !important;
 }
 
 .bubble-wrap--theme-summer {
@@ -1070,7 +1214,10 @@ function renderCyberDecodeText(text: string, index: number) {
 .bubble-wrap--theme-summer :deep(.goal-card__body),
 .bubble-wrap--theme-summer :deep(.ask-question-result),
 .bubble-wrap--theme-summer :deep(.ask-question-result__state),
-.bubble-wrap--theme-summer :deep(.ask-question-answer) {
+.bubble-wrap--theme-summer :deep(.ask-question-answer),
+.bubble-wrap--theme-summer :deep(.subagent__summary),
+.bubble-wrap--theme-summer :deep(.subagent__body),
+.bubble-wrap--theme-summer :deep(.subagent__error) {
   background:
     radial-gradient(circle at 20% 16%, rgba(255, 255, 255, 0.76), transparent 28%),
     linear-gradient(135deg, rgba(210, 244, 255, 0.28), rgba(255, 255, 255, 0.18)),
@@ -1097,8 +1244,49 @@ function renderCyberDecodeText(text: string, index: number) {
 .bubble-wrap--theme-summer :deep(.ask-question-answer__header),
 .bubble-wrap--theme-summer :deep(.ask-question-answer__question),
 .bubble-wrap--theme-summer :deep(.ask-question-answer__empty),
-.bubble-wrap--theme-summer :deep(.code-text) {
+.bubble-wrap--theme-summer :deep(.code-text),
+.bubble-wrap--theme-summer :deep(.subagent__title),
+.bubble-wrap--theme-summer :deep(.subagent__status),
+.bubble-wrap--theme-summer :deep(.subagent__duration),
+.bubble-wrap--theme-summer :deep(.subagent__label),
+.bubble-wrap--theme-summer :deep(.subagent__prompt),
+.bubble-wrap--theme-summer :deep(.subagent__transcript),
+.bubble-wrap--theme-summer :deep(.subagent__tool-name),
+.bubble-wrap--theme-summer :deep(.subagent__tool-preview),
+.bubble-wrap--theme-summer :deep(.subagent__truncated),
+.bubble-wrap--theme-summer :deep(.subagent__meta) {
   color: var(--message-summer-text) !important;
+}
+
+.bubble-wrap--theme-summer :deep(table),
+.bubble-wrap--theme-summer :deep(._table) {
+  background: rgba(239, 252, 255, 0.64) !important;
+  color: var(--message-summer-text) !important;
+}
+
+.bubble-wrap--theme-summer :deep(thead),
+.bubble-wrap--theme-summer :deep(._thead) {
+  background: rgba(14, 136, 165, 0.1) !important;
+}
+
+.bubble-wrap--theme-summer :deep(tbody),
+.bubble-wrap--theme-summer :deep(._tbody) {
+  background: transparent !important;
+}
+
+.bubble-wrap--theme-summer :deep(tr),
+.bubble-wrap--theme-summer :deep(._tr),
+.bubble-wrap--theme-summer :deep(th),
+.bubble-wrap--theme-summer :deep(td),
+.bubble-wrap--theme-summer :deep(._th),
+.bubble-wrap--theme-summer :deep(._td) {
+  border-color: rgba(14, 136, 165, 0.2) !important;
+  color: var(--message-summer-text) !important;
+}
+
+.bubble-wrap--theme-summer :deep(th),
+.bubble-wrap--theme-summer :deep(._th) {
+  background: rgba(14, 136, 165, 0.1) !important;
 }
 
 @keyframes cyberTextGlitch {
@@ -1122,6 +1310,15 @@ function renderCyberDecodeText(text: string, index: number) {
 
 .part-thinking--collapsed {
   padding-bottom: 16rpx;
+  width: fit-content;
+  border-radius: 999rpx;
+}
+
+.part-thinking--expanded {
+  width: 100%;
+  box-sizing: border-box;
+  border-radius: 12rpx;
+  padding: 16rpx 20rpx;
 }
 
 .part-thinking--translucent {
