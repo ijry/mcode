@@ -1094,6 +1094,14 @@
             <text class="input-feedback__label">发送失败</text>
             <text class="input-feedback__text">{{ runtimeErrorText }}</text>
           </view>
+          <!-- 关闭入口是必需的：这条横幅不会自动消失（见 store 的 dismissSessionError）。 -->
+          <view class="input-feedback__dismiss" @click.stop="dismissRuntimeError">
+            <up-icon
+              name="close"
+              size="12"
+              :color="upThemeVar('--up-tips-color', '#909193')"
+            ></up-icon>
+          </view>
         </view>
       </template>
     </ConversationDetailBody>
@@ -3292,6 +3300,17 @@ async function sendDraft(draft: QueuedDraft): Promise<boolean> {
  * 只在输入框仍是空的时候覆盖：拒绝到达前用户可能已经开始打下一条，那份新内容比这份
  * 失败的草稿更该留着。附件同理，用合并而不是替换。
  */
+/**
+ * 关掉「发送失败」横幅。
+ *
+ * 那条横幅此前无法消除：`setSessionError(id, null)` 只在发送成功后被调，而
+ * `clearStaleTurnError` 对「没有轮次归属」的错误一律跳过 —— catch 里写入时若
+ * `liveMessage` 已被清空就正是这种情况。于是一次额度不足留下的报错会一直挂着。
+ */
+function dismissRuntimeError() {
+  runtime.dismissSessionError(Number(props.conversationId || 0));
+}
+
 function restoreDraftToComposer(draft: QueuedDraft) {
   if (!inputText.value.trim()) {
     inputText.value = draft.text || "";

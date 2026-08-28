@@ -2396,6 +2396,103 @@ describe('conversationRuntime ACP error handling', () => {
     })
   })
 
+  describe('dismissing the error banner', () => {
+    // 那条「发送失败」横幅此前既不会自动消失、也没有关闭入口：
+    // - `setSessionError(id, null)` 只在**发送成功**后被调；
+    // - `clearStaleTurnError` 有一道 `if (!inputErrorTurnKey) return` 守卫，而从
+    //   catch 里写进去的错误在 liveMessage 为 null 时（冷启动/已清空）记不到轮次，
+    //   于是被判成「不属于任何轮次」，永远不清。
+    // 结果是一条历史错误可以无限期挂在输入框上方。
+    it('clears message, details and turn key together', () => {
+      const { store, session } = prepareSession()
+      store.handleEvent({
+        type: 'error',
+        connectionId: 'conn-1',
+        data: { message: '额度不足', details: 'stderr tail' },
+      } as any)
+      expect(session.inputErrorMessage).toBe('额度不足')
+
+      store.dismissSessionError(1)
+
+      expect(session.inputErrorMessage).toBeNull()
+      expect(session.inputErrorDetails).toBeNull()
+      expect(session.inputErrorTurnKey).toBeNull()
+    })
+
+    it('clears the turn key even when the error belonged to a live turn', () => {
+      // 上一条测试里 liveMessage 为 null，所以 inputErrorTurnKey 本来就是 null ——
+      // 它证明不了「关闭时清了轮次键」。这条先让错误真的归属到一轮，再关。
+      //
+      // 为什么必须清：留着一个非空的轮次键，下一条错误进来时 clearStaleTurnError
+      // 会拿它跟当前轮比对，把那条**新**错误当成陈旧的清掉。
+      const { store, session } = prepareSession()
+      store.setLiveMessage(1, [{ type: 'text', text: 'hi' }], true, { id: 'turn-a' })
+      store.handleEvent({
+        type: 'error',
+        connectionId: 'conn-1',
+        data: { message: '额度不足' },
+      } as any)
+      expect(session.inputErrorTurnKey).toBe('turn-a')
+
+      store.dismissSessionError(1)
+
+      expect(session.inputErrorTurnKey).toBeNull()
+    })
+
+    it('restores a usable status so the composer is not stuck in error', () => {
+      // `error` 事件把 status 置成了 "error"，那会让底部一直显示「运行异常」。
+      // 手动关闭横幅时要把状态恢复成可发送的值。
+      const { store, session } = prepareSession()
+      store.handleEvent({
+        type: 'error',
+        connectionId: 'conn-1',
+        data: { message: '额度不足' },
+      } as any)
+      expect(session.status).toBe('error')
+
+      store.dismissSessionError(1)
+
+      expect(session.status).toBe('connected')
+    })
+
+    it('falls back to idle when the connection is already gone', () => {
+      // 真实路径：报错时还连着，随后连接被 invalidate（connectionId 清空），用户这才
+      // 去关横幅。没有连接就不能声称 connected。
+      //
+      // 注意不能用 `handleEvent` 造这个场景 —— 那个入口按 connectionId 反查 session，
+      // connectionId 为 null 时根本找不到会话，事件会被静默丢弃。
+      const { store, session } = prepareSession()
+      store.handleEvent({
+        type: 'error',
+        connectionId: 'conn-1',
+        data: { message: '连接失败' },
+      } as any)
+      expect(session.status).toBe('error')
+      session.connectionId = null
+
+      store.dismissSessionError(1)
+
+      expect(session.status).toBe('idle')
+    })
+
+    it('leaves a healthy session alone', () => {
+      // 关闭一条不存在的错误不该把状态从 thinking 打回 connected ——
+      // 那会让正在跑的会话看起来停了。
+      const { store, session } = prepareSession()
+      session.status = 'thinking'
+
+      store.dismissSessionError(1)
+
+      expect(session.status).toBe('thinking')
+      expect(session.inputErrorMessage).toBeNull()
+    })
+
+    it('does nothing for an unknown conversation', () => {
+      const { store } = prepareSession()
+      expect(() => store.dismissSessionError(999)).not.toThrow()
+    })
+  })
+
   describe('turn feedback notes', () => {
     // 便签是轮次级瞬态 steering，服务端刻意不持久化，并在下一轮 UserMessage 清表。
     // mcode 走 native 通道，自己的便签**出生即 delivered** —— 所以本地插入后不会再

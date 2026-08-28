@@ -1363,6 +1363,37 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     }
   }
 
+  /**
+   * 用户手动关掉「发送失败」横幅。
+   *
+   * 这个入口是必需的，不是便利功能：那条横幅此前**既不会自动消失、也无法关闭**。
+   * - `setSessionError(id, null)` 只在发送成功后被调用；
+   * - `clearStaleTurnError` 有一道 `if (!inputErrorTurnKey) return` 守卫，而 catch 里
+   *   写入错误时若 `liveMessage` 为 null（冷启动、或刚被 clearLiveMessage 清掉），
+   *   轮次键就记不上，于是这条错误被判成「不属于任何轮次」，永远不清。
+   *
+   * 结果是一条历史错误（比如一次额度不足）可以无限期挂在输入框上方，让用户以为当前
+   * 就是这个状态。
+   *
+   * 与 `setSessionError(id, null)` 的区别：那个是发送成功后的内部清理；这个表达的是
+   * 「用户看过了、要它消失」，语义上属于 UI 动作，因此单独成一个 action 而不是复用。
+   *
+   * **不碰会话本身的运行状态**（只在 status 卡在 `error` 时恢复成可发送的值）——
+   * 正在跑的会话被关闭横幅打回 `connected` 会看起来像停了。
+   */
+  function dismissSessionError(conversationId: number) {
+    const session = sessions.value.get(conversationId)
+    if (!session) return
+    session.inputErrorMessage = null
+    session.inputErrorDetails = null
+    // 轮次键必须一起清：留着它会让下一条错误被 `clearStaleTurnError` 误判成陈旧的。
+    session.inputErrorTurnKey = null
+    session.apiRetry = null
+    if (session.status === "error") {
+      session.status = session.connectionId ? "connected" : "idle"
+    }
+  }
+
   function canSend(conversationId: number) {
     const managed = connectionSessionManager.getByConversationId(conversationId)
     if (!managed) return true
@@ -1415,6 +1446,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     recordFeedbackNote,
     bindCreatedConversationRuntime,
     setSessionError,
+    dismissSessionError,
     applyConversationDetailStats,
     canSend,
     getManagedConversation,
