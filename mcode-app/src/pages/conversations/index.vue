@@ -685,6 +685,7 @@ import { getRegisteredRemoteInstanceDescriptor } from "@/services/realtime/remot
 import type { CodegGateway } from "@/services/gateway"
 import { normalizeAgentType } from "@/services/conversation/agentType"
 import { parseConversationId } from "@/services/conversation/conversationIdentity"
+import { seedCreatedConversationSummary } from "@/services/conversation/createdConversationSeed"
 import type {
   AgentOptionsSnapshot,
   AcpAgentInfo,
@@ -2153,71 +2154,6 @@ function replaceConnectionGroup(nextGroup: ConnectionGroup) {
   connectionGroups.value = nextGroups
   if (showHistoryPanel.value && historyGroupKey.value === nextGroup.key) {
     projects.value = nextGroup.projects
-  }
-}
-
-async function seedCreatedConversationSummary(input: {
-  gateway: CodegGateway
-  instanceKey: string
-  conversationId: number
-  folderId: number
-  title: string
-  agentType: string
-  hasTaskContent: boolean
-}) {
-  const now = Date.now()
-
-  await upsertConversationSummary({
-    id: input.conversationId,
-    instanceKey: input.instanceKey,
-    folderId: input.folderId,
-    title: input.title.trim() || `会话 #${input.conversationId}`,
-    agentType: normalizeAgentType(input.agentType),
-    externalId: null,
-    connectionId: null,
-    status: normalizeConversationStatus(input.hasTaskContent ? "in_progress" : "unknown"),
-    lastTurnId: null,
-    lastMessageAt: now,
-    unreadCount: 0,
-    isPinned: false,
-    deletedAt: null,
-    updatedAt: now,
-  })
-
-  try {
-    // 只读 summary / title / folderId / agentType / status，完全不看轮次内容
-    // （lastTurnId 在新建会话时硬编码为 null），所以取最小窗口。
-    const detail = await input.gateway.call<any>("get_folder_conversation", {
-      conversationId: input.conversationId,
-      tailTurns: METADATA_ONLY_CONVERSATION_TAIL_TURNS,
-    })
-    const summary =
-      detail?.summary && typeof detail.summary === "object"
-        ? detail.summary
-        : {}
-    const title = firstString(detail?.title, summary?.title, input.title)
-    await upsertConversationSummary({
-      id: input.conversationId,
-      instanceKey: input.instanceKey,
-      folderId: Number(detail?.folder_id || detail?.folderId || summary?.folder_id || input.folderId),
-      title: title || `会话 #${input.conversationId}`,
-      agentType: normalizeAgentType(
-        firstString(detail?.agent_type, detail?.agentType, summary?.agent_type, input.agentType)
-      ),
-      externalId: firstString(detail?.session_id, detail?.sessionId, summary?.external_id) || null,
-      connectionId: null,
-      status: normalizeConversationStatus(
-        firstString(detail?.status, summary?.status, input.hasTaskContent ? "in_progress" : "unknown")
-      ),
-      lastTurnId: null,
-      lastMessageAt: now,
-      unreadCount: 0,
-      isPinned: false,
-      deletedAt: null,
-      updatedAt: now,
-    })
-  } catch (error) {
-    console.warn("seed created conversation detail skipped:", error)
   }
 }
 
