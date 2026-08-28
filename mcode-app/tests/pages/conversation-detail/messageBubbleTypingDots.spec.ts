@@ -31,6 +31,13 @@ describe("streaming typing dots contract", () => {
     expect(dots).toContain("align-items: center;")
   })
 
+  it("aligns the dots with the markdown text left edge", () => {
+    // `.bubble` 内距 6px，但 `.part-text :deep(.up-markdown)` 自己还有 `padding: 1px 2px`，
+    // 所以正文左沿在 8px，而点只有 6px。补 4rpx(=2px) 让两者对齐。
+    const dots = rule(".typing-dots")
+    expect(dots).toContain("padding-left: 4rpx;")
+  })
+
   it("uses an accent color the dots are actually visible in", () => {
     const dot = rule(".dot")
     // --up-border-color 是分割线级别的浅灰，在气泡背景上几乎看不见。

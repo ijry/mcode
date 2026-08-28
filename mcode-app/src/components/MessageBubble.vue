@@ -1635,6 +1635,8 @@ function renderCyberDecodeText(text: string, index: number) {
   padding-top: 8rpx;
   /* 点原本紧贴气泡下沿（.bubble 只有 4px 6px 内距），视觉上像被裁掉半个。 */
   padding-bottom: 16rpx;
+  /* 正文左沿 = .bubble 的 6px + .up-markdown 自带的 2px；点没有那层内距，补 4rpx(=2px)。 */
+  padding-left: 4rpx;
 }
 
 .dot {
