@@ -235,6 +235,51 @@ const emit = defineEmits<{
   backdrop-filter: blur(10rpx);
 }
 
+/*
+ * 默认主题的边框旋转跑马灯。
+ *
+ * 图层机制与 cyber 完全一致：`::before` 是一整块 conic-gradient，`::after` 用实色面板
+ * 盖住中心只露出 2rpx 边缘，所以旋转 `::before` 看起来就是「一段高光沿边框跑」。
+ * 之所以挂在 `--status-*` 而不是 `--cyber-active`：`cyberActive` 在 InteractivePane 里是
+ * `detailTheme === 'matrix' && active`，非 matrix 主题恒为 false，默认主题拿不到那个类。
+ *
+ * 排在 cyber 规则之前：cyber 侧选择器都带 `.detail-body--cyber-active`（两个类），
+ * 权重更高，颜色/时长/停转覆盖不受影响。
+ */
+.input-status-wrap--status-running::before,
+.input-status-wrap--status-pending::before {
+  /*
+   * 基础态的 74% 混色 + 0.72 不透明度在浅色页面上几乎读不出「在转」（实测边框最亮点与
+   * 静止段亮度差不到 6/255）。旋转态单独把高光段拉满，静止态外观保持不变。
+   */
+  background:
+    conic-gradient(
+      from 0deg,
+      transparent 0deg,
+      color-mix(in srgb, var(--up-primary, #2979ff) 24%, transparent 76%) 42deg,
+      var(--up-primary, #2979ff) 84deg,
+      color-mix(in srgb, var(--up-success, #19be6b) 72%, transparent 28%) 120deg,
+      transparent 162deg,
+      transparent 232deg,
+      color-mix(in srgb, var(--up-primary, #2979ff) 54%, transparent 46%) 286deg,
+      transparent 332deg,
+      transparent 360deg
+    );
+  opacity: 0.92;
+  animation: inputStatusLedSpin 1.55s linear infinite;
+}
+
+.input-status-wrap--status-pending::before {
+  animation-duration: 2.4s;
+}
+
+/* 非活跃态别转，避免空闲时一直有个光点在跑。 */
+.input-status-wrap--status-idle::before,
+.input-status-wrap--status-online::before,
+.input-status-wrap--status-error::before {
+  animation: none;
+}
+
 .detail-body--cyber .input-status-wrap {
   box-shadow: 0 0 0 1rpx rgba(0, 255, 65, 0.08), 0 0 28rpx rgba(0, 255, 65, 0.1);
 }
