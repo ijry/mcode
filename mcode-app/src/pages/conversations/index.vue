@@ -684,6 +684,7 @@ import {
 import { getRegisteredRemoteInstanceDescriptor } from "@/services/realtime/remoteInstanceRegistry"
 import type { CodegGateway } from "@/services/gateway"
 import { normalizeAgentType } from "@/services/conversation/agentType"
+import { parseConversationId } from "@/services/conversation/conversationIdentity"
 import type {
   AgentOptionsSnapshot,
   AcpAgentInfo,
@@ -1063,15 +1064,6 @@ watch(creating, (active) => {
   }
 })
 
-const AGENT_LABELS: Record<string, string> = {
-  claude_code: "Claude Code",
-  codex:       "Codex CLI",
-  open_code:   "OpenCode",
-  gemini:      "Gemini CLI",
-  open_claw:   "OpenClaw",
-  cline:       "Cline",
-}
-
 function resetCreateAgentConfig(message = "") {
   createAgentConfig.value = {
     status: "idle",
@@ -1166,7 +1158,11 @@ function normalizeCreateAgentOptions(raw: unknown): AgentListOption[] {
       const value = normalizeAgentType(item.agent_type)
       return {
         value,
-        label: String(item.name || AGENT_LABELS[value] || value),
+        // 标签取站内唯一那份映射（`remoteSettings.AGENT_LABELS`，经
+        // `formatOverviewAgentLabel` 暴露）。页面此前有本地副本，把 codex 写成
+        // 「Codex CLI」而全局那份是「Codex」—— 同一个 agent 在新建弹层和别处显示成
+        // 两个名字。远端给了 `name` 时仍优先用它。
+        label: String(item.name || formatOverviewAgentLabel(value)),
         description: item.description ? String(item.description) : "",
         sortOrder: typeof item.sort_order === "number" ? item.sort_order : Number.MAX_SAFE_INTEGER,
       }
@@ -2332,23 +2328,6 @@ function syncAuthToConnection(conn: ConnectionItem) {
     return
   }
   auth.setRelayMode(authMode.baseUrl, authMode.session)
-}
-
-function parseConversationId(input: unknown): number {
-  if (typeof input === "number" && Number.isFinite(input)) return input
-  if (typeof input === "string") {
-    const parsed = Number(input)
-    if (Number.isFinite(parsed) && parsed > 0) return parsed
-  }
-  if (input && typeof input === "object") {
-    const maybeId = (input as any).id ?? (input as any).conversationId
-    if (typeof maybeId === "number" && Number.isFinite(maybeId)) return maybeId
-    if (typeof maybeId === "string") {
-      const parsed = Number(maybeId)
-      if (Number.isFinite(parsed) && parsed > 0) return parsed
-    }
-  }
-  return 0
 }
 
 function loadData() {

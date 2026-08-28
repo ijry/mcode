@@ -216,6 +216,7 @@ import type { CodegGateway } from "@/services/gateway"
 import type { ConnectionInfo } from "@/types/acp"
 import { usePetStore } from "@/stores/pet"
 import { XycloudApiError } from "@/services/xycloudAuth"
+import { parseConversationId } from "@/services/conversation/conversationIdentity"
 import {
   CLOUD_TODO_STATUS_DONE,
   CLOUD_TODO_STATUS_PENDING,
@@ -761,23 +762,6 @@ function onAgentConfirm(e: any) {
   selectedAgentType.value = sel.value
   selectedAgentName.value = sel.text
   showAgentPicker.value = false
-}
-
-function parseConversationId(input: unknown): number {
-  if (typeof input === "number" && Number.isFinite(input)) return input
-  if (typeof input === "string") {
-    const parsed = Number(input)
-    if (Number.isFinite(parsed) && parsed > 0) return parsed
-  }
-  if (input && typeof input === "object") {
-    const maybeId = (input as any).id ?? (input as any).conversationId
-    if (typeof maybeId === "number" && Number.isFinite(maybeId)) return maybeId
-    if (typeof maybeId === "string") {
-      const parsed = Number(maybeId)
-      if (Number.isFinite(parsed) && parsed > 0) return parsed
-    }
-  }
-  return 0
 }
 
 function resolveConnectedSessionId(connection: ConnectionInfo | null | undefined) {

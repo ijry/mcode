@@ -1,6 +1,7 @@
 import {
   buildBulkSelectionItem,
   buildBulkSelectionKey,
+  formatOverviewAgentLabel,
   buildOverviewDisplayModel,
   formatOverviewRelativeTime,
   isSelectableOverviewCard,
@@ -338,5 +339,27 @@ describe("formatOverviewRelativeTime", () => {
     expect(formatOverviewRelativeTime(undefined)).toBe("")
     expect(formatOverviewRelativeTime("")).toBe("")
     expect(formatOverviewRelativeTime("不是时间")).toBe("")
+  })
+})
+
+describe("formatOverviewAgentLabel", () => {
+  it("reads the repository-wide label map", () => {
+    // 站内唯一那份映射在 `services/remoteSettings.AGENT_LABELS`。会话列表页曾有本地副本，
+    // 把 codex 写成「Codex CLI」而全局那份是「Codex」—— 同一个 agent 在新建弹层与其它
+    // 页面显示成两个名字。这条把「只有一份」钉住。
+    expect(formatOverviewAgentLabel("codex")).toBe("Codex")
+    expect(formatOverviewAgentLabel("claude_code")).toBe("Claude Code")
+    expect(formatOverviewAgentLabel("gemini")).toBe("Gemini CLI")
+    expect(formatOverviewAgentLabel("open_code")).toBe("OpenCode")
+  })
+
+  it("passes an unknown agent id through instead of blanking it", () => {
+    // 新 agent 上线时标签表还没跟上，显示原始 id 比显示空白好。
+    expect(formatOverviewAgentLabel("brand_new_agent")).toBe("brand_new_agent")
+  })
+
+  it("falls back to a placeholder for a missing id", () => {
+    expect(formatOverviewAgentLabel("")).toBe("未知")
+    expect(formatOverviewAgentLabel(undefined)).toBe("未知")
   })
 })
