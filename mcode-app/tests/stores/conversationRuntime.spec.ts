@@ -2284,19 +2284,6 @@ describe('conversationRuntime ACP error handling', () => {
       expect(session.inputErrorDetails).toBeNull()
     })
 
-    it('does not let an error-free snapshot erase a fresher live error', () => {
-      // attach 快照可能比刚收到的实时 error 更旧（seq 缺失时 shouldIgnoreOlderSnapshot
-      // 挡不住），拿一份不含错误的旧快照擦掉刚报出来的原因，等于故障又变回静默。
-      const { store, session } = prepareSession()
-      session.inputErrorMessage = 'live error just arrived'
-      session.inputErrorDetails = 'live stderr'
-
-      store.hydrateLiveSnapshot(1, { status: 'connected' })
-
-      expect(session.inputErrorMessage).toBe('live error just arrived')
-      expect(session.inputErrorDetails).toBe('live stderr')
-    })
-
     it('falls back to a generic message for an old backend without last_error', () => {
       const { store, session } = prepareSession()
 
@@ -2304,6 +2291,95 @@ describe('conversationRuntime ACP error handling', () => {
 
       expect(session.inputErrorMessage).toBe('会话运行失败')
       expect(session.inputErrorDetails).toBeNull()
+    })
+
+    // 服务端在 `StatusChanged(Prompting)` 把 `last_error` 清成 None
+    // （`session_state.rs:679`），所以「更新的快照里没有错误」明确意味着「已经没错了」。
+    // 桌面端就是这么读的（新鲜路径一句 `error: patch.lastError`）。
+    //
+    // 此前 mcode 只有「有就写」那半边，本地那条错误没有任何退场机会 —— 表现为
+    // 「PC 端恢复正常了，mcode 还挂着一条过期的 502」。
+    describe('clearing a stale error from a fresher snapshot', () => {
+      it('clears the local error when a fresher snapshot carries none', () => {
+        const { store, session } = prepareSession()
+        store.hydrateLiveSnapshot(1, {
+          event_seq: 7,
+          status: 'connected',
+          last_error: { message: 'unexpected status 502', details: 'stderr tail' },
+        })
+        expect(session.inputErrorMessage).toBe('unexpected status 502')
+
+        // mcode 离开详情页期间 PC 发了新一轮，服务端清掉了 last_error。重进时取到的
+        // 就是这份更新、且不含错误的快照。
+        store.hydrateLiveSnapshot(1, { event_seq: 42, status: 'connected' })
+
+        expect(session.inputErrorMessage).toBeNull()
+        expect(session.inputErrorDetails).toBeNull()
+        expect(session.inputErrorTurnKey).toBeNull()
+      })
+
+      it('clears on the cold-start path where no event has been applied yet', () => {
+        // `currentSeq` 为 null（一条事件都没应用过）时，带 seq 的快照就是唯一真相来源。
+        // 走这条路的是 `ensureMountedDetailTabRuntime`：连接判定为活时它只补快照、
+        // 不 connect（`index.vue:1710`），于是没有别的清除机会。
+        const { store, session } = prepareSession()
+        session.inputErrorMessage = '上一次留下的 502'
+        session.inputErrorDetails = 'stderr tail'
+        expect(session.lastAppliedSeq).toBeNull()
+
+        store.hydrateLiveSnapshot(1, { event_seq: 99, status: 'connected' })
+
+        expect(session.inputErrorMessage).toBeNull()
+      })
+
+      it('keeps the error when the snapshot carries no event_seq at all', () => {
+        // 旧后端 / 字段缺失：新旧无从判断，而 `shouldIgnoreOlderSnapshot` 也挡不住它。
+        // 拿它擦掉刚报出来的原因等于故障又变回静默。
+        const { store, session } = prepareSession()
+        session.inputErrorMessage = 'live error just arrived'
+        session.inputErrorDetails = 'live stderr'
+
+        store.hydrateLiveSnapshot(1, { status: 'connected' })
+
+        expect(session.inputErrorMessage).toBe('live error just arrived')
+        expect(session.inputErrorDetails).toBe('live stderr')
+      })
+
+      it('keeps the error when the snapshot is only as new as the cursor', () => {
+        // 严格大于，不用 `>=`：同 seq 说明快照并不比游标新，而本地那条错误可能来自
+        // 完全不推进游标的来源 —— 发送失败走 `setSessionError`，根本没有 seq。
+        const { store, session } = prepareSession()
+        store.handleEvent({
+          type: 'stream_batch',
+          seq: 9,
+          connectionId: 'conn-1',
+          data: { delta: 'ok', contentType: 'text' },
+        } as any)
+        store.setSessionError(1, '发送失败: 额度不足')
+        expect(session.lastAppliedSeq).toBe(9)
+
+        store.hydrateLiveSnapshot(1, { event_seq: 9, status: 'connected' })
+
+        expect(session.inputErrorMessage).toBe('发送失败: 额度不足')
+      })
+
+      it('does not clear apiRetry along with the error', () => {
+        // 重试横幅是瞬态提示，服务端**刻意不进快照**，所以「快照里没有」不等于
+        // 「重试结束了」。跟着 last_error 一起清会让冷启动进入一个正在退避重试的
+        // 会话时横幅先消失、几秒后又出现。
+        const { store, session } = prepareSession()
+        session.inputErrorMessage = '过期的 502'
+        store.handleEvent({
+          type: 'api_retry',
+          connectionId: 'conn-1',
+          data: { attempt: 2, max_retries: 5 },
+        } as any)
+
+        store.hydrateLiveSnapshot(1, { event_seq: 33, status: 'connected' })
+
+        expect(session.inputErrorMessage).toBeNull()
+        expect(session.apiRetry).toMatchObject({ attempt: 2 })
+      })
     })
   })
 

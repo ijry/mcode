@@ -403,12 +403,33 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     // 快照里的 `last_error` 是「最近一次 agent 报错」，与 status 无关 —— 冷启动进入一个
     // 已经失败的会话时，它是唯一能拿到原因的地方（实时 error 事件早发完了）。
     //
-    // 快照没带错误时**不清空已有的**：attach 快照可能比刚收到的实时 error 更旧
-    // （`shouldIgnoreOlderSnapshot` 只挡 seq 明确更小的，seq 缺失时挡不住），
-    // 拿一份不含错误的旧快照擦掉刚刚报出来的原因，等于故障又变回静默。
+    // 快照对这个字段是**权威值**，不是只增的补丁：服务端在 `StatusChanged(Prompting)`
+    // 时把 `last_error` 清成 None（`session_state.rs:679`），所以「更新的快照里没有错误」
+    // 明确意味着「已经没有错误了」。桌面端就是这么读的（`acp-connections-context.tsx`
+    // 新鲜路径上一句 `error: patch.lastError`，null 即清空）。
+    //
+    // 这里此前只有「有就写」那半边，于是本地那条错误没有任何退场机会 —— 表现为
+    // 「PC 端恢复正常了，mcode 还挂着一条过期的 502」。窗口比看起来窄，因为有三条
+    // 自愈路径（在线收到 `status_changed → thinking`、走 `runtime.connect()`、进程重启），
+    // 但 `ensureMountedDetailTabRuntime` 判定连接仍活时**只补快照、不 connect**
+    // （`index.vue:1710`），后台标签走的正是这条，于是那条错误可以一直挂着。
     const snapshotError = deriveSnapshotLastError(snapshot)
     if (snapshotError) {
       recordSessionError(session, snapshotError.message, snapshotError.details)
+    } else if (isProvablyFresherSnapshot(snapshotSeq, currentSeq)) {
+      // 只在**可证明更新**时才清。两个前提都是必需的：
+      // - `event_seq` 缺失时不清：那种快照的新旧无法判断，而 `shouldIgnoreOlderSnapshot`
+      //   同样挡不住它，拿它擦掉刚报出来的原因等于故障又变回静默。
+      // - 严格大于，不用 `>=`：同 seq 说明快照并不比游标新，而本地那条错误可能来自
+      //   完全不推进游标的来源（`setSessionError` 写的发送失败根本没有 seq）。
+      //
+      // 代价：`inputErrorMessage` 也承载两类瞬态通知（`turn_queued` 的「任务已加入
+      // 队列。」、`turn_cancel_requested` 的「正在取消当前任务...」），它们绕过
+      // `recordSessionError` 直接赋值，因此也会被这里清掉。已确认接受 —— 那些通知本身
+      // 就是瞬态的。真正的解法是给错误加来源标记，但那要动 13 处清除点。
+      session.inputErrorMessage = null
+      session.inputErrorDetails = null
+      session.inputErrorTurnKey = null
     }
     // AIR 失败表在快照里（`session_state.rs:1671`，注释明说是为 mid-session attach 设计
     // 的），所以**冷启动就能拿到** —— 这是它比 Claude 的 `api_retry` 强的地方，后者必须
@@ -2602,6 +2623,30 @@ function deriveRuntimeStatus(snapshot: any, liveMessage: LiveMessage | null) {
 function resolveLiveMessageId(...candidates: Array<string | null | undefined>) {
   const normalized = firstString(...candidates)
   return normalized || createRuntimeLiveMessageId()
+}
+
+/**
+ * 这份快照能否**证明**自己比已应用的事件游标更新。
+ *
+ * 只服务一件事：决定「快照里没有 `last_error`」是否足以清掉本地那条错误。写入不看这个
+ * 判据 —— 报错宁可多显示，清除才需要证据。
+ *
+ * 两条都不成立时返回 false（保守不清）：
+ * - `snapshotSeq` 不是有限数（旧后端 / 字段缺失）：新旧无从判断。
+ * - 本地游标已存在且 `snapshotSeq <= currentSeq`：快照并不比游标新。**同 seq 也算不新**
+ *   —— 本地那条错误可能来自完全不推进游标的来源（发送失败走 `setSessionError`，根本
+ *   没有 seq），此时同 seq 快照证明不了它已经过期。
+ *
+ * `currentSeq` 为 null（冷启动，一条事件都没应用过）时任何带 seq 的快照都算更新：那份
+ * 快照就是此刻唯一的真相来源。
+ */
+function isProvablyFresherSnapshot(
+  snapshotSeq: number | null,
+  currentSeq: number | null
+) {
+  if (typeof snapshotSeq !== "number" || !Number.isFinite(snapshotSeq)) return false
+  if (typeof currentSeq !== "number" || !Number.isFinite(currentSeq)) return true
+  return snapshotSeq > currentSeq
 }
 
 /**
