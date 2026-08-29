@@ -1458,7 +1458,7 @@ function syncDetailNativeStatusBar() {
   } catch {}
 
   syncIosStandaloneStatusBar({
-    cyberModeEnabled: detailTheme.value === "matrix",
+    darkStatusBarBand: detailTheme.value === "matrix",
     statusBarBackgroundColor: statusBarBackgroundColor,
     pageBackgroundColor,
   })

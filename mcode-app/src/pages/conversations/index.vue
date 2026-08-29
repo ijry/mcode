@@ -360,7 +360,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from "vue"
+import { ref, computed, getCurrentInstance, onMounted, watch } from "vue"
 import { onHide, onPullDownRefresh, onShow, onUnload } from "@dcloudio/uni-app"
 import { useAuthStore } from "@/stores/auth"
 import { useConversationRuntimeStore } from "@/stores/conversationRuntime"
@@ -439,6 +439,8 @@ import {
   normalizeOpenedTabsList,
 } from "@/services/conversation/pcTabSyncService"
 import { refreshConversationTabBadge } from "@/services/conversation/conversationTabBadgeService"
+import { syncIosStandaloneStatusBar } from "@/services/iosStandaloneStatusBar"
+import { isDarkThemeMode } from "@/services/theme"
 import {
   buildConnectionConversationSnapshot,
   mapConversationSummaryRecordToConversation,
@@ -466,6 +468,11 @@ import type { RealtimeBridgeHealth } from "@/types/acp"
 
 const auth = useAuthStore()
 const runtime = useConversationRuntimeStore()
+const currentInstance = getCurrentInstance()
+// upThemeVar 是 uview 用 Options API mixin 注入的方法，只有模板作用域能直接调；
+// <script setup> 里必须经 proxy 取，否则 ReferenceError（computed 里会静默失败）。
+const upThemeVar = (varName: string, fallbackColor?: string) =>
+  currentInstance?.proxy?.upThemeVar?.(varName, fallbackColor) ?? (fallbackColor || "")
 const loading = ref(false)
 const searchKeyword = ref("")
 const showCreateDialog = ref(false)
@@ -750,6 +757,7 @@ onShow(() => {
   livePreviewTransferredConversationIds.clear()
   loadConversationLivePreviewPreference()
   loadHideCompletedPreference()
+  syncConversationListNativeStatusBar()
   const shouldForceRefresh = consumeConversationListDirty()
   void loadOverviewDataAfterConnectionPrepare(
     shouldForceRefresh ? { force: true } : undefined
@@ -761,6 +769,53 @@ onShow(() => {
 
 function loadConversationLivePreviewPreference() {
   livePreviewEnabled.value = readConversationListLiveStreamEnabled()
+}
+
+/**
+ * 顶部状态栏色带同步。
+ *
+ * iOS standalone（`apple-mobile-web-app-status-bar-style` 非 `black-translucent`）下 webview
+ * 画不到状态栏那条带子，它由系统按 `html`/`body` 背景 + status bar style 绘制。列表页此前从不
+ * 调这个 service，色带就停在 index.html 启动时写的 `black`，玻璃 navbar 上方于是压着一条黑带 ——
+ * 视觉上就是「顶部导航没沉浸进状态栏」。
+ *
+ * 刻意不改成 `black-translucent`：现有页面都各自消费过一次 safe-area，full-bleed 会把上下
+ * inset 重复计算一遍（见 docs/mcode-architecture-notes/2026-07-05-p63-detail-cyber-mode.md）。
+ *
+ * 底色必须给 6 位实色 —— service 的 normalizeHexColor 会把 `var()`/`rgba()` 判非法后回退成黑色，
+ * 正是要修的黑带。navbar 玻璃色 `--up-navbar-glass-bg-color` 只由 u-navbar 组件的 CSS 定义、不在
+ * uview 的 JS 主题表里，`upThemeVar` 取不到，所以用表里现成的 `--up-card-bg-color` 近似 navbar
+ * 表面：玻璃层是 0.82 不透明度的白（深色下为 rgba(28,28,30,.82)）叠在页面顶部渐变上，合成结果
+ * 比 `--up-page-bg-color` 更接近卡片色，色带与它同色才不会在 navbar 上沿留一条接缝。
+ *
+ * 两个参数给同一个值是刻意的：色带、theme-color、`html`/`body` 背景在这一页都应该是 navbar
+ * 表面色。`body` 背景平时被 `.conversations-page` 的渐变盖住，只在橡皮筋回弹时露出。
+ */
+function syncConversationListNativeStatusBar() {
+  const darkStatusBarBand = isDarkThemeMode()
+  const surfaceFallbackColor = darkStatusBarBand ? "#1c1c1e" : "#ffffff"
+  const navbarSurfaceColor = upThemeVar("--up-card-bg-color", surfaceFallbackColor) || surfaceFallbackColor
+  const frontColor = darkStatusBarBand ? "#ffffff" : "#000000"
+
+  try {
+    const result = uni.setNavigationBarColor?.({
+      frontColor,
+      backgroundColor: navbarSurfaceColor,
+      animation: { duration: 0, timingFunc: "linear" },
+    })
+    result && typeof (result as Promise<unknown>).catch === "function" && (result as Promise<unknown>).catch(() => {})
+  } catch {}
+
+  syncIosStandaloneStatusBar({
+    darkStatusBarBand,
+    statusBarBackgroundColor: navbarSurfaceColor,
+    pageBackgroundColor: navbarSurfaceColor,
+  })
+
+  try {
+    const nativeNavigator = (globalThis as any).plus?.navigator
+    nativeNavigator?.setStatusBarStyle?.(darkStatusBarBand ? "light" : "dark")
+  } catch {}
 }
 
 function loadHideCompletedPreference() {

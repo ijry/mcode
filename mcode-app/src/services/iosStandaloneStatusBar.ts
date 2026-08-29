@@ -1,7 +1,11 @@
 export type IosStandaloneStatusBarStyle = "default" | "black" | "black-translucent"
 
 export interface IosStandaloneStatusBarOptions {
-  cyberModeEnabled: boolean
+  /**
+   * 状态栏色带是否走深色（深色底 + 浅色图标）。命名按它控制的视觉来，
+   * 而不是按某个页面主题 —— 会话详情页的 matrix 主题和列表页的深色主题都会打开它。
+   */
+  darkStatusBarBand: boolean
   statusBarBackgroundColor: string
   pageBackgroundColor: string
 }
@@ -22,7 +26,7 @@ export function syncIosStandaloneStatusBar(options: IosStandaloneStatusBarOption
 
   const statusColor = normalizeHexColor(options.statusBarBackgroundColor, "#000000")
   const pageColor = normalizeHexColor(options.pageBackgroundColor, statusColor)
-  syncMetaContent(THEME_COLOR_META_NAME, options.cyberModeEnabled ? statusColor : pageColor)
+  syncMetaContent(THEME_COLOR_META_NAME, options.darkStatusBarBand ? statusColor : pageColor)
 
   if (!isIosStandaloneDisplayMode()) return
 
@@ -31,9 +35,9 @@ export function syncIosStandaloneStatusBar(options: IosStandaloneStatusBarOption
   // safe areas; full-bleed mode double-counts top and bottom insets.
   syncMetaContent(
     APPLE_STATUS_BAR_META_NAME,
-    options.cyberModeEnabled ? "black" : "default"
+    options.darkStatusBarBand ? "black" : "default"
   )
-  document.documentElement.style.backgroundColor = options.cyberModeEnabled ? statusColor : pageColor
+  document.documentElement.style.backgroundColor = options.darkStatusBarBand ? statusColor : pageColor
   document.body?.style.setProperty("background-color", pageColor)
 }
 
