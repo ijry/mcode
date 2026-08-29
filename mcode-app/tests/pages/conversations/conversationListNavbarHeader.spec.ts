@@ -7,6 +7,7 @@ function read(relativePath: string) {
 
 const PAGE = "../../../src/pages/conversations/index.vue"
 const NAVBAR = "../../../src/pages/conversations/components/ConversationsNavbar.vue"
+const SEARCHBAR = "../../../src/pages/conversations/components/ConversationsSearchBar.vue"
 
 describe("conversation list navbar header contract", () => {
   // 顶栏已抽成 ConversationsNavbar.vue。navbar 本身的形制断言读子组件，页面侧只断言
@@ -20,7 +21,6 @@ describe("conversation list navbar header contract", () => {
     // tab 页没有返回目标；一旦误开 autoBack 会 navigateBack 到上一个 tab。
     expect(source).toContain(':autoBack="false"')
     expect(source).toContain('height="44px"')
-    expect(source).toContain(`:leftIcon="historyMode ? 'arrow-left' : ''"`)
     // 返回动作作为事件上抛，页面接住后再决定是否关历史面板。
     expect(source).toContain('@leftClick="emit(\'back\')"')
   })
@@ -31,11 +31,11 @@ describe("conversation list navbar header contract", () => {
     expect(source).toContain("<ConversationsNavbar")
     expect(source).toContain(':history-mode="showHistoryPanel"')
     expect(source).toContain(':title="historyGroupTitle"')
-    expect(source).toContain(':can-create="canCreateInHistory"')
+    expect(source).toContain(':hide-completed="hideCompletedConversations"')
     expect(source).toContain(':show-selection-entry="showSelectionEntry"')
     expect(source).toContain(':selection-mode="selectionMode"')
     expect(source).toContain('@back="handleNavbarLeftClick"')
-    expect(source).toContain('@create="createConversation()"')
+    expect(source).toContain('@toggle-hide-completed="toggleHideCompletedConversations"')
     expect(source).toContain('@toggle-selection="toggleSelectionMode"')
   })
 
@@ -69,15 +69,105 @@ describe("conversation list navbar header contract", () => {
     expect(block).toContain("closeHistoryPanel()")
   })
 
-  it("keeps both right-slot buttons independently clickable", () => {
+  // 「已完成筛选」与「选择」收进左侧 up-select 下拉，顶栏因此没有 right 槽；新建的 ＋
+  // 搬到搜索行。这一组钉住那个归属，防止有人把按钮又摆回顶栏右侧。
+  it("puts the filter and selection actions inside a left up-select menu", () => {
     const source = read(NAVBAR)
 
-    // right 槽整块共用一个 @rightClick，两个按钮要分别响应，所以不能用它。
+    expect(source).toContain("<template #left>")
+    expect(source).toContain("<up-select")
+    expect(source).toContain('class="conversations-navbar__menu"')
+    // 触发区是纯图标：#text 槽放图标顶掉默认 label，#icon 槽塞占位节点顶掉默认 arrow-down。
+    expect(source).toContain("<template #text>")
+    expect(source).toContain('class="conversations-navbar__menu-icon"')
+    expect(source).toContain('name="more-dot-fill"')
+    expect(source).toContain("<template #icon>")
+    expect(source).toContain('class="conversations-navbar__menu-icon-slot"')
+    // 文案版触发区不许回来（标题的位置在 center 槽）。
+    expect(source).not.toContain("conversations-navbar__menu-label")
+    expect(source).toContain('@select="handleMenuSelect"')
+
+    // 两个动作只通过菜单项上抛，顶栏不再自己摆按钮。
+    expect(source).toContain('emit("toggle-hide-completed")')
+    expect(source).toContain('emit("toggle-selection")')
+    expect(source).not.toContain("<template #right>")
     expect(source).not.toContain("@rightClick")
-    expect(source).toContain('class="conversations-navbar__select"')
-    expect(source).toContain('@click="emit(\'toggle-selection\')"')
-    expect(source).toContain('class="conversations-navbar__action"')
-    expect(source).toContain('@click="emit(\'create\')"')
+    expect(source).not.toContain("conversations-navbar__action")
+  })
+
+  // up-select 不绑 current，菜单没有勾选态可显示，所以文案必须说「点下去会发生什么」。
+  // 写成当前状态（「已隐藏已完成」）的话，用户读不出这是开关还是标签。
+  it("labels menu items by the action they perform", () => {
+    const source = read(NAVBAR)
+
+    expect(source).toContain('props.hideCompleted ? "显示已完成会话" : "隐藏已完成会话"')
+    expect(source).toContain('props.selectionMode ? "退出选择" : "选择会话"')
+    // 没有可选中卡片时不出「选择会话」；但已在选择模式里必须保留，否则筛选把卡片全藏掉后
+    // 用户没有退出选择的入口。
+    expect(source).toContain("if (props.showSelectionEntry || props.selectionMode) {")
+  })
+
+  // 左侧触发区改成图标后，「会话」这个页面标题必须落在 center 槽，否则概览模式没有标题。
+  it("keeps the overview title in the navbar center slot", () => {
+    const source = read(NAVBAR)
+
+    expect(source).toContain("<template #center>")
+    expect(source).toContain('{{ historyMode ? title : "会话" }}')
+  })
+
+  it("moves the create-conversation plus into the search row", () => {
+    const navbar = read(NAVBAR)
+    const searchbar = read(SEARCHBAR)
+    const page = read(PAGE)
+
+    expect(navbar).not.toContain("emit('create')")
+    expect(searchbar).toContain('class="conversations-create-button"')
+    expect(searchbar).toContain('@click="emit(\'create\')"')
+    expect(searchbar).toContain('v-if="canCreate"')
+    expect(page).toContain(':can-create="canCreateConversation"')
+    expect(page).toContain('@create="createConversation()"')
+  })
+
+  // 搜索行高度：up-search 的 :height 用 px，容器/输入框/圆钮用 rpx，必须成对。
+  // 32px === 64rpx（750rpx 设计稿下 1px = 2rpx），错开就会出现输入框与圆钮不同高。
+  it("keeps the search row compact with matching heights", () => {
+    const source = read(SEARCHBAR)
+
+    expect(source).toContain(':height="32"')
+    expect(source).not.toContain("80rpx")
+    const contentBlock = source.slice(
+      source.indexOf(".conversations-searchbar :deep(.u-search__content) {"),
+      source.indexOf("}", source.indexOf(".conversations-searchbar :deep(.u-search__content) {")) + 1
+    )
+    expect(contentBlock).toContain("height: 64rpx;")
+    const buttonBlock = source.slice(
+      source.indexOf(".conversations-create-button {"),
+      source.indexOf("}", source.indexOf(".conversations-create-button {")) + 1
+    )
+    expect(buttonBlock).toContain("width: 64rpx;")
+    expect(buttonBlock).toContain("height: 64rpx;")
+  })
+
+  // 「已完成」筛选胶囊已从搜索行移走，别留下副本 —— 两个入口切同一个偏好会让用户
+  // 以为是两个开关。
+  it("drops the completed-filter chip from the search row", () => {
+    const source = read(SEARCHBAR)
+
+    expect(source).not.toContain("conversations-filter-chip")
+    expect(source).not.toContain("toggle-hide-completed")
+  })
+
+  // 选择模式下底部是批量操作条，新建会打断选择流程（这条规则从原顶栏的
+  // `v-if="!selectionMode"` 继承）；历史模式没有分组键时新建弹层没有默认连接可用。
+  it("keeps the create button's visibility rules", () => {
+    const source = read(PAGE)
+    const block = source.slice(
+      source.indexOf("const canCreateConversation = computed(() => {"),
+      source.indexOf("})", source.indexOf("const canCreateConversation = computed(() => {")) + 2
+    )
+
+    expect(block).toContain("if (selectionMode.value) return false")
+    expect(block).toContain("if (showHistoryPanel.value) return Boolean(historyGroupKey.value)")
   })
 
   it("hides the title field from the create sheet", () => {
@@ -98,9 +188,11 @@ describe("conversation list navbar header contract", () => {
   it("switches the navbar into history mode without new reactive state", () => {
     const source = read(NAVBAR)
 
-    // 标题与右侧按钮都只读传入的 prop，子组件不引入新的 ref。
-    expect(source).toContain('historyMode ? title : "会话"')
-    expect(source).toContain('v-if="canCreate"')
+    // 标题与菜单项都只读传入的 prop，子组件不引入新的 ref（menuOptions 是 computed）。
+    expect(source).toContain('name="arrow-left"')
+    expect(source).toContain('class="conversations-navbar__title u-line-1"')
+    expect(source).toContain('v-if="historyMode"')
+    expect(source).not.toContain("ref(")
   })
 
   // .u-navbar__content 自带 background-color: $u-bg-color，光靠 bgColor="transparent"

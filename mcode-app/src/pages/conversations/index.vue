@@ -10,18 +10,18 @@
       <ConversationsNavbar
         :history-mode="showHistoryPanel"
         :title="historyGroupTitle"
-        :can-create="canCreateInHistory"
+        :hide-completed="hideCompletedConversations"
         :show-selection-entry="showSelectionEntry"
         :selection-mode="selectionMode"
         @back="handleNavbarLeftClick"
-        @create="createConversation()"
+        @toggle-hide-completed="toggleHideCompletedConversations"
         @toggle-selection="toggleSelectionMode"
       />
 
       <ConversationsSearchBar
         v-model="searchKeyword"
-        :hide-completed="hideCompletedConversations"
-        @toggle-hide-completed="toggleHideCompletedConversations"
+        :can-create="canCreateConversation"
+        @create="createConversation()"
       />
 
       <!-- 无连接 -->
@@ -623,8 +623,16 @@ const createSheetDefaultConnectionKey = computed(() =>
   showHistoryPanel.value ? historyGroupKey.value : ""
 )
 
-const canCreateInHistory = computed(() => {
-  if (!showHistoryPanel.value || !historyGroupKey.value) return false
+/**
+ * 搜索行右侧的「＋」是否可见。
+ *
+ * 选择模式下藏掉：那时底部是批量操作条，新建会打断选择流程（这条规则从原顶栏的
+ * `v-if="!selectionMode"` 继承而来）。历史模式必须有分组键，否则新建弹层没有默认连接
+ * 可用 —— 这是原 `canCreateInHistory` 的判据。
+ */
+const canCreateConversation = computed(() => {
+  if (selectionMode.value) return false
+  if (showHistoryPanel.value) return Boolean(historyGroupKey.value)
   return true
 })
 

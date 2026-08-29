@@ -6,76 +6,119 @@
     :border="false"
     :autoBack="false"
     height="44px"
-    :leftIcon="historyMode ? 'arrow-left' : ''"
-    :leftIconColor="upThemeVar('--up-main-color', '#191c1e')"
     bgColor="transparent"
     :statusBarBgColor="NAVBAR_GLASS_BG_COLOR"
     @leftClick="emit('back')"
   >
-    <template #center>
-      <text class="conversations-navbar__title u-line-1">
-        {{ historyMode ? title : "会话" }}
-      </text>
+    <!-- 自己渲染 left 槽，所以不再传 leftIcon（有插槽时该 prop 不生效）。
+         概览模式下这里是纯图标的下拉菜单触发区，历史模式下退回返回箭头。 -->
+    <template #left>
+      <up-icon
+        v-if="historyMode"
+        name="arrow-left"
+        size="20"
+        :color="upThemeVar('--up-main-color', '#191c1e')"
+      ></up-icon>
+      <up-select
+        v-else
+        class="conversations-navbar__menu"
+        :options="menuOptions"
+        keyName="value"
+        labelName="label"
+        optionsWidth="320rpx"
+        @select="handleMenuSelect"
+      >
+        <!-- 触发区只有一个图标：文案「会话」已移到 center 槽。图标放 #text 槽，
+             #icon 槽必须塞一个真实但隐藏的节点 —— Vue 的 renderSlot 在插槽内容为空
+             （空 template / 只有注释）时会回落到默认内容，也就是 up-select 自带的
+             arrow-down，写 `<template #icon></template>` 是关不掉它的。 -->
+        <template #text>
+          <up-icon
+            class="conversations-navbar__menu-icon"
+            name="more-dot-fill"
+            size="20"
+            :color="upThemeVar('--up-main-color', '#191c1e')"
+          ></up-icon>
+        </template>
+        <template #icon>
+          <text class="conversations-navbar__menu-icon-slot"></text>
+        </template>
+      </up-select>
     </template>
-    <template #right>
-      <view class="conversations-navbar__actions">
-        <template v-if="historyMode">
-          <view
-            v-if="canCreate"
-            class="conversations-navbar__select"
-            @click="emit('create')"
-          >
-            <text class="conversations-navbar__select-text">新建</text>
-          </view>
-        </template>
-        <template v-else>
-          <view
-            v-if="showSelectionEntry"
-            class="conversations-navbar__select"
-            @click="emit('toggle-selection')"
-          >
-            <text class="conversations-navbar__select-text">{{ selectionMode ? "取消" : "选择" }}</text>
-          </view>
-          <view
-            v-if="!selectionMode"
-            class="conversations-navbar__action"
-            @click="emit('create')"
-          >
-            <up-icon name="plus" size="18" :color="upThemeVar('--up-primary', '#2f7cf6')"></up-icon>
-          </view>
-        </template>
-      </view>
+    <!-- 概览模式居中显示固定文案「会话」，历史模式居中显示分组名。 -->
+    <template #center>
+      <text class="conversations-navbar__title u-line-1">{{ historyMode ? title : "会话" }}</text>
     </template>
   </up-navbar>
 </template>
 
 <script setup lang="ts">
-import { getCurrentInstance } from "vue"
+import { computed, getCurrentInstance } from "vue"
 
 /**
- * 会话列表顶栏。两种形态：概览（标题「会话」+ 选择/新建）与历史（返回 + 历史标题 + 新建）。
+ * 会话列表顶栏。两种形态：概览（左侧图标下拉菜单 + 中间「会话」）与历史（返回 + 分组标题）。
  *
- * 纯受控：所有开关状态（是否历史模式、能否新建、是否显示选择入口、是否正在选择）都由页面
- * 传入，子组件只上抛三个动作事件。back 只在历史模式下可能触发（返回图标仅历史模式渲染）。
+ * 「已完成筛选」与「选择」两个动作收进左侧的 `up-select` 下拉，新建会话的 `＋` 移到搜索行
+ * （见 ConversationsSearchBar.vue），所以顶栏不再有 right 槽。
+ *
+ * 纯受控：所有开关状态（是否历史模式、是否隐藏已完成、是否显示选择入口、是否正在选择）都
+ * 由页面传入，子组件只上抛三个动作事件。back 只在历史模式下可能触发（返回图标仅历史模式
+ * 渲染，但 `.u-navbar__content__left` 这块点击区两种模式都在，故守卫留在页面）。
  */
-defineProps<{
-  /** 历史面板模式（决定标题、返回图标、右侧按钮布局）。 */
+const props = defineProps<{
+  /** 历史面板模式（决定左侧是返回箭头还是下拉菜单、中间是否显示分组标题）。 */
   historyMode: boolean
-  /** 历史模式下的标题；概览模式固定显示「会话」。 */
+  /** 历史模式下的标题；概览模式中间固定显示「会话」。 */
   title: string
-  /** 历史模式下是否显示「新建」。 */
-  canCreate: boolean
-  /** 概览模式下是否显示「选择」入口。 */
+  /** 是否隐藏已完成会话（决定菜单项文案是「显示」还是「隐藏」）。 */
+  hideCompleted: boolean
+  /** 概览模式下是否有可选中的卡片（无则不出「选择会话」这一项）。 */
   showSelectionEntry: boolean
-  /** 是否处于批量选择中（决定「选择」文案与是否隐藏「新建」）。 */
+  /** 是否处于批量选择中（决定选择项文案）。 */
   selectionMode: boolean
 }>()
 
 const emit = defineEmits<{
   (event: "back"): void
-  (event: "create"): void
+  (event: "toggle-hide-completed"): void
   (event: "toggle-selection"): void
 }>()
+
+const MENU_HIDE_COMPLETED = "hide-completed"
+const MENU_SELECTION = "selection"
+
+/**
+ * 下拉菜单项。文案随当前状态翻转（说的是「点下去会发生什么」，而不是当前状态），因为
+ * `up-select` 没有勾选态可用 —— 不绑 `current`，菜单每次打开都是无选中项。
+ *
+ * 「选择会话」只在有可选中卡片时出现（沿用页面的 `showSelectionEntry`）；已经在选择模式里
+ * 时无条件保留，否则筛选把卡片全藏掉后用户就没有退出选择的入口了。
+ */
+const menuOptions = computed(() => {
+  const options = [
+    {
+      value: MENU_HIDE_COMPLETED,
+      label: props.hideCompleted ? "显示已完成会话" : "隐藏已完成会话",
+    },
+  ]
+  if (props.showSelectionEntry || props.selectionMode) {
+    options.push({
+      value: MENU_SELECTION,
+      label: props.selectionMode ? "退出选择" : "选择会话",
+    })
+  }
+  return options
+})
+
+function handleMenuSelect(item: { value?: string }) {
+  if (item?.value === MENU_HIDE_COMPLETED) {
+    emit("toggle-hide-completed")
+    return
+  }
+  if (item?.value === MENU_SELECTION) {
+    emit("toggle-selection")
+  }
+}
 
 /**
  * 状态栏底色。**直接给 CSS `var()` 字符串，不在 script 里求值** —— `upThemeVar` 是 uview 用
@@ -140,49 +183,44 @@ const upThemeVar = (varName: string, fallbackColor?: string) =>
   color: var(--up-main-color, #191c1e);
 }
 
-/* .u-navbar__content__right 自带 padding: 0 13px，故这里不再另加外边距。 */
-.conversations-navbar__actions {
-  display: flex;
-  align-items: center;
-  gap: 12rpx;
-  flex-shrink: 0;
-}
-
-.conversations-navbar__select {
-  min-width: 84rpx;
-  height: 56rpx;
-  padding: 0 18rpx;
-  border-radius: 999rpx;
-  background: color-mix(in srgb, var(--up-primary, #2f7cf6) 10%, var(--up-card-bg-color, #ffffff) 90%);
+/* 图标化的下拉触发区。撑满 navbar 高度（见下条注释），所以这里只负责让图标居中并给出
+   一块比图标本身更宽的点击区。 */
+.conversations-navbar__menu-icon {
   display: flex;
   align-items: center;
   justify-content: center;
-}
-
-.conversations-navbar__select-text {
-  font-size: 24rpx;
-  line-height: 1;
-  font-weight: 700;
-  color: var(--up-primary, #2f7cf6);
-}
-
-.conversations-navbar__action {
   width: 56rpx;
-  height: 56rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 999rpx;
-  border: 1rpx solid rgba(255, 255, 255, 0.5);
-  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 50%, transparent);
-  backdrop-filter: blur(25rpx);
-  -webkit-backdrop-filter: blur(25rpx);
-  box-shadow: 0 6rpx 18rpx rgba(47, 124, 246, 0.08);
-  flex-shrink: 0;
-  transition: transform 0.2s ease;
+  height: 100%;
 }
 
-.conversations-navbar__action:active {
-  transform: scale(0.9);
+/* 占位节点，用来顶掉 up-select 默认 #icon 槽里的 arrow-down（空插槽会回落到默认内容）。 */
+.conversations-navbar__menu-icon-slot {
+  display: none;
+}
+
+/* 触发区撑满 navbar 高度。u-select 的面板定位是 `top: calc(100% + 4px)`，若触发区只有文字
+   高度（约 20px，在 44px 里居中），面板会从 navbar 中部往下弹，压住 navbar 下沿。撑满之后
+   「100%」就等于 navbar 底边。
+   `.u-navbar__content__left` 是 top:0/bottom:0 的绝对定位块 + align-items: center，
+   所以这里的 100% 解析得到确定值。 */
+.conversations-navbar__menu,
+.conversations-navbar__menu :deep(.u-select__content),
+.conversations-navbar__menu :deep(.u-select__label) {
+  height: 100%;
+}
+
+/* 面板自身的底色/边框由 u-select 用 --up-card-bg-color / --up-border-color 画好了（随主题
+   翻转），这里只补圆角与投影，让它读起来跟本页的玻璃卡片同族。
+   `:deep()` 能命中是因为子组件根元素带着本组件的 scope 属性。 */
+.conversations-navbar__menu :deep(.u-select__options) {
+  border-radius: 20rpx;
+  overflow: hidden;
+  box-shadow: 0 18rpx 52rpx rgba(15, 23, 42, 0.16);
+}
+
+/* u-select 自带 `margin-bottom: 46px`（为它原本的表单场景留位），在 navbar 里没有意义 ——
+   它会把面板下方撑出一段不可见的可点区域。 */
+.conversations-navbar__menu :deep(.u-select__options__wrap) {
+  margin-bottom: 0;
 }
 </style>
