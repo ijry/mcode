@@ -21,6 +21,8 @@ const COMMAND_TIMEOUT_MS: Record<string, number> = {
   acp_uninstall_agent: 180_000,
 }
 
+const PAIR_TIMEOUT_MS = 15_000
+
 function getHeaders(session?: RelaySessionInfo | null): HeadersInit {
   const headers: Record<string, string> = {
     "content-type": "application/json",
@@ -63,6 +65,18 @@ function normalizePairTargetMetadata(input: unknown): PairTargetMetadata {
   }
 }
 
+/**
+ * 401 时网关只回 `{"error":"pairing failed"}`，直译出来用户无从下手。
+ * 配对码是一次性的（relay 侧 `consumeOffer`），所以这条路径最常见的真实原因是
+ * 「码已被用过 / 已过期」，提示要把重新出码这个动作说出来。
+ */
+function describePairFailure(body: unknown, statusCode: number): string {
+  if (statusCode === 401 || statusCode === 403) {
+    return "配对码已失效或已被使用，请在电脑端重新生成配对码"
+  }
+  return toResponseErrorMessage(body, statusCode)
+}
+
 export class RelayGateway implements CodegGateway {
   readonly mode = "relay" as const
 
@@ -86,11 +100,19 @@ export class RelayGateway implements CodegGateway {
         secret: params.secret,
       },
       header: { "content-type": "application/json" },
+      timeout: PAIR_TIMEOUT_MS,
     })
+    const statusCode = Number((res as any).statusCode || 0)
+    if (statusCode >= 400) {
+      throw new Error(`pair: ${describePairFailure(res.data, statusCode)}`)
+    }
     const raw = res.data as {
       accessToken?: string
       refreshToken?: string
       target?: unknown
+    }
+    if (!raw?.accessToken) {
+      throw new Error("pair: 网关未返回访问令牌，请重新获取配对码后重试")
     }
     const target = normalizePairTargetMetadata(raw.target)
     const data: RelaySessionInfo = {

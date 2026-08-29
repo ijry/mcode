@@ -277,7 +277,7 @@
               </u-radio-group>
             </u-form-item>
 
-            <u-form-item label="目标类型" prop="targetAgent" required>
+            <u-form-item v-if="showTargetAgentPicker" label="目标类型" prop="targetAgent" required>
               <u-subsection
                 :list="targetAgentLabels"
                 :current="targetAgentIndex"
@@ -333,7 +333,7 @@
                 ></u-input>
               </u-form-item>
               <text class="connections-sheet__tip">
-                请使用所选目标生成的配对代码。Codeg、OpenCode 与 MCode Desktop 可以分别通过同一网关连接。
+                {{ pairCodeTip }}
               </text>
             </view>
           </u-form>
@@ -462,6 +462,13 @@ import {
 } from "@/services/remoteSettings"
 import { openGuardedExternalUrl } from "@/services/externalLinkGuard"
 import { connectionBaseUrl } from "@/services/connection/connectionLookup"
+import { probeWithRetry } from "@/services/connection/reachability"
+import {
+  getPairCodeTip,
+  getTargetAgentIndex,
+  getVisibleTargetAgentOptions,
+  resolveTargetAgentByIndex,
+} from "./connectionTargetAgentOptions"
 
 declare const plus: any
 
@@ -470,12 +477,6 @@ const HOST_FALLBACK_IMAGE = "/static/connection-hosts/other-computer.svg"
 const OFFICIAL_GATEWAY_BASE_URL = normalizeBaseUrl(
   String(import.meta.env.VITE_MCODE_OFFICIAL_GATEWAY_BASE_URL || "https://mcode-relay.lingyun.net")
 )
-const targetAgentOptions = [
-  { label: "Codeg", value: "codeg" as ConnectionTargetAgent },
-  { label: "OpenCode", value: "opencode" as ConnectionTargetAgent },
-  { label: "MCode Desktop", value: "mcode-desktop" as ConnectionTargetAgent },
-]
-const targetAgentLabels = targetAgentOptions.map((item) => item.label)
 const gatewayProviderOptions = [
   { label: "MCode 官方网关", value: "official" as ConnectionGatewayProvider },
   { label: "自定义", value: "custom" as ConnectionGatewayProvider },
@@ -514,6 +515,8 @@ const reconnectTimerMap = new Map<string, ReturnType<typeof setTimeout>>()
 const stoppedWatcherKeys = new Set<string>()
 const NETWORK_FAILURE_HINT = "请检查主机网络可达性、内网穿透地址稳定性，以及电脑端 Web 服务是否开启。"
 const CONNECTION_RETRY_DELAY_MS = 3000
+/** 单次探测超时：3s 在移动网络 + 冷启动网关下经常不够，第二次点确认才成功多半就是这个。 */
+const CONNECTION_PROBE_TIMEOUT_MS = 8000
 
 type ConnectionItem = ConnectionContext
 
@@ -532,10 +535,12 @@ const form = ref({
 
 const connections = ref<ConnectionItem[]>([])
 const popupTitle = computed(() => (editingConnectionKey.value ? "编辑连接" : "新增连接"))
-const targetAgentIndex = computed(() => {
-  const index = targetAgentOptions.findIndex((item) => item.value === form.value.targetAgent)
-  return index >= 0 ? index : 0
-})
+const targetAgentLabels = computed(() =>
+  getVisibleTargetAgentOptions(form.value.targetAgent).map((item) => item.label)
+)
+const showTargetAgentPicker = computed(() => targetAgentLabels.value.length > 1)
+const targetAgentIndex = computed(() => getTargetAgentIndex(form.value.targetAgent))
+const pairCodeTip = computed(() => getPairCodeTip(form.value.targetAgent))
 
 const connectionActions = computed(() => {
   const current = connections.value[currentConnectionIndex.value]
@@ -684,7 +689,7 @@ function handleRouteModeChange(value: string) {
 }
 
 function handleTargetAgentChange(index: number) {
-  form.value.targetAgent = targetAgentOptions[index]?.value || "codeg"
+  form.value.targetAgent = resolveTargetAgentByIndex(index, form.value.targetAgent)
 }
 
 function handleGatewayProviderSelect(item: { value?: ConnectionGatewayProvider }) {
@@ -792,10 +797,25 @@ async function submitConnection() {
         hostModelId: form.value.hostModelId,
       })
 
-      await assertConnectionReachable(newConnection)
+      // 配对码是一次性的：pair 已经成功就必须落盘，否则探测失败会把这张码白白烧掉，
+      // 用户再点一次确认只会拿到 401。探测结果只决定卡片状态与提示文案。
+      const reachability = await probeConnectionReachabilityWithRetry(newConnection)
       saveConnection(newConnection, previousKey || undefined)
       syncConnectionRuntimeState(previousKey, newConnection)
-      uni.showToast({ title: "配对成功", icon: "success" })
+      if (reachability.online) {
+        uni.showToast({ title: "配对成功", icon: "success" })
+      } else {
+        markConnectionFailure(
+          connectionKey(newConnection),
+          reachability.error || NETWORK_FAILURE_HINT,
+          "error"
+        )
+        uni.showToast({
+          title: `配对已完成，但主机暂时不可达：${reachability.error || NETWORK_FAILURE_HINT}`,
+          icon: "none",
+          duration: 4500,
+        })
+      }
     }
 
     closeAddPopup()
@@ -1359,11 +1379,21 @@ function formatConnectionFailureToast(error: unknown) {
   return `连接失败：${message}`
 }
 
+/**
+ * 探测可达性，失败时在短窗口内重试。
+ *
+ * relay 的 `online` 只反映桌面端 WebSocket 当下是否注册（无心跳宽限），配对刚完成的
+ * 一两秒里探到 offline 属于正常抖动，单次判定会把它误报成「电脑端目标未在线」。
+ */
 async function assertConnectionReachable(conn: ConnectionItem) {
-  const result = await probeConnectionOnline(conn)
+  const result = await probeConnectionReachabilityWithRetry(conn)
   if (!result.online) {
     throw new Error(result.error || NETWORK_FAILURE_HINT)
   }
+}
+
+function probeConnectionReachabilityWithRetry(conn: ConnectionItem) {
+  return probeWithRetry(() => probeConnectionOnline(conn))
 }
 
 function extractErrorMessage(error: unknown) {
@@ -1618,7 +1648,7 @@ async function probeDirectOnline(conn: ConnectionItem): Promise<ProbeConnectionR
         "content-type": "application/json",
         ...(token ? { authorization: `Bearer ${token}` } : {}),
       },
-      timeout: 3000,
+      timeout: CONNECTION_PROBE_TIMEOUT_MS,
     })
     const online = Number(res.statusCode) >= 200 && Number(res.statusCode) < 400
     return online
@@ -1640,7 +1670,7 @@ async function probeRelayOnline(conn: ConnectionItem): Promise<ProbeConnectionRe
       header: {
         authorization: `Bearer ${session.accessToken}`,
       },
-      timeout: 3000,
+      timeout: CONNECTION_PROBE_TIMEOUT_MS,
     })
 
     if (Number(response.statusCode) !== 200) {
