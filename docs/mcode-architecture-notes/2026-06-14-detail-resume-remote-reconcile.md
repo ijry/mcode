@@ -1,5 +1,9 @@
 # Detail Resume Remote Reconcile
 
+> 2026-08-30 update: `forceRemoteTurnReconcileOnLoad` 已被
+> `2026-08-30-23-21-history-window-entry-refresh.md` 取代。详情页现在在热运行时、
+> SQLite 水合和冷启动入口都会请求最新尾窗详情；后台恢复不再需要单独的强制对账标记。
+
 ## Summary
 
 会话详情页此前在应用后台恢复后，或者冷重开后命中旧的 runtime 持久化记录时，如果本地 runtime 里仍有可渲染消息状态，就会直接复用该 hot runtime，不再主动向远端拉取完整会话 turns。这样会导致一种场景：

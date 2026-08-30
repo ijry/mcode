@@ -2,6 +2,12 @@
 
 **文件**：`2026-08-19-14-13-conversation-detail-history-pull-refresh.md`
 
+> 2026-08-30 更新：热运行时 / SQLite 水合入口现在都会立即请求最新尾窗详情并建立
+> `historyWindow`，不再把独立窗口探测作为正常入口路径。下面关于
+> `shouldForceRemoteTurnReconcile`、首次进入不对账、以及探测“绝不覆盖 localTurns”的描述
+> 只保留为历史背景；当前复刻请以
+> `2026-08-30-23-21-history-window-entry-refresh.md` 为准。
+
 ## 现象（用户原话）
 
 > 无法下拉加载分页的历史消息啊并且顶部的上滑加载更早消息不应该固定应显示在列表上方

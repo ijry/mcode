@@ -699,9 +699,8 @@ const permissionSubmitting = ref(false)
 const pendingPermissionSubmittingOptionId = ref("")
 const questionSubmitting = ref(false)
 const askQuestionSelections = ref<Record<string, QuestionSelectionState>>({})
-const forceRemoteTurnReconcileOnLoad = ref(false)
-// 正在进行的窗口探测，按会话去重。watcher 与 loadConversation 都会调
-// ensureConversationHistoryWindow，没有这个守卫会并发发出多个相同的尾窗请求。
+// 正在进行的窗口探测，按会话去重。watcher 与手势重试都可能补窗口，
+// 没有这个守卫会并发发出多个相同的尾窗请求。
 const historyWindowProbeConversationIds = new Set<number>()
 let detailAgentProbeToken = 0
 let stuckPromptTimer: ReturnType<typeof setTimeout> | null = null
@@ -2297,7 +2296,6 @@ onShow(() => {
   if (!hasLoadedOnce.value || !conversationId.value || loading.value) return
   if (!needsResumeRefresh.value) return
   needsResumeRefresh.value = false
-  forceRemoteTurnReconcileOnLoad.value = true
   void initializeDetailTabsShell()
   syncDetailBridgeHealth()
   syncLongWaitState()
@@ -2939,7 +2937,7 @@ function getRemoteConversationMetadata(
 }
 
 async function fetchRemoteConversationDetail(targetConversationId = conversationId.value) {
-  const gateway = await getDetailGateway({ refreshAuth: true })
+  const gateway = await getDetailGateway()
   return await gateway.call<any>(
     "get_folder_conversation",
     buildTailHistoryRequest(targetConversationId)
@@ -2947,7 +2945,7 @@ async function fetchRemoteConversationDetail(targetConversationId = conversation
 }
 
 async function fetchRemoteConversationDetailById(targetConversationId: number) {
-  const gateway = await getDetailGateway({ refreshAuth: true })
+  const gateway = await getDetailGateway()
   return await gateway.call<any>(
     "get_folder_conversation",
     buildTailHistoryRequest(targetConversationId)
@@ -2964,15 +2962,18 @@ async function applyRemoteHistoryWindowDetail(input: {
   const historyWindow = requireConversationHistoryWindow(input.detail)
   applyRemoteDetailStats(input.detail, input.conversationId)
 
-  const preserveRuntimeTurns =
-    hasInFlightConversationDetail(input.detail) ||
-    hasVolatileRuntimeState(input.runtimeSession) ||
-    Boolean(input.runtimeSession.inFlightUserTurnId)
+  const shouldKeepExistingTurns =
+    Boolean(input.runtimeSession.historyWindow) &&
+    (
+      hasInFlightConversationDetail(input.detail) ||
+      hasVolatileRuntimeState(input.runtimeSession) ||
+      Boolean(input.runtimeSession.inFlightUserTurnId)
+    )
 
-  if (preserveRuntimeTurns) {
-    // 轮次不动，窗口坐标也不能动 —— 两者必须成对。旧窗口仍精确描述 localTurns[0]，
-    // 换成尾窗那一组会把「翻了多远」打回一页，「加载更早」随后会连着几次拉回内存里
-    // 已有的轮次（全被去重掉），看起来就像按钮失灵。只允许刷新 turns_total。
+  if (shouldKeepExistingTurns) {
+    // 已有窗口且当前有实时/进行中状态时，轮次不动，窗口坐标也不能动 —— 两者必须
+    // 成对。旧窗口仍精确描述 localTurns[0]，换成尾窗那一组会把「翻了多远」打回一页。
+    // 没有旧窗口时不走这里：这次远端尾窗会成为 localTurns 的新基准，窗口坐标随它建立。
     runtime.setConversationHistoryWindow(
       input.conversationId,
       resolvePreservedTurnsWindow(input.runtimeSession.historyWindow, historyWindow)
@@ -3008,7 +3009,7 @@ async function applyRemoteHistoryWindowDetail(input: {
       conversationId: input.conversationId,
       detail: input.detail,
       fallbackFolderId: input.folderId,
-      persistTurns: !preserveRuntimeTurns,
+      persistTurns: !shouldKeepExistingTurns,
     })
   } catch (error) {
     detailDebugLog("history-window-persist-failed", {
@@ -3024,22 +3025,17 @@ async function applyRemoteHistoryWindowDetail(input: {
 /**
  * 确保 `session.historyWindow` 存在 —— 不存在就拉一次尾窗把它建起来。
  *
- * 为什么需要这个：`historyWindow` 是「能否往上翻页」的**唯一**依据
- * （`hasOlderConversationHistory` 只看 `turns_offset > 0`），但建立它的路径只有
- * `applyRemoteHistoryWindowDetail`，而 `loadConversation` 三条分支里只有冷启动那条
- * 会 await 它。列表页的实时预览会**预连接**会话（`conversations/index.vue` 的
- * `runLivePreviewAttach` → `runtime.connect`），realtime 事件把 `localTurns` 填出内容，
- * 于是 `hasRenderableRuntimeState` 为真、走热运行时分支；而该分支只在
- * `shouldForceRemoteTurnReconcile` 时才对账（首次进入恒为 false）。
- * 结果：**时间线有内容、窗口是 null，「加载更早」永远不动，指示器还显示
- * 「没有更多历史了」**。这就是用户报的「无法下拉加载分页的历史消息」。
+ * 为什么还需要这个：正常进入详情页时，热运行时 / SQLite 水合 / 冷启动都会发起
+ * `fetchRemoteConversationDetail`，由那份最新尾窗直接建立窗口。但入口请求可能失败，
+ * 或者已经有深分页窗口且正处于流式状态，此时 `applyRemoteHistoryWindowDetail` 会保留
+ * 旧时间线与旧窗口，只刷新统计。等流式结束后，仍需要这条轻量自愈路径把缺失窗口补齐。
  *
- * 而且这是个**自锁**：没窗口 → `loadOlderTurns` 在入口就返回 → 永远建不起窗口。
- * 所以必须由详情页主动探测，不能等翻页手势。
+ * `historyWindow` 是「能否往上翻页」的**唯一**依据（`hasOlderConversationHistory`
+ * 只看 `turns_offset > 0`）。如果窗口长期为 null，`loadOlderTurns` 在入口就返回，
+ * 用户滚到顶部也不会发出上一页请求。
  *
- * 关键约束：**这条路径绝不能覆盖 `localTurns`。** 走到这里意味着内存里可能正有
- * 流式内容/待回答卡片，整体赋值会把它们抹掉。所以只取窗口三元组，轮次交给
- * `applyRemoteHistoryWindowDetail` 自己的保留逻辑处理。
+ * 关键约束：窗口和 `localTurns` 仍由 `applyRemoteHistoryWindowDetail` 成对更新。
+ * 已有窗口且处于进行中状态时保留当前轮次；没有旧窗口时，远端尾窗会成为新的可分页基准。
  */
 async function ensureConversationHistoryWindow(input: {
   conversationId: number
@@ -3286,10 +3282,6 @@ async function loadConversation() {
     persistedRuntime = localState.persistedRuntime
     const localTurns = localState.localTurns
 
-    const shouldForceRemoteTurnReconcile =
-      forceRemoteTurnReconcileOnLoad.value ||
-      shouldReconcileTurnsFromPersistedRuntime(persistedRuntime)
-
     let agentType =
       firstString(managed?.connection.agentType, localSummary?.agentType) || "claude_code"
     let resumeSessionId =
@@ -3316,24 +3308,12 @@ async function loadConversation() {
 
     if (hasHotRuntime) {
       finishInitialLoad(cachedViewState, persistedRuntime)
-      if (shouldForceRemoteTurnReconcile) {
-        void reconcileRemoteTurnsAfterResume({
-          conversationId: targetConversationId,
-          folderId: targetFolderId,
-          instanceKey,
-          runtimeSession,
-        })
-      } else {
-        // 热运行时分支不做对账，于是**没有任何代码**会建立 historyWindow ——
-        // 列表页实时预览预热过的会话正是走这里进来的。补一次窗口探测，
-        // 否则「加载更早」永远不动（详见 ensureConversationHistoryWindow）。
-        void ensureConversationHistoryWindow({
-          conversationId: targetConversationId,
-          folderId: targetFolderId,
-          instanceKey,
-          runtimeSession,
-        })
-      }
+      void reconcileRemoteTurnsAfterResume({
+        conversationId: targetConversationId,
+        folderId: targetFolderId,
+        instanceKey,
+        runtimeSession,
+      })
     } else if (localTurns.length > 0) {
       runtimeSession.localTurns = localTurns
         .slice()
@@ -3422,9 +3402,6 @@ async function loadConversation() {
       uni.showToast({ title: `加载失败: ${message}`, icon: "none", duration: 3000 })
     }
   } finally {
-    if (loadToken === detailLoadSequence) {
-      forceRemoteTurnReconcileOnLoad.value = false
-    }
     finishInitialLoad(cachedViewState, persistedRuntime)
     if (loadToken === detailLoadSequence) {
       drainPendingDetailTabSwitch({ syncRemote: false })
@@ -3626,7 +3603,6 @@ async function reconcileRemoteTurnsAfterLocalHydrate(input: {
   runtimeSession: ReturnType<typeof runtime.getOrCreateSession>
 }) {
   if (!input.conversationId) return
-  if (hasVolatileRuntimeState(input.runtimeSession)) return
 
   try {
     const result = await fetchRemoteConversationDetail(input.conversationId)
@@ -3663,16 +3639,6 @@ function applyRemoteDetailStats(detail: any, targetConversationId = conversation
   const normalizedConversationId = Number(targetConversationId || 0)
   if (!normalizedConversationId) return
   runtime.applyConversationDetailStats(normalizedConversationId, detail)
-}
-
-function shouldReconcileTurnsFromPersistedRuntime(
-  persistedRuntime: ConversationRuntimeRecord | null
-) {
-  if (!persistedRuntime) return false
-  if (!persistedRuntime.isActive) return false
-  if (persistedRuntime.liveMessageJson) return true
-
-  return typeof persistedRuntime.lastAppliedSeq === "number" && persistedRuntime.lastAppliedSeq > 0
 }
 
 interface DetailProjectEntry {

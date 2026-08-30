@@ -733,7 +733,7 @@ describe("ConversationDetailBody", () => {
     expect(source).toContain('@message-scroll-upper="handleMessageListScrollUpper"');
   });
 
-  it("probes a history window on entry so paging cannot self-lock", () => {
+  it("refreshes the latest detail on entry so history paging starts with a real window", () => {
     const pageSource = fs.readFileSync(
       path.resolve(
         __dirname,
@@ -748,7 +748,8 @@ describe("ConversationDetailBody", () => {
     );
     expect(probeSource).not.toBe("");
 
-    // 已有窗口就不要再探测 —— 否则每次进详情都白发一个尾窗请求。
+    // 保留 watcher 的并发保护：它只负责异常重试/流式结束后的自愈，正常入口不再依赖它
+    // 建立窗口。
     expect(probeSource).toContain("if (input.runtimeSession.historyWindow) return");
     // 流式中/有 in-flight 用户轮次时建不出窗口：窗口的语义是「localTurns[0] 的全局
     // 下标」，而此刻我们不知道 localTurns[0] 落在哪，硬记一个尾窗坐标会造成不可
@@ -768,8 +769,7 @@ describe("ConversationDetailBody", () => {
       "if (session !== input.runtimeSession || session.historyWindow) return",
     );
 
-    // 自愈 watcher：流式结束后补探测。少了它，热运行时分支进来时正在流式的会话
-    // 会把窗口永久停在 null（探测当场早退，而翻页是唯一的另一个写窗口方)。
+    // 自愈 watcher 仍保留，用于入口请求失败或流式期间无法安全更新窗口时重试。
     expect(pageSource).toMatch(
       /hasVolatileRuntimeState\(runtimeSession\),[\s\S]*Number\(runtimeSession\?\.localTurns\?\.length \|\| 0\) > 0,/,
     );
@@ -779,6 +779,38 @@ describe("ConversationDetailBody", () => {
     expect(pageSource).toMatch(
       /void ensureConversationHistoryWindow\(\{[\s\S]*?conversationId: targetConversationId,/,
     );
+
+    // 热运行时和 SQLite 水合都必须直接发起最新详情请求；不能只有热运行时的强制
+    // 对账才请求，也不能在本地水合遇到 volatile 状态时静默跳过。
+    expect(pageSource).toMatch(
+      /if \(hasHotRuntime\) \{[\s\S]*?void reconcileRemoteTurnsAfterResume\(/,
+    );
+    expect(pageSource).toMatch(
+      /\} else if \(localTurns\.length > 0\) \{[\s\S]*?void reconcileRemoteTurnsAfterLocalHydrate\(/,
+    );
+    const localReconcileSource = pageSource.slice(
+      pageSource.indexOf("async function reconcileRemoteTurnsAfterLocalHydrate(input: {"),
+      pageSource.indexOf("function summarizeDetailTurns(detail: any)"),
+    );
+    expect(localReconcileSource).not.toMatch(
+      /if \(hasVolatileRuntimeState\(input\.runtimeSession\)\) return/,
+    );
+    const applyWindowSource = pageSource.slice(
+      pageSource.indexOf("async function applyRemoteHistoryWindowDetail(input: {"),
+      pageSource.indexOf("async function ensureConversationHistoryWindow(input: {"),
+    );
+    expect(applyWindowSource).toMatch(
+      /const shouldKeepExistingTurns =[\s\S]*Boolean\(input\.runtimeSession\.historyWindow\) &&/,
+    );
+    expect(applyWindowSource).toContain("persistTurns: !shouldKeepExistingTurns");
+
+    // 最新详情请求本身就是窗口建立请求，不应再串行刷新 relay auth。
+    const fetchDetailSource = pageSource.slice(
+      pageSource.indexOf("async function fetchRemoteConversationDetail("),
+      pageSource.indexOf("async function applyRemoteHistoryWindowDetail(input: {"),
+    );
+    expect(fetchDetailSource).toContain("const gateway = await getDetailGateway()");
+    expect(fetchDetailSource).not.toContain("refreshAuth: true");
   });
 
   it("keeps older server pages remote-only and removes the retired SQLite cursor protocol", () => {
