@@ -28,9 +28,9 @@ describe("app version presentation", () => {
   it("appends the compile timestamp to the runtime version", () => {
     expect(
       buildAppVersionLabel(
-        { version: "0.3.0", versionCode: "3" },
+        { version: "0.3.1", versionCode: "3" },
         new Date(2026, 7, 26, 21, 30, 45),
       ),
-    ).toBe("0.3.0.202608262130")
+    ).toBe("0.3.1.202608262130")
   })
 })

@@ -37,7 +37,7 @@ describe("app update service", () => {
     }
     ;(uni.getSystemInfoSync as jest.Mock).mockReturnValue({ platform: "android" })
     ;(uni.getAppBaseInfo as jest.Mock).mockReturnValue({
-      appVersion: "0.3.0",
+      appVersion: "0.3.1",
       appVersionCode: "3",
     })
     ;(uni.request as jest.Mock).mockResolvedValue({
@@ -47,7 +47,7 @@ describe("app update service", () => {
         data: {
           hasUpdate: true,
           versionInfo: {
-            version: "0.3.0",
+            version: "0.3.1",
             versionCode: "3",
             updateIntro: "修复问题",
           },
@@ -60,11 +60,11 @@ describe("app update service", () => {
     await new Promise((resolve) => setTimeout(resolve, 0))
 
     expect(uni.request).toHaveBeenCalledWith(expect.objectContaining({
-      url: "https://app.lingyun.net/api/v1/appbeta/app/checkUpdate?key=qH5w&version=0.3.0&versionCode=3",
+      url: "https://app.lingyun.net/api/v1/appbeta/app/checkUpdate?key=qH5w&version=0.3.1&versionCode=3",
       method: "GET",
     }))
     expect(uni.showModal).toHaveBeenCalledWith(expect.objectContaining({
-      title: "发现新版本 0.3.0（构建号 3）",
+      title: "发现新版本 0.3.1（构建号 3）",
       confirmText: "立即更新",
     }))
     expect((global as any).plus.runtime.openWeb).toHaveBeenCalledWith(
@@ -76,7 +76,7 @@ describe("app update service", () => {
     ;(global as any).plus = { runtime: {} }
     ;(uni.getSystemInfoSync as jest.Mock).mockReturnValue({ platform: "android" })
     ;(uni.getAppBaseInfo as jest.Mock).mockReturnValue({
-      appVersion: "0.3.0",
+      appVersion: "0.3.1",
       appVersionCode: "3",
     })
     ;(uni.setStorageSync as jest.Mock).mockImplementation(() => undefined)

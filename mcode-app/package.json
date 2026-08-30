@@ -1,7 +1,7 @@
 {
   "name": "mcode-app",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.3.1",
   "type": "module",
   "scripts": {
     "test:unit": "jest --config jest.config.cjs --runInBand",

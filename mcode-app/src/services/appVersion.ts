@@ -3,7 +3,7 @@ export interface AppVersionInfo {
   versionCode: string
 }
 
-export const FALLBACK_APP_VERSION = "0.3.0"
+export const FALLBACK_APP_VERSION = "0.3.1"
 export const FALLBACK_APP_VERSION_CODE = "3"
 export const APP_BUILD_TIME =
   typeof __APP_BUILD_TIME__ === "string" ? __APP_BUILD_TIME__ : ""
