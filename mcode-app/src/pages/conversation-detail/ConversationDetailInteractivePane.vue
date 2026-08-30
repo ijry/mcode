@@ -709,7 +709,7 @@
                 note.status === 'delivered' && 'feedback-notes__status--delivered',
               ]"
             >
-              {{ note.status === "delivered" ? "已插入本轮" : "等待读取" }}
+              {{ feedbackNoteStatusText(note.status) }}
             </text>
           </view>
         </view>
@@ -764,6 +764,58 @@
               @click="sendQuickReply(item.value)"
             >
               <text class="composer-quick-chip__text">{{ item.label }}</text>
+            </view>
+          </view>
+          <view
+            v-else-if="composerPanelMode === 'feedback'"
+            class="composer-panel__body composer-panel__body--feedback"
+          >
+            <view class="composer-feedback__heading">
+              <text class="composer-feedback__title">实时反馈</text>
+              <text class="composer-feedback__desc">{{
+                realtimeFeedbackDescription
+              }}</text>
+            </view>
+            <up-textarea
+              class="composer-feedback__input"
+              v-model="realtimeFeedbackText"
+              :maxlength="REALTIME_FEEDBACK_MAX_CHARS"
+              autoHeight
+              count
+              placeholder="输入备注或纠偏内容"
+              :placeholder-style="'color: ' + upThemeVar('--up-tips-color', '#909193')"
+              @input="handleRealtimeFeedbackInput"
+              @linechange="handleComposerLayoutChange"
+            ></up-textarea>
+            <view class="composer-feedback__actions">
+              <view
+                class="composer-feedback__button composer-feedback__button--cancel"
+                @click="closeRealtimeFeedbackPanel"
+              >
+                <text class="composer-feedback__button-text">取消</text>
+              </view>
+              <view
+                :class="[
+                  'composer-feedback__button composer-feedback__button--send',
+                  !canSubmitRealtimeFeedback &&
+                    'composer-feedback__button--disabled',
+                ]"
+                @click="submitRealtimeFeedback"
+              >
+                <up-loading-icon
+                  v-if="realtimeFeedbackSubmitting"
+                  mode="circle"
+                  size="15"
+                  color="#ffffff"
+                ></up-loading-icon>
+                <up-icon
+                  v-else
+                  name="arrow-up"
+                  size="16"
+                  color="#ffffff"
+                ></up-icon>
+                <text class="composer-feedback__button-text">发送</text>
+              </view>
             </view>
           </view>
           <view
@@ -915,6 +967,25 @@
               size="13"
               :color="upThemeVar('--up-tips-color', '#909193')"
             ></up-icon>
+          </view>
+          <view
+            v-if="showRealtimeFeedbackMenuItem"
+            class="input-tool-menu__item"
+            :class="{
+              'input-tool-menu__item--disabled': realtimeFeedbackMenuDisabled,
+            }"
+            @click="handleRealtimeFeedbackMenu"
+          >
+            <up-icon
+              name="chat"
+              size="18"
+              :color="
+                realtimeFeedbackMenuDisabled
+                  ? upThemeVar('--up-tips-color', '#909193')
+                  : upThemeVar('--up-main-color', '#303133')
+              "
+            ></up-icon>
+            <text class="input-tool-menu__label">实时反馈</text>
           </view>
           <view class="input-tool-menu__item" @click="openConfigPanelFromMenu">
             <up-icon
@@ -1165,6 +1236,7 @@ import {
   type MentionTriggerState,
 } from "@/services/composerReferences";
 import { toErrorMessage } from "@/services/gateway/error";
+import { getRemoteFeedbackSettings } from "@/services/connectionDetailSettings";
 import { getRemoteGitLog } from "@/services/projectGit";
 import {
   getRemoteProjectFileTree,
@@ -1217,14 +1289,21 @@ import {
 import {
   buildDraftSendPayload,
   buildPromptStartWatchSignature,
+  isRealtimeFeedbackMenuDisabled,
+  isNoActiveTurnRejection,
   isQueuedPromptResponse,
   isTurnInProgressRejection,
+  REALTIME_FEEDBACK_MAX_CHARS,
+  resolveFeedbackNoteStatusLabel,
+  resolveRealtimeFeedbackChannel,
   resolveRunningSendAction,
   sendPromptWithConnectionRecovery,
   resolveDraftSendFailure,
   resolvePromptStartSnapshotOutcome,
   resolvePromptStartTimeoutFailure,
   resolvePromptStartWatchOutcome,
+  type RealtimeFeedbackChannel,
+  resolveNoActiveTurnFeedbackFallback,
   type SendAttemptResult,
 } from "./detailPromptSend";
 import {
@@ -1311,7 +1390,7 @@ interface DetailProjectEntry {
   path: string;
 }
 
-type ComposerPanelMode = "" | "quick_reply" | "config";
+type ComposerPanelMode = "" | "quick_reply" | "feedback" | "config";
 type ComposerConfigPanelKey = Exclude<ComposerConfigKey, "">;
 
 interface ComposerConfigNavItem {
@@ -1408,6 +1487,10 @@ const sending = ref(false);
 // 插入当前回合在途：这条链路是「等后端确认后才清输入框」，不单独上锁的话连点两次会
 // 把同一段文本注入两遍。
 const steeringIntoTurn = ref(false);
+const realtimeFeedbackEnabled = ref(false);
+const realtimeFeedbackSettingsLoaded = ref(false);
+const realtimeFeedbackText = ref("");
+const realtimeFeedbackSubmitting = ref(false);
 const stoppingSession = ref(false);
 const toolRowExpanded = ref(false);
 const detailProjectEntries = ref<DetailProjectEntry[]>([]);
@@ -1463,6 +1546,7 @@ let initialHistoryLoadingToken = 0;
 let preservingHistoryAnchor = false;
 let detailAgentProbeToken = 0;
 let detailProjectEntriesToken = 0;
+let realtimeFeedbackProbeToken = 0;
 let mentionSourceLoadToken = 0;
 
 const normalizedAgentType = computed(() => normalizeAgentType(props.agentType));
@@ -1820,11 +1904,54 @@ const isBusyForSend = computed(
     runtimeStatus.value === "waiting_permission" ||
     runtimeStatus.value === "waiting_question",
 );
-// 「插入当前回合」是否可用。读的是服务端合成的权威位，**不看 agentType** ——
-// 见 `RuntimeSession.nativeSteeringAvailable` 的说明。
+// Both capabilities come from the current connection snapshot. The backend
+// uses the same priority when handling submit_session_feedback.
 const nativeSteeringAvailable = computed(() =>
   Boolean(session.value.nativeSteeringAvailable),
 );
+const feedbackToolAvailable = computed(() =>
+  Boolean(session.value.feedbackToolAvailable),
+);
+const realtimeFeedbackChannel = computed<RealtimeFeedbackChannel>(() =>
+  resolveRealtimeFeedbackChannel({
+    nativeSteeringAvailable: nativeSteeringAvailable.value,
+    feedbackToolAvailable: feedbackToolAvailable.value,
+  }),
+);
+const isClaudeAgentType = computed(
+  () => normalizedAgentType.value === "claude_code",
+);
+const showRealtimeFeedbackMenuItem = computed(
+  () =>
+    realtimeFeedbackSettingsLoaded.value &&
+    realtimeFeedbackEnabled.value,
+);
+const realtimeFeedbackDescription = computed(() => {
+  if (isClaudeAgentType.value) {
+    return "Claude 请使用输入框的当前回合插入功能。";
+  }
+  if (realtimeFeedbackChannel.value === "native") {
+    return "备注会立即插入当前回合，智能体马上就能看到。";
+  }
+  return "智能体会在下次检查时读取，不会打断当前步骤。";
+});
+const realtimeFeedbackMenuDisabled = computed(() =>
+  isRealtimeFeedbackMenuDisabled({
+    agentType: normalizedAgentType.value,
+    isBusy: isBusyForSend.value,
+    feedbackToolAvailable: feedbackToolAvailable.value,
+    nativeSteeringAvailable: nativeSteeringAvailable.value,
+    hasConnection: Boolean(firstString(session.value.connectionId)),
+    submitting: realtimeFeedbackSubmitting.value,
+  }),
+);
+const canSubmitRealtimeFeedback = computed(
+  () =>
+    realtimeFeedbackEnabled.value &&
+    !realtimeFeedbackMenuDisabled.value &&
+    Boolean(realtimeFeedbackText.value.trim()),
+);
+// 见 `RuntimeSession.nativeSteeringAvailable` 的说明。
 const feedbackNotes = computed(() => session.value.feedbackNotes || []);
 // 只在**运行中**且非空时显示（桌面端同判据）。回合结束后便签仍在 store 里（要等下一轮
 // user_message 才清，见那处注释），但那时它已经没有「正在影响这一轮」的含义，挂在
@@ -1993,6 +2120,29 @@ watch(
   () =>
     [
       firstString(props.instanceKey),
+      Number(props.conversationId || 0),
+      normalizedAgentType.value,
+      firstString(session.value.connectionId),
+      Boolean(props.active),
+    ] as const,
+  ([, conversationId, , , active]) => {
+    realtimeFeedbackProbeToken += 1;
+    realtimeFeedbackEnabled.value = false;
+    realtimeFeedbackSettingsLoaded.value = false;
+    realtimeFeedbackText.value = "";
+    if (composerPanelMode.value === "feedback") {
+      composerPanelMode.value = "";
+    }
+    if (!conversationId || !active) return;
+    void loadRealtimeFeedbackState();
+  },
+  { immediate: true },
+);
+
+watch(
+  () =>
+    [
+      firstString(props.instanceKey),
       Number(props.folderId || 0),
       Boolean(props.active),
     ] as const,
@@ -2082,6 +2232,14 @@ function resolveDetailDescriptor(): RemoteInstanceDescriptor {
   return auth.currentRemoteInstance();
 }
 
+function resolveAcpRequestOptions() {
+  const instanceKey = firstString(
+    props.instanceKey,
+    session.value.instanceKey,
+  );
+  return instanceKey ? { instanceKey } : undefined;
+}
+
 async function getDetailGateway() {
   const descriptor = resolveDetailDescriptor();
   if (descriptor.mode === "direct") {
@@ -2112,6 +2270,46 @@ async function getDetailGateway() {
     relayUrl: descriptor.baseUrl,
     session,
   });
+}
+
+async function loadRealtimeFeedbackState() {
+  const token = ++realtimeFeedbackProbeToken;
+  try {
+    const gateway = await getDetailGateway();
+    const settings = await getRemoteFeedbackSettings(gateway);
+    if (token !== realtimeFeedbackProbeToken) return;
+    realtimeFeedbackEnabled.value = settings.enabled;
+    realtimeFeedbackSettingsLoaded.value = true;
+
+    const connectionId = firstString(session.value.connectionId);
+    if (!settings.enabled || !connectionId) {
+      scheduleViewportSync();
+      return;
+    }
+
+    const snapshot = await acpApi.acpGetSessionSnapshot(
+      connectionId,
+      resolveAcpRequestOptions(),
+    );
+    if (token !== realtimeFeedbackProbeToken || !snapshot) return;
+    // Feedback capability hydration must not enter the runtime's history
+    // backfill path; the detail page owns the authoritative tail refresh.
+    runtime.hydrateFeedbackSnapshot(
+      Number(props.conversationId || 0),
+      snapshot,
+      connectionId,
+    );
+  } catch (error) {
+    if (token !== realtimeFeedbackProbeToken) return;
+    if (!realtimeFeedbackSettingsLoaded.value) {
+      realtimeFeedbackEnabled.value = false;
+    }
+    console.warn("load realtime feedback state failed", error);
+  } finally {
+    if (token === realtimeFeedbackProbeToken) {
+      scheduleViewportSync();
+    }
+  }
 }
 
 async function loadDetailProjectEntries() {
@@ -2820,6 +3018,9 @@ function toggleInputToolRow() {
     return;
   }
   toolRowExpanded.value = !toolRowExpanded.value;
+  if (toolRowExpanded.value && !realtimeFeedbackSettingsLoaded.value) {
+    void loadRealtimeFeedbackState();
+  }
   if (!toolRowExpanded.value) {
     composerPanelMode.value = "";
     expandedConfigKey.value = "";
@@ -2880,6 +3081,204 @@ function openAttachmentPicker() {
       }
     },
   });
+}
+
+function handleRealtimeFeedbackMenu() {
+  if (realtimeFeedbackMenuDisabled.value) return;
+  realtimeFeedbackText.value = "";
+  openComposerPanelFromMenu("feedback");
+}
+
+function feedbackNoteStatusText(status: "pending" | "delivered") {
+  return resolveFeedbackNoteStatusLabel(status);
+}
+
+function handleRealtimeFeedbackInput(event: unknown) {
+  const value = resolveComposerInputValue(event);
+  if (value != null) {
+    realtimeFeedbackText.value = value;
+  }
+  scheduleViewportSync();
+}
+
+function isCurrentFeedbackConnection(
+  conversationId: number,
+  connectionId: string,
+) {
+  return (
+    Number(props.conversationId || 0) === conversationId &&
+    firstString(session.value.connectionId) === connectionId
+  );
+}
+
+function isPendingFeedbackResult(item: unknown) {
+  return (
+    item &&
+    typeof item === "object" &&
+    String((item as Record<string, unknown>).status || "")
+      .trim()
+      .toLowerCase() === "pending"
+  );
+}
+
+function snapshotExplicitlyDisablesNativeSteering(snapshot: unknown) {
+  if (!snapshot || typeof snapshot !== "object") return false;
+  const record = snapshot as Record<string, unknown>;
+  return (
+    record.native_steering_available === false ||
+    record.nativeSteeringAvailable === false
+  );
+}
+
+/**
+ * Reconcile the backend's channel choice after a submit. Native steering can
+ * downgrade at runtime when an adapter reports `startedNewTurn`; a pending
+ * response exposes that immediately, while a delivered response needs one
+ * authoritative snapshot read to discover the downgrade.
+ */
+function reconcileRealtimeFeedbackSubmission(
+  conversationId: number,
+  connectionId: string,
+  requestedChannel: RealtimeFeedbackChannel,
+  item: unknown,
+): RealtimeFeedbackChannel | null {
+  if (!isCurrentFeedbackConnection(conversationId, connectionId)) return null;
+  if (requestedChannel !== "native") return requestedChannel;
+
+  if (isPendingFeedbackResult(item)) {
+    const downgraded = runtime.markNativeSteeringUnavailable(
+      conversationId,
+      connectionId,
+    );
+    if (downgraded) {
+      uni.showToast({
+        title: "当前连接已切换为等待读取模式",
+        icon: "none",
+        duration: 2800,
+      });
+    }
+    return "pull";
+  }
+
+  // A delivered result is also returned by the adapter's detached-turn
+  // downgrade path. Verify it asynchronously so the successful note remains
+  // responsive while future submissions use the pull channel.
+  void (async () => {
+    try {
+      const snapshot = await acpApi.acpGetSessionSnapshot(
+        connectionId,
+        resolveAcpRequestOptions(),
+      );
+      if (!isCurrentFeedbackConnection(conversationId, connectionId)) return;
+      const accepted = runtime.hydrateFeedbackSnapshot(
+        conversationId,
+        snapshot,
+        connectionId,
+      );
+      if (
+        accepted &&
+        snapshotExplicitlyDisablesNativeSteering(snapshot)
+      ) {
+        runtime.markNativeSteeringUnavailable(conversationId, connectionId);
+      }
+    } catch {
+      // The submit already succeeded. A failed verification should not turn a
+      // delivered note into a user-visible error; the next live snapshot can
+      // still converge the capability.
+    }
+  })();
+  return "native";
+}
+
+function closeRealtimeFeedbackPanel() {
+  if (realtimeFeedbackSubmitting.value) return;
+  realtimeFeedbackText.value = "";
+  composerPanelMode.value = "";
+  scheduleViewportSync();
+}
+
+async function submitRealtimeFeedback() {
+  const text = realtimeFeedbackText.value.trim();
+  if (!text || realtimeFeedbackSubmitting.value) return;
+  if (!canSubmitRealtimeFeedback.value) {
+    uni.showToast({
+      title: isBusyForSend.value
+        ? "当前会话暂不支持实时反馈"
+        : "当前没有正在运行的回合",
+      icon: "none",
+      duration: 2500,
+    });
+    return;
+  }
+
+  const targetConversationId = Number(props.conversationId || 0);
+  const connectionId = firstString(session.value.connectionId);
+  const requestedChannel = realtimeFeedbackChannel.value;
+  if (!targetConversationId || !connectionId || !requestedChannel) return;
+
+  realtimeFeedbackSubmitting.value = true;
+  try {
+    const item = await acpApi.acpSubmitSessionFeedback(
+      connectionId,
+      text,
+      resolveAcpRequestOptions(),
+    );
+    if (!isCurrentFeedbackConnection(targetConversationId, connectionId)) return;
+    runtime.recordFeedbackNote(targetConversationId, item);
+    const deliveredChannel = reconcileRealtimeFeedbackSubmission(
+      targetConversationId,
+      connectionId,
+      requestedChannel,
+      item,
+    );
+    if (
+      deliveredChannel &&
+      isCurrentFeedbackConnection(targetConversationId, connectionId)
+    ) {
+      realtimeFeedbackText.value = "";
+      composerPanelMode.value = "";
+      uni.showToast({
+        title:
+          deliveredChannel === "native"
+            ? "实时反馈已插入本轮"
+            : "实时反馈已发送，等待读取",
+        icon: "none",
+      });
+    }
+  } catch (error) {
+    const message = toErrorMessage(error);
+    if (isNoActiveTurnRejection(error)) {
+      const fallback = resolveNoActiveTurnFeedbackFallback({
+        hasComposerContent: Boolean(
+          inputText.value.trim() || attachments.value.length > 0,
+        ),
+      });
+      if (fallback === "composer") {
+        inputText.value = text;
+        composerCursor.value = null;
+        realtimeFeedbackText.value = "";
+        composerPanelMode.value = "";
+        toolRowExpanded.value = false;
+      }
+      uni.showToast({
+        title:
+          fallback === "composer"
+            ? "本轮已结束，反馈内容已移回输入框"
+            : "本轮已结束，反馈草稿已保留",
+        icon: "none",
+        duration: 2500,
+      });
+      return;
+    }
+    uni.showToast({
+      title: `反馈发送失败: ${message}`,
+      icon: "none",
+      duration: 3000,
+    });
+  } finally {
+    realtimeFeedbackSubmitting.value = false;
+    scheduleViewportSync();
+  }
 }
 
 function getSlashCommandDesc(item: SlashCommandItem) {
@@ -3006,6 +3405,9 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  // In-flight settings/snapshot responses must not hydrate a session after
+  // this pane has been destroyed or its tab has been replaced.
+  realtimeFeedbackProbeToken += 1;
   // 切 tab / 退出详情页都会销毁本组件（见上方说明）。防抖里还压着的那次必须**同步
   // 立即**落盘 —— 等它自己触发的话组件已经没了。
   clearDraftPersistTimer();
@@ -3129,24 +3531,42 @@ function openSteerActionSheet(rawText: string) {
 async function steerIntoCurrentTurn(text: string) {
   if (steeringIntoTurn.value) return;
   const connectionId = firstString(session.value.connectionId);
+  const targetConversationId = Number(props.conversationId || 0);
   if (!connectionId) {
     uni.showToast({ title: "未连接到代理", icon: "none" });
     return;
   }
   steeringIntoTurn.value = true;
   try {
-    const item = await acpApi.acpSubmitSessionFeedback(connectionId, text);
+    const item = await acpApi.acpSubmitSessionFeedback(
+      connectionId,
+      text,
+      resolveAcpRequestOptions(),
+    );
+    if (!isCurrentFeedbackConnection(targetConversationId, connectionId)) return;
     // 乐观回显：接口返回的就是那条便签。随后到达的 `feedback_submitted` 广播按 id
     // 幂等，所以这里先 append 不会变成两条 —— 而不 append 的话，在广播回来之前
     // （relay 链路上是几百毫秒）界面上没有任何插入成功的痕迹。
-    runtime.recordFeedbackNote(Number(props.conversationId || 0), item);
+    runtime.recordFeedbackNote(targetConversationId, item);
+    const deliveredChannel = reconcileRealtimeFeedbackSubmission(
+      targetConversationId,
+      connectionId,
+      "native",
+      item,
+    );
     inputText.value = "";
     composerCursor.value = null;
     closeMentionPanel();
-    uni.showToast({ title: "已插入当前回合", icon: "none" });
+    uni.showToast({
+      title:
+        deliveredChannel === "pull"
+          ? "已发送反馈，等待读取"
+          : "已插入当前回合",
+      icon: "none",
+    });
   } catch (error) {
     const message = toErrorMessage(error);
-    if (/no active turn/i.test(message)) {
+    if (isNoActiveTurnRejection(error)) {
       uni.showToast({
         title: "当前回合已结束，可直接发送",
         icon: "none",

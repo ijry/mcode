@@ -1,5 +1,6 @@
 import type { PromptInputBlock } from "@/types/acp"
 import type { ConnectionTargetAgent } from "@/services/connectionSchema"
+import { normalizeAgentType } from "@/services/conversation/agentType"
 import type { QueuedDraft } from "./detailDataNormalization"
 import { buildDraftPromptBlocks } from "./detailDraftQueue"
 
@@ -88,6 +89,107 @@ export function resolveRunningSendAction(input: {
   if (!input.nativeSteeringAvailable) return "blocked"
   if (input.hasAttachments) return "blocked"
   return "steer_sheet"
+}
+
+export type RealtimeFeedbackChannel = "native" | "pull" | null
+
+/** Backend channel selection order for `submit_session_feedback`. */
+export function resolveRealtimeFeedbackChannel(input: {
+  nativeSteeringAvailable?: boolean
+  feedbackToolAvailable?: boolean
+}): RealtimeFeedbackChannel {
+  if (input.nativeSteeringAvailable === true) return "native"
+  if (input.feedbackToolAvailable === true) return "pull"
+  return null
+}
+
+/** Maximum length accepted by codeg-plus `submit_session_feedback`. */
+export const REALTIME_FEEDBACK_MAX_CHARS = 4096
+
+const NO_ACTIVE_TURN_MARKER = "no active turn"
+const NO_ACTIVE_TURN_CODES = new Set(["no_active_turn", "no-active-turn"])
+
+/**
+ * Recognize the feedback-specific turn-end race across direct and relay
+ * transports. The web gateway may preserve the message, wrap it in an error
+ * object, or expose a stable code; inspect the raw value before formatting it
+ * for a toast so a generic gateway code cannot hide the recoverable signal.
+ */
+export function isNoActiveTurnRejection(error: unknown): boolean {
+  return matchesNoActiveTurnValue(error, new Set<unknown>())
+}
+
+export type NoActiveTurnFeedbackFallback = "composer" | "feedback_panel"
+
+/**
+ * Decide where an unconsumed feedback draft should remain after the turn ends.
+ * Never merge it into an existing composer draft, which could silently change
+ * the user's pending prompt or attach feedback text to unrelated files.
+ */
+export function resolveNoActiveTurnFeedbackFallback(input: {
+  hasComposerContent: boolean
+}): NoActiveTurnFeedbackFallback {
+  return input.hasComposerContent ? "feedback_panel" : "composer"
+}
+
+/** Keep a note's settled label stable when the connection later changes channel. */
+export function resolveFeedbackNoteStatusLabel(status: "pending" | "delivered") {
+  return status === "pending" ? "等待读取" : "已送达"
+}
+
+function matchesNoActiveTurnValue(value: unknown, seen: Set<unknown>): boolean {
+  if (seen.has(value)) return false
+  if (value && (typeof value === "object" || typeof value === "string")) {
+    seen.add(value)
+  }
+
+  if (typeof value === "string") {
+    const normalized = value.toLowerCase()
+    if (normalized.includes(NO_ACTIVE_TURN_MARKER)) return true
+    if (NO_ACTIVE_TURN_CODES.has(normalized.trim())) return true
+    try {
+      const parsed = JSON.parse(value)
+      if (parsed !== value && matchesNoActiveTurnValue(parsed, seen)) return true
+    } catch {
+      // The transport normally sends a plain display string; non-JSON text is
+      // already fully covered by the marker check above.
+    }
+    return false
+  }
+
+  if (!value || typeof value !== "object") return false
+  const record = value as Record<string, unknown>
+  if (
+    typeof record.code === "string" &&
+    NO_ACTIVE_TURN_CODES.has(record.code.trim().toLowerCase())
+  ) {
+    return true
+  }
+  return [
+    record.message,
+    record.detail,
+    record.error,
+    record.data,
+    record.body,
+    record.response,
+  ].some((candidate) => matchesNoActiveTurnValue(candidate, seen))
+}
+
+export function isRealtimeFeedbackMenuDisabled(input: {
+  agentType?: string
+  isBusy: boolean
+  feedbackToolAvailable?: boolean
+  nativeSteeringAvailable?: boolean
+  hasConnection: boolean
+  submitting: boolean
+}): boolean {
+  return (
+    normalizeAgentType(input.agentType) === "claude_code" ||
+    !input.isBusy ||
+    !resolveRealtimeFeedbackChannel(input) ||
+    !input.hasConnection ||
+    input.submitting
+  )
 }
 
 // codeg-plus `AcpError::TurnInProgress` 的 Display 串前缀（`acp/error.rs:20`）。

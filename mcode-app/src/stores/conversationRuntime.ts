@@ -112,6 +112,8 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         sharedPromptQueue: createSharedPromptQueueState(),
         inFlightUserTurnId: null,
         nativeSteeringAvailable: false,
+        nativeSteeringDowngraded: false,
+        feedbackToolAvailable: false,
         feedbackNotes: [],
         consumedFeedbackIds: new Map<string, number>(),
         lastAppliedSeq: null,
@@ -378,13 +380,12 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     }
     session.pendingPermission = normalizePendingPermission(snapshot?.pending_permission)
     session.pendingQuestion = normalizePendingQuestion(snapshot?.pending_question)
-    // 「插入当前回合」的能力位。**只升不降**：`connectionId` 在连接还在 connecting 时
-    // 就已经存在，那一刻服务端尚未在 initialize 里写 `native_steering_available`，第一次
-    // 读回来必然是 false —— 无条件赋值会把入口永久关掉。false 与字段缺失（旧后端）在这里
-    // 是同一件事：都不构成「这条会话不支持」的证据。真正的清零在 disconnect / 换连接。
-    if (readSnapshotNativeSteering(snapshot)) {
-      session.nativeSteeringAvailable = true
-    }
+    // 反馈通道能力位。快照读取**只升不降**：`connectionId` 在连接还在 connecting 时
+    // 就已经存在，那一刻服务端尚未在 initialize 里写能力字段，第一次读回 false 很正常；
+    // 无条件覆盖会把入口永久关掉。false 与字段缺失（旧后端）都不构成「不支持」的证据。
+    // 清零发生在 disconnect / 换连接；native 还可由提交结果明确降级，墓碑会阻止迟到旧快照
+    // 再把它升回去。
+    applyFeedbackSnapshotState(session, snapshot)
     // 本轮便签也在快照里（`session_state.rs:1653`，注释写明是为「mid-turn attach 的
     // 客户端渲染那些一次性 feedback_submitted 不会重放的便签」准备的）。冷启动 /
     // 重连进一个进行中的会话时，这是唯一来源。
@@ -392,12 +393,6 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     // 合并方向与上面的能力位**相反**：这里实时优先。快照可能停在 `pending`，而
     // `feedback_consumed` 事件已经到了。空数组（服务端不上线该字段时的常态）在
     // mergeFeedbackSnapshot 里原样返回本地表，不会误清。
-    const snapshotNotes = (
-      Array.isArray(snapshot?.feedback) ? snapshot.feedback : []
-    )
-      .map((raw: unknown) => normalizeFeedbackNote(raw))
-      .filter(Boolean) as FeedbackNote[]
-    session.feedbackNotes = mergeFeedbackSnapshot(session.feedbackNotes, snapshotNotes)
     session.status = deriveRuntimeStatus(
       snapshot,
       shouldIgnoreSnapshotLiveMessage
@@ -471,6 +466,52 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       session.stats.totalTokens = firstNumber(usage.used) || session.stats.totalTokens
     }
     maybeBackfillMissingHistory(session, "snapshot")
+  }
+
+  /**
+   * Hydrate only the feedback side-channel from a snapshot.
+   *
+   * Feedback capability/notes are needed by the composer, but a capability
+   * refresh must not re-derive live status or start the mid-turn history
+   * backfill path. The detail page already owns the authoritative history
+   * refresh.
+   */
+  function hydrateFeedbackSnapshot(
+    conversationId: number,
+    snapshot: any,
+    expectedConnectionId?: string
+  ) {
+    const session = getOrCreateSession(conversationId)
+    if (!snapshot || typeof snapshot !== "object") return false
+
+    // A feedback-only read is intentionally isolated from live/history state,
+    // but it still needs the same identity fence: a response for the previous
+    // connection or an older event cursor must not resurrect its notes into the
+    // current turn.
+    const expected = firstString(expectedConnectionId)
+    if (expected && session.connectionId !== expected) return false
+    const snapshotConnectionId = firstString(
+      snapshot.connection_id,
+      snapshot.connectionId
+    )
+    if (expected && snapshotConnectionId && snapshotConnectionId !== expected) {
+      return false
+    }
+    const snapshotSeq = firstNumber(snapshot.event_seq, snapshot.eventSeq)
+    const currentSeq = session.lastAppliedSeq
+    if (
+      snapshotSeq != null &&
+      currentSeq != null &&
+      Number.isFinite(snapshotSeq) &&
+      Number.isFinite(currentSeq) &&
+      snapshotSeq < currentSeq
+    ) {
+      return false
+    }
+
+    touchHotConversation(conversationId)
+    applyFeedbackSnapshotState(session, snapshot)
+    return true
   }
 
   function applyConversationDetailStats(conversationId: number, detail: ConversationDetail | any) {
@@ -647,9 +688,8 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       case "feedback_consumed": {
         // agent 通过 `check_user_feedback` 读走了若干条便签。
         //
-        // **这个事件几乎不会是为 mcode 自己的便签发的**：mcode 走 native 通道，便签
-        // 出生即 delivered（见 `FeedbackNote` 类型说明）。它承载的是**别人的便签**
-        // —— 桌面端在同一会话里走 pull 通道发的那些。
+        // pull 通道的便签（包括 mcode 在 native 不可用时提交的便签）会由这条事件从
+        // pending 翻成 delivered；native 通道的便签出生即 delivered，不会重复走这里。
         const ids: string[] = Array.isArray(event.data?.ids) ? event.data.ids : []
         if (ids.length === 0) break
         // 服务端一定会带 delivered_at；解析不出来时退回「现在」，因为这个事件的语义
@@ -1002,8 +1042,19 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     sinceSeq?: number
   ) {
     const session = getOrCreateSession(conversationId)
+    const connectionChanged = session.connectionId !== managed.connectionId
     session.connectionId = managed.connectionId
     session.instanceKey = managed.instanceKey
+    if (connectionChanged) {
+      // Capabilities and feedback notes describe one concrete adapter
+      // connection. A reused conversation can be rebound after another
+      // connection takes ownership, so do not carry the old channel across.
+      session.nativeSteeringAvailable = false
+      session.nativeSteeringDowngraded = false
+      session.feedbackToolAvailable = false
+      session.feedbackNotes = []
+      session.consumedFeedbackIds = new Map()
+    }
     connections.value.set(managed.connectionId, managed.connection)
     if (
       session.status === "idle" ||
@@ -1100,6 +1151,8 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         session.lastCompletedTurnAt = 0
         // 会话被别的连接接管了：能力位属于旧那条，必须清掉等新快照重新声明。
         session.nativeSteeringAvailable = false
+        session.nativeSteeringDowngraded = false
+        session.feedbackToolAvailable = false
         session.feedbackNotes = []
         session.consumedFeedbackIds = new Map()
         resetTurnScopedBackfillState(session)
@@ -1191,6 +1244,8 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       // 能力位随连接消亡：它描述的是「这条连接的 adapter 支持什么」，下一条连接可能
       // 是另一个 agent / 另一个版本。留着它会让重连到 codex 后仍然显示插入入口。
       session.nativeSteeringAvailable = false
+      session.nativeSteeringDowngraded = false
+      session.feedbackToolAvailable = false
       // 便签同理：它们属于那条已经断掉的连接的当前回合。
       session.feedbackNotes = []
       session.consumedFeedbackIds = new Map()
@@ -1217,6 +1272,8 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     session.apiRetry = null
     // 同 disconnect：能力位属于那条已经作废的连接，不能带到下一条上。
     session.nativeSteeringAvailable = false
+    session.nativeSteeringDowngraded = false
+    session.feedbackToolAvailable = false
     session.feedbackNotes = []
     session.consumedFeedbackIds = new Map()
     if (!isSharedInProgressStatus(session.status)) {
@@ -1341,6 +1398,11 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     session.pendingQuestion = null
     session.sharedPromptQueue = createSharedPromptQueueState()
     session.inFlightUserTurnId = null
+    session.nativeSteeringAvailable = false
+    session.nativeSteeringDowngraded = false
+    session.feedbackToolAvailable = false
+    session.feedbackNotes = []
+    session.consumedFeedbackIds = new Map()
     resetTurnScopedBackfillState(session)
     session.lastAppliedSeq = 0
     session.lastCompletedTurnKey = null
@@ -1366,6 +1428,27 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       note,
       session.consumedFeedbackIds
     )
+  }
+
+  /**
+   * Explicitly converge a native channel after the submit path proves that
+   * the adapter downgraded to pull. Snapshot reads are monotonic because an
+   * early `false` can simply mean initialize has not completed; this method is
+   * the deliberate exception and must only be called from a submit-result
+   * reconciliation that has already checked the connection identity.
+   */
+  function markNativeSteeringUnavailable(
+    conversationId: number,
+    expectedConnectionId?: string
+  ) {
+    const session = sessions.value.get(conversationId)
+    if (!session) return false
+    const expected = firstString(expectedConnectionId)
+    if (expected && session.connectionId !== expected) return false
+    session.nativeSteeringDowngraded = true
+    if (!session.nativeSteeringAvailable) return false
+    session.nativeSteeringAvailable = false
+    return true
   }
 
   function setSessionError(conversationId: number, message: string | null) {
@@ -1460,6 +1543,8 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     handleEvent,
     handleEventForConversation,
     hydrateLiveSnapshot,
+    hydrateFeedbackSnapshot,
+    markNativeSteeringUnavailable,
     connect,
     disconnect,
     invalidateConnection,
@@ -1532,12 +1617,25 @@ interface RuntimeSession {
    * 明确不给它开（`connection.rs:9470` 的注释写了「不暴露原始声明位，否则前端会忍不住
    * 自己推导」）。
    *
-   * **单调升级**：只有快照报 `true` 才置位，`false` 与字段缺失都**不回落**。理由与
-   * codeg-plus 前端对 `feedback_tool_available` 的处理相同 —— `connectionId` 在连接刚
-   * 创建（还在 connecting）时就有了，那一刻服务端尚未在 initialize 里写这个字段，第一次
-   * 读必然是 false；无条件覆盖会让入口永久消失。清零只发生在 disconnect / 换连接。
+   * **快照只单调升级**：只有快照报 `true` 才置位，`false` 与字段缺失都**不回落**。理由
+   * 与 codeg-plus 前端对 `feedback_tool_available` 的处理相同 —— `connectionId` 在连接
+   * 刚创建（还在 connecting）时就有了，那一刻服务端尚未在 initialize 里写这个字段，第一次
+   * 读必然是 false；无条件覆盖会让入口永久消失。清零只发生在 disconnect / 换连接，或
+   * 提交结果明确证明 adapter 已降级时（`nativeSteeringDowngraded`）。
    */
   nativeSteeringAvailable: boolean
+  /**
+   * 当前连接是否已经被提交结果明确判定为 native steering 降级。它是防止随后到达的旧快照
+   * 再把 native 能力错误升回来的墓碑；换连接时必须清零。
+   */
+  nativeSteeringDowngraded: boolean
+  /**
+   * 当前连接是否在启动时注入了 `check_user_feedback` pull 工具。
+   *
+   * 与 native steering 一样从快照单调升级，连接失效时清零。全局开关在会话启动后
+   * 打开不能补注入该工具，因此菜单可用性必须同时要求此位为 true。
+   */
+  feedbackToolAvailable: boolean
   /**
    * 本轮的补充意见便签（见 `FeedbackNote`）。轮次级瞬态：下一轮 `user_message` 清空，
    * 不进时间线、不进 SQLite、不参与轮次去重 —— 与服务端「intentionally NOT persisted」
@@ -2701,6 +2799,26 @@ function deriveSnapshotLastError(snapshot: any): RuntimeErrorEvent | null {
   return null
 }
 
+function applyFeedbackSnapshotState(session: RuntimeSession, snapshot: any) {
+  if (readSnapshotNativeSteering(snapshot) && !session.nativeSteeringDowngraded) {
+    session.nativeSteeringAvailable = true
+  }
+  if (readSnapshotFeedbackToolAvailable(snapshot)) {
+    session.feedbackToolAvailable = true
+  }
+
+  const snapshotNotes = (
+    Array.isArray(snapshot?.feedback) ? snapshot.feedback : []
+  )
+    .map((raw: unknown) => normalizeFeedbackNote(raw))
+    .filter(Boolean) as FeedbackNote[]
+  session.feedbackNotes = mergeFeedbackSnapshot(
+    session.feedbackNotes,
+    snapshotNotes,
+    session.consumedFeedbackIds
+  )
+}
+
 /**
  * 快照是否声明这条连接支持原生 steering。
  *
@@ -2713,6 +2831,14 @@ function readSnapshotNativeSteering(snapshot: any): boolean {
   return (
     snapshot.native_steering_available === true ||
     snapshot.nativeSteeringAvailable === true
+  )
+}
+
+function readSnapshotFeedbackToolAvailable(snapshot: any): boolean {
+  if (!snapshot || typeof snapshot !== "object") return false
+  return (
+    snapshot.feedback_tool_available === true ||
+    snapshot.feedbackToolAvailable === true
   )
 }
 

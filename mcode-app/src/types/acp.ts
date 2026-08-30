@@ -469,16 +469,17 @@ export interface SessionFailureRecord {
  *
  * | 通道 | 出生状态 | 谁把它翻成 delivered |
  * | --- | --- | --- |
- * | native `_session/steering`（mcode 走这条） | **`delivered`**（`new_delivered`，`feedback.rs:76`） | 没有人 —— 出生即已送达 |
+ * | native `_session/steering`（提交端选择时） | **`delivered`**（`new_delivered`，`feedback.rs:76`） | 没有人 —— 出生即已送达 |
  * | pull `check_user_feedback` | `pending`（`new_pending`） | agent 主动调工具时的 `FeedbackConsumed` |
  *
- * 所以 **mcode 自己插入的便签永远不会收到 `feedback_consumed`**。native 便签必须
- * 从出生就是 `delivered`，否则 `read_pending_feedback`（只返回 `Pending`，
+ * native 通道提交的便签不会收到自己的 `feedback_consumed`。pull 通道提交的便签则会
+ * 在 agent 调用工具后收到该事件；因此客户端不能按「是不是本机提交」来推断状态。
+ * native 便签必须从出生就是 `delivered`，否则 `read_pending_feedback`（只返回 `Pending`，
  * `manager.rs:2585`）会把同一段文本再喂给 agent 一遍 —— 那个「只读 Pending」正是
  * 推/拉两条通道之间的互斥。
  *
- * 那还接 `feedback_consumed` 做什么：**别人的便签**。桌面端在同一会话里走 pull 通道
- * 发的便签会广播过来，它才有「等待读取 → 已读取」这两帧。
+ * 所有客户端都要接 `feedback_consumed`：它既承载其他客户端通过 pull 通道发来的便签，
+ * 也承载 mcode 在当前连接回退到 pull 通道后提交的便签。
  */
 export interface FeedbackNote {
   id: string

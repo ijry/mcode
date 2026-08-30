@@ -169,10 +169,22 @@ describe("ConversationDetailBody", () => {
     expect(source).toContain("<up-divider");
     expect(source).toContain("@click=\"openAttachmentPicker\"");
     expect(source).toContain("@click=\"openQuickReplyPanelFromMenu\"");
+    expect(source).toContain("@click=\"handleRealtimeFeedbackMenu\"");
+    expect(source).toContain("'input-tool-menu__item--disabled': realtimeFeedbackMenuDisabled");
+    expect(source).toContain("showRealtimeFeedbackMenuItem");
+    expect(source).toContain("realtimeFeedbackMenuDisabled");
+    expect(source).toContain("isClaudeAgentType");
+    expect(source).toContain("feedbackToolAvailable");
+    expect(source).toContain("loadRealtimeFeedbackState");
+    expect(source).toContain("getRemoteFeedbackSettings");
+    expect(source).toContain("openComposerPanelFromMenu(\"feedback\")");
+    expect(source).toContain("composerPanelMode === 'feedback'");
+    expect(source).toContain("submitRealtimeFeedback");
+    expect(source).toContain("<up-textarea");
+    expect(source).toContain("realtimeFeedbackChannel");
+    expect(source).toContain("nativeSteeringAvailable");
     expect(source).toContain("@click=\"openConfigPanelFromMenu\"");
-    expect(source).not.toContain("@click=\"handleRealtimeFeedbackMenu\"");
     expect(source).not.toContain("@click=\"handleSlashCommandMenu\"");
-    expect(source).not.toContain("实时反馈");
     expect(source).not.toContain("斜杠命令");
   });
 

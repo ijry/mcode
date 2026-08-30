@@ -50,7 +50,7 @@ type RelayRecoveryState = {
   recoveryMessage: string | null
 }
 
-type AcpRequestOptions = {
+export type AcpRequestOptions = {
   instanceKey?: string
 }
 
@@ -329,11 +329,11 @@ class AcpApiClient {
   }
 
   /**
-   * 把一段文本注入**正在运行**的回合（原生 `_session/steering`）。
+   * 向**正在运行**的回合提交一段实时反馈。
    *
-   * 只在 `RuntimeSession.nativeSteeringAvailable` 为真时调用 —— 那是服务端合成的权威
-   * 能力位。服务端接口是 `submit_session_feedback`（codeg-plus
-   * `web/handlers/feedback.rs:56`），成功时返回一条 `FeedbackItem`。
+   * `submit_session_feedback` 会在服务端按当前连接能力选择 native
+   * `_session/steering`，否则走 `check_user_feedback` pull 通道；成功时返回一条
+   * `FeedbackItem`。调用方仍应先用快照中的能力位控制入口。
    *
    * **text-only**：服务端 steering 的 params 只有一个 text block
    * （`acp/connection.rs:2577`），附件不能走这条路。
@@ -342,14 +342,18 @@ class AcpApiClient {
    * `live feedback is disabled`、`invalid feedback`（空/超长）。调用方要分别处理，
    * 尤其不能把 no-active-turn 当普通失败 —— 那种情况下文本没被消费，可以直接发送。
    *
-   * relay 模式无需改动：`/v1/proxy/:command` 是透传的。mcode-desktop 目标不支持这条
-   * 命令，但它的快照里 `native_steering_available` 恒为 false，走不到这里。
+   * relay 模式无需改动：`/v1/proxy/:command` 是透传的。`instanceKey` 用于把请求发到
+   * 详情页当前绑定的远端实例。
    */
-  async acpSubmitSessionFeedback(connectionId: string, text: string): Promise<any> {
+  async acpSubmitSessionFeedback(
+    connectionId: string,
+    text: string,
+    options?: AcpRequestOptions
+  ): Promise<any> {
     return await this.request("/submit_session_feedback", {
       connectionId,
       text,
-    })
+    }, options)
   }
 
   /**
@@ -1452,9 +1456,9 @@ class AcpApiClient {
         // agent 通过 `check_user_feedback` 读走了若干条便签。同样是平铺载荷
         // （`{ids, delivered_at}`）。
         //
-        // 注意这个事件**几乎不会**是为 mcode 自己的便签发的：mcode 走 native
-        // `_session/steering`，便签出生即 delivered。它承载的是桌面端走 pull 通道
-        // 发的那些 —— 见 `FeedbackNote` 类型说明里的通道对照表。
+        // pull 通道的便签（包括 mcode 在 native 不可用时提交的便签）会由这条事件从
+        // pending 翻成 delivered；native 通道的便签出生即 delivered。见 `FeedbackNote`
+        // 类型说明里的通道对照表。
         const ids = Array.isArray(record.ids)
           ? record.ids.map((id) => firstString(id)).filter(Boolean)
           : []

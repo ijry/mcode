@@ -177,6 +177,50 @@ describe('conversationRuntime ACP error handling', () => {
     })
   })
 
+  it('clears feedback capabilities when a reused managed connection changes identity', async () => {
+    const manager = require('@/services/conversation/connectionSessionManager')
+    const store = useConversationRuntimeStore()
+    const session = store.getOrCreateSession(1)
+    session.connectionId = 'conn-old'
+    store.hydrateLiveSnapshot(1, {
+      native_steering_available: true,
+      feedback_tool_available: true,
+      feedback: [{
+        id: 'old-feedback',
+        text: '旧连接便签',
+        status: 'delivered',
+      }],
+    })
+
+    manager.connectionSessionManager.getByConversationId.mockReturnValue({
+      conversationId: 1,
+      instanceKey: 'test-instance',
+      connectionId: 'conn-new',
+      connection: {
+        id: 'conn-new',
+        agentType: 'codex',
+        sessionId: 'sess-new',
+        status: 'connected',
+        capabilities: [],
+      },
+      externalId: 'sess-new',
+      status: 'connected',
+      role: 'owner',
+      sharedLive: true,
+      detachOnly: true,
+      allowSend: true,
+      lastTouchedAt: Date.now(),
+    })
+
+    await store.connect(1, 'codex')
+
+    expect(session.connectionId).toBe('conn-new')
+    expect(session.nativeSteeringAvailable).toBe(false)
+    expect(session.nativeSteeringDowngraded).toBe(false)
+    expect(session.feedbackToolAvailable).toBe(false)
+    expect(session.feedbackNotes).toEqual([])
+  })
+
   it('dedupes concurrent connect calls for the same conversation', async () => {
     const manager = require('@/services/conversation/connectionSessionManager')
     const store = useConversationRuntimeStore()
@@ -2490,6 +2534,132 @@ describe('conversationRuntime ACP error handling', () => {
     })
   })
 
+  describe('snapshot pull feedback capability', () => {
+    it('hydrates feedback state without touching live history state', () => {
+      const { store, session } = prepareSession()
+      session.status = 'connected'
+
+      store.hydrateFeedbackSnapshot(1, {
+        status: 'prompting',
+        native_steering_available: true,
+        feedback_tool_available: true,
+        feedback: [{
+          id: 'feedback-1',
+          text: 'keep the scope small',
+          status: 'delivered',
+          created_at: '2026-08-31T00:00:00.000Z',
+          delivered_at: '2026-08-31T00:00:01.000Z',
+        }],
+      })
+
+      expect(session.nativeSteeringAvailable).toBe(true)
+      expect(session.feedbackToolAvailable).toBe(true)
+      expect(session.feedbackNotes).toHaveLength(1)
+      expect(session.status).toBe('connected')
+      expect(session.liveMessage).toBeNull()
+      expect(session.historyWindow).toBeNull()
+      expect(session.localTurns).toHaveLength(0)
+    })
+
+    it('latches feedback_tool_available from snake_case and camelCase snapshots', () => {
+      const { store, session } = prepareSession()
+      expect(session.feedbackToolAvailable).toBe(false)
+
+      store.hydrateLiveSnapshot(1, {
+        status: 'prompting',
+        feedback_tool_available: true,
+      })
+      expect(session.feedbackToolAvailable).toBe(true)
+
+      const second = store.getOrCreateSession(2)
+      store.hydrateLiveSnapshot(2, {
+        status: 'prompting',
+        feedbackToolAvailable: true,
+      })
+      expect(second.feedbackToolAvailable).toBe(true)
+    })
+
+    it('does not downgrade a confirmed tool capability on a stale false snapshot', () => {
+      const { store, session } = prepareSession()
+      store.hydrateLiveSnapshot(1, {
+        status: 'prompting',
+        feedback_tool_available: true,
+      })
+
+      store.hydrateLiveSnapshot(1, {
+        status: 'prompting',
+        feedback_tool_available: false,
+      })
+
+      expect(session.feedbackToolAvailable).toBe(true)
+    })
+
+    it('clears the tool capability when the connection is invalidated', () => {
+      const { store, session } = prepareSession()
+      store.hydrateLiveSnapshot(1, {
+        status: 'prompting',
+        feedback_tool_available: true,
+      })
+
+      store.invalidateConnection(1, 'conn-1')
+
+      expect(session.feedbackToolAvailable).toBe(false)
+    })
+
+    it('rejects a feedback snapshot that is older than the live event cursor', () => {
+      const { store, session } = prepareSession()
+      session.lastAppliedSeq = 12
+
+      expect(store.hydrateFeedbackSnapshot(1, {
+        event_seq: 11,
+        feedback_tool_available: true,
+        feedback: [{
+          id: 'stale-feedback',
+          text: '旧回合内容',
+          status: 'pending',
+        }],
+      }, 'conn-1')).toBe(false)
+
+      expect(session.feedbackToolAvailable).toBe(false)
+      expect(session.feedbackNotes).toHaveLength(0)
+    })
+
+    it('does not hydrate a snapshot for a replaced connection', () => {
+      const { store, session } = prepareSession()
+
+      expect(store.hydrateFeedbackSnapshot(1, {
+        feedback_tool_available: true,
+        feedback: [{
+          id: 'wrong-connection',
+          text: '不属于当前连接',
+          status: 'pending',
+        }],
+      }, 'conn-old')).toBe(false)
+
+      expect(session.feedbackToolAvailable).toBe(false)
+      expect(session.feedbackNotes).toHaveLength(0)
+    })
+
+    it('allows an explicit native capability downgrade for the current connection', () => {
+      const { store, session } = prepareSession()
+      store.hydrateLiveSnapshot(1, {
+        native_steering_available: true,
+      })
+
+      expect(store.markNativeSteeringUnavailable(1, 'conn-old')).toBe(false)
+      expect(session.nativeSteeringAvailable).toBe(true)
+      expect(store.markNativeSteeringUnavailable(1, 'conn-1')).toBe(true)
+      expect(session.nativeSteeringAvailable).toBe(false)
+
+      // A late launch-time snapshot must not resurrect the channel after the
+      // submit result has explicitly downgraded it.
+      store.hydrateFeedbackSnapshot(1, {
+        native_steering_available: true,
+      }, 'conn-1')
+      expect(session.nativeSteeringAvailable).toBe(false)
+    })
+  })
+
   describe('dismissing the error banner', () => {
     // 那条「发送失败」横幅此前既不会自动消失、也没有关闭入口：
     // - `setSessionError(id, null)` 只在**发送成功**后被调；
@@ -2737,6 +2907,33 @@ describe('conversationRuntime ACP error handling', () => {
       })
 
       expect(session.feedbackNotes.map((note: any) => note.id)).toEqual(['f1'])
+    })
+
+    it('settles a snapshot-only note when consume arrives first', () => {
+      const { store, session } = prepareSession()
+
+      store.handleEvent({
+        type: 'feedback_consumed',
+        connectionId: 'conn-1',
+        data: { ids: ['f1'], deliveredAt: '2026-08-27T00:00:05.000Z' },
+      } as any)
+      store.hydrateLiveSnapshot(1, {
+        status: 'prompting',
+        feedback: [
+          {
+            id: 'f1',
+            text: '快照里的便签',
+            created_at: '2026-08-27T00:00:00.000Z',
+            status: 'pending',
+          },
+        ],
+      })
+
+      expect(session.feedbackNotes[0]).toMatchObject({
+        id: 'f1',
+        status: 'delivered',
+        deliveredAt: Date.parse('2026-08-27T00:00:05.000Z'),
+      })
     })
 
     it('does not let an empty snapshot erase live notes', () => {

@@ -188,6 +188,15 @@ describe("mergeFeedbackSnapshot", () => {
       .toEqual(["f1", "f2"])
   })
 
+  it("settles snapshot-only entries against consumed tombstones", () => {
+    const consumed = new Map([["f1", 3000]])
+    const snapshot = [note({ id: "f1", status: "pending", deliveredAt: null })]
+
+    expect(mergeFeedbackSnapshot([], snapshot, consumed)).toEqual([
+      note({ id: "f1", status: "delivered", deliveredAt: 3000 }),
+    ])
+  })
+
   it("returns the live list untouched for an empty snapshot", () => {
     // 服务端在列表为空时不上线这个字段（skip_serializing_if），所以「缺失」是常态，
     // 绝不能当成「服务端说没有便签」而清掉本地的。

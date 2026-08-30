@@ -12,8 +12,9 @@ import type { FeedbackNote } from "@/types/acp"
  * 便签是**轮次级瞬态**，不是历史：服务端明确不持久化，并在下一轮 `UserMessage` 清空。
  * 所以这里没有任何 SQLite 交互，也不参与轮次去重。
  *
- * 通道差异见 `FeedbackNote` 的类型说明 —— mcode 走 native，自己插入的便签**出生即
- * `delivered`**，永远不会收到自己的 `feedback_consumed`。
+ * 通道差异见 `FeedbackNote` 的类型说明 —— mcode 按当前连接能力优先选择 native，
+ * native 不可用时回退到 pull。native 便签**出生即 `delivered`**；pull 便签先是
+ * `pending`，等 `feedback_consumed` 再变为 `delivered`。
  */
 
 /** 服务端 `FeedbackStatus` 的全部取值（snake_case 上线）。 */
@@ -98,13 +99,19 @@ export function appendFeedbackNote(
 ): FeedbackNote[] {
   if (current.some((item) => item.id === note.id)) return current
 
-  const consumedAt = consumedIds.get(note.id)
-  const settled: FeedbackNote =
-    consumedAt == null
-      ? note
-      : { ...note, status: "delivered", deliveredAt: note.deliveredAt ?? consumedAt }
+  const settled = settleFeedbackNote(note, consumedIds)
 
   return [...current, settled]
+}
+
+function settleFeedbackNote(
+  note: FeedbackNote,
+  consumedIds: Map<string, number>
+): FeedbackNote {
+  const consumedAt = consumedIds.get(note.id)
+  return consumedAt == null
+    ? note
+    : { ...note, status: "delivered", deliveredAt: note.deliveredAt ?? consumedAt }
 }
 
 /**
@@ -151,14 +158,15 @@ export function markFeedbackNotesDelivered(
  */
 export function mergeFeedbackSnapshot(
   live: FeedbackNote[],
-  snapshotNotes: FeedbackNote[]
+  snapshotNotes: FeedbackNote[],
+  consumedIds: Map<string, number> = new Map()
 ): FeedbackNote[] {
   if (snapshotNotes.length === 0) return live
 
   const liveById = new Map(live.map((item) => [item.id, item]))
   const merged: FeedbackNote[] = []
   for (const note of snapshotNotes) {
-    merged.push(liveById.get(note.id) ?? note)
+    merged.push(liveById.get(note.id) ?? settleFeedbackNote(note, consumedIds))
     liveById.delete(note.id)
   }
   // 快照里没有、只在实时流里出现过的排在后面（保持到达顺序）。

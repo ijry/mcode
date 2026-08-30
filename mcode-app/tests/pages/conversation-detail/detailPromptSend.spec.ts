@@ -2,12 +2,18 @@ import {
   buildDraftSendPayload,
   buildPromptStartWatchSignature,
   isConnectionNotFoundError,
+  isNoActiveTurnRejection,
   isQueuedPromptResponse,
+  isRealtimeFeedbackMenuDisabled,
   isTurnInProgressRejection,
+  REALTIME_FEEDBACK_MAX_CHARS,
   resolvePromptStartSnapshotOutcome,
   resolvePromptStartTimeoutFailure,
   resolvePromptStartWatchOutcome,
   resolveDraftSendFailure,
+  resolveNoActiveTurnFeedbackFallback,
+  resolveFeedbackNoteStatusLabel,
+  resolveRealtimeFeedbackChannel,
   resolveRunningSendAction,
   sendPromptWithConnectionRecovery,
 } from "@/pages/conversation-detail/detailPromptSend"
@@ -267,6 +273,112 @@ describe("running send interception", () => {
       nativeSteeringAvailable: true,
       hasAttachments: true,
     })).toBe("blocked")
+  })
+
+  it("disables the explicit realtime feedback menu for Claude agents", () => {
+    expect(isRealtimeFeedbackMenuDisabled({
+      agentType: "claude_code",
+      isBusy: true,
+      feedbackToolAvailable: true,
+      nativeSteeringAvailable: true,
+      hasConnection: true,
+      submitting: false,
+    })).toBe(true)
+    expect(isRealtimeFeedbackMenuDisabled({
+      agentType: "Claude-Code",
+      isBusy: true,
+      feedbackToolAvailable: true,
+      nativeSteeringAvailable: true,
+      hasConnection: true,
+      submitting: false,
+    })).toBe(true)
+
+    expect(isRealtimeFeedbackMenuDisabled({
+      agentType: "codex",
+      isBusy: true,
+      feedbackToolAvailable: true,
+      nativeSteeringAvailable: false,
+      hasConnection: true,
+      submitting: false,
+    })).toBe(false)
+  })
+
+  it("selects native feedback before the pull fallback", () => {
+    expect(resolveRealtimeFeedbackChannel({
+      nativeSteeringAvailable: true,
+      feedbackToolAvailable: true,
+    })).toBe("native")
+    expect(resolveRealtimeFeedbackChannel({
+      nativeSteeringAvailable: false,
+      feedbackToolAvailable: true,
+    })).toBe("pull")
+    expect(resolveRealtimeFeedbackChannel({
+      nativeSteeringAvailable: false,
+      feedbackToolAvailable: false,
+    })).toBeNull()
+    expect(REALTIME_FEEDBACK_MAX_CHARS).toBe(4096)
+  })
+
+  it("accepts a native-only channel for non-Claude agents", () => {
+    expect(isRealtimeFeedbackMenuDisabled({
+      agentType: "gemini",
+      isBusy: true,
+      feedbackToolAvailable: false,
+      nativeSteeringAvailable: true,
+      hasConnection: true,
+      submitting: false,
+    })).toBe(false)
+  })
+
+  it("requires an active feedback channel before enabling the menu", () => {
+    const available = {
+      agentType: "codex",
+      isBusy: true,
+      feedbackToolAvailable: true,
+      nativeSteeringAvailable: false,
+      hasConnection: true,
+      submitting: false,
+    }
+
+    expect(isRealtimeFeedbackMenuDisabled({ ...available, isBusy: false })).toBe(true)
+    expect(isRealtimeFeedbackMenuDisabled({
+      ...available,
+      feedbackToolAvailable: false,
+      nativeSteeringAvailable: false,
+    })).toBe(true)
+    expect(isRealtimeFeedbackMenuDisabled({
+      ...available,
+      hasConnection: false,
+    })).toBe(true)
+    expect(isRealtimeFeedbackMenuDisabled({
+      ...available,
+      submitting: true,
+    })).toBe(true)
+  })
+
+  it("recognizes the no-active-turn feedback rejection across transports", () => {
+    expect(isNoActiveTurnRejection("submit_session_feedback: no active turn")).toBe(true)
+    expect(isNoActiveTurnRejection(new Error("no active turn to send feedback to"))).toBe(true)
+    expect(isNoActiveTurnRejection({
+      message: "submit_session_feedback: no active turn",
+    })).toBe(true)
+    expect(isNoActiveTurnRejection({ code: "no_active_turn" })).toBe(true)
+    expect(isNoActiveTurnRejection("turn already in progress")).toBe(false)
+    expect(isNoActiveTurnRejection({ code: "target_offline" })).toBe(false)
+  })
+
+  it("returns feedback to the main composer only when it is empty", () => {
+    expect(resolveNoActiveTurnFeedbackFallback({
+      hasComposerContent: false,
+    })).toBe("composer")
+    expect(resolveNoActiveTurnFeedbackFallback({
+      hasComposerContent: true,
+    })).toBe("feedback_panel")
+  })
+
+  it("keeps feedback note labels independent from the current channel", () => {
+    expect(resolveFeedbackNoteStatusLabel("pending")).toBe("等待读取")
+    expect(resolveFeedbackNoteStatusLabel("delivered")).toBe("已送达")
   })
 
   it("recognizes the busy rejection from both backends", () => {
