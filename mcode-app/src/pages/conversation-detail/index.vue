@@ -3918,7 +3918,7 @@ function measureMessageListHeight() {
     .boundingClientRect()
     .select(".detail-shell__page--active .input-main-row")
     .boundingClientRect()
-    .select(".detail-shell__page--active .input-tool-row")
+    .select(".detail-shell__page--active .input-tool-menu")
     .boundingClientRect()
     .select(".detail-shell__page--active .message-list__content")
     .boundingClientRect()

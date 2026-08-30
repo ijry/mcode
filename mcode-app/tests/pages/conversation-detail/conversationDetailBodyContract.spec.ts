@@ -85,12 +85,13 @@ describe("ConversationDetailBody", () => {
       'class="input-status-row__text">{{ inputStatusText }}</text>',
     );
     expect(paneSource).toContain("'tool-toggle-btn'");
-    expect(paneSource).toContain('v-if="showInputToolRow" class="input-tool-row"');
-    expect(paneSource).toContain('class="input-tool-btn input-tool-btn--danger"');
+    expect(paneSource).toContain('v-if="showInputToolMenu"');
+    expect(paneSource).toContain('class="input-tool-menu"');
+    expect(paneSource).toContain('class="input-tool-menu__item input-tool-menu__item--danger"');
     expect(shellSource).toContain("const DEFAULT_DETAIL_TOOLBAR_HEIGHT = 0");
   });
 
-  it("keeps bottom input tools evenly distributed", () => {
+  it("shows the plus input tools as a left-aligned menu above the composer", () => {
     const source = fs.readFileSync(
       path.resolve(
         __dirname,
@@ -99,12 +100,13 @@ describe("ConversationDetailBody", () => {
       "utf8",
     );
 
-    const toolButtonBlock =
-      source.match(/\.input-tool-btn\s*\{[^}]*\}/)?.[0] || "";
-    expect(toolButtonBlock).toContain("flex: 1;");
-    expect(toolButtonBlock).toContain("min-width: 0;");
-    expect(toolButtonBlock).not.toContain("flex: 0 0 72rpx;");
-    expect(toolButtonBlock).not.toContain("width: 72rpx;");
+    const toolMenuBlock =
+      source.match(/\.input-tool-menu\s*\{[^}]*\}/)?.[0] || "";
+    expect(toolMenuBlock).toContain("width: min(520rpx, 72vw);");
+    expect(toolMenuBlock).toContain("margin-bottom: 12rpx;");
+    expect(toolMenuBlock).toContain("align-self: flex-start;");
+    expect(source).toContain(".input-tool-menu__item");
+    expect(source).not.toContain(".input-tool-row");
   });
 
   it("anchors plan drawer theme styles on the teleported drawer root", () => {
@@ -142,11 +144,74 @@ describe("ConversationDetailBody", () => {
       "utf8",
     );
 
-    expect(source).toContain("@click=\"toggleComposerPanel('config')\"");
+    expect(source).toContain("@click=\"openConfigPanelFromMenu\"");
     expect(source).toContain("composerPanelMode === 'config'");
     expect(source).toMatch(/<up-icon\s+name="setting"/);
-    expect(source).toContain('class="input-tool-btn input-tool-btn--danger"');
+    expect(source).toContain('class="input-tool-menu__item input-tool-menu__item--danger"');
     expect(source).toContain("function loadDetailAgentConfig()");
+  });
+
+  it("separates quick continue from other plus menu actions", () => {
+    const source = fs.readFileSync(
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/ConversationDetailInteractivePane.vue",
+      ),
+      "utf8",
+    );
+
+    const menuIndex = source.indexOf('v-if="showInputToolMenu"');
+    const inputMainRowIndex = source.indexOf('class="input-main-row"');
+    expect(menuIndex).toBeGreaterThan(-1);
+    expect(menuIndex).toBeLessThan(inputMainRowIndex);
+    expect(source).toContain('class="input-tool-menu__item input-tool-menu__item--primary"');
+    expect(source).toContain('@click="sendQuickContinue"');
+    expect(source).toContain("<up-divider");
+    expect(source).toContain("@click=\"openAttachmentPicker\"");
+    expect(source).toContain("@click=\"openQuickReplyPanelFromMenu\"");
+    expect(source).toContain("@click=\"openConfigPanelFromMenu\"");
+    expect(source).not.toContain("@click=\"handleRealtimeFeedbackMenu\"");
+    expect(source).not.toContain("@click=\"handleSlashCommandMenu\"");
+    expect(source).not.toContain("实时反馈");
+    expect(source).not.toContain("斜杠命令");
+  });
+
+  it("opens composer action panels above the input with a two-column config layout", () => {
+    const source = fs.readFileSync(
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/ConversationDetailInteractivePane.vue",
+      ),
+      "utf8",
+    );
+    const styles = fs.readFileSync(
+      path.resolve(__dirname, "../../../src/pages/conversation-detail/index.scss"),
+      "utf8",
+    );
+
+    const composerPanelIndex = source.indexOf('v-if="showComposerPanel"');
+    const inputMainRowIndex = source.indexOf('class="input-main-row"');
+    const inputToolRowIndex = source.indexOf('v-if="showInputToolMenu"');
+    expect(composerPanelIndex).toBeGreaterThan(-1);
+    expect(inputMainRowIndex).toBeGreaterThan(-1);
+    expect(inputToolRowIndex).toBeGreaterThan(-1);
+    expect(composerPanelIndex).toBeLessThan(inputMainRowIndex);
+    expect(composerPanelIndex).toBeLessThan(inputToolRowIndex);
+
+    expect(source).toContain("composerConfigNavItems");
+    expect(source).toContain("activeComposerConfigItem");
+    expect(source).toContain('class="composer-panel__config-layout"');
+    expect(source).toContain('class="composer-panel__config-nav"');
+    expect(source).toContain('class="composer-panel__config-detail"');
+    expect(source).toContain("@click=\"activateComposerConfigItem(item.key)\"");
+    expect(source).toContain('v-if="composerPanelMode === \'quick_reply\'"');
+
+    expect(styles).toMatch(/\.composer-panel__config-layout\s*\{[\s\S]*display:\s*grid;/);
+    expect(styles).toMatch(
+      /\.composer-panel__config-layout\s*\{[\s\S]*grid-template-columns:\s*220rpx minmax\(0, 1fr\);/,
+    );
+    expect(styles).toContain(".composer-panel__config-nav");
+    expect(styles).toContain(".composer-panel__config-detail");
   });
 
   it("defers inactive pane project and config loading", () => {
@@ -519,7 +584,7 @@ describe("ConversationDetailBody", () => {
       '.select(".detail-shell__page--active .input-main-row")',
     );
     expect(source).toContain(
-      '.select(".detail-shell__page--active .input-tool-row")',
+      '.select(".detail-shell__page--active .input-tool-menu")',
     );
     expect(source).toContain(
       '.select(".detail-shell__page--active .message-list__content")',

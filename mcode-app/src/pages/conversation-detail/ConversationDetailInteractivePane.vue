@@ -746,6 +746,202 @@
           </view>
         </view>
 
+        <view
+          v-if="showComposerPanel"
+          :class="[
+            'composer-panel',
+            translucentMessageList && 'composer-panel--translucent',
+          ]"
+        >
+          <view
+            v-if="composerPanelMode === 'quick_reply'"
+            class="composer-panel__body composer-panel__body--quick"
+          >
+            <view
+              v-for="item in quickReplyItems"
+              :key="item.value"
+              class="composer-quick-chip"
+              @click="sendQuickReply(item.value)"
+            >
+              <text class="composer-quick-chip__text">{{ item.label }}</text>
+            </view>
+          </view>
+          <view
+            v-else-if="composerPanelMode === 'config'"
+            class="composer-panel__config-layout"
+          >
+            <view class="composer-panel__config-nav">
+              <view
+                v-for="item in composerConfigNavItems"
+                :key="item.key"
+                :class="[
+                  'composer-config-nav-item',
+                  activeComposerConfigKey === item.key &&
+                    'composer-config-nav-item--active',
+                  item.disabled && 'composer-config-nav-item--disabled',
+                ]"
+                @click="activateComposerConfigItem(item.key)"
+              >
+                <text class="composer-config-nav-item__label u-line-1">{{
+                  item.label
+                }}</text>
+                <text class="composer-config-nav-item__summary u-line-1">{{
+                  item.summary
+                }}</text>
+              </view>
+            </view>
+            <scroll-view scroll-y class="composer-panel__config-detail">
+              <view
+                v-if="!activeComposerConfigItem"
+                class="composer-config-empty"
+              >
+                <text class="composer-config-empty__text">远端未提供可配置项</text>
+              </view>
+              <view
+                v-else-if="showPermissionModeValues"
+                class="composer-config-option-list"
+              >
+                <view
+                  v-for="mode in activePermissionModes"
+                  :key="mode.id"
+                  :class="[
+                    'composer-config-option',
+                    detailAgentConfig.selectedModeId === mode.id &&
+                      'composer-config-option--active',
+                  ]"
+                  @click.stop="selectDetailMode(mode.id)"
+                >
+                  <text class="composer-config-option__check">{{
+                    detailAgentConfig.selectedModeId === mode.id ? "✓" : ""
+                  }}</text>
+                  <view class="composer-config-option__body">
+                    <text class="composer-config-option__title">{{
+                      mode.name
+                    }}</text>
+                    <text
+                      v-if="mode.description"
+                      class="composer-config-option__desc"
+                    >
+                      {{ mode.description }}
+                    </text>
+                  </view>
+                </view>
+              </view>
+              <view
+                v-else-if="activeConfigOption"
+                class="composer-config-option-list"
+              >
+                <view
+                  v-for="value in activeConfigValues"
+                  :key="value.value"
+                  :class="[
+                    'composer-config-option',
+                    detailAgentConfig.selectedValues[
+                      activeConfigOption.id
+                    ] === value.value && 'composer-config-option--active',
+                  ]"
+                  @click.stop="
+                    selectDetailConfigValue(activeConfigOption.id, value.value)
+                  "
+                >
+                  <text class="composer-config-option__check">{{
+                    detailAgentConfig.selectedValues[activeConfigOption.id] ===
+                    value.value
+                      ? "✓"
+                      : ""
+                  }}</text>
+                  <view class="composer-config-option__body">
+                    <text class="composer-config-option__title">{{
+                      value.name
+                    }}</text>
+                    <text
+                      v-if="value.description"
+                      class="composer-config-option__desc"
+                    >
+                      {{ value.description }}
+                    </text>
+                  </view>
+                </view>
+              </view>
+              <view v-else class="composer-config-empty">
+                <text class="composer-config-empty__text">{{
+                  activeComposerConfigItem.summary
+                }}</text>
+              </view>
+            </scroll-view>
+          </view>
+        </view>
+
+        <view
+          v-if="showInputToolMenu"
+          class="input-tool-menu"
+          :class="{
+            'input-tool-menu--translucent': translucentMessageList,
+          }"
+        >
+          <view
+            class="input-tool-menu__item input-tool-menu__item--primary"
+            @click="sendQuickContinue"
+          >
+            <up-icon
+              name="play-right"
+              size="18"
+              :color="upThemeVar('--up-primary', '#2979ff')"
+            ></up-icon>
+            <text class="input-tool-menu__label">快捷继续</text>
+          </view>
+          <up-divider
+            :hairline="true"
+            :customStyle="{ margin: '6rpx 0' }"
+          ></up-divider>
+          <view class="input-tool-menu__item" @click="openAttachmentPicker">
+            <up-icon
+              name="attach"
+              size="18"
+              :color="upThemeVar('--up-main-color', '#303133')"
+            ></up-icon>
+            <text class="input-tool-menu__label">附加文件</text>
+          </view>
+          <view class="input-tool-menu__item" @click="openQuickReplyPanelFromMenu">
+            <up-icon
+              name="list-dot"
+              size="18"
+              :color="upThemeVar('--up-main-color', '#303133')"
+            ></up-icon>
+            <text class="input-tool-menu__label">快捷消息</text>
+            <up-icon
+              class="input-tool-menu__arrow"
+              name="arrow-right"
+              size="13"
+              :color="upThemeVar('--up-tips-color', '#909193')"
+            ></up-icon>
+          </view>
+          <view class="input-tool-menu__item" @click="openConfigPanelFromMenu">
+            <up-icon
+              name="setting"
+              size="18"
+              :color="upThemeVar('--up-main-color', '#303133')"
+            ></up-icon>
+            <text class="input-tool-menu__label">设置</text>
+            <up-icon
+              class="input-tool-menu__arrow"
+              name="arrow-right"
+              size="13"
+              :color="upThemeVar('--up-tips-color', '#909193')"
+            ></up-icon>
+          </view>
+          <view
+            class="input-tool-menu__item input-tool-menu__item--danger"
+            :class="{
+              'input-tool-menu__item--disabled': !canStopSession || stoppingSession,
+            }"
+            @click.stop="confirmStopSession()"
+          >
+            <view class="input-tool-menu__stop-mark"></view>
+            <text class="input-tool-menu__label">停止当前会话</text>
+          </view>
+        </view>
+
         <view class="input-main-row">
           <view
             :class="[
@@ -811,266 +1007,6 @@
             ></up-loading-icon>
             <up-icon v-else name="arrow-up" size="22" color="#ffffff"></up-icon>
           </view>
-        </view>
-
-        <view v-if="showInputToolRow" class="input-tool-row">
-          <view class="input-tool-btn" @click="handleChooseImages">
-            <view
-              :class="[
-                'input-tool-btn__icon',
-                translucentMessageList && 'input-tool-btn__icon--translucent',
-              ]"
-            >
-              <up-icon
-                name="photo"
-                size="20"
-                :color="upThemeVar('--up-content-color', '#606266')"
-              ></up-icon>
-            </view>
-          </view>
-
-          <view class="input-tool-btn" @click="handleChooseFiles">
-            <view
-              :class="[
-                'input-tool-btn__icon',
-                translucentMessageList && 'input-tool-btn__icon--translucent',
-              ]"
-            >
-              <up-icon
-                name="file-text"
-                size="20"
-                :color="upThemeVar('--up-content-color', '#606266')"
-              ></up-icon>
-            </view>
-          </view>
-
-          <view
-            :class="[
-              'input-tool-btn',
-              composerPanelMode === 'quick_reply' && 'input-tool-btn--active',
-            ]"
-            @click="toggleComposerPanel('quick_reply')"
-          >
-            <view
-              :class="[
-                'input-tool-btn__icon',
-                translucentMessageList && 'input-tool-btn__icon--translucent',
-              ]"
-            >
-              <up-icon
-                name="share"
-                size="20"
-                :color="upThemeVar('--up-content-color', '#606266')"
-              ></up-icon>
-            </view>
-          </view>
-
-          <view
-            :class="[
-              'input-tool-btn',
-              composerPanelMode === 'config' && 'input-tool-btn--active',
-            ]"
-            @click="toggleComposerPanel('config')"
-          >
-            <view
-              :class="[
-                'input-tool-btn__icon',
-                translucentMessageList && 'input-tool-btn__icon--translucent',
-              ]"
-            >
-              <up-icon
-                name="setting"
-                size="20"
-                :color="upThemeVar('--up-content-color', '#606266')"
-              ></up-icon>
-            </view>
-          </view>
-
-          <view
-            class="input-tool-btn input-tool-btn--danger"
-            :class="{
-              'input-tool-btn--disabled': !canStopSession || stoppingSession,
-            }"
-            @click.stop="confirmStopSession()"
-          >
-            <view
-              :class="[
-                'input-tool-btn__icon',
-                translucentMessageList && 'input-tool-btn__icon--translucent',
-              ]"
-            >
-              <up-loading-icon
-                v-if="stoppingSession"
-                mode="circle"
-                size="16"
-                color="#f56c6c"
-              ></up-loading-icon>
-              <view v-else class="input-tool-btn__stop-mark"></view>
-            </view>
-          </view>
-        </view>
-
-        <view
-          v-if="showComposerPanel"
-          :class="[
-            'composer-panel',
-            translucentMessageList && 'composer-panel--translucent',
-          ]"
-        >
-          <view
-            v-if="composerPanelMode === 'quick_reply'"
-            class="composer-panel__body composer-panel__body--quick"
-          >
-            <view
-              v-for="item in quickReplyItems"
-              :key="item.value"
-              class="composer-quick-chip"
-              @click="sendQuickReply(item.value)"
-            >
-              <text class="composer-quick-chip__text">{{ item.label }}</text>
-            </view>
-          </view>
-          <scroll-view v-else scroll-y class="composer-panel__scroll">
-            <view class="composer-panel__scroll-content">
-              <view class="composer-panel__section">
-                <text class="composer-panel__section-title">模型配置</text>
-                <view
-                  :class="[
-                    'composer-config-row',
-                    !modelOption && 'composer-config-row--disabled',
-                  ]"
-                  @click="toggleConfigRow('model')"
-                >
-                  <text class="composer-config-row__label">模型</text>
-                  <text class="composer-config-row__value">{{
-                    modelSummary
-                  }}</text>
-                </view>
-                <view
-                  v-if="expandedConfigKey === 'model' && modelOption"
-                  class="config-chip-grid"
-                >
-                  <view
-                    v-for="value in modelOption?.kind.options || []"
-                    :key="value.value"
-                    :class="[
-                      'config-chip',
-                      detailAgentConfig.selectedValues[
-                        modelOption?.id || ''
-                      ] === value.value && 'config-chip--active',
-                    ]"
-                    @click.stop="
-                      selectDetailConfigValue(
-                        modelOption?.id || '',
-                        value.value,
-                      )
-                    "
-                  >
-                    <text class="config-chip__title">{{ value.name }}</text>
-                  </view>
-                </view>
-              </view>
-
-              <view class="composer-panel__section">
-                <view
-                  :class="[
-                    'composer-config-row',
-                    !reasoningOption && 'composer-config-row--disabled',
-                  ]"
-                  @click="toggleConfigRow('reasoning')"
-                >
-                  <text class="composer-config-row__label">推理强度</text>
-                  <text class="composer-config-row__value">{{
-                    reasoningSummary
-                  }}</text>
-                </view>
-                <view
-                  v-if="expandedConfigKey === 'reasoning' && reasoningOption"
-                  class="config-chip-grid"
-                >
-                  <view
-                    v-for="value in reasoningOption?.kind.options || []"
-                    :key="value.value"
-                    :class="[
-                      'config-chip',
-                      detailAgentConfig.selectedValues[
-                        reasoningOption?.id || ''
-                      ] === value.value && 'config-chip--active',
-                    ]"
-                    @click.stop="
-                      selectDetailConfigValue(
-                        reasoningOption?.id || '',
-                        value.value,
-                      )
-                    "
-                  >
-                    <text class="config-chip__title">{{ value.name }}</text>
-                  </view>
-                </view>
-              </view>
-
-              <view class="composer-panel__section">
-                <view
-                  :class="[
-                    'composer-config-row',
-                    !hasPermissionOptions && 'composer-config-row--disabled',
-                  ]"
-                  @click="toggleConfigRow('permission')"
-                >
-                  <text class="composer-config-row__label">授权类型</text>
-                  <text class="composer-config-row__value">{{
-                    permissionSummary
-                  }}</text>
-                </view>
-                <view
-                  v-if="
-                    expandedConfigKey === 'permission' &&
-                    detailAgentConfig.modes?.available_modes?.length
-                  "
-                  class="config-chip-grid"
-                >
-                  <view
-                    v-for="mode in detailAgentConfig.modes?.available_modes ||
-                    []"
-                    :key="mode.id"
-                    :class="[
-                      'config-chip',
-                      detailAgentConfig.selectedModeId === mode.id &&
-                        'config-chip--active',
-                    ]"
-                    @click.stop="selectDetailMode(mode.id)"
-                  >
-                    <text class="config-chip__title">{{ mode.name }}</text>
-                  </view>
-                </view>
-                <view
-                  v-else-if="
-                    expandedConfigKey === 'permission' && permissionOption
-                  "
-                  class="config-chip-grid"
-                >
-                  <view
-                    v-for="value in permissionOption?.kind.options || []"
-                    :key="value.value"
-                    :class="[
-                      'config-chip',
-                      detailAgentConfig.selectedValues[
-                        permissionOption?.id || ''
-                      ] === value.value && 'config-chip--active',
-                    ]"
-                    @click.stop="
-                      selectDetailConfigValue(
-                        permissionOption?.id || '',
-                        value.value,
-                      )
-                    "
-                  >
-                    <text class="config-chip__title">{{ value.name }}</text>
-                  </view>
-                </view>
-              </view>
-            </view>
-          </scroll-view>
         </view>
 
         <view
@@ -1241,6 +1177,9 @@ import type {
   PendingQuestionState,
   PermissionRequest,
   QuestionAnswer,
+  SessionConfigOptionInfo,
+  SessionConfigOptionValueInfo,
+  SessionModeInfo,
 } from "@/types/acp";
 import ConversationDetailBody from "./ConversationDetailBody.vue";
 import type { CyberEffectPhase, DetailThemeId } from "./detailCyberMode";
@@ -1373,6 +1312,14 @@ interface DetailProjectEntry {
 }
 
 type ComposerPanelMode = "" | "quick_reply" | "config";
+type ComposerConfigPanelKey = Exclude<ComposerConfigKey, "">;
+
+interface ComposerConfigNavItem {
+  key: ComposerConfigPanelKey;
+  label: string;
+  summary: string;
+  disabled: boolean;
+}
 
 const props = defineProps<{
   conversationId: number;
@@ -1765,6 +1712,9 @@ const showComposerPanel = computed(() => composerPanelMode.value !== "");
 const showInputToolRow = computed(
   () => toolRowExpanded.value || showComposerPanel.value,
 );
+const showInputToolMenu = computed(
+  () => toolRowExpanded.value && !showComposerPanel.value,
+);
 const detailConfigProjection = computed(() =>
   projectDetailConfigOptions(detailAgentConfig.value.configOptions),
 );
@@ -1804,6 +1754,63 @@ const permissionSummary = computed(() =>
     state: detailAgentConfig.value,
     permissionOption: permissionOption.value,
   }),
+);
+const composerConfigNavItems = computed<ComposerConfigNavItem[]>(() => [
+  {
+    key: "permission",
+    label: "Mode",
+    summary: permissionSummary.value,
+    disabled: !hasPermissionOptions.value,
+  },
+  {
+    key: "model",
+    label: "Model",
+    summary: modelSummary.value,
+    disabled: !hasModelOptions.value,
+  },
+  {
+    key: "reasoning",
+    label: "Reasoning",
+    summary: reasoningSummary.value,
+    disabled: !reasoningOption.value,
+  },
+]);
+const firstAvailableComposerConfigKey = computed<ComposerConfigKey>(
+  () => composerConfigNavItems.value.find((item) => !item.disabled)?.key || "",
+);
+const activeComposerConfigKey = computed<ComposerConfigKey>(() => {
+  if (
+    expandedConfigKey.value &&
+    composerConfigNavItems.value.some(
+      (item) => item.key === expandedConfigKey.value && !item.disabled,
+    )
+  ) {
+    return expandedConfigKey.value;
+  }
+  return firstAvailableComposerConfigKey.value;
+});
+const activeComposerConfigItem = computed(
+  () =>
+    composerConfigNavItems.value.find(
+      (item) => item.key === activeComposerConfigKey.value,
+    ) || null,
+);
+const activeConfigOption = computed<SessionConfigOptionInfo | null>(() => {
+  if (activeComposerConfigKey.value === "model") return modelOption.value;
+  if (activeComposerConfigKey.value === "reasoning") return reasoningOption.value;
+  if (activeComposerConfigKey.value === "permission") return permissionOption.value;
+  return null;
+});
+const activeConfigValues = computed<SessionConfigOptionValueInfo[]>(() =>
+  activeConfigOption.value?.kind.options || [],
+);
+const activePermissionModes = computed<SessionModeInfo[]>(
+  () => detailAgentConfig.value.modes?.available_modes || [],
+);
+const showPermissionModeValues = computed(
+  () =>
+    activeComposerConfigKey.value === "permission" &&
+    activePermissionModes.value.length > 0,
 );
 const isBusyForSend = computed(
   () =>
@@ -2191,8 +2198,12 @@ function persistDetailAgentConfigSelection() {
 }
 
 function toggleConfigRow(key: ComposerConfigKey) {
-  expandedConfigKey.value = nextExpandedConfigKey({
-    currentKey: expandedConfigKey.value,
+  activateComposerConfigItem(key);
+}
+
+function activateComposerConfigItem(key: ComposerConfigKey) {
+  const next = nextExpandedConfigKey({
+    currentKey: "",
     targetKey: key,
     availability: {
       hasModelOptions: hasModelOptions.value,
@@ -2200,6 +2211,9 @@ function toggleConfigRow(key: ComposerConfigKey) {
       hasPermissionOptions: hasPermissionOptions.value,
     },
   });
+  if (next) {
+    expandedConfigKey.value = next;
+  }
   scheduleViewportSync();
 }
 
@@ -2798,9 +2812,35 @@ async function loadOlderTurns() {
 }
 
 function toggleInputToolRow() {
+  if (showComposerPanel.value) {
+    composerPanelMode.value = "";
+    expandedConfigKey.value = "";
+    toolRowExpanded.value = false;
+    scheduleViewportSync();
+    return;
+  }
   toolRowExpanded.value = !toolRowExpanded.value;
   if (!toolRowExpanded.value) {
     composerPanelMode.value = "";
+    expandedConfigKey.value = "";
+  }
+  scheduleViewportSync();
+}
+
+function openQuickReplyPanelFromMenu() {
+  openComposerPanelFromMenu("quick_reply");
+}
+
+function openConfigPanelFromMenu() {
+  openComposerPanelFromMenu("config");
+}
+
+function openComposerPanelFromMenu(mode: Exclude<ComposerPanelMode, "">) {
+  toolRowExpanded.value = false;
+  composerPanelMode.value = mode;
+  if (mode === "config") {
+    expandedConfigKey.value = activeComposerConfigKey.value;
+  } else {
     expandedConfigKey.value = "";
   }
   scheduleViewportSync();
@@ -2813,10 +2853,33 @@ function toggleComposerPanel(mode: ComposerPanelMode) {
   if (!composerPanelMode.value) {
     toolRowExpanded.value = false;
   }
-  if (nextMode !== "config") {
+  if (nextMode === "config") {
+    expandedConfigKey.value = activeComposerConfigKey.value;
+  } else {
     expandedConfigKey.value = "";
   }
   scheduleViewportSync();
+}
+
+async function sendQuickContinue() {
+  await sendQuickReply("继续");
+}
+
+function openAttachmentPicker() {
+  toolRowExpanded.value = false;
+  scheduleViewportSync();
+  uni.showActionSheet({
+    itemList: ["选择图片", "选择文件"],
+    success: (result) => {
+      if (Number(result.tapIndex) === 0) {
+        handleChooseImages();
+        return;
+      }
+      if (Number(result.tapIndex) === 1) {
+        handleChooseFiles();
+      }
+    },
+  });
 }
 
 function getSlashCommandDesc(item: SlashCommandItem) {
@@ -3800,14 +3863,4 @@ function showSharedLiveBlockedToast() {
   transition: none !important;
 }
 
-.input-tool-btn--text {
-  min-width: 58rpx;
-  padding: 0 14rpx;
-}
-
-.input-tool-btn__label {
-  font-size: 24rpx;
-  color: var(--up-content-color, #606266);
-  font-weight: 600;
-}
 </style>
