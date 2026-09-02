@@ -7,7 +7,30 @@ import {
   listWorkTaskTemplates,
   saveWorkTaskTemplate,
 } from "@/services/workTask"
+import TaskAgentConfigSheet from "./TaskAgentConfigSheet.vue"
+import {
+  buildAgentConfigContextKey,
+  createEmptyDetailAgentConfigState,
+  persistAgentConfigCache,
+  readFreshAgentConfigCache,
+  type DetailAgentConfigState,
+} from "@/services/conversation/composerTools"
+import {
+  effectiveTaskAgentSelection,
+  hasTaskAgentConfigChoices,
+  INHERITED_TASK_AGENT_SELECTION,
+  readTaskAgentSelection,
+  taskAgentConfigPlaceholderState,
+  taskAgentConfigStateFromSnapshot,
+  taskAgentConfigSummary,
+  taskAgentLabelSnapshot,
+  withTaskAgentConfigValue,
+  withTaskAgentMode,
+  type TaskAgentConfigSelection,
+} from "../taskAgentConfig"
+import { AGENT_DISPLAY_ORDER, AGENT_LABELS } from "@/services/remoteSettings"
 import type { CodegGateway } from "@/services/gateway"
+import type { AgentOptionsSnapshot } from "@/types/acp"
 import type { WorkTask, WorkTaskDraft, WorkTaskTemplate } from "@/types/workTask"
 
 /**
@@ -26,6 +49,13 @@ import type { WorkTask, WorkTaskDraft, WorkTaskTemplate } from "@/types/workTask
  * `agentDirty` 为 false 时 draft 里 `agent_type` 是 null（继续继承）；只有用户
  * 显式改过才作为本任务的覆盖值保存。冻结一份"当时的默认值"会让文件夹改了默认
  * 之后这个任务莫名其妙还在用旧 agent。
+ *
+ * **智能体选项（授权模式 / 模型 / 推理程度）与 agent 共享同一个 dirty 位**：它们是
+ * 一组三件套 —— `mode_id` / `config_values` 的取值只在某个 agent 下有意义（`opus-4.6`
+ * 对 Codex 毫无意义），单独覆盖其中一项而让 agent 继续继承，会在文件夹换了默认 agent
+ * 之后留下一份跨 agent 的垃圾配置。这也是 PC 端
+ * `codeg-plus/src/components/tasks/task-editor-dialog.tsx` 的做法（一个 `agentDirty`
+ * 管三样，换 agent 时清空另外两样）。
  */
 const props = defineProps<{
   show: boolean
@@ -49,14 +79,15 @@ const upThemeCardStyle = computed(() => currentInstance?.proxy?.upThemeCardStyle
 const upThemeVar = (varName: string, fallbackColor?: string) =>
   currentInstance?.proxy?.upThemeVar?.(varName, fallbackColor) ?? (fallbackColor || "")
 
-const AGENT_OPTIONS = [
-  { label: "Claude Code", value: "claude_code" },
-  { label: "Codex CLI", value: "codex" },
-  { label: "OpenCode", value: "open_code" },
-  { label: "Gemini CLI", value: "gemini" },
-  { label: "OpenClaw", value: "open_claw" },
-  { label: "Cline", value: "cline" },
-]
+/**
+ * 可选 agent 列表。取 `remoteSettings` 那份**唯一**标签映射，不再本地抄一遍 ——
+ * 此前这里的副本把 codex 写成「Codex CLI」而全局那份是「Codex」，同一个 agent 在任务
+ * 弹层和别处显示成两个名字（`CreateConversationSheet` 已经踩过并记录了同一个坑）。
+ */
+const AGENT_OPTIONS = AGENT_DISPLAY_ORDER.map((value) => ({
+  label: AGENT_LABELS[value],
+  value: value as string,
+}))
 
 const title = ref("")
 const prompt = ref("")
@@ -65,11 +96,26 @@ const agentDirty = ref(false)
 const agentType = ref("claude_code")
 const showProjectPicker = ref(false)
 const showAgentPicker = ref(false)
+const showAgentConfigSheet = ref(false)
 const showTemplatePanel = ref(false)
 const templates = ref<WorkTaskTemplate[]>([])
 const templateName = ref("")
 const templateBusy = ref(false)
 const errorMessage = ref("")
+
+/**
+ * 智能体选项的探测状态与当前选择（形状与新建会话弹层、会话详情 composer 同源）。
+ */
+const agentConfig = ref<DetailAgentConfigState>(createEmptyDetailAgentConfigState())
+/**
+ * 记录里存着的那份选择（本任务的覆盖值，或继承来的文件夹默认值）。探测结果按它投影，
+ * 探测失败时它就是要写回去的东西 —— 一次读取失败不该把用户配好的选项清空。
+ */
+const storedSelection = ref<TaskAgentConfigSelection>({ ...INHERITED_TASK_AGENT_SELECTION })
+/** 上次保存时记下的人类可读名字；探测不到时靠它显示「Opus 4.6」而不是一串 id。 */
+const storedLabels = ref<Record<string, unknown> | null>(null)
+/** 在途探测的序号 —— 切项目/切 agent/关弹层后回来的旧响应据此丢弃。 */
+let agentProbeToken = 0
 
 const isEdit = computed(() => props.task != null)
 const sheetTitle = computed(() => (isEdit.value ? "编辑任务" : "新建任务"))
@@ -90,8 +136,22 @@ const selectedProjectName = computed(() => {
   const project = props.projects.find((item) => item.id === folderId.value)
   return project ? project.name || project.path : ""
 })
+/** 探测要带上项目路径：同一个 agent 在不同目录下可能报出不同的选项集。 */
+const selectedProjectPath = computed(
+  () => props.projects.find((item) => item.id === folderId.value)?.path || ""
+)
 const selectedAgentLabel = computed(
   () => AGENT_OPTIONS.find((item) => item.value === agentType.value)?.label || agentType.value
+)
+const agentConfigSummary = computed(() =>
+  taskAgentConfigSummary({
+    state: agentConfig.value,
+    stored: storedSelection.value,
+    fallbackLabels: storedLabels.value,
+  })
+)
+const agentConfigOpenable = computed(
+  () => agentConfig.value.status === "failed" || hasTaskAgentConfigChoices(agentConfig.value)
 )
 
 const canSubmit = computed(
@@ -108,7 +168,13 @@ const folderLocked = computed(() => props.task?.worktree_folder_id != null)
 watch(
   () => props.show,
   (visible) => {
-    if (!visible) return
+    if (!visible) {
+      // 关闭时推进一格：在途探测回来后会发现 token 变了而放弃写入，否则一次慢请求
+      // 会在弹层已经关掉（甚至下次打开成另一个任务）之后覆盖状态。
+      agentProbeToken += 1
+      showAgentConfigSheet.value = false
+      return
+    }
     seedForm()
     void loadTemplates()
     void syncEffectiveAgent()
@@ -121,6 +187,18 @@ watch(folderId, () => {
   void syncEffectiveAgent()
 })
 
+/**
+ * 选项探测跟着 (agent, 项目路径) 走。项目也算在内 —— 探测是在那个目录里现拉一个 agent
+ * 做的，同一个 agent 在不同项目下可能报出不同的选项集（项目级配置）。
+ */
+watch(
+  () => [props.show, agentType.value, selectedProjectPath.value] as const,
+  ([visible]) => {
+    if (!visible) return
+    void loadAgentConfig()
+  }
+)
+
 function seedForm() {
   errorMessage.value = ""
   showTemplatePanel.value = false
@@ -132,6 +210,11 @@ function seedForm() {
     folderId.value = task.folder_id
     agentDirty.value = task.config?.agent_type != null
     agentType.value = task.config?.agent_type || "claude_code"
+    // 任务自己有覆盖值时读它；否则留空等 `syncEffectiveAgent` 用文件夹的生效设置回填。
+    storedSelection.value = agentDirty.value
+      ? readTaskAgentSelection(task.config)
+      : { ...INHERITED_TASK_AGENT_SELECTION }
+    storedLabels.value = task.config?.label_snapshot || null
     return
   }
   title.value = ""
@@ -140,12 +223,17 @@ function seedForm() {
     props.defaultFolderId > 0 ? props.defaultFolderId : props.projects[0]?.id || 0
   agentDirty.value = false
   agentType.value = "claude_code"
+  storedSelection.value = { ...INHERITED_TASK_AGENT_SELECTION }
+  storedLabels.value = null
 }
 
 /**
  * 用户没碰过 agent 时，把控件显示成该项目**生效**的默认值。失败静默 ——
  * 拿不到设置只意味着控件显示 claude_code，提交时仍然是 null（继承），
  * 不会因为一次读取失败就把错的 agent 冻进任务里。
+ *
+ * 三样一起回填：agent 与它的 mode / config 是一组，只回填 agent 会让选项行显示成
+ * 「使用远端默认配置」，而实际上文件夹里配了模型。
  */
 async function syncEffectiveAgent() {
   if (agentDirty.value || !props.gateway || folderId.value <= 0) return
@@ -153,9 +241,82 @@ async function syncEffectiveAgent() {
     const settings = await getWorkTaskSettingsEffective(props.gateway, folderId.value)
     if (agentDirty.value) return
     agentType.value = settings.default_agent_type || "claude_code"
+    storedSelection.value = readTaskAgentSelection(settings)
+    storedLabels.value = settings.label_snapshot || null
+    // 探测已经落地时把继承来的那份选择投影上去（探测比设置先回来是常态）。
+    reprojectStoredSelection()
   } catch (error) {
     console.warn("load effective task settings failed:", error)
   }
+}
+
+/**
+ * 探测这个 agent 在这个项目下能配什么。
+ *
+ * 缓存复用 `composerTools` 那套（5 分钟 TTL，与新建会话弹层同源），`scope` 传固定的
+ * `"work_task"`：任务的选择存在服务端记录里，不该和会话 composer 的本机记忆串台，
+ * 但同一台连接上多个任务探测同一个 agent 时可以共用快照。
+ *
+ * **依赖里刻意不含 `props.gateway`**：它是个对象，而列表每次刷新都会重建连接桶（因此
+ * 换一个新的 gateway 实例）。把它放进 watch 会让一次后台刷新重新投影状态，把用户刚在
+ * 弹层里选好的取值冲掉。`selectedProjectPath` 是字符串所以没有这个问题。
+ */
+async function loadAgentConfig() {
+  const gateway = props.gateway
+  if (!gateway) {
+    agentConfig.value = taskAgentConfigPlaceholderState(
+      "idle",
+      "连接不可用，保存后将沿用原有选项"
+    )
+    return
+  }
+  if (!agentType.value) {
+    agentConfig.value = taskAgentConfigPlaceholderState("idle")
+    return
+  }
+
+  const token = ++agentProbeToken
+  const contextKey = buildAgentConfigContextKey(
+    gateway.getRemoteInstanceDescriptor().instanceKey,
+    agentType.value,
+    selectedProjectPath.value,
+    "work_task"
+  )
+  const cached = readFreshAgentConfigCache(contextKey)
+  if (cached) {
+    agentConfig.value = taskAgentConfigStateFromSnapshot(cached, storedSelection.value)
+    return
+  }
+
+  agentConfig.value = taskAgentConfigPlaceholderState("loading")
+  try {
+    const snapshot = await gateway.call<AgentOptionsSnapshot>("acp_describe_agent_options", {
+      agentType: agentType.value,
+      workingDir: selectedProjectPath.value || null,
+    })
+    if (token !== agentProbeToken) return
+    persistAgentConfigCache(contextKey, snapshot)
+    agentConfig.value = taskAgentConfigStateFromSnapshot(snapshot, storedSelection.value)
+  } catch (error) {
+    if (token !== agentProbeToken) return
+    console.warn("probe task agent options failed:", error)
+    agentConfig.value = taskAgentConfigPlaceholderState(
+      "failed",
+      "读取失败，保存后将沿用原有选项"
+    )
+  }
+}
+
+/** 存储那份选择变了（生效设置回来了、套了模板）时，重新投影到已有快照上。 */
+function reprojectStoredSelection() {
+  if (agentConfig.value.status !== "ready") return
+  agentConfig.value = taskAgentConfigStateFromSnapshot(
+    {
+      modes: agentConfig.value.modes,
+      config_options: agentConfig.value.configOptions,
+    },
+    storedSelection.value
+  )
 }
 
 async function loadTemplates() {
@@ -189,9 +350,15 @@ function onAgentConfirm(event: any) {
     (typeof selected === "string"
       ? AGENT_OPTIONS.find((item) => item.label === selected)
       : null)
-  if (option) {
+  if (option && option.value !== agentType.value) {
     agentType.value = option.value
     // 显式选过就是覆盖 —— 从这一刻起 draft 会带上 agent_type。
+    agentDirty.value = true
+    // 换 agent 就清空选项：`opus-4.6` 这种取值只在原来那个 agent 下有意义，留着会在
+    // 新 agent 上变成一份必被拒绝（或更糟：静默忽略）的配置。新的探测会填上新默认值。
+    storedSelection.value = { ...INHERITED_TASK_AGENT_SELECTION }
+    storedLabels.value = null
+  } else if (option) {
     agentDirty.value = true
   }
   showAgentPicker.value = false
@@ -199,7 +366,29 @@ function onAgentConfirm(event: any) {
 
 function resetAgentOverride() {
   agentDirty.value = false
+  storedSelection.value = { ...INHERITED_TASK_AGENT_SELECTION }
+  storedLabels.value = null
   void syncEffectiveAgent()
+}
+
+function openAgentConfigSheet() {
+  if (agentConfig.value.status === "loading") return
+  showAgentConfigSheet.value = true
+}
+
+/** 动一下选项也算覆盖本任务 —— 与改 agent 同一个 dirty 位，见组件头部说明。 */
+function selectAgentMode(modeId: string) {
+  agentConfig.value = withTaskAgentMode(agentConfig.value, modeId)
+  agentDirty.value = true
+}
+
+function selectAgentConfigValue(payload: { configId: string; valueId: string }) {
+  agentConfig.value = withTaskAgentConfigValue(
+    agentConfig.value,
+    payload.configId,
+    payload.valueId
+  )
+  agentDirty.value = true
 }
 
 /**
@@ -209,18 +398,41 @@ function resetAgentOverride() {
  * 而服务端把 config 当不透明 JSON 存，一个 text 块是最小可用形状。PC 端编辑过的
  * 任务如果带了图片块，在这里会被这一个 text 块**替换掉**，所以编辑弹层的说明里
  * 要提醒（见下方 helper 文案）。
+ *
+ * 选项部分走 `effectiveTaskAgentSelection`：存的是界面上**正在显示**的那个具体值，
+ * 而不是「用户动过的那几个」。理由见 `taskAgentConfig.ts` —— 存空值等于跟随远端默认，
+ * 而远端默认将来会变，同一个任务半年后会跑在另一个模型上。
  */
 function buildDraft(): WorkTaskDraft {
   const displayText = prompt.value.trim()
+  if (!agentDirty.value) {
+    return {
+      folder_id: folderId.value,
+      title: title.value.trim(),
+      config: {
+        prompt_blocks: [{ type: "text", text: displayText }],
+        display_text: displayText,
+        agent_type: null,
+        mode_id: null,
+        config_values: {},
+      },
+    }
+  }
+  const selection = effectiveTaskAgentSelection(agentConfig.value, storedSelection.value)
   return {
     folder_id: folderId.value,
     title: title.value.trim(),
     config: {
       prompt_blocks: [{ type: "text", text: displayText }],
       display_text: displayText,
-      agent_type: agentDirty.value ? agentType.value : null,
-      mode_id: null,
-      config_values: {},
+      agent_type: agentType.value,
+      mode_id: selection.mode_id,
+      config_values: selection.config_values,
+      label_snapshot: taskAgentLabelSnapshot({
+        agentType: agentType.value,
+        state: agentConfig.value,
+        selection,
+      }),
     },
   }
 }
@@ -245,6 +457,10 @@ function applyTemplate(template: WorkTaskTemplate) {
   if (templateAgent) {
     agentType.value = templateAgent
     agentDirty.value = true
+    // 模板存的是三件套，一起套用 —— 只套 agent 会让模板里的模型选择静默丢掉。
+    storedSelection.value = readTaskAgentSelection(template.config)
+    storedLabels.value = template.config?.label_snapshot || null
+    reprojectStoredSelection()
   } else {
     resetAgentOverride()
   }
@@ -366,6 +582,32 @@ async function removeTemplate(template: WorkTaskTemplate) {
             </view>
           </view>
 
+          <!-- 智能体选项（授权模式 / 模型 / 推理程度）。与 agent 同一个 dirty 位：
+               这些取值只在某个 agent 下有意义，见 script 顶部说明。 -->
+          <view class="task-form-group">
+            <text class="task-form-label">智能体选项</text>
+            <view v-if="agentConfig.status === 'loading'" class="task-editor__config-loading">
+              <up-loading-icon size="18" :color="upThemeVar('--up-primary', '#2979ff')"></up-loading-icon>
+              <text class="task-form-helper">正在读取可用配置...</text>
+            </view>
+            <view
+              v-else
+              class="task-form-readonly"
+              @click="agentConfigOpenable && openAgentConfigSheet()"
+            >
+              <text class="task-form-readonly__text">{{ agentConfigSummary }}</text>
+              <up-icon
+                v-if="agentConfigOpenable"
+                name="arrow-right"
+                size="14"
+                :color="upThemeVar('--up-light-color', '#c0c4cc')"
+              ></up-icon>
+            </view>
+            <text v-if="agentConfig.status === 'failed'" class="task-form-helper">
+              读取失败，保存后将沿用原有选项。
+            </text>
+          </view>
+
           <view class="task-form-group">
             <view class="task-editor__template-head" @click="showTemplatePanel = !showTemplatePanel">
               <text class="task-form-label">模板</text>
@@ -444,6 +686,18 @@ async function removeTemplate(template: WorkTaskTemplate) {
       @confirm="onAgentConfirm"
       @cancel="showAgentPicker = false"
     ></up-picker>
+
+    <!-- 选项弹层是**兄弟节点**而不是嵌在上面那个 popup 里：uview-plus 的 popup 各自
+         fixed 定位，嵌套时内层会被外层的 transform 上下文困住（新建会话弹层的二级
+         配置弹层同样是平铺的）。 -->
+    <TaskAgentConfigSheet
+      v-model:show="showAgentConfigSheet"
+      :state="agentConfig"
+      hint="仅对本任务生效。"
+      @selectMode="selectAgentMode"
+      @selectConfigValue="selectAgentConfigValue"
+      @reload="loadAgentConfig"
+    />
   </view>
 </template>
 
@@ -467,6 +721,19 @@ async function removeTemplate(template: WorkTaskTemplate) {
 .task-editor__reset-text {
   font-size: 22rpx;
   color: var(--up-primary, #2979ff);
+}
+
+.task-editor__config-loading {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  padding: 20rpx 24rpx;
+  border-radius: 20rpx;
+  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
+}
+
+.task-editor__config-loading .task-form-helper {
+  margin-top: 0;
 }
 
 .task-editor__template-head {

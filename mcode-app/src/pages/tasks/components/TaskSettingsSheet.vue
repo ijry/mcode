@@ -7,7 +7,30 @@ import {
   getWorkTaskSettingsEffective,
   setWorkTaskSettings,
 } from "@/services/workTask"
+import TaskAgentConfigSheet from "./TaskAgentConfigSheet.vue"
+import {
+  buildAgentConfigContextKey,
+  createEmptyDetailAgentConfigState,
+  persistAgentConfigCache,
+  readFreshAgentConfigCache,
+  type DetailAgentConfigState,
+} from "@/services/conversation/composerTools"
+import {
+  effectiveTaskAgentSelection,
+  hasTaskAgentConfigChoices,
+  INHERITED_TASK_AGENT_SELECTION,
+  readTaskAgentSelection,
+  taskAgentConfigPlaceholderState,
+  taskAgentConfigStateFromSnapshot,
+  taskAgentConfigSummary,
+  taskAgentLabelSnapshot,
+  withTaskAgentConfigValue,
+  withTaskAgentMode,
+  type TaskAgentConfigSelection,
+} from "../taskAgentConfig"
+import { AGENT_DISPLAY_ORDER, AGENT_LABELS } from "@/services/remoteSettings"
 import type { CodegGateway } from "@/services/gateway"
+import type { AgentOptionsSnapshot } from "@/types/acp"
 import type { WorkTaskFolderSettings } from "@/types/workTask"
 
 /**
@@ -29,6 +52,12 @@ const props = defineProps<{
   folderId: number
   /** 项目名（标题里显示）；全局时为空。 */
   folderName: string
+  /**
+   * 项目在远端的绝对路径，探测智能体选项时作为 `workingDir` 传过去（同一个 agent
+   * 在不同目录下可能报出不同选项集）。全局作用域下为空 —— 那时探的是无目录上下文
+   * 的默认选项集，与引擎在任意项目里启动前读到的那份一致。
+   */
+  folderPath?: string
   gateway: CodegGateway | null
 }>()
 
@@ -42,14 +71,13 @@ const upThemeCardStyle = computed(() => currentInstance?.proxy?.upThemeCardStyle
 const upThemeVar = (varName: string, fallbackColor?: string) =>
   currentInstance?.proxy?.upThemeVar?.(varName, fallbackColor) ?? (fallbackColor || "")
 
+/**
+ * 默认 agent 的可选项。空串是「跟随文件夹默认」（`default_agent_type: null`），后面
+ * 的标签取 `remoteSettings` 那份唯一映射，不本地抄一遍。
+ */
 const AGENT_OPTIONS = [
   { label: "跟随文件夹默认", value: "" },
-  { label: "Claude Code", value: "claude_code" },
-  { label: "Codex CLI", value: "codex" },
-  { label: "OpenCode", value: "open_code" },
-  { label: "Gemini CLI", value: "gemini" },
-  { label: "OpenClaw", value: "open_claw" },
-  { label: "Cline", value: "cline" },
+  ...AGENT_DISPLAY_ORDER.map((value) => ({ label: AGENT_LABELS[value], value: value as string })),
 ]
 
 const STAGE_TABS = [
@@ -68,7 +96,14 @@ const draft = ref<WorkTaskFolderSettings | null>(null)
 /** `custom` = 该项目有自己的设置行；`global` = 跟随全局。全局作用域下恒为 custom。 */
 const source = ref<"global" | "custom">("custom")
 const showAgentPicker = ref(false)
+const showAgentConfigSheet = ref(false)
 const activeStage = ref("all")
+
+/** 智能体选项的探测状态与当前选择（与编辑弹层同一套模块）。 */
+const agentConfig = ref<DetailAgentConfigState>(createEmptyDetailAgentConfigState())
+/** 设置行里存着的那份选择；探测失败时保存写回的就是它。 */
+const storedSelection = ref<TaskAgentConfigSelection>({ ...INHERITED_TASK_AGENT_SELECTION })
+let agentProbeToken = 0
 
 const isGlobalScope = computed(() => props.folderId === GLOBAL_SCOPE)
 const scopeName = computed(() =>
@@ -81,6 +116,21 @@ const selectedAgentLabel = computed(() => {
   const value = draft.value?.default_agent_type || ""
   return AGENT_OPTIONS.find((item) => item.value === value)?.label || value
 })
+const agentConfigSummary = computed(() =>
+  taskAgentConfigSummary({
+    state: agentConfig.value,
+    stored: storedSelection.value,
+    fallbackLabels: draft.value?.label_snapshot || null,
+  })
+)
+const agentConfigOpenable = computed(
+  () => agentConfig.value.status === "failed" || hasTaskAgentConfigChoices(agentConfig.value)
+)
+/**
+ * 「跟随全局」时不探测、也不显示选项行：那一份配置属于全局那一行，在这里画出来会让
+ * 用户以为改的是这个项目的（而保存走的是 delete，改动全部丢弃）。
+ */
+const editing = computed(() => isGlobalScope.value || source.value === "custom")
 const activeStageHint = computed(
   () => STAGE_TABS.find((item) => item.id === activeStage.value)?.hint || ""
 )
@@ -106,10 +156,27 @@ const maxConcurrentText = computed({
 watch(
   () => [props.show, props.folderId],
   () => {
-    if (!props.show) return
+    if (!props.show) {
+      // 在途探测作废，见编辑弹层同一处注释。
+      agentProbeToken += 1
+      showAgentConfigSheet.value = false
+      return
+    }
     void loadSettings()
   },
   { immediate: false }
+)
+
+/**
+ * 探测跟着 (默认 agent, 作用域) 走，并且**只在真正编辑那一份时**发起 —— 「跟随全局」
+ * 状态下探测出来的选项没有落点，白拉一个 CLI 进程。
+ */
+watch(
+  () => [props.show, editing.value, draft.value?.default_agent_type || "", props.folderPath || ""] as const,
+  ([visible, isEditing]) => {
+    if (!visible || !isEditing) return
+    void loadAgentConfig()
+  }
 )
 
 async function loadSettings() {
@@ -120,22 +187,91 @@ async function loadSettings() {
   loading.value = true
   errorMessage.value = ""
   activeStage.value = "all"
+  agentConfig.value = taskAgentConfigPlaceholderState("idle")
   try {
     if (isGlobalScope.value) {
       // 全局行没有「跟随」这个概念 —— 它就是被跟随的那一份。
       source.value = "custom"
       draft.value = await getWorkTaskSettingsEffective(props.gateway, GLOBAL_SCOPE)
+      storedSelection.value = readTaskAgentSelection(draft.value)
+      reprojectStoredSelection()
       return
     }
     const own = await getWorkTaskSettingsOwn(props.gateway, props.folderId)
     source.value = own ? "custom" : "global"
     // 跟随全局时也要显示**生效**值，否则表单是一片默认值，用户看不到自己实际在用什么。
     draft.value = own || (await getWorkTaskSettingsEffective(props.gateway, props.folderId))
+    storedSelection.value = readTaskAgentSelection(draft.value)
+    reprojectStoredSelection()
   } catch (error) {
     errorMessage.value = toErrorMessage(error)
     draft.value = null
   } finally {
     loading.value = false
+  }
+}
+
+/**
+ * 设置行读回来之后，把它的那份选择重新投影到已有快照上。
+ *
+ * 需要这一步是因为**探测可能先于设置落地**：第二次打开同一个文件夹时，`default_agent_type`
+ * 没变（上一次的 draft 还在），探测 watch 于是只被 `show` 触发一次，用的是上一次那份
+ * `storedSelection`。不重投影的话，界面显示的是上次打开时的选择，而不是服务端这一行的
+ * 真实值。与编辑弹层的同名函数同一个理由。
+ */
+function reprojectStoredSelection() {
+  if (agentConfig.value.status !== "ready") return
+  agentConfig.value = taskAgentConfigStateFromSnapshot(
+    {
+      modes: agentConfig.value.modes,
+      config_options: agentConfig.value.configOptions,
+    },
+    storedSelection.value
+  )
+}
+
+/** 见编辑弹层 `loadAgentConfig` 的注释 —— 同一套缓存键与丢弃规则。 */
+async function loadAgentConfig() {
+  const gateway = props.gateway
+  const agentType = draft.value?.default_agent_type || ""
+  if (!gateway || !agentType) {
+    // 「跟随文件夹默认」时探不出东西来：真正要跑的 agent 由每个项目自己的默认值决定。
+    agentConfig.value = taskAgentConfigPlaceholderState(
+      "idle",
+      "选择一个具体 agent 后可配置它的选项"
+    )
+    return
+  }
+
+  const token = ++agentProbeToken
+  const contextKey = buildAgentConfigContextKey(
+    gateway.getRemoteInstanceDescriptor().instanceKey,
+    agentType,
+    props.folderPath || "",
+    "work_task"
+  )
+  const cached = readFreshAgentConfigCache(contextKey)
+  if (cached) {
+    agentConfig.value = taskAgentConfigStateFromSnapshot(cached, storedSelection.value)
+    return
+  }
+
+  agentConfig.value = taskAgentConfigPlaceholderState("loading")
+  try {
+    const snapshot = await gateway.call<AgentOptionsSnapshot>("acp_describe_agent_options", {
+      agentType,
+      workingDir: props.folderPath || null,
+    })
+    if (token !== agentProbeToken) return
+    persistAgentConfigCache(contextKey, snapshot)
+    agentConfig.value = taskAgentConfigStateFromSnapshot(snapshot, storedSelection.value)
+  } catch (error) {
+    if (token !== agentProbeToken) return
+    console.warn("probe task settings agent options failed:", error)
+    agentConfig.value = taskAgentConfigPlaceholderState(
+      "failed",
+      "读取失败，保存后将沿用原有选项"
+    )
   }
 }
 
@@ -146,9 +282,34 @@ function closeSheet() {
 function onAgentConfirm(event: any) {
   const selected = event?.value?.[0]
   if (draft.value && selected && typeof selected.value === "string") {
-    draft.value.default_agent_type = selected.value || null
+    const next = selected.value || null
+    if (next !== draft.value.default_agent_type) {
+      draft.value.default_agent_type = next
+      // 换 agent 就清空选项，理由同编辑弹层：取值只在原来那个 agent 下有意义。
+      storedSelection.value = { ...INHERITED_TASK_AGENT_SELECTION }
+      draft.value.mode_id = null
+      draft.value.config_values = {}
+      draft.value.label_snapshot = null
+    }
   }
   showAgentPicker.value = false
+}
+
+function openAgentConfigSheet() {
+  if (agentConfig.value.status === "loading") return
+  showAgentConfigSheet.value = true
+}
+
+function selectAgentMode(modeId: string) {
+  agentConfig.value = withTaskAgentMode(agentConfig.value, modeId)
+}
+
+function selectAgentConfigValue(payload: { configId: string; valueId: string }) {
+  agentConfig.value = withTaskAgentConfigValue(
+    agentConfig.value,
+    payload.configId,
+    payload.valueId
+  )
 }
 
 async function save() {
@@ -161,7 +322,24 @@ async function save() {
     if (!isGlobalScope.value && source.value === "global") {
       await deleteWorkTaskSettings(props.gateway, props.folderId)
     } else {
-      await setWorkTaskSettings(props.gateway, props.folderId, draft.value)
+      const agentType = draft.value.default_agent_type || ""
+      // 存界面上正在显示的那份具体值（见 `taskAgentConfig.effectiveTaskAgentSelection`）。
+      // 没定具体 agent 时选项无从解释，一并留空。
+      const selection = agentType
+        ? effectiveTaskAgentSelection(agentConfig.value, storedSelection.value)
+        : { ...INHERITED_TASK_AGENT_SELECTION }
+      await setWorkTaskSettings(props.gateway, props.folderId, {
+        ...draft.value,
+        mode_id: selection.mode_id,
+        config_values: selection.config_values,
+        label_snapshot: agentType
+          ? taskAgentLabelSnapshot({
+              agentType,
+              state: agentConfig.value,
+              selection,
+            })
+          : null,
+      })
     }
     uni.showToast({ title: "已保存", icon: "success" })
     emit("update:show", false)
@@ -226,6 +404,36 @@ async function save() {
                 <text class="task-form-readonly__text">{{ selectedAgentLabel }}</text>
                 <up-icon name="arrow-down" size="14" :color="upThemeVar('--up-light-color', '#c0c4cc')"></up-icon>
               </view>
+            </view>
+
+            <!-- 智能体选项（授权模式 / 模型 / 推理程度）。跟随全局时不画：那份配置
+                 属于全局那一行，在这里改会在保存（走 delete）时全部丢弃。 -->
+            <view v-if="editing" class="task-form-group">
+              <text class="task-form-label">智能体选项</text>
+              <view v-if="agentConfig.status === 'loading'" class="task-settings__config-loading">
+                <up-loading-icon size="18" :color="upThemeVar('--up-primary', '#2979ff')"></up-loading-icon>
+                <text class="task-form-helper">正在读取可用配置...</text>
+              </view>
+              <view
+                v-else
+                class="task-form-readonly"
+                @click="agentConfigOpenable && openAgentConfigSheet()"
+              >
+                <text class="task-form-readonly__text">{{ agentConfigSummary }}</text>
+                <up-icon
+                  v-if="agentConfigOpenable"
+                  name="arrow-right"
+                  size="14"
+                  :color="upThemeVar('--up-light-color', '#c0c4cc')"
+                ></up-icon>
+              </view>
+              <text class="task-form-helper">
+                {{
+                  agentConfig.status === "failed"
+                    ? "读取失败，保存后将沿用原有选项。"
+                    : "新任务默认使用这些选项，每个任务仍可单独覆盖。"
+                }}
+              </text>
             </view>
 
             <view class="task-form-group">
@@ -366,6 +574,16 @@ async function save() {
       @confirm="onAgentConfirm"
       @cancel="showAgentPicker = false"
     ></up-picker>
+
+    <!-- 兄弟节点而不是嵌套，理由同编辑弹层。 -->
+    <TaskAgentConfigSheet
+      v-model:show="showAgentConfigSheet"
+      :state="agentConfig"
+      :hint="`${scopeName} 中新任务的默认选项。`"
+      @selectMode="selectAgentMode"
+      @selectConfigValue="selectAgentConfigValue"
+      @reload="loadAgentConfig"
+    />
   </view>
 </template>
 
@@ -387,5 +605,18 @@ async function save() {
 
 .task-settings__stages {
   margin: 14rpx 0;
+}
+
+.task-settings__config-loading {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  padding: 20rpx 24rpx;
+  border-radius: 20rpx;
+  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
+}
+
+.task-settings__config-loading .task-form-helper {
+  margin-top: 0;
 }
 </style>

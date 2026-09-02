@@ -260,6 +260,235 @@ describe("tasks page contract", () => {
         expect(source).toContain(component)
       })
     })
+
+    /**
+     * 选项探测要带 `workingDir`，而 `filterProjectOptions` 只带名字 —— 路径得从
+     * `activeBucket.projects`（`loadRemoteProjects` 的结果）里取。少传路径不会报错，
+     * 只会让探测回来的是无目录上下文那份选项集，与引擎真正启动时读到的可能不同。
+     */
+    it("hands the settings sheet the project path its probe needs", () => {
+      expect(source).toContain(':folderPath="settingsFolderPath"')
+      const block = extractFunctionBlock(source, "function openSettingsSheet()")
+      expect(block).toContain("activeBucket.value?.projects")
+      expect(block).toContain("settingsFolderPath.value")
+    })
+  })
+
+  /**
+   * 智能体选项（授权模式 / 模型 / 推理程度）。
+   *
+   * 这一组的共同点是：**错了不会报错**，只会让任务悄悄跑在另一套配置上。所以判定全部
+   * 收在 `pages/tasks/taskAgentConfig.ts`（有独立单测），这里只锁两个弹层确实用的是
+   * 那一份、以及几处容易接错的线。
+   */
+  describe("agent options", () => {
+    const editor = read("pages/tasks/components/TaskEditorSheet.vue")
+    const settings = read("pages/tasks/components/TaskSettingsSheet.vue")
+    const configSheet = read("pages/tasks/components/TaskAgentConfigSheet.vue")
+
+    /** 探测命令与超时是既有契约（后端探测预算 60s，网关侧 70s），别换成别的命令。 */
+    it("probes the same command the conversation flows probe", () => {
+      ;[editor, settings].forEach((source) => {
+        expect(source).toContain('"acp_describe_agent_options"')
+        expect(source).toContain("workingDir")
+      })
+      ;["services/gateway/directGateway.ts", "services/gateway/relayGateway.ts"].forEach((file) => {
+        expect(read(file)).toContain("acp_describe_agent_options: 70_000")
+      })
+    })
+
+    /**
+     * 快照归一化只有一份实现（`composerTools.createReadyDetailAgentConfigState`，经
+     * `taskAgentConfigStateFromSnapshot` 转出）—— 它负责摘掉 `mode` 那个镜像配置项。
+     * 自己 map 一遍 `snapshot.config_options` 会把那个镜像项画出来，而 replay 它会被
+     * `acp_set_config_option` 拒绝（见 P53 笔记）。
+     */
+    it("normalizes every snapshot through the shared projection", () => {
+      ;[editor, settings].forEach((source) => {
+        expect(source).toContain("taskAgentConfigStateFromSnapshot")
+        expect(source).toContain('from "../taskAgentConfig"')
+        // 反向断言：不在组件里自己拆快照。
+        expect(source).not.toContain("snapshot.config_options")
+      })
+      expect(read("pages/tasks/taskAgentConfig.ts")).toContain(
+        "createReadyDetailAgentConfigState"
+      )
+    })
+
+    /**
+     * 保存写的是 `effectiveTaskAgentSelection` 的结果 —— 界面上正在显示的那份具体值。
+     * 直接写 `selectedValues` 会漏掉用户没动过的选项（存空 = 跟随远端默认，而远端默认
+     * 将来会变）；探测失败时它又会原样退回存储值，不至于把配置清空。
+     */
+    it("saves the pinned selection rather than the raw selected values", () => {
+      const draft = extractFunctionBlock(editor, "function buildDraft(): WorkTaskDraft")
+      expect(draft).toContain("effectiveTaskAgentSelection(agentConfig.value, storedSelection.value)")
+      expect(draft).toContain("mode_id: selection.mode_id")
+      expect(draft).toContain("config_values: selection.config_values")
+      expect(draft).toContain("taskAgentLabelSnapshot")
+      // 没碰过 agent 的分支仍然写 null —— 继承不能被冻结成一份快照。
+      expect(draft).toContain("agent_type: null")
+
+      const save = extractFunctionBlock(settings, "async function save()")
+      expect(save).toContain("effectiveTaskAgentSelection(agentConfig.value, storedSelection.value)")
+      expect(save).toContain("taskAgentLabelSnapshot")
+    })
+
+    /**
+     * 选项与 agent 是一组三件套：`opus` 这种取值只在某个 agent 下有意义。换 agent 不清空
+     * 会把一份跨 agent 的垃圾配置存进去；而动选项不置 dirty，则会让「本任务覆盖」在
+     * `agent_type: null` 的分支里被整段丢弃。
+     */
+    it("keeps the agent and its options as one override unit", () => {
+      const confirm = extractFunctionBlock(editor, "function onAgentConfirm(event: any)")
+      expect(confirm).toContain("INHERITED_TASK_AGENT_SELECTION")
+      expect(confirm).toContain("agentDirty.value = true")
+
+      const mode = extractFunctionBlock(editor, "function selectAgentMode(modeId: string)")
+      expect(mode).toContain("agentDirty.value = true")
+      const value = extractFunctionBlock(
+        editor,
+        "function selectAgentConfigValue(payload: { configId: string; valueId: string })"
+      )
+      expect(value).toContain("agentDirty.value = true")
+
+      // 恢复继承要把三样一起收回，否则选项行还显示着上一个 agent 的模型。
+      const reset = extractFunctionBlock(editor, "function resetAgentOverride()")
+      expect(reset).toContain("agentDirty.value = false")
+      expect(reset).toContain("INHERITED_TASK_AGENT_SELECTION")
+
+      // 设置弹层换 agent 时同样清空（那里没有 dirty 位，直接改 draft）。
+      const settingsConfirm = extractFunctionBlock(settings, "function onAgentConfirm(event: any)")
+      expect(settingsConfirm).toContain("INHERITED_TASK_AGENT_SELECTION")
+      expect(settingsConfirm).toContain("draft.value.config_values = {}")
+    })
+
+    /** 生效设置与模板都存着三件套，只回填 agent 会让模型选择静默丢掉。 */
+    it("carries mode and config through inheritance and templates", () => {
+      const sync = extractFunctionBlock(editor, "async function syncEffectiveAgent()")
+      expect(sync).toContain("readTaskAgentSelection(settings)")
+      const template = extractFunctionBlock(
+        editor,
+        "function applyTemplate(template: WorkTaskTemplate)"
+      )
+      expect(template).toContain("readTaskAgentSelection(template.config)")
+    })
+
+    /**
+     * 存储那份选择晚于探测落地是常态（探测走缓存能立刻返回，而设置/设置行要一次往返）。
+     * 不重新投影的话，界面显示的是探测时那份（可能是上一次打开留下的）选择，而不是
+     * 服务端这一行的真实值。
+     */
+    it("re-projects the stored selection when it lands after the probe", () => {
+      ;[editor, settings].forEach((source) => {
+        expect(source).toContain("function reprojectStoredSelection()")
+        const block = extractFunctionBlock(source, "function reprojectStoredSelection()")
+        expect(block).toContain('agentConfig.value.status !== "ready"')
+        expect(block).toContain("taskAgentConfigStateFromSnapshot")
+      })
+      expect(extractFunctionBlock(editor, "async function syncEffectiveAgent()")).toContain(
+        "reprojectStoredSelection()"
+      )
+      expect(extractFunctionBlock(settings, "async function loadSettings()")).toContain(
+        "reprojectStoredSelection()"
+      )
+    })
+
+    /**
+     * 探测的 watch **不能依赖 `props.gateway`**：它是个对象，而列表每次后台刷新都会重建
+     * 连接桶（于是换一个新实例）。依赖它会让一次刷新重新投影状态，把用户刚在弹层里
+     * 选好的取值冲掉。
+     */
+    it("keys the probe on strings, not on the gateway object", () => {
+      expect(editor).toContain(
+        "() => [props.show, agentType.value, selectedProjectPath.value] as const"
+      )
+      expect(settings).toContain('props.folderPath || ""] as const')
+      ;[editor, settings].forEach((source) => {
+        expect(source).not.toContain("props.gateway] as const")
+      })
+    })
+
+    /**
+     * 切 agent / 切项目 / 关弹层之后回来的旧探测响应必须丢掉 —— 一次慢探测会把另一个
+     * agent 的选项集写进状态，用户于是对着一份不属于当前 agent 的模型列表做选择。
+     */
+    it("discards a probe response that outlived its request", () => {
+      ;[editor, settings].forEach((source) => {
+        expect(source).toContain("let agentProbeToken = 0")
+        expect(source).toContain("const token = ++agentProbeToken")
+        expect(source).toContain("if (token !== agentProbeToken) return")
+        // 关闭弹层也推进一格。
+        expect(source).toContain("agentProbeToken += 1")
+      })
+    })
+
+    /**
+     * 「跟随全局」时不探测：那份配置属于全局那一行，保存走的是 delete，在这里改动
+     * 只会被丢弃 —— 而探测本身要在远端现拉一个 CLI 进程。
+     */
+    it("skips the probe while a folder follows the global defaults", () => {
+      expect(settings).toContain("const editing = computed(")
+      expect(settings).toContain('source.value === "custom"')
+      expect(settings).toContain('v-if="editing"')
+      const probe = extractFunctionBlock(settings, "async function loadAgentConfig()")
+      // 没定具体 agent 时也探不出东西来（真正要跑的由每个项目的默认值决定）。
+      expect(probe).toContain("!agentType")
+    })
+
+    /**
+     * 探测要现拉一个 agent，失败得能重试 —— 否则用户只能关掉弹层再开一次（而缓存
+     * 里没有快照，等于重来一遍）。
+     */
+    it("offers a retry on a failed probe", () => {
+      expect(configSheet).toContain('emit(\'reload\')')
+      ;[editor, settings].forEach((source) => {
+        expect(source).toContain('@reload="loadAgentConfig"')
+      })
+    })
+
+    /**
+     * 没有取值列表的配置项（ACP 的 boolean kind，例如 Cline 的 `auto_approve`）在 chip
+     * 界面里会渲染成一个空的分组标题 —— 一行看不懂也点不动的字。
+     */
+    it("renders only options that have values to pick from", () => {
+      expect(configSheet).toContain("selectableTaskConfigOptions")
+      expect(configSheet).toContain('v-for="option in configOptions"')
+    })
+
+    /**
+     * 两个弹层共用同一个选项组件，且它是**兄弟节点**而不是嵌在各自的 popup 里：
+     * uview-plus 的 popup 各自 fixed 定位，嵌套时内层会被外层的 transform 上下文困住。
+     */
+    it("mounts one shared config sheet as a sibling popup", () => {
+      ;[editor, settings].forEach((source) => {
+        expect(source).toContain("<TaskAgentConfigSheet")
+        expect(source).toContain('import TaskAgentConfigSheet from "./TaskAgentConfigSheet.vue"')
+      })
+    })
+
+    /** 标签映射只有一份（`remoteSettings.AGENT_LABELS`），此前这两处各抄了一份副本。 */
+    it("labels agents through the single shared map", () => {
+      ;[editor, settings].forEach((source) => {
+        expect(source).toContain("AGENT_DISPLAY_ORDER")
+        expect(source).toContain('from "@/services/remoteSettings"')
+        // 副本里 codex 曾被写成「Codex CLI」，而全局那份是「Codex」。
+        expect(source).not.toContain('"Codex CLI"')
+      })
+    })
+
+    /**
+     * 详情页显示 `label_snapshot` 而不是原始 `agent_type`：那份快照带着这一轮实际用的
+     * 模型，并且在 agent 被卸载之后依然说得出人话。
+     */
+    it("shows the resolved agent label on the detail header", () => {
+      const detail = read("pages/task-detail/index.vue")
+      expect(detail).toContain("const agentMetaText = computed(")
+      expect(detail).toContain("label_snapshot")
+      expect(detail).toContain("taskAgentLabel")
+      // 反向断言：不再把原始 id 直接印在头部。
+      expect(detail).not.toContain("{{ task.agent_type }}")
+    })
   })
 
   describe("schedule sheet", () => {
@@ -406,6 +635,7 @@ describe("tasks page contract", () => {
         "pages/tasks/components/TaskCard.vue",
         "pages/tasks/components/TaskStatusChip.vue",
         "pages/tasks/components/TaskEditorSheet.vue",
+        "pages/tasks/components/TaskAgentConfigSheet.vue",
         "pages/tasks/components/TaskMergeSheet.vue",
         "pages/tasks/components/TaskAcceptSheet.vue",
         "pages/tasks/components/TaskCancelSheet.vue",

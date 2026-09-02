@@ -62,6 +62,7 @@ import {
   taskEventTargetStatus,
 } from "../tasks/taskPresentation"
 import { formatScheduleFull } from "../tasks/taskSchedule"
+import { taskAgentLabel } from "../tasks/taskAgentConfig"
 import type { CodegGateway } from "@/services/gateway"
 import type {
   WorkTask,
@@ -151,6 +152,29 @@ const projectName = computed(() => {
 })
 const promptText = computed(() => task.value?.config?.display_text?.trim() || "")
 const unsupportedText = computed(() => taskUnsupportedText(connection.value))
+
+/**
+ * 头部那一行的 agent 文案。原先直接显示 `task.agent_type`（用户看到 `claude_code`
+ * 这种原始 id），现在优先读保存时记下的 `label_snapshot` —— 它带着**这一轮实际用的
+ * 模型**（「Claude Code · Opus 4.6」），而且在 agent 后来被卸载、或选项集换了版本之后
+ * 依然说得出人话。与 PC 端 `task-detail-sheet.tsx` 的 `agentLabel` 同一套优先级。
+ */
+const agentMetaText = computed(() => {
+  const current = task.value
+  if (!current) return ""
+  const snapshot = current.config?.label_snapshot as Record<string, unknown> | null | undefined
+  const agentLabel =
+    pickLabel(snapshot?.agent_label) ||
+    taskAgentLabel(current.agent_type || current.config?.agent_type)
+  if (!agentLabel) return ""
+  const configLabels = snapshot?.config_labels as Record<string, unknown> | null | undefined
+  const modelLabel = pickLabel(configLabels?.model)
+  return modelLabel ? `${agentLabel} · ${modelLabel}` : agentLabel
+})
+
+function pickLabel(value: unknown): string {
+  return typeof value === "string" && value.trim() ? value.trim() : ""
+}
 
 /**
  * 详情页只握着自己这一行，看不到兄弟任务，所以**判断不出**同项目是否正有合并在跑。
@@ -543,8 +567,8 @@ function goBack() {
         </view>
         <view v-if="task" class="task-detail-header__meta">
           <text v-if="projectName" class="task-detail-header__meta-text">{{ projectName }}</text>
-          <text v-if="projectName && task.agent_type" class="task-detail-header__meta-sep">·</text>
-          <text v-if="task.agent_type" class="task-detail-header__meta-text">{{ task.agent_type }}</text>
+          <text v-if="projectName && agentMetaText" class="task-detail-header__meta-sep">·</text>
+          <text v-if="agentMetaText" class="task-detail-header__meta-text">{{ agentMetaText }}</text>
           <text v-if="task.work_branch" class="task-detail-header__meta-sep">·</text>
           <text v-if="task.work_branch" class="task-detail-header__meta-branch">{{ task.work_branch }}</text>
         </view>

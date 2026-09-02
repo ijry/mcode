@@ -136,6 +136,7 @@
       v-model:show="showSettingsSheet"
       :folderId="settingsFolderId"
       :folderName="settingsFolderName"
+      :folderPath="settingsFolderPath"
       :gateway="activeGateway"
       @saved="refreshAfterAction"
     />
@@ -295,6 +296,8 @@ const followUpTask = ref<WorkTask | null>(null)
 const actionGateway = ref<CodegGateway | null>(null)
 const settingsFolderId = ref(0)
 const settingsFolderName = ref("")
+/** 设置弹层探测智能体选项时用的 `workingDir`；全局作用域为空。 */
+const settingsFolderPath = ref("")
 
 const disposeTaskChanged = new Map<string, () => void>()
 let refreshTimer: ReturnType<typeof setTimeout> | null = null
@@ -733,6 +736,9 @@ function openSettingsSheet() {
   settingsFolderId.value = filter.folderId
   settingsFolderName.value =
     filterProjectOptions.value.find((item) => item.id === filter.folderId)?.name || ""
+  // 项目路径来自 `loadRemoteProjects`（`filterProjectOptions` 只带名字），选项探测要它。
+  settingsFolderPath.value =
+    (activeBucket.value?.projects || []).find((item) => item.id === filter.folderId)?.path || ""
   showSettingsSheet.value = true
 }
 
