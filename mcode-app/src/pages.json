@@ -31,6 +31,22 @@
       }
     },
     {
+      "path": "pages/tasks/index",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "任务",
+        "enablePullDownRefresh": true
+      }
+    },
+    {
+      "path": "pages/task-detail/index",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "任务详情",
+        "enablePullDownRefresh": true
+      }
+    },
+    {
       "path": "pages/todos/index",
       "style": {
         "navigationStyle": "custom",
@@ -184,8 +200,8 @@
         "selectedIconPath": "static/tabbar/conversations-active.png"
       },
       {
-        "pagePath": "pages/todos/index",
-        "text": "待办",
+        "pagePath": "pages/tasks/index",
+        "text": "任务",
         "iconPath": "static/tabbar/todos.png",
         "selectedIconPath": "static/tabbar/todos-active.png"
       },

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed, getCurrentInstance } from "vue"
 import type { TodoTab } from "../todoState"
 
 const props = defineProps<{
@@ -11,11 +12,38 @@ const emit = defineEmits<{
   (e: "update:searchKeyword", value: string): void
   (e: "create"): void
 }>()
+
+const currentInstance = getCurrentInstance()
+const upThemeVarFromProxy = (varName: string, fallbackColor?: string) =>
+  currentInstance?.proxy?.upThemeVar?.(varName, fallbackColor) ?? (fallbackColor || "")
+
+/**
+ * 是否需要自己画一个返回箭头。
+ *
+ * 「待办」原先是 tabBar 页（tabBar 页不需要返回，也没有返回可用），它被「任务」取代
+ * 之后只能通过 `navigateTo` 进来 —— 而本页是 `navigationStyle: "custom"`，没有原生导航栏
+ * 提供返回。判据用页面栈深度而不是加一个路由参数：只要栈里不止一页，就一定是被
+ * navigateTo 推进来的，这样两种入口都不用改调用方。
+ */
+const canGoBack = computed(() => {
+  try {
+    return (getCurrentPages()?.length || 1) > 1
+  } catch {
+    return false
+  }
+})
+
+function goBack() {
+  uni.navigateBack({ delta: 1 })
+}
 </script>
 
 <template>
   <view class="todo-header">
     <view class="todo-header__top">
+      <view v-if="canGoBack" class="todo-header__back" @click="goBack">
+        <up-icon name="arrow-left" size="18" :color="upThemeVarFromProxy('--up-main-color', '#303133')"></up-icon>
+      </view>
       <text class="todo-header__title">待办</text>
       <view class="todo-header__action" @click="emit('create')">
         <up-icon name="plus" size="16" color="#ffffff"></up-icon>
@@ -70,7 +98,20 @@ const emit = defineEmits<{
   gap: 20rpx;
 }
 
+.todo-header__back {
+  width: 58rpx;
+  height: 58rpx;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999rpx;
+  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
+}
+
 .todo-header__title {
+  flex: 1;
+  min-width: 0;
   font-size: 60rpx;
   font-weight: 700;
   line-height: 1.08;

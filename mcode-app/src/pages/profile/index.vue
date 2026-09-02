@@ -51,6 +51,16 @@
     <view class="section">
       <view class="section-title">应用设置</view>
       <view class="menu-list" :style="upThemeCardStyle">
+        <!-- 「待办」原先是底部 tab，被「任务」取代后仍然保留（本地 + 云端待办是
+             独立于 codeg 连接的一套东西），入口移到这里。 -->
+        <view class="menu-item" @click="goToTodos">
+          <view class="menu-left">
+            <u-icon name="checkmark-circle" size="22" color="#19be6b"></u-icon>
+            <text class="menu-text">待办</text>
+          </view>
+          <u-icon name="arrow-right" :color="upThemeVar('--up-light-color', '#c0c4cc')" size="18"></u-icon>
+        </view>
+
         <view class="menu-item" @click="goToSettings">
           <view class="menu-left">
             <u-icon name="setting" size="22" :color="upThemeVar('--up-primary', '#2979ff')"></u-icon>
@@ -294,6 +304,16 @@ function goToAchievement() {
 function goToSettings() {
   uni.navigateTo({
     url: "/pages/settings/index",
+  })
+}
+
+/**
+ * 待办页。`navigateTo` 而不是 `switchTab` —— 它已经不在 tabBar 里了
+ * （底部第三格现在是「任务」）。
+ */
+function goToTodos() {
+  uni.navigateTo({
+    url: "/pages/todos/index",
   })
 }
 

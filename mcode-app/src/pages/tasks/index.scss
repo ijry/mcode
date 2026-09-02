@@ -1,0 +1,326 @@
+/**
+ * 任务页与其子组件**共享**的样式。
+ *
+ * 为什么要一个单独的 `.scss`：`<style scoped>` 不跨组件边界，而任务卡片、状态胶囊、
+ * 底部弹层的表单行同时出现在列表页、详情页和各个 sheet 里。把共享类放在这里、
+ * 由每一方 `@import`，是 `pages/conversations/index.scss` 已经确立的做法。
+ *
+ * 规矩（`tests/pages/tasks/sharedStylesheetContract.spec.ts` 会两个方向都断言）：
+ * - 共享类只写在这里，页面里不再复制一份；
+ * - 只属于某一个页面的类不要放进来。
+ *
+ * 颜色一律 `var(--up-*, <字面兜底>)`，复合色用 `color-mix` —— 见仓库 AGENTS.md，
+ * 不新增 `--mcode-*` 别名。
+ */
+
+/* ===== 状态胶囊 ===== */
+
+.task-status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6rpx;
+  flex-shrink: 0;
+  max-width: 100%;
+  padding: 6rpx 14rpx;
+  border-radius: 999rpx;
+  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
+}
+
+.task-status-chip__text {
+  font-size: 20rpx;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--up-tips-color, #909193);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-status-chip--running {
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 14%, var(--up-card-bg-color, #ffffff) 86%);
+}
+
+.task-status-chip--running .task-status-chip__text {
+  color: var(--up-primary, #2979ff);
+}
+
+.task-status-chip--attention {
+  background: color-mix(in srgb, var(--up-warning, #ff9900) 16%, var(--up-card-bg-color, #ffffff) 84%);
+}
+
+.task-status-chip--attention .task-status-chip__text {
+  color: var(--up-warning, #ff9900);
+}
+
+.task-status-chip--success {
+  background: color-mix(in srgb, var(--up-success, #19be6b) 14%, var(--up-card-bg-color, #ffffff) 86%);
+}
+
+.task-status-chip--success .task-status-chip__text {
+  color: var(--up-success, #19be6b);
+}
+
+.task-status-chip--error {
+  background: color-mix(in srgb, var(--up-error, #fa3534) 14%, var(--up-card-bg-color, #ffffff) 86%);
+}
+
+.task-status-chip--error .task-status-chip__text {
+  color: var(--up-error, #fa3534);
+}
+
+/* ===== 小角标（排队合并、worktree 已删、计划开始……） ===== */
+
+.task-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4rpx;
+  max-width: 100%;
+  padding: 4rpx 12rpx;
+  border-radius: 999rpx;
+  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
+}
+
+.task-badge__text {
+  font-size: 18rpx;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--up-tips-color, #909193);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-badge--primary {
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 12%, var(--up-card-bg-color, #ffffff) 88%);
+}
+
+.task-badge--primary .task-badge__text {
+  color: var(--up-primary, #2979ff);
+}
+
+.task-badge--warning {
+  background: color-mix(in srgb, var(--up-warning, #ff9900) 14%, var(--up-card-bg-color, #ffffff) 86%);
+}
+
+.task-badge--warning .task-badge__text {
+  color: var(--up-warning, #ff9900);
+}
+
+.task-badge--success {
+  background: color-mix(in srgb, var(--up-success, #19be6b) 14%, var(--up-card-bg-color, #ffffff) 86%);
+}
+
+.task-badge--success .task-badge__text {
+  color: var(--up-success, #19be6b);
+}
+
+.task-badge--error {
+  background: color-mix(in srgb, var(--up-error, #fa3534) 14%, var(--up-card-bg-color, #ffffff) 86%);
+}
+
+.task-badge--error .task-badge__text {
+  color: var(--up-error, #fa3534);
+}
+
+/* ===== 底部弹层（创建/编辑、合并、完成、取消、重启、定时、设置共用） ===== */
+
+.task-sheet {
+  padding: 36rpx 24rpx 0;
+  background: var(--up-card-bg-color, #ffffff);
+  border-radius: 28rpx 28rpx 0 0;
+  max-height: 82vh;
+  box-sizing: border-box;
+}
+
+.task-sheet__hd {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20rpx;
+  margin-bottom: 26rpx;
+}
+
+.task-sheet__title {
+  font-size: 34rpx;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--up-main-color, #303133);
+}
+
+.task-sheet__desc {
+  display: block;
+  margin-top: 8rpx;
+  font-size: 24rpx;
+  line-height: 1.5;
+  color: var(--up-content-color, #606266);
+}
+
+.task-sheet__close {
+  width: 56rpx;
+  height: 56rpx;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
+}
+
+.task-sheet__scroll {
+  max-height: 56vh;
+}
+
+.task-sheet__actions {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  margin-top: 24rpx;
+}
+
+.task-sheet__actions > * {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ===== 弹层里的表单行 ===== */
+
+.task-form-group {
+  margin-bottom: 26rpx;
+}
+
+.task-form-label {
+  display: block;
+  margin-bottom: 12rpx;
+  font-size: 26rpx;
+  font-weight: 600;
+  color: var(--up-content-color, #606266);
+}
+
+.task-form-helper {
+  display: block;
+  margin-top: 10rpx;
+  font-size: 22rpx;
+  line-height: 1.5;
+  color: var(--up-tips-color, #909193);
+}
+
+.task-form-readonly {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+  padding: 20rpx 24rpx;
+  border-radius: 20rpx;
+  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
+}
+
+.task-form-readonly__text {
+  flex: 1;
+  min-width: 0;
+  font-size: 28rpx;
+  color: var(--up-main-color, #303133);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-form-switch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20rpx;
+  padding: 18rpx 0;
+}
+
+.task-form-switch__copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+}
+
+.task-form-switch__title {
+  font-size: 28rpx;
+  font-weight: 600;
+  color: var(--up-main-color, #303133);
+}
+
+.task-form-switch__desc {
+  font-size: 22rpx;
+  line-height: 1.5;
+  color: var(--up-tips-color, #909193);
+}
+
+/* ===== chip 组（继续处理意图、合并策略、阶段提示词） ===== */
+
+.task-chip-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12rpx;
+}
+
+.task-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8rpx;
+  padding: 12rpx 22rpx;
+  border-radius: 999rpx;
+  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
+}
+
+.task-chip__text {
+  font-size: 24rpx;
+  font-weight: 600;
+  color: var(--up-content-color, #606266);
+}
+
+.task-chip--active {
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 14%, var(--up-card-bg-color, #ffffff) 86%);
+}
+
+.task-chip--active .task-chip__text {
+  color: var(--up-primary, #2979ff);
+}
+
+/* ===== 弹层内提示条（排队提醒、拒绝原因） ===== */
+
+.task-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 12rpx;
+  padding: 18rpx 20rpx;
+  margin-bottom: 22rpx;
+  border-radius: 18rpx;
+  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
+}
+
+.task-notice__text {
+  flex: 1;
+  min-width: 0;
+  font-size: 24rpx;
+  line-height: 1.5;
+  color: var(--up-content-color, #606266);
+  word-break: break-word;
+}
+
+.task-notice--warning {
+  background: color-mix(in srgb, var(--up-warning, #ff9900) 12%, var(--up-card-bg-color, #ffffff) 88%);
+}
+
+.task-notice--warning .task-notice__text {
+  color: var(--up-warning, #ff9900);
+}
+
+.task-notice--error {
+  background: color-mix(in srgb, var(--up-error, #fa3534) 12%, var(--up-card-bg-color, #ffffff) 88%);
+}
+
+.task-notice--error .task-notice__text {
+  color: var(--up-error, #fa3534);
+}
+
+.task-safe-bottom {
+  height: calc(32rpx + env(safe-area-inset-bottom));
+}
