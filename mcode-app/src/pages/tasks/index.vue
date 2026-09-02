@@ -21,6 +21,7 @@
           @create="openCreateSheet"
           @openFilter="showFilterSheet = true"
           @openSettings="openSettingsSheet"
+          @openForge="openForgePanel"
         />
       </up-sticky>
 
@@ -191,6 +192,8 @@ import {
   WORK_TASK_CHANGED_CHANNEL,
 } from "@/services/workTask"
 import { buildTaskDetailRoute, isTaskCapableConnection } from "@/services/taskDetail"
+import { buildForgeRoute, isForgeCapableConnection } from "@/services/forge/forgeRoute"
+import { readStoredForgeScope } from "@/services/forge/forgeScopePreference"
 import {
   readStoredTaskFilter,
   writeStoredTaskFilter,
@@ -740,6 +743,44 @@ function openSettingsSheet() {
   settingsFolderPath.value =
     (activeBucket.value?.projects || []).find((item) => item.id === filter.folderId)?.path || ""
   showSettingsSheet.value = true
+}
+
+/**
+ * 打开仓库面板（顶部的 GitHub 图标）。
+ *
+ * 作用域三级回退：上次看的那条连接（仍然在列表里）→ 当前筛选那条 → 第一条。
+ * 存储优先于当前筛选，因为「上次看的仓库」比「任务列表当前筛到哪台机器」更可能
+ * 是他现在想看的 —— 这两件事只是恰好共用一个连接列表。
+ *
+ * 跳转前 `applyConnectionAuth`，让新页首屏就用对网关（与 `openTaskDetail` 同一套路）。
+ */
+function openForgePanel() {
+  const capable = connections.value.filter((item) => isForgeCapableConnection(item.connection))
+  if (capable.length === 0) {
+    uni.showToast({ title: "请先添加一条 codeg 连接", icon: "none" })
+    return
+  }
+  const stored = readStoredForgeScope()
+  const bucket =
+    (stored.connectionId
+      ? capable.find((item) => String(item.connection.id || "").trim() === stored.connectionId)
+      : null) ||
+    capable.find((item) => item.key === activeBucket.value?.key) ||
+    capable[0]
+  const connectionId = String(bucket.connection.id || "").trim()
+  if (!connectionId) {
+    uni.showToast({ title: "缺少连接信息，请返回连接页重试", icon: "none" })
+    return
+  }
+  applyConnectionAuth(bucket.connection)
+  uni.navigateTo({
+    url: buildForgeRoute({
+      connectionId,
+      // folderId 交给面板自己定：任务页的项目筛选（可能为 0 = 全部）与「看哪个
+      // 仓库」不是同一个问题，硬塞进去会让面板打开在一个用户没选过的仓库上。
+      folderId: 0,
+    }),
+  })
 }
 
 async function submitEditor(draft: WorkTaskDraft) {

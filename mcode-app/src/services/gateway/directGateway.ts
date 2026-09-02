@@ -1,5 +1,6 @@
 import type { CodegGateway, EventChannelConnection } from "./types"
 import { toErrorMessage, toResponseErrorMessage } from "./error"
+import { GatewayCommandError } from "./commandError"
 import { getDirectToken, normalizeDirectBaseUrl, setDirectToken } from "./directTokenStore"
 import { buildRemoteInstanceKey } from "@/services/realtime/instance-key"
 import { decodeSocketPayload } from "./socketPayload"
@@ -65,9 +66,14 @@ export class DirectGateway implements CodegGateway {
       })
       const statusCode = Number((res as any).statusCode || 0)
       if (statusCode >= 400) {
-        throw new Error(
-          `${command}: ${toResponseErrorMessage(res.data, statusCode)}`
-        )
+        // 类型化错误：`message` 与以前逐字节相同，但把响应体原样带上，
+        // 让调用方能读到 `i18n_key` 并给出对应的恢复动作（见 `commandError.ts`）。
+        throw new GatewayCommandError({
+          command,
+          statusCode,
+          message: `${command}: ${toResponseErrorMessage(res.data, statusCode)}`,
+          body: res.data,
+        })
       }
       if (res.data && typeof res.data === "object") {
         const body = res.data as Record<string, unknown>
@@ -78,6 +84,9 @@ export class DirectGateway implements CodegGateway {
       }
       return res.data as T
     } catch (error) {
+      // 已经是类型化错误就原样抛：再包一层会丢掉结构，而且会得到重复前缀
+      // （`"cmd: cmd: HTTP 422"`）。
+      if (error instanceof GatewayCommandError) throw error
       throw new Error(`${command}: ${toErrorMessage(error)}`)
     }
   }

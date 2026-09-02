@@ -47,6 +47,27 @@
       }
     },
     {
+      "path": "pages/forge/index",
+      "style": {
+        "navigationBarTitleText": "仓库面板",
+        "enablePullDownRefresh": true
+      }
+    },
+    {
+      "path": "pages/forge-item/index",
+      "style": {
+        "navigationBarTitleText": "条目详情",
+        "enablePullDownRefresh": true
+      }
+    },
+    {
+      "path": "pages/forge-accounts/index",
+      "style": {
+        "navigationBarTitleText": "代码托管账号",
+        "enablePullDownRefresh": true
+      }
+    },
+    {
       "path": "pages/todos/index",
       "style": {
         "navigationStyle": "custom",

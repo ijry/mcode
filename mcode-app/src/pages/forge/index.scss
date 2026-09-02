@@ -1,0 +1,261 @@
+/**
+ * 仓库面板的跨组件共享样式。
+ *
+ * `<style scoped>` 不跨组件边界，所以任何被多个组件用到的类名必须住在这里，
+ * 每个消费方在自己的 `<style scoped lang="scss">` 顶部 `@import`。与
+ * `pages/tasks/index.scss` 同一套约定。
+ *
+ * 颜色一律 `var(--up-*, 字面兜底)` —— **禁止 `--mcode-*`**（见 AGENTS.md）。
+ */
+
+/* ===== 卡片与区块 ===== */
+
+.forge-card {
+  padding: 24rpx;
+  border-radius: 24rpx;
+  background: var(--up-card-bg-color, #ffffff);
+  border: 1rpx solid var(--up-border-color, #dadbde);
+}
+
+.forge-section-title {
+  font-size: 26rpx;
+  font-weight: 700;
+  color: var(--up-main-color, #303133);
+}
+
+.forge-muted {
+  font-size: 22rpx;
+  line-height: 1.5;
+  color: var(--up-tips-color, #909193);
+}
+
+/* ===== 胶囊 ===== */
+
+.forge-chip {
+  display: flex;
+  align-items: center;
+  gap: 6rpx;
+  padding: 4rpx 14rpx;
+  border-radius: 999rpx;
+  border: 1rpx solid transparent;
+}
+
+.forge-chip__text {
+  font-size: 20rpx;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+/* 标签胶囊的三个颜色由 forgeLabelColor.labelSwatch() 内联给，
+   这里只定形状 —— 颜色算在 JS 里是因为标签配色要按感知亮度分两套，
+   而 scoped 样式里没有可以 key 的根 class 去挑。 */
+.forge-label {
+  max-width: 220rpx;
+}
+
+.forge-label__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ===== 提示条（不遮挡内容的那种） ===== */
+
+.forge-notice {
+  padding: 16rpx 20rpx;
+  border-radius: 18rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+
+.forge-notice__text {
+  font-size: 22rpx;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.forge-notice--info {
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 8%, var(--up-card-bg-color, #ffffff) 92%);
+}
+
+.forge-notice--info .forge-notice__text {
+  color: var(--up-content-color, #606266);
+}
+
+.forge-notice--warning {
+  background: color-mix(in srgb, var(--up-warning, #ff9900) 10%, var(--up-card-bg-color, #ffffff) 90%);
+}
+
+.forge-notice--warning .forge-notice__text {
+  color: var(--up-warning, #ff9900);
+}
+
+.forge-notice--error {
+  background: color-mix(in srgb, var(--up-error, #fa3534) 8%, var(--up-card-bg-color, #ffffff) 92%);
+}
+
+.forge-notice--error .forge-notice__text {
+  color: var(--up-error, #fa3534);
+}
+
+.forge-notice__action {
+  align-self: flex-start;
+  font-size: 22rpx;
+  font-weight: 700;
+  color: var(--up-primary, #2979ff);
+}
+
+/* ===== 加载 / 空 ===== */
+
+.forge-inline-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14rpx;
+  padding: 60rpx 0;
+}
+
+.forge-inline-loading__text {
+  font-size: 24rpx;
+  color: var(--up-content-color, #606266);
+}
+
+.forge-empty {
+  padding: 80rpx 0;
+}
+
+/* ===== 底部弹层（形状与 pages/tasks/index.scss 的 task-sheet__* 一致） ===== */
+
+.forge-sheet {
+  padding: 28rpx 28rpx calc(28rpx + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 20rpx;
+  background: var(--up-card-bg-color, #ffffff);
+  max-height: 76vh;
+}
+
+.forge-sheet__hd {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16rpx;
+}
+
+.forge-sheet__title-block {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+}
+
+.forge-sheet__title {
+  font-size: 32rpx;
+  font-weight: 700;
+  color: var(--up-main-color, #303133);
+}
+
+.forge-sheet__desc {
+  font-size: 22rpx;
+  line-height: 1.5;
+  color: var(--up-tips-color, #909193);
+}
+
+.forge-sheet__close {
+  width: 56rpx;
+  height: 56rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999rpx;
+  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
+  flex-shrink: 0;
+}
+
+.forge-sheet__body {
+  flex: 1;
+  min-height: 0;
+}
+
+.forge-sheet__group {
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+}
+
+.forge-sheet__group-title {
+  font-size: 24rpx;
+  font-weight: 700;
+  color: var(--up-content-color, #606266);
+}
+
+/* 单选行：左边文案右边勾。整行可点，不要只让那个勾可点。 */
+.forge-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+  padding: 20rpx;
+  border-radius: 20rpx;
+  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
+  border: 1rpx solid transparent;
+}
+
+.forge-option--active {
+  border-color: var(--up-primary, #2979ff);
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 8%, var(--up-card-bg-color, #ffffff) 92%);
+}
+
+.forge-option__copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+}
+
+.forge-option__title {
+  font-size: 26rpx;
+  font-weight: 600;
+  color: var(--up-main-color, #303133);
+}
+
+.forge-option__desc {
+  font-size: 22rpx;
+  line-height: 1.45;
+  color: var(--up-tips-color, #909193);
+  word-break: break-all;
+}
+
+.forge-sheet__ft {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+}
+
+.forge-sheet__btn {
+  flex: 1;
+  height: 84rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 22rpx;
+  font-size: 28rpx;
+  font-weight: 700;
+}
+
+.forge-sheet__btn--ghost {
+  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
+  color: var(--up-content-color, #606266);
+}
+
+.forge-sheet__btn--primary {
+  background: var(--up-primary, #2979ff);
+  color: #ffffff;
+}
+
+.forge-sheet__btn--disabled {
+  opacity: 0.5;
+}

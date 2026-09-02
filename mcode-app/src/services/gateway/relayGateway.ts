@@ -7,6 +7,7 @@ import type {
   RelaySessionInfo,
 } from "./types"
 import { toErrorMessage, toResponseErrorMessage } from "./error"
+import { GatewayCommandError } from "./commandError"
 import { buildRemoteInstanceKey } from "@/services/realtime/instance-key"
 import { decodeSocketPayload } from "./socketPayload"
 import { buildWebSocketProtocols } from "./wsProtocol"
@@ -141,9 +142,15 @@ export class RelayGateway implements CodegGateway {
       })
       const statusCode = Number((res as any).statusCode || 0)
       if (statusCode >= 400) {
-        throw new Error(
-          `${command}: ${toResponseErrorMessage(res.data, statusCode)}`
-        )
+        // 与 directGateway 同构。relay 的 `/v1/proxy/:command` 把桌面端的
+        // `{status, body}` 原样转发，所以两条链路拿到的都是同一个
+        // `AppCommandError` 形状 —— 修一处，两边都能读到 `i18n_key`。
+        throw new GatewayCommandError({
+          command,
+          statusCode,
+          message: `${command}: ${toResponseErrorMessage(res.data, statusCode)}`,
+          body: res.data,
+        })
       }
       if (res.data && typeof res.data === "object") {
         const body = res.data as Record<string, unknown>
@@ -154,6 +161,7 @@ export class RelayGateway implements CodegGateway {
       }
       return res.data as T
     } catch (error) {
+      if (error instanceof GatewayCommandError) throw error
       throw new Error(`${command}: ${toErrorMessage(error)}`)
     }
   }

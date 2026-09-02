@@ -31,6 +31,7 @@ const emit = defineEmits<{
   (event: "create"): void
   (event: "openFilter"): void
   (event: "openSettings"): void
+  (event: "openForge"): void
 }>()
 
 const currentInstance = getCurrentInstance()
@@ -80,6 +81,17 @@ function handleTabChange(item: any) {
         <text class="task-header__summary">{{ props.filterSummary }}</text>
       </view>
       <view class="task-header__tools">
+        <!-- 仓库面板入口。放在工具组最左边，与「设置 / 筛选」这两个作用于**本页**的
+             按钮隔开语义上不同的一件事：它是去另一个功能。
+             `github-circle-fill` 是 uview 内置图标集里唯一的 GitHub 图标（实心圆），
+             与旁边两个线性图标不完全同族，但零新增文件且颜色跟随主题。 -->
+        <view class="task-header__tool" @click="emit('openForge')">
+          <up-icon
+            name="github-circle-fill"
+            size="18"
+            :color="upThemeVar('--up-content-color', '#606266')"
+          ></up-icon>
+        </view>
         <view class="task-header__tool" @click="emit('openSettings')">
           <up-icon name="setting" size="17" :color="upThemeVar('--up-content-color', '#606266')"></up-icon>
         </view>
