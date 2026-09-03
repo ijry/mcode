@@ -9,7 +9,7 @@ const uni = uniPlugin?.default || uniPlugin
 const appBuildTime = new Date().toISOString()
 const alias = []
 const localUviewPlusSource = path.resolve(
-  "D:/Repos/xyito/open/uview-plus/src/uni_modules/uview-plus",
+  "D:/Repos/xyito/ultra-ui/uview-plus/src/uni_modules/uview-plus",
 )
 
 if (
