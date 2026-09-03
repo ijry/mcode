@@ -5,15 +5,62 @@ import {
   type ConversationLivePreviewSession,
 } from "./conversationLivePreview"
 
+/**
+ * 「等用户回复」的三种 displayStatus。与 runtime 的状态串**同名**，不是另造一套词汇 ——
+ * `RuntimeSession.status` 里本来就有 `waiting_permission` / `waiting_question`，
+ * `conversationLivePreview` 的 `LIVE_PREVIEW_STATUSES` 也认它们，共用同一套字符串能避免
+ * 「同一个状态两处叫法不同」的经典漂移。`waiting_plan_approval` 是列表这层新增的
+ * （runtime 目前不产出它，只有 pet 快照会给）。
+ */
+const AWAITING_DISPLAY_STATUSES = new Set([
+  "waiting_permission",
+  "waiting_question",
+  "waiting_plan_approval",
+])
+
+/** 这张卡是不是在等用户回复。排序、chip 样式、文案三处共用这一个判据。 */
+export function isAwaitingOverviewCard(displayStatus: string): boolean {
+  return AWAITING_DISPLAY_STATUSES.has(normalizeOverviewStatus(displayStatus))
+}
+
+/**
+ * 一张卡最终显示成什么状态。
+ *
+ * ## 优先级（顺序是刻意的）
+ *
+ * 1. `runtime === "error"` → `failed`
+ * 2. **runtime 说在等回复** → 原样返回那个 waiting 串。runtime 由
+ *    `permission_request` / `question_request` 事件直接翻转，是最快最准的一手信息。
+ * 3. **pet 快照说在等回复** → 原样返回。放在第 4 条**之前**是刻意的：断线期间事件被直接
+ *    丢弃（帧上没有 event id，服务端无订阅者时不入队），runtime 可能永久卡在 `thinking`；
+ *    而 pet 快照是重连后按服务端内存态重算下发的，那时它才是对的。让快照压过 runtime 的
+ *    执行态，这个洞就自愈。
+ * 4. runtime 真的在执行（`thinking` / `running_tool`）→ `in_progress`
+ * 5. 其余 → 落回 summary 的持久状态
+ *
+ * ## 为什么第 2、3 条不再折叠成 `in_progress`
+ *
+ * 原先 waiting 被 `isRuntimeExecutionStatus` 一并折叠进 `in_progress`，于是一个卡在
+ * `ask_user_question` 上的会话在列表上显示「远程运行中」—— 用户以为它在干活，实际上它在
+ * 等人，而且**只要没人回它就永远不会动**。这是本次改动要修的核心表现。
+ */
 export function resolveOverviewCardDisplayStatus(
   summaryStatus: string,
-  runtimeStatus?: string | null
+  runtimeStatus?: string | null,
+  awaitingStatus?: string | null
 ) {
   const normalizedSummaryStatus = normalizeOverviewStatus(summaryStatus)
   const normalizedRuntimeStatus = normalizeOverviewStatus(runtimeStatus)
-  if (!normalizedRuntimeStatus) return normalizedSummaryStatus
+  const normalizedAwaitingStatus = normalizeOverviewStatus(awaitingStatus)
+
   if (normalizedRuntimeStatus === "error") {
     return "failed"
+  }
+  if (isAwaitingOverviewCard(normalizedRuntimeStatus)) {
+    return normalizedRuntimeStatus
+  }
+  if (isAwaitingOverviewCard(normalizedAwaitingStatus)) {
+    return normalizedAwaitingStatus
   }
   if (isRuntimeExecutionStatus(normalizedRuntimeStatus)) {
     return "in_progress"
@@ -44,13 +91,14 @@ export function shouldHideCompletedOverviewCard(
   return normalizeOverviewStatus(displayStatus) === "completed"
 }
 
+/**
+ * runtime 是不是「真的在执行」。
+ *
+ * waiting 那两个状态**刻意不在这里** —— 它们由 `resolveOverviewCardDisplayStatus` 在更早
+ * 一步单独返回。把它们留在这里会重新把「在等人」折叠成「在跑」，也就是本次要修的 bug。
+ */
 function isRuntimeExecutionStatus(status: string) {
-  return (
-    status === "thinking" ||
-    status === "running_tool" ||
-    status === "waiting_permission" ||
-    status === "waiting_question"
-  )
+  return status === "thinking" || status === "running_tool"
 }
 
 function normalizeOverviewStatus(value?: string | null) {
@@ -125,6 +173,11 @@ export function overviewCardMatchesKeyword(
 /** 状态 → 中文标签。与 `overviewStatusClass` 是同一状态串的两张平行表，改一处要改两处。 */
 export function overviewStatusLabel(status: string): string {
   const value = normalizeOverviewStatus(status)
+  // waiting 三兄弟共用一种 chip 样式，但文案分开 —— 「回复一个问题」和「批一次授权」
+  // 对用户是两种不同的动作，合并成一句会让人不知道点进去要干什么。
+  if (value === "waiting_question") return "待回复"
+  if (value === "waiting_permission") return "待授权"
+  if (value === "waiting_plan_approval") return "待审批"
   if (value === "in_progress") return "远程运行中"
   if (value === "completed") return "已完成"
   if (value === "cancelled" || value === "canceled") return "已停止"
@@ -138,9 +191,11 @@ export function overviewStatusLabel(status: string): string {
  *
  * 注意分支集合与 `overviewStatusLabel` **不等**：`pending_review` 有专属标签（「待处理」）
  * 但没有专属样式，落到 `idle`。这是既有行为，本次照搬不改。
+ * waiting 三种反过来 —— 三个标签共用一个 `waiting` 样式。
  */
 export function overviewStatusClass(status: string): string {
   const value = normalizeOverviewStatus(status)
+  if (isAwaitingOverviewCard(value)) return "waiting"
   if (value === "in_progress") return "running"
   if (value === "completed") return "completed"
   if (value === "cancelled" || value === "canceled") return "stopped"
@@ -154,22 +209,30 @@ export function isRunningOverviewCard(displayStatus: string): boolean {
 }
 
 /**
- * 运行中的卡提到最前，其余**保持传入顺序**。
+ * 待回复的卡提到最前，其次运行中，其余**保持传入顺序**。
+ *
+ * 三档而不是两档：待回复的会话在被回复之前**不会自己往前走**，所以它比「在跑」更需要用户
+ * 立刻看到。运行中的卡迟点看也无所谓，它自己会推进。
  *
  * tiebreak 用数组下标而不是任何时间字段：传进来的顺序已经是
- * `buildConnectionConversationSnapshot` 按活跃时间排好的，这里只做「置顶正在跑的」这一件
- * 事。用时间重排会与那层的排序规则打架（见
+ * `buildConnectionConversationSnapshot` 按活跃时间排好的，这里只做「置顶」这一件事。
+ * 用时间重排会与那层的排序规则打架（见
  * `2026-08-20-09-05-conversation-list-time-only-ordering`）。
  */
 export function sortRunningOverviewCardsFirst<T extends { displayStatus: string }>(
   cards: T[]
 ): T[] {
+  const rank = (displayStatus: string) => {
+    if (isAwaitingOverviewCard(displayStatus)) return 0
+    if (isRunningOverviewCard(displayStatus)) return 1
+    return 2
+  }
   return cards
     .map((card, index) => ({ card, index }))
     .sort((left, right) => {
-      const leftRunning = isRunningOverviewCard(left.card.displayStatus) ? 0 : 1
-      const rightRunning = isRunningOverviewCard(right.card.displayStatus) ? 0 : 1
-      if (leftRunning !== rightRunning) return leftRunning - rightRunning
+      const leftRank = rank(left.card.displayStatus)
+      const rightRank = rank(right.card.displayStatus)
+      if (leftRank !== rightRank) return leftRank - rightRank
       return left.index - right.index
     })
     .map((entry) => entry.card)
@@ -248,12 +311,20 @@ export function resolveOverviewEmptyText(keyword: string, hideCompleted: boolean
  *
  * `resolveRuntimeSession` 而不是直接收一个 Map：Vue 的响应式对象不进纯模块，模块因此
  * 可以在 jest 里裸测。页面侧传 `(id) => runtime.sessions.get(id)`。
+ *
+ * `resolveAwaitingStatus` 同理，但它多收一个 `instanceKey`：**会话号在不同连接上会重复**，
+ * 只用 conversationId 查会把 A 机器的待回复标到 B 机器的同号会话上。可选 —— 不传就退化成
+ * 只认 runtime 的旧行为。
  */
 export function buildOverviewDisplayModel<G extends OverviewGroupLike>(input: {
   groups: G[]
   resolveRuntimeSession: (
     conversationId: number
   ) => ConversationLivePreviewSession | undefined | null
+  resolveAwaitingStatus?: (
+    instanceKey: string,
+    conversationId: number
+  ) => string | undefined | null
   instanceKeyByGroupKey: Record<string, string>
   keyword: string
   hideCompleted: boolean
@@ -269,8 +340,14 @@ export function buildOverviewDisplayModel<G extends OverviewGroupLike>(input: {
 
     for (const card of group.cards) {
       // 每张卡**只查一次** runtime —— 这是把 8 次遍历压成 1 次的关键那一步。
-      const session = input.resolveRuntimeSession(Number(card.conversationId || 0))
-      const displayStatus = resolveOverviewCardDisplayStatus(card.status, session?.status)
+      const conversationId = Number(card.conversationId || 0)
+      const session = input.resolveRuntimeSession(conversationId)
+      const awaitingStatus = input.resolveAwaitingStatus?.(instanceKey, conversationId)
+      const displayStatus = resolveOverviewCardDisplayStatus(
+        card.status,
+        session?.status,
+        awaitingStatus
+      )
 
       // 过滤必须在 displayStatus 算完之后：正在跑的 completed 会话此时已被提升成
       // in_progress，不会被藏。

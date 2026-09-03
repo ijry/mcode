@@ -439,6 +439,11 @@ import {
   normalizeOpenedTabsList,
 } from "@/services/conversation/pcTabSyncService"
 import { refreshConversationTabBadge } from "@/services/conversation/conversationTabBadgeService"
+import {
+  getAwaitingReply,
+  getAwaitingReplyStoreVersion,
+  ingestPetSessionsPayload,
+} from "@/services/conversation/awaitingReplyStore"
 import { syncIosStandaloneStatusBar } from "@/services/iosStandaloneStatusBar"
 import { isDarkThemeMode } from "@/services/theme"
 import {
@@ -558,6 +563,14 @@ const bulkSendText = ref("")
 const bulkSending = ref(false)
 const BULK_SEND_QUICK_TEXT = "继续"
 
+/**
+ * `awaitingReplyStore` 的版本号镜像 —— 存储是纯模块（Map），Vue 追不到它的内部改动，
+ * 靠这个 ref 把「有变化」搬进响应式系统。见 `overviewDisplayModel` 里的说明。
+ *
+ * 页面 onShow 时也要同步一次：列表页没挂载的那段时间里，常驻的
+ * `conversationTabBadgeService` 一直在 ingest，存储早就往前走了。
+ */
+const awaitingReplyVersion = ref(getAwaitingReplyStoreVersion())
 
 /**
  * 会话列表的**唯一**可见派生。
@@ -566,17 +579,25 @@ const BULK_SEND_QUICK_TEXT = "继续"
  * 所以结构上不可能像收口前那样分叉 —— 那时它们是两条独立派生，任何判据改动都必须同时改
  * 两处，漏改候选那条会让看不见的卡仍被订阅、仍能被「全选」勾中。
  */
-const overviewDisplayModel = computed(() =>
-  buildOverviewDisplayModel({
+const overviewDisplayModel = computed(() => {
+  // 建立对待回复存储的响应式依赖。那个存储是个纯模块（Map，非 reactive），Vue 追不到它的
+  // 内部改动，所以它每次 ingest 会把版本号 +1，这里读一下版本号就能在推送到达时重算。
+  // 直接把 Map 做成 reactive 不行：Vue 3 对 Map 只在整体替换时触发依赖，改 key 不触发。
+  void awaitingReplyVersion.value
+
+  return buildOverviewDisplayModel({
     groups: connectionGroups.value,
     // 回调而不是直接传 Map：让纯模块与 Vue 响应式解耦（模块因此能在 jest 里裸测）。
     resolveRuntimeSession: (conversationId) => runtime.sessions.get(conversationId),
+    // 必须带 instanceKey —— 会话号在不同连接上会重复。
+    resolveAwaitingStatus: (instanceKey, conversationId) =>
+      getAwaitingReply(instanceKey, conversationId)?.kind,
     instanceKeyByGroupKey: Object.fromEntries(connectionInstanceKeyMap),
     keyword: searchKeyword.value,
     hideCompleted: hideCompletedConversations.value,
     livePreviewEnabled: livePreviewEnabled.value,
   })
-)
+})
 
 const filteredConnectionGroups = computed(() => overviewDisplayModel.value.groups)
 
@@ -766,13 +787,19 @@ onShow(() => {
   loadConversationLivePreviewPreference()
   loadHideCompletedPreference()
   syncConversationListNativeStatusBar()
+  // 追上页面未挂载期间常驻服务 ingest 的待回复状态，否则第一屏的 chip 要等下一次推送才出现。
+  awaitingReplyVersion.value = getAwaitingReplyStoreVersion()
   const shouldForceRefresh = consumeConversationListDirty()
   void loadOverviewDataAfterConnectionPrepare(
     shouldForceRefresh ? { force: true } : undefined
   ).finally(() => {
     scheduleLivePreviewReconcile()
   })
-  void refreshConversationTabBadge()
+  void refreshConversationTabBadge().finally(() => {
+    // 那次刷新会顺带 ingest 一遍最新载荷（每个实例都拉了 `pet_list_active_sessions`），
+    // 所以拉完再同步一次版本号，冷启动第一屏就能带上 chip。
+    awaitingReplyVersion.value = getAwaitingReplyStoreVersion()
+  })
 })
 
 function loadConversationLivePreviewPreference() {
@@ -1538,7 +1565,17 @@ function ensureOpenedTabsSubscription(instanceKey: string) {
  */
 function ensureActiveSessionsSubscription(instanceKey: string) {
   if (!instanceKey || disposeActiveSessionsChangedMap.has(instanceKey)) return
-  const unsubscribe = acpApi.subscribeGlobalEvent("pet://sessions", () => {
+  const unsubscribe = acpApi.subscribeGlobalEvent("pet://sessions", (payload) => {
+    // 待回复 chip 走**立即**路径：ingest + 版本号 +1，`overviewDisplayModel` 当场重算。
+    // 不能等下面那个 debounce —— 那条是「重新拉一遍会话列表」，秒级延迟对刷新标题/活跃时间
+    // 无所谓，但「智能体在等你回话」晚一秒出现就是一秒的空等。
+    //
+    // 这里与 `conversationTabBadgeService` 的 ingest 重复调用是无害的：同一份载荷归一化出
+    // 同一个 Map，幂等。两处都留是因为它们的生命周期不同 —— 服务那份保证列表页没挂载时也是
+    // 热的，页面这份保证页面在时不依赖服务的调度时机。
+    ingestPetSessionsPayload(instanceKey, payload)
+    awaitingReplyVersion.value = getAwaitingReplyStoreVersion()
+
     if (livePreviewPageVisible.value) {
       scheduleActiveSessionsOverviewRefresh(instanceKey)
     }
@@ -2596,6 +2633,32 @@ function formatTime(time?: string): string {
   color: #ff5f56;
 }
 
+/*
+ * 「待回复 / 待授权 / 待审批」共用这一种 chip。
+ *
+ * 用琥珀色而不是绿色（运行中）：绿色读作「一切正常，它在自己跑」，而这个状态恰恰相反 ——
+ * 它在等人，不动手就永远不动。也不用红色，那是异常，会让人以为出错了。
+ *
+ * 呼吸动画比 `--running` 慢（2.4s vs 1.5s）：运行中的快脉冲表达「正在推进」，
+ * 待回复要表达「停在这儿等你」，慢一点才不像在跑。
+ */
+.status-chip--waiting {
+  background-color: rgba(255, 159, 10, 0.18);
+}
+
+.status-chip--waiting::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: rgba(255, 159, 10, 0.2);
+  animation: waitingPulse 2.4s ease-out infinite;
+}
+
+.status-chip--waiting .status-chip__text {
+  color: #c77700;
+}
+
 .status-chip--history {
   background-color: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
 }
@@ -2615,6 +2678,21 @@ function formatTime(time?: string): string {
   }
   100% {
     transform: scale(1.42);
+    opacity: 0;
+  }
+}
+
+@keyframes waitingPulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.7;
+  }
+  70% {
+    transform: scale(1.28);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1.28);
     opacity: 0;
   }
 }

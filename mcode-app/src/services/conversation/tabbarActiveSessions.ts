@@ -56,8 +56,19 @@ export function formatConversationTabBadgeText(count: number): string {
   return String(normalized)
 }
 
+/**
+ * 拉一次 `pet_list_active_sessions` 的**原始载荷**。
+ *
+ * 与 `fetchOngoingActiveSessionCount` 分开是因为调用方要的东西不同：角标只要一个数字，
+ * 而会话列表的「待回复」还要逐行的 `sessions[]`（`conversationId` + `blockedOn`）。
+ * 让角标那条路也走这个函数，两边就共用同一次请求，不必为列表再拉一遍。
+ */
+export async function fetchActiveSessionsPayload(gateway: CodegGateway): Promise<unknown> {
+  return await gateway.call<unknown>("pet_list_active_sessions")
+}
+
 export async function fetchOngoingActiveSessionCount(gateway: CodegGateway): Promise<number> {
-  const payload = await gateway.call<unknown>("pet_list_active_sessions")
+  const payload = await fetchActiveSessionsPayload(gateway)
   return getOngoingActiveSessionCount(payload)
 }
 

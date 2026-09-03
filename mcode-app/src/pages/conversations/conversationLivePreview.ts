@@ -3,12 +3,21 @@ import type { ContentPart, LiveMessage } from "@/types/acp"
 export const CONVERSATION_LIST_LIVE_PREVIEW_LIMIT = 5
 export const CONVERSATION_LIST_LIVE_PREVIEW_TEXT_LIMIT = 180
 
+/**
+ * 值得挂实时预览的状态。
+ *
+ * 必须包含 waiting 那几个：`resolveOverviewCardDisplayStatus` 现在会原样返回它们（不再折叠
+ * 成 `in_progress`），而这个集合的入参是 `displayStatus`。漏掉任何一个，那种卡就会被
+ * `selectConversationLivePreviewIds` 排除 → 不再订阅 → 「等待回答」预览文案消失，
+ * 连 runtime 那一手待回复状态也一起丢了。
+ */
 const LIVE_PREVIEW_STATUSES = new Set([
   "in_progress",
   "thinking",
   "running_tool",
   "waiting_permission",
   "waiting_question",
+  "waiting_plan_approval",
 ])
 
 export interface ConversationLivePreviewCard {
@@ -55,6 +64,7 @@ export function resolveConversationLivePreviewText(
   if (!session) return ""
   if (session.pendingPermission || session.status === "waiting_permission") return "等待确认"
   if (session.pendingQuestion || session.status === "waiting_question") return "等待回答"
+  if (session.status === "waiting_plan_approval") return "等待审批"
 
   const liveMessage = session.liveMessage
   const parts = liveMessage?.content || []

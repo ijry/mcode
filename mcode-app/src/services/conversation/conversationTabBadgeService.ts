@@ -6,9 +6,10 @@ import {
 import { markConnectionConnected } from "@/services/connection/connectedMapStore"
 import {
   applyConversationTabBarBadge,
-  fetchOngoingActiveSessionCount,
+  fetchActiveSessionsPayload,
   getOngoingActiveSessionCount,
 } from "@/services/conversation/tabbarActiveSessions"
+import { ingestPetSessionsPayload } from "@/services/conversation/awaitingReplyStore"
 
 /**
  * 底部 tab「会话」角标的**自治**维护者。
@@ -24,6 +25,10 @@ import {
  *
  * 与页面侧的关系：页面**不再**自己订阅或清理，只在需要时调 `refreshConversationTabBadge()`
  * 触发一次立即重算（例如下拉刷新、新建会话后）。计数的权威副本在本模块的 `countByInstance` 里。
+ *
+ * 顺带 ingest 「待回复」状态：同一份 `pet://sessions` 载荷既算角标数字，也喂
+ * `awaitingReplyStore`（会话列表的待回复 chip 读它）。搭在这里而不是列表页，理由和角标
+ * 一样 —— 列表页未挂载时状态也要保持热的，否则冷启动进列表第一屏没有 chip。
  */
 
 const countByInstance = new Map<string, number>()
@@ -76,6 +81,8 @@ function ensureInstanceSubscriptions(instanceKey: string) {
   const disposeSessions = acpApi.subscribeGlobalEvent(
     "pet://sessions",
     (payload) => {
+      // 同一份载荷两个消费者：角标数字 + 会话列表的待回复 chip。
+      ingestPetSessionsPayload(instanceKey, payload)
       countByInstance.set(instanceKey, getOngoingActiveSessionCount(payload))
       void pushBadge()
     },
@@ -117,7 +124,9 @@ async function refreshInternal() {
       // 先真的问一次服务端 —— direct 模式下 `resolveConnectionContext` 只是用存储里的
       // baseUrl + token 拼出 gateway 对象，**不碰网络**，所以 resolve 成功证明不了可达。
       // 只有这个调用返回了，才算「确实连上过」。
-      const count = await fetchOngoingActiveSessionCount(resolved.gateway)
+      const payload = await fetchActiveSessionsPayload(resolved.gateway)
+      ingestPetSessionsPayload(instanceKey, payload)
+      const count = getOngoingActiveSessionCount(payload)
       markConnectionConnected(conn)
       return { instanceKey, count }
     })

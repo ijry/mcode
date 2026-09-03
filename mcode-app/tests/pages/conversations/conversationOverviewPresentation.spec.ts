@@ -4,9 +4,13 @@ import {
   formatOverviewAgentLabel,
   buildOverviewDisplayModel,
   formatOverviewRelativeTime,
+  isAwaitingOverviewCard,
   isSelectableOverviewCard,
+  overviewStatusClass,
+  overviewStatusLabel,
   resolveOverviewCardDisplayStatus,
   shouldHideCompletedOverviewCard,
+  sortRunningOverviewCardsFirst,
 } from "@/pages/conversations/conversationOverviewPresentation"
 
 describe("conversationOverviewPresentation", () => {
@@ -20,8 +24,108 @@ describe("conversationOverviewPresentation", () => {
   it("promotes only real execution states to in_progress", () => {
     expect(resolveOverviewCardDisplayStatus("completed", "thinking")).toBe("in_progress")
     expect(resolveOverviewCardDisplayStatus("completed", "running_tool")).toBe("in_progress")
-    expect(resolveOverviewCardDisplayStatus("completed", "waiting_permission")).toBe("in_progress")
-    expect(resolveOverviewCardDisplayStatus("completed", "waiting_question")).toBe("in_progress")
+  })
+
+  /**
+   * 这是本次改动的核心行为反转。
+   *
+   * 一个卡在 `ask_user_question` 上的会话原先显示「远程运行中」—— 但它**只要没人回它就永远
+   * 不会动**。把 waiting 折叠进 in_progress 等于把「需要你现在动手」渲染成「它在自己跑」。
+   */
+  it("surfaces waiting states instead of folding them into in_progress", () => {
+    expect(resolveOverviewCardDisplayStatus("completed", "waiting_permission")).toBe(
+      "waiting_permission"
+    )
+    expect(resolveOverviewCardDisplayStatus("completed", "waiting_question")).toBe(
+      "waiting_question"
+    )
+  })
+
+  /**
+   * pet 快照兜底：绝大多数卡片**没有** runtime 会话（实时预览上限 5 条，且要页面可见才挂），
+   * 所以「待回复」主要靠这条路径。
+   */
+  it("takes the awaiting status from the pet snapshot when runtime has nothing", () => {
+    expect(
+      resolveOverviewCardDisplayStatus("in_progress", undefined, "waiting_question")
+    ).toBe("waiting_question")
+    expect(resolveOverviewCardDisplayStatus("completed", "", "waiting_plan_approval")).toBe(
+      "waiting_plan_approval"
+    )
+  })
+
+  /**
+   * 快照压过 runtime 的执行态是刻意的：断线期间事件被直接丢弃，runtime 可能永久卡在
+   * `thinking`，而快照是重连后按服务端内存态重算的。让快照赢，这个洞才会自愈。
+   */
+  it("lets the snapshot win over a stale runtime execution status", () => {
+    expect(resolveOverviewCardDisplayStatus("in_progress", "thinking", "waiting_question")).toBe(
+      "waiting_question"
+    )
+  })
+
+  /** runtime 自己说在等回复时，用 runtime 那一份（更快、更准）。 */
+  it("prefers the runtime waiting status over the snapshot one", () => {
+    expect(
+      resolveOverviewCardDisplayStatus("in_progress", "waiting_permission", "waiting_question")
+    ).toBe("waiting_permission")
+  })
+
+  /** runtime 报 error 仍然最高优先 —— 一个已经炸掉的会话不该显示成「待回复」。 */
+  it("keeps error ahead of any awaiting status", () => {
+    expect(resolveOverviewCardDisplayStatus("in_progress", "error", "waiting_question")).toBe(
+      "failed"
+    )
+  })
+
+  it("ignores an unknown awaiting status instead of rendering it raw", () => {
+    expect(resolveOverviewCardDisplayStatus("completed", undefined, "waiting_something")).toBe(
+      "completed"
+    )
+    expect(resolveOverviewCardDisplayStatus("completed", undefined, "")).toBe("completed")
+  })
+})
+
+describe("awaiting status presentation", () => {
+  it("labels each waiting kind with its own action", () => {
+    expect(overviewStatusLabel("waiting_question")).toBe("待回复")
+    expect(overviewStatusLabel("waiting_permission")).toBe("待授权")
+    expect(overviewStatusLabel("waiting_plan_approval")).toBe("待审批")
+  })
+
+  it("shares one chip style across all waiting kinds", () => {
+    expect(overviewStatusClass("waiting_question")).toBe("waiting")
+    expect(overviewStatusClass("waiting_permission")).toBe("waiting")
+    expect(overviewStatusClass("waiting_plan_approval")).toBe("waiting")
+  })
+
+  it("leaves the pre-existing status table untouched", () => {
+    expect(overviewStatusLabel("in_progress")).toBe("远程运行中")
+    expect(overviewStatusClass("in_progress")).toBe("running")
+    expect(overviewStatusLabel("pending_review")).toBe("待处理")
+    expect(overviewStatusClass("pending_review")).toBe("idle")
+    expect(overviewStatusLabel("failed")).toBe("异常")
+    expect(overviewStatusClass("failed")).toBe("error")
+  })
+
+  it("normalizes casing and padding like the resolver does", () => {
+    expect(isAwaitingOverviewCard(" WAITING_QUESTION ")).toBe(true)
+    expect(isAwaitingOverviewCard("in_progress")).toBe(false)
+    expect(overviewStatusClass(" Waiting_Question ")).toBe("waiting")
+  })
+
+  /**
+   * 待回复排在运行中之前：等回复的会话在被回复之前不会自己往前走，而运行中的会自己推进。
+   */
+  it("sorts awaiting cards ahead of running ones", () => {
+    const sorted = sortRunningOverviewCardsFirst([
+      { displayStatus: "completed", id: 1 },
+      { displayStatus: "in_progress", id: 2 },
+      { displayStatus: "waiting_question", id: 3 },
+      { displayStatus: "in_progress", id: 4 },
+      { displayStatus: "waiting_permission", id: 5 },
+    ])
+    expect(sorted.map((card) => card.id)).toEqual([3, 5, 2, 4, 1])
   })
 })
 
@@ -226,6 +330,44 @@ describe("buildOverviewDisplayModel", () => {
       },
     })
     expect(seen).toContain(101)
+  })
+
+  /**
+   * 待回复查询必须带 instanceKey：**会话号在不同连接上会重复**，只用 conversationId 查会
+   * 把 A 机器的待回复标到 B 机器的同号会话上。
+   */
+  it("looks the awaiting status up by instance key AND conversation id", () => {
+    const seen: Array<[string, number]> = []
+    const model = build({
+      resolveAwaitingStatus: (instanceKey, conversationId) => {
+        seen.push([instanceKey, conversationId])
+        return "waiting_question"
+      },
+    })
+    expect(seen).toEqual([["direct::local", 101]])
+    expect(model.groups[0].cards[0].displayStatus).toBe("waiting_question")
+    // 候选集也要带上同一个 displayStatus，否则实时预览的选取会与渲染分叉。
+    expect(model.candidates[0].displayStatus).toBe("waiting_question")
+  })
+
+  /** 不传回调时退化成只认 runtime 的旧行为，不报错。 */
+  it("works without an awaiting resolver at all", () => {
+    const model = build()
+    expect(model.groups[0].cards[0].displayStatus).toBe("pending_review")
+  })
+
+  /**
+   * 「待回复」不能被「隐藏已完成」吃掉：一个 status 是 completed、但此刻正等用户回答的会话
+   * （比如上一轮结束后 agent 又发起了提问），藏掉等于让那个提问永远无人应答。
+   */
+  it("never hides an awaiting card even when it is persisted as completed", () => {
+    const model = build({
+      groups: [group({ cards: [card({ status: "completed" })] })],
+      resolveAwaitingStatus: () => "waiting_question",
+      hideCompleted: true,
+    })
+    expect(model.groups[0].cards).toHaveLength(1)
+    expect(model.candidates).toHaveLength(1)
   })
 
   it("resolves each runtime session once per card, not once per consumer", () => {

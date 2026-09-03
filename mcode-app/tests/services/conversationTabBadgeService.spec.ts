@@ -5,7 +5,7 @@ const mockRemoveTabBarBadge = jest.fn()
 const mockGetStorageSync = jest.fn()
 const mockResolveConnectionContext = jest.fn()
 const mockReadStoredConnections = jest.fn()
-const mockFetchCount = jest.fn()
+const mockFetchPayload = jest.fn()
 
 jest.mock("@/api/acp", () => ({
   acpApi: {
@@ -24,7 +24,7 @@ jest.mock("@/services/conversation/tabbarActiveSessions", () => {
   const actual = jest.requireActual("@/services/conversation/tabbarActiveSessions")
   return {
     ...actual,
-    fetchOngoingActiveSessionCount: mockFetchCount,
+    fetchActiveSessionsPayload: mockFetchPayload,
   }
 })
 
@@ -66,7 +66,7 @@ describe("conversationTabBadgeService", () => {
   })
 
   it("sets the badge without any page ever mounting", async () => {
-    mockFetchCount.mockResolvedValue(3)
+    mockFetchPayload.mockResolvedValue({ runningCount: 3, waitingCount: 0, sessions: [] })
 
     const service = await import("@/services/conversation/conversationTabBadgeService")
     service.startConversationTabBadgeService()
@@ -79,7 +79,7 @@ describe("conversationTabBadgeService", () => {
   })
 
   it("subscribes to pet://sessions so the badge stays live off-page", async () => {
-    mockFetchCount.mockResolvedValue(1)
+    mockFetchPayload.mockResolvedValue({ runningCount: 1, waitingCount: 0, sessions: [] })
 
     const service = await import("@/services/conversation/conversationTabBadgeService")
     await service.refreshConversationTabBadge()
@@ -115,7 +115,7 @@ describe("conversationTabBadgeService", () => {
   })
 
   it("keeps the previous count when one instance fails to answer", async () => {
-    mockFetchCount.mockResolvedValueOnce(5)
+    mockFetchPayload.mockResolvedValueOnce({ runningCount: 5, waitingCount: 0, sessions: [] })
 
     const service = await import("@/services/conversation/conversationTabBadgeService")
     await service.refreshConversationTabBadge()
@@ -125,7 +125,7 @@ describe("conversationTabBadgeService", () => {
 
     // 一次网络抖动不该把角标清零 —— 用户会以为任务都跑完了。
     mockSetTabBarBadge.mockClear()
-    mockFetchCount.mockRejectedValueOnce(new Error("offline"))
+    mockFetchPayload.mockRejectedValueOnce(new Error("offline"))
     await service.refreshConversationTabBadge()
 
     expect(mockSetTabBarBadge).toHaveBeenCalledWith(
@@ -135,7 +135,7 @@ describe("conversationTabBadgeService", () => {
   })
 
   it("refetches the real count after a reconnect, not on first connect", async () => {
-    mockFetchCount.mockResolvedValue(1)
+    mockFetchPayload.mockResolvedValue({ runningCount: 1, waitingCount: 0, sessions: [] })
 
     const service = await import("@/services/conversation/conversationTabBadgeService")
     await service.refreshConversationTabBadge()
@@ -146,22 +146,22 @@ describe("conversationTabBadgeService", () => {
     const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
 
     // 首连：合成 idle → connected，不该重取。
-    mockFetchCount.mockClear()
+    mockFetchPayload.mockClear()
     healthCallback({ state: "idle" })
     healthCallback({ state: "connected" })
     await flush()
-    expect(mockFetchCount).not.toHaveBeenCalled()
+    expect(mockFetchPayload).not.toHaveBeenCalled()
 
     // 断线重连：断线期间 pet://sessions 与其它事件一样被直接丢弃（服务端无订阅者时
     // 不入队），所以必须重新拉真实计数，否则角标停在断线前的旧值。
     healthCallback({ state: "error" })
     healthCallback({ state: "connected" })
     await flush()
-    expect(mockFetchCount).toHaveBeenCalled()
+    expect(mockFetchPayload).toHaveBeenCalled()
   })
 
   it("shares one in-flight request across concurrent callers", async () => {
-    mockFetchCount.mockResolvedValue(2)
+    mockFetchPayload.mockResolvedValue({ runningCount: 2, waitingCount: 0, sessions: [] })
 
     const service = await import("@/services/conversation/conversationTabBadgeService")
     await Promise.all([
@@ -171,7 +171,7 @@ describe("conversationTabBadgeService", () => {
     ])
 
     // App onShow、页面下拉刷新、新建会话可能同时触发，不该打三次网络。
-    expect(mockFetchCount).toHaveBeenCalledTimes(1)
+    expect(mockFetchPayload).toHaveBeenCalledTimes(1)
   })
 
   /**
@@ -189,7 +189,7 @@ describe("conversationTabBadgeService", () => {
   it("counts saved connections even when the connected map is empty", async () => {
     mockGetStorageSync.mockReturnValue({})
     mockReadStoredConnections.mockReturnValue([{ key: "conn-a" }])
-    mockFetchCount.mockResolvedValue(4)
+    mockFetchPayload.mockResolvedValue({ runningCount: 4, waitingCount: 0, sessions: [] })
 
     const service = await import("@/services/conversation/conversationTabBadgeService")
     await service.refreshConversationTabBadge()
@@ -203,7 +203,7 @@ describe("conversationTabBadgeService", () => {
   it("marks a connection as connected once it resolves", async () => {
     mockGetStorageSync.mockReturnValue({})
     mockReadStoredConnections.mockReturnValue([{ key: "conn-a" }])
-    mockFetchCount.mockResolvedValue(1)
+    mockFetchPayload.mockResolvedValue({ runningCount: 1, waitingCount: 0, sessions: [] })
 
     const service = await import("@/services/conversation/conversationTabBadgeService")
     await service.refreshConversationTabBadge()
@@ -226,7 +226,7 @@ describe("conversationTabBadgeService", () => {
     mockReadStoredConnections.mockReturnValue([{ key: "conn-a" }])
     // resolve 成功（不碰网络），但真正的请求失败
     mockResolveConnectionContext.mockResolvedValue(gatewayFor("direct::a"))
-    mockFetchCount.mockRejectedValue(new Error("ECONNREFUSED"))
+    mockFetchPayload.mockRejectedValue(new Error("ECONNREFUSED"))
 
     const service = await import("@/services/conversation/conversationTabBadgeService")
     await service.refreshConversationTabBadge()
