@@ -7,6 +7,23 @@ import UniUpRoot from "uview-plus/libs/root/index.js";
 
 const uni = uniPlugin?.default || uniPlugin
 const appBuildTime = new Date().toISOString()
+
+/**
+ * H5 产物内附带版本标记 version.json，与 __APP_BUILD_TIME__ 共用同一个
+ * appBuildTime，供前端“探测到新版本后强制刷新一次”的更新守卫读取。仅 H5 构建生成。
+ */
+const h5VersionJsonPlugin = {
+  name: "mcode:h5-version-json",
+  apply: "build",
+  generateBundle() {
+    if (process.env.UNI_PLATFORM !== "h5") return
+    this.emitFile({
+      type: "asset",
+      fileName: "version.json",
+      source: JSON.stringify({ buildTime: appBuildTime }),
+    })
+  },
+}
 const alias = []
 const localUviewPlusSource = path.resolve(
   "D:/Repos/xyito/ultra-ui/uview-plus/src/uni_modules/uview-plus",
@@ -27,6 +44,7 @@ export default defineConfig({
     __APP_BUILD_TIME__: JSON.stringify(appBuildTime),
   },
   plugins: [
+    h5VersionJsonPlugin,
     UniUpRoot({
 	  rootFileName: "App.up",
     }),

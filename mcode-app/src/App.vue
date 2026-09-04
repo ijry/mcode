@@ -7,6 +7,7 @@ import {
 } from "@/services/conversation/conversationTabBadgeService"
 import { useAccountStore } from "@/stores/account"
 import { startAppUpdateCheck } from "@/services/appUpdate"
+import { startH5UpdateGuard } from "@/services/h5UpdateGuard"
 import { acpApi } from "@/api/acp"
 import { flushH5Database } from "@/services/db/sqlite"
 import { flushPersistedStores } from "@/stores/persistStorage"
@@ -19,6 +20,8 @@ onLaunch(() => {
   // 角标必须在 App 层启动：冷启动落在 tabBar 第 0 项「连接」页，会话页可能整个会话期间
   // 都没被打开过 —— 而角标恰恰是给「不在会话页时」看的。
   startConversationTabBadgeService()
+  // H5/iOS standalone 下站点更新后旧文档不会自动重载，启动即开启“探测新版本→强制刷新一次”守卫。
+  startH5UpdateGuard()
   startAppUpdateCheck(true)
 })
 
