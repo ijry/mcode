@@ -14,6 +14,8 @@ import type {
   PermissionOption,
   PendingQuestionState,
   ApiRetryEvent,
+  AsyncTaskRecord,
+  BackgroundSettledEntry,
   FeedbackNote,
   RuntimeErrorEvent,
   SessionFailureRecord,
@@ -56,6 +58,17 @@ import {
   normalizeSessionFailureRecord,
   settleRecoveredSessionFailures,
 } from "@/services/conversation/sessionFailureRecords"
+import {
+  adoptUnknownAsyncTasks,
+  mergeAsyncTasks,
+  normalizeAsyncTaskDelta,
+  normalizeAsyncTaskRecord,
+  upsertAsyncTask,
+} from "@/services/conversation/asyncTasks"
+import {
+  appendBackgroundSettled,
+  normalizeBackgroundActivity,
+} from "@/services/conversation/backgroundActivity"
 import {
   DEFAULT_CONVERSATION_HISTORY_PAGE_SIZE,
   isWindowedConversationDetail,
@@ -115,6 +128,11 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         apiRetry: null,
         pendingPermission: null,
         pendingQuestion: null,
+        permissionQueueDepth: 0,
+        asyncTasks: [],
+        backgroundOutstanding: 0,
+        backgroundSettled: [],
+        backgroundSettledSeq: 0,
         sharedPromptQueue: createSharedPromptQueueState(),
         inFlightUserTurnId: null,
         nativeSteeringAvailable: false,
@@ -454,6 +472,38 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         session.sessionFailures,
         snapshotFailures
       )
+    }
+    // **后台任务的两条来源都在快照里** —— 这是中途 attach 唯一能补回它们的地方：
+    // `background_activity` / `async_task` 都是一次性事件，seq 低于水位后不会重放
+    // （服务端注释原话：快照带 `background_outstanding` 是为了「让中途 attach 的客户端
+    // 恢复那些一次性事件不会替它重放的 pending 计数」，`session_state.rs:1854-1862`）。
+    //
+    // 计数是**权威值**：服务端每次重算后整体下发，快照里没有该字段（旧服务端）时保持原值。
+    const snapshotOutstanding = firstNumber(
+      snapshot?.background_outstanding,
+      snapshot?.backgroundOutstanding
+    )
+    if (snapshotOutstanding != null) {
+      session.backgroundOutstanding = Math.max(0, Math.trunc(snapshotOutstanding))
+    }
+    // AIR 任务表分两种合并方向，**取决于快照是否可证明比本地游标新**：
+    // - 更新的快照：按 id 替换（服务端已经合并过整行）；
+    // - 已被本地追过的旧快照：**只增不改**。它的行可能比本地旧，按 id 替换会把一个本地
+    //   已经看到跑完的任务走回 `running`，而那条终态事件不会重放来纠正。行上没有版本号，
+    //   无法逐行判断谁更新，所以用结构性规则代替（`adoptUnknownAsyncTasks`）。
+    const snapshotTasks = (
+      Array.isArray(snapshot?.async_tasks)
+        ? snapshot.async_tasks
+        : Array.isArray(snapshot?.asyncTasks)
+          ? snapshot.asyncTasks
+          : []
+    )
+      .map((raw: unknown) => normalizeAsyncTaskRecord(raw))
+      .filter(Boolean) as AsyncTaskRecord[]
+    if (snapshotTasks.length > 0) {
+      session.asyncTasks = isProvablyFresherSnapshot(snapshotSeq, currentSeq)
+        ? mergeAsyncTasks(session.asyncTasks, snapshotTasks)
+        : adoptUnknownAsyncTasks(session.asyncTasks, snapshotTasks)
     }
     // **不清 `apiRetry`。** 重试横幅（Claude 的 `api_retry` / codex 的 `TurnRetrying`）
     // 是瞬态提示，服务端**刻意不放进快照**（`session_state.rs` 的注释：「与 Claude 的
@@ -871,10 +921,61 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         session.inputErrorDetails = null
         session.inputErrorTurnKey = null
         session.pendingPermission = normalizePermissionRequest(event.data)
+        session.permissionQueueDepth = Math.max(
+          0,
+          Math.trunc(firstNumber(event.data?.queued) ?? 0)
+        )
         session.pendingQuestion = null
         maybeBackfillMissingHistory(session, "permission_request")
         syncManagedSendPermission(session.conversationId)
         break
+
+      case "permission_queue_depth":
+        // 只更新数字，**不动 status、不动 pendingPermission**：这条事件在队列变化时单独到达，
+        // 可能早于或晚于对应的 `permission_request`。没有 pending 授权时留着数字也无害 ——
+        // UI 只在授权卡片上显示它。
+        session.permissionQueueDepth = Math.max(
+          0,
+          Math.trunc(firstNumber(event.data?.depth) ?? 0)
+        )
+        break
+
+      case "async_task": {
+        // AIR 异步任务增量。合并规则与快照那条路共用 `services/conversation/asyncTasks.ts`，
+        // 与服务端 `SessionState::apply_event` 同规则。
+        //
+        // **引用相同就不写回**：`upsertAsyncTask` 在空转时返回同一个数组，避免无意义的
+        // reactive 触发 —— 一个 monitor 任务每秒都在发进度 tick，这条路是热路径。
+        const delta = normalizeAsyncTaskDelta(event.data)
+        if (!delta) break
+        const nextTasks = upsertAsyncTask(session.asyncTasks, delta)
+        if (nextTasks !== session.asyncTasks) {
+          session.asyncTasks = nextTasks
+          touchHotConversation(session.conversationId)
+        }
+        break
+      }
+
+      case "background_activity": {
+        // 转录派生的后台活动。**不改 status** —— 后台有活不代表当前回合在跑，
+        // 状态胶囊的改口由呈现层按 `runtimeStatus + backgroundOutstanding` 决定
+        // （`detailBackgroundTasks.ts` 的 `shouldShowBackgroundBusyStatus`）。
+        const update = normalizeBackgroundActivity(event.data)
+        if (!update) break
+        // `null` = 这一帧没报计数，保持原值；`0` 是权威的「后台已空」，必须落地。
+        if (update.outstanding != null) {
+          session.backgroundOutstanding = update.outstanding
+        }
+        if (update.settled.length > 0) {
+          session.backgroundSettled = appendBackgroundSettled(
+            session.backgroundSettled,
+            update.settled
+          )
+          session.backgroundSettledSeq += 1
+          touchHotConversation(session.conversationId)
+        }
+        break
+      }
 
       case "question_request":
         touchHotConversation(session.conversationId)
@@ -1057,6 +1158,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       // connection takes ownership, so do not carry the old channel across.
       session.nativeSteeringAvailable = false
       session.nativeSteeringDowngraded = false
+      resetBackgroundActivityState(session)
       session.feedbackToolAvailable = false
       session.feedbackNotes = []
       session.consumedFeedbackIds = new Map()
@@ -1158,6 +1260,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         // 会话被别的连接接管了：能力位属于旧那条，必须清掉等新快照重新声明。
         session.nativeSteeringAvailable = false
         session.nativeSteeringDowngraded = false
+        resetBackgroundActivityState(session)
         session.feedbackToolAvailable = false
         session.feedbackNotes = []
         session.consumedFeedbackIds = new Map()
@@ -1251,6 +1354,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       // 是另一个 agent / 另一个版本。留着它会让重连到 codex 后仍然显示插入入口。
       session.nativeSteeringAvailable = false
       session.nativeSteeringDowngraded = false
+      resetBackgroundActivityState(session)
       session.feedbackToolAvailable = false
       // 便签同理：它们属于那条已经断掉的连接的当前回合。
       session.feedbackNotes = []
@@ -1279,6 +1383,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     // 同 disconnect：能力位属于那条已经作废的连接，不能带到下一条上。
     session.nativeSteeringAvailable = false
     session.nativeSteeringDowngraded = false
+    resetBackgroundActivityState(session)
     session.feedbackToolAvailable = false
     session.feedbackNotes = []
     session.consumedFeedbackIds = new Map()
@@ -1348,6 +1453,9 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     if (!session?.pendingPermission) return
     if (requestId && session.pendingPermission.id !== requestId) return
     session.pendingPermission = null
+    // 队列深度跟着这张卡片走。批掉一条后清零，等服务端的下一条 `permission_request` /
+    // `permission_queue_depth` 重新报 —— 少报一瞬间无害，多报会让用户守着一个空队列。
+    session.permissionQueueDepth = 0
     if (session.status === "waiting_permission") {
       session.status = session.liveMessage
         ? "thinking"
@@ -1406,6 +1514,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     session.inFlightUserTurnId = null
     session.nativeSteeringAvailable = false
     session.nativeSteeringDowngraded = false
+    resetBackgroundActivityState(session)
     session.feedbackToolAvailable = false
     session.feedbackNotes = []
     session.consumedFeedbackIds = new Map()
@@ -1616,6 +1725,44 @@ interface RuntimeSession {
   apiRetry: ApiRetryEvent | null
   pendingPermission: PermissionRequest | null
   pendingQuestion: PendingQuestionState | null
+  /**
+   * 当前这条授权后面还排着几条（服务端 `permission_request.queued` /
+   * `permission_queue_depth`）。
+   *
+   * 只在**已经拿到 pending 授权**时有意义：批掉一条后清零，等服务端的下一条
+   * `permission_request` / `permission_queue_depth` 重新报。宁可短暂少报也不多报 ——
+   * 「还有 2 条」挂在一个其实已经空了的队列上，会让用户以为还得守着。
+   */
+  permissionQueueDepth: number
+  /**
+   * AIR 异步任务表（`services/conversation/asyncTasks.ts`）：Claude 的非智能体后台工作
+   * —— `run_in_background` 的 shell、workflow、monitor。
+   *
+   * 与 `backgroundOutstanding` 是**互补**的两条来源，不是同一件事的两种表达：这张表有明细
+   * 但**不含子智能体**（adapter 在 AIR 通道忽略 `taskType: "local_agent"`），那个计数含
+   * 子智能体但只有数字。呈现层取两者较大值，见 `detailBackgroundTasks.ts`。
+   *
+   * 终态行**保留在表里**（adapter 会继续修订已完成的任务），「显示什么」由 `liveAsyncTasks`
+   * 决定。连接失效时整表清空 —— 后台工作活不过 agent CLI 进程，而它的寿命就是连接的寿命。
+   */
+  asyncTasks: AsyncTaskRecord[]
+  /**
+   * 已启动、未结算的后台任务数（转录派生，`background_activity.outstanding`）。
+   *
+   * **这是「轮次结束 ≠ 活干完」的唯一信号。** `turn_complete` 之后它仍可能 > 0：异步子智能体
+   * 与后台 shell 还在跑。此前 mcode 完全不接这条通道，于是手机上显示「已完成」而 PC 上
+   * 后台还在烧 token —— 用户据此合上电脑，正在跑的活跟着死。
+   */
+  backgroundOutstanding: number
+  /**
+   * 最近结算掉的后台任务（滚动日志，上限见 `BACKGROUND_SETTLED_LOG_LIMIT`）。
+   *
+   * 桌面端对每条 `settled[]` 弹一次 OS 通知；mcode 没有任何通知通道（无推送、无本地通知），
+   * 所以只能落成页内提示。`backgroundSettledSeq` 单调递增，供 UI 建立「有新结算」的依赖 ——
+   * 数组内容可能重复（同一个 taskId 可被 `SendMessage` 唤醒后再次结算），靠内容判新会漏。
+   */
+  backgroundSettled: BackgroundSettledEntry[]
+  backgroundSettledSeq: number
   sharedPromptQueue: SharedPromptQueueState
   inFlightUserTurnId: string | null
   /**
@@ -1688,6 +1835,25 @@ interface RuntimeSession {
    */
   subagentTranscripts: Record<string, string>
   stats: SessionStats
+}
+
+/**
+ * 连接失效 / 换连接时清空后台任务态。
+ *
+ * **后台工作活不过 agent CLI 进程，而它的寿命就是连接的寿命** —— 服务端的转录 watcher
+ * 因此也是 connection-scoped（`codeg-plus/src-tauri/src/acp/background_watch.rs` 顶部注释）。
+ * 所以旧连接的计数与任务行对新连接一律不成立，留着就是幽灵行。
+ *
+ * 即便 mcode 只是本地 detach（PC 上那条连接还活着、后台还在跑），清掉也仍然是对的：
+ * 我们已经不再收它的增量，留一个再也不会更新的数字比没有更糟。重新 attach 时快照会补回来。
+ *
+ * 授权队列深度同理挂在连接上，一并清。
+ */
+function resetBackgroundActivityState(session: RuntimeSession) {
+  session.asyncTasks = []
+  session.backgroundOutstanding = 0
+  session.backgroundSettled = []
+  session.permissionQueueDepth = 0
 }
 
 function resetTurnScopedBackfillState(session: RuntimeSession) {

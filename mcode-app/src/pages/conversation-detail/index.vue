@@ -217,8 +217,10 @@
               :initial-loading="isActiveDetailTabPage(index) && detailContentInitialLoading"
               :load-error-message="isActiveDetailTabPage(index) ? detailLoadErrorMessage : ''"
               :on-before-send-prompt="ensurePcTabReadyForPrompt"
+              :transport-banner="isActiveDetailTabPage(index) ? transportBanner : null"
               @layout-change="measureMessageListHeight"
               @reload="reloadDetailContent"
+              @status-action="handleDetailStatusAction"
             />
           </view>
         </swiper-item>
@@ -491,6 +493,7 @@ import {
   buildRuntimeRetryText,
   buildRuntimeStatusClass,
   buildRuntimeStatusLabel,
+  buildTransportBanner,
   waitingStateBadgeText as resolveWaitingStateBadgeText,
   waitingStateDescription as resolveWaitingStateDescription,
   waitingStateFootnote as resolveWaitingStateFootnote,
@@ -1230,17 +1233,22 @@ const showBridgeRecoveredBanner = computed(() => {
   return Date.now() - bridgeRecoveredAt.value < 3000
 })
 /**
- * 注意：这条状态链（`detailStatusState` → `detailStatusBanner` / `runtimeStatusLabel` /
- * `runtimeStatusClass` → `toolbarStatusText` → `toolbarNoticeItems`）以及
- * `handleDetailStatusAction` 目前在外壳里**没有任何消费者** —— 状态条整套已经归
- * `ConversationDetailInteractivePane` 所有（它自己算 `runtimeStatusLabel` /
- * `runtimeStatusClass` 并渲染 `input-status-row`）。这里保留是为了不在性能改动里
- * 夹带删除，清理另开一次。
+ * 这条状态链（`detailStatusState` → `detailStatusBanner` → `transportBanner`）现在**有消费者**：
+ * 外壳把 `transportBanner` 传给 pane，pane 在输入区上方渲染它（见 `buildTransportBanner`）。
+ * 从「算好但没人用」变成「只用其中一部分」——
  *
- * 因此下面的 `planTaskCount` 在计划抽屉关闭时是 0（`planTasks` 已改为抽屉门禁，
- * 见其注释）。它只影响 `long_wait` 分支里「查看计划 / 查看最近一步」这个文案。
- * **如果哪天要把这条链接回 UI**，`planTaskCount` 得换成一个不扫全表的判据
- * （或者由 pane 把它已经算好的数量 emit 上来），不要把常驻的全表扫描加回去。
+ * - **传输层那几档**（`bridge_*` / `replay_miss` / `agent_disconnected`）由横幅承接，
+ *   这是 pane 完全没有的能力，也正是「手机上看不到断线」那个洞；
+ * - `runtime_error` / `api_retry` / `long_wait` 仍归 pane 自己（composer 那侧的
+ *   `input-feedback--error` / `--retry` 与等待卡片），横幅刻意不重复它们。
+ *
+ * `runtimeStatusLabel` / `runtimeStatusClass` / `toolbarStatusText` 依然没有消费者 ——
+ * 状态胶囊归 pane 所有（它自己算）。清理另开一次，不在这里夹带。
+ *
+ * `planTaskCount` 在计划抽屉关闭时是 0（`planTasks` 已改为抽屉门禁，见其注释），
+ * 因此只影响 `long_wait` 分支里「查看计划 / 查看最近一步」的文案 —— 而那一档不进横幅，
+ * 所以当前无实际影响。**若将来把 `long_wait` 也接进 UI**，`planTaskCount` 要换成一个
+ * 不扫全表的判据（或由 pane 把已经算好的数量 emit 上来），不要把常驻的全表扫描加回去。
  */
 const detailStatusState = computed<DetailStatusState>(() =>
   buildDetailStatusState({
@@ -1261,6 +1269,13 @@ const detailStatusState = computed<DetailStatusState>(() =>
 const detailStatusBanner = computed(() =>
   detailStatusState.value.code === "idle" ? null : detailStatusState.value
 )
+/**
+ * 外壳真正渲染的那条横幅（见 `buildTransportBanner`）。
+ *
+ * 与 `detailStatusBanner` 分开：后者是全量状态（含 runtime_error / api_retry / long_wait），
+ * 那几类由 pane 承接。外壳只画 pane 拿不到的传输层状态。
+ */
+const transportBanner = computed(() => buildTransportBanner(detailStatusBanner.value))
 const showRuntimeRetryFeedback = computed(() =>
   Boolean(runtimeRetryText.value) &&
   detailStatusState.value.code !== "api_retry" &&

@@ -44,9 +44,29 @@
               <view class="project-git-action project-git-action--primary" @click="openBranchSheet">
                 <text>切分支</text>
               </view>
+              <view
+                class="project-git-action project-git-action--primary"
+                @click="openCommitPopup"
+              >
+                <text>提交</text>
+              </view>
+              <view class="project-git-action" @click="handlePull">
+                <text>{{ pulling ? "拉取中" : "拉取" }}</text>
+              </view>
               <view class="project-git-action" @click="handlePush">
                 <text>Push</text>
               </view>
+            </view>
+          </view>
+
+          <!--
+            冲突是 pull 的**正常返回值**（服务端放在成功响应里）。手机端解决不了冲突，
+            所以用常驻提示而不是 toast —— 一闪而过的提示会让用户以为同步成功了。
+          -->
+          <view v-if="pullConflictText" class="project-git-conflict">
+            <text class="project-git-conflict__text">{{ pullConflictText }}</text>
+            <view class="project-git-action" @click="pullConflictText = ''">
+              <text>知道了</text>
             </view>
           </view>
 
@@ -216,6 +236,73 @@
         </view>
       </view>
     </u-popup>
+
+    <!--
+      提交。底部而不是居中：文件多的时候要能滚，居中弹窗在小屏上会把输入框顶到键盘后面。
+    -->
+    <u-popup :show="showCommitPopup" mode="bottom" :round="24" @close="closeCommitPopup">
+      <view class="project-git-commit-sheet" :style="upThemeCardStyle">
+        <text class="project-git-popup__title">提交变更</text>
+        <u-textarea
+          v-model="commitMessage"
+          placeholder="提交说明"
+          :count="false"
+          height="120"
+          :disabled="committing"
+        ></u-textarea>
+
+        <view class="project-git-commit-sheet__head">
+          <text class="project-git-commit-sheet__label"
+            >勾选要暂存的文件（{{ commitSelectedCount }}/{{ commitFileOptions.length }}）</text
+          >
+          <view class="project-git-action" @click="toggleAllCommitFiles">
+            <text>{{ commitAllSelected ? "全不选" : "全选" }}</text>
+          </view>
+        </view>
+
+        <scroll-view scroll-y class="project-git-commit-sheet__list">
+          <view
+            v-for="option in commitFileOptions"
+            :key="option.file"
+            class="project-git-commit-row"
+            @click="handleToggleCommitFile(option.file)"
+          >
+            <u-icon
+              :name="option.selected ? 'checkmark-circle-fill' : 'checkmark-circle'"
+              size="18"
+              :color="
+                option.selected
+                  ? upThemeVar('--up-primary', '#2979ff')
+                  : upThemeVar('--up-tips-color', '#909193')
+              "
+            ></u-icon>
+            <text class="project-git-commit-row__path">{{ option.file }}</text>
+            <text class="project-git-commit-row__status">{{
+              commitFileStatusText(option)
+            }}</text>
+          </view>
+          <view v-if="commitFileOptions.length === 0" class="project-git-empty-row">
+            <text>工作区没有变更；提交将只包含已暂存的内容。</text>
+          </view>
+        </scroll-view>
+
+        <!--
+          「提交的是整个索引」这条语义必须写在界面上：服务端第二步是不带 pathspec 的
+          `git commit`，别处暂存过的文件会一并进来。闷着会被当成 bug。
+        -->
+        <text class="project-git-commit-sheet__hint"
+          >提交会包含此前已暂存的内容；作者信息由 PC 端 Git 账号配置决定。</text
+        >
+
+        <text v-if="commitError" class="project-git-commit-sheet__error">{{ commitError }}</text>
+
+        <view class="project-git-popup__actions">
+          <u-button type="primary" block :loading="committing" @click="submitCommit"
+            >提交</u-button
+          >
+        </view>
+      </view>
+    </u-popup>
   </view>
 </template>
 
@@ -232,6 +319,7 @@ import {
   buildProjectGitDiffRoute,
   buildWorkspaceStatusSummary,
   checkoutRemoteBranch,
+  commitRemoteChanges,
   createRemoteBranch,
   formatGitDateTime,
   getGitFileStatusPresentation,
@@ -244,6 +332,7 @@ import {
   getRemotePushInfo,
   isCurrentBranchHistoryView,
   isNotGitRepositoryError,
+  pullRemoteChanges,
   pushRemoteBranch,
   resetRemoteBranch,
   type GitBranchList,
@@ -258,6 +347,17 @@ import {
   readProjectGitSplitRatio,
   writeProjectGitSplitRatio,
 } from "../projectGitSplitState"
+import {
+  buildCommitFileOptions,
+  buildCommitResultText,
+  commitFileStatusText,
+  selectedCommitFiles,
+  setAllCommitFiles,
+  toggleCommitFile,
+  validateCommitForm,
+  type CommitFileOption,
+} from "../projectGitCommitForm"
+import { buildPullOutcomeView } from "../projectGitSyncPresentation"
 
 const props = withDefaults(
   defineProps<{
@@ -299,6 +399,14 @@ const currentCommitAction = ref<GitLogEntry | null>(null)
 const showCreateBranchPopup = ref(false)
 const createBranchName = ref("")
 const showResetPopup = ref(false)
+const showCommitPopup = ref(false)
+const commitMessage = ref("")
+const commitFileOptions = ref<CommitFileOption[]>([])
+const commitError = ref("")
+const committing = ref(false)
+const pulling = ref(false)
+/** 冲突提示常驻直到用户手动关掉；`hasConflict` 只在这一处落成文案。 */
+const pullConflictText = ref("")
 const resetMode = ref<GitResetMode>("mixed")
 const splitRatio = ref(DEFAULT_PROJECT_GIT_SPLIT_RATIO)
 
@@ -560,6 +668,98 @@ function handleResetModeChange(value: string) {
   resetMode.value = value as GitResetMode
 }
 
+const commitSelectedCount = computed(() => selectedCommitFiles(commitFileOptions.value).length)
+const commitAllSelected = computed(
+  () =>
+    commitFileOptions.value.length > 0 &&
+    commitSelectedCount.value === commitFileOptions.value.length
+)
+
+function openCommitPopup() {
+  // 每次打开都按当前工作区重建勾选集：上一次留下的选择可能指向已经被提交/被丢弃的文件。
+  commitFileOptions.value = buildCommitFileOptions(workspaceEntries.value)
+  commitError.value = ""
+  showCommitPopup.value = true
+}
+
+function closeCommitPopup() {
+  if (committing.value) return
+  showCommitPopup.value = false
+}
+
+function handleToggleCommitFile(file: string) {
+  commitFileOptions.value = toggleCommitFile(commitFileOptions.value, file)
+}
+
+function toggleAllCommitFiles() {
+  commitFileOptions.value = setAllCommitFiles(commitFileOptions.value, !commitAllSelected.value)
+}
+
+async function submitCommit() {
+  if (committing.value) return
+  const validation = validateCommitForm({ message: commitMessage.value })
+  if (!validation.valid) {
+    commitError.value = validation.error
+    return
+  }
+  if (!resolvedGateway.value || !props.projectPath) {
+    commitError.value = "连接不可用"
+    return
+  }
+
+  const files = selectedCommitFiles(commitFileOptions.value)
+  committing.value = true
+  commitError.value = ""
+  try {
+    const committedFiles = await commitRemoteChanges(
+      resolvedGateway.value,
+      props.projectPath,
+      commitMessage.value.trim(),
+      files,
+      props.folderId > 0 ? props.folderId : null
+    )
+    showCommitPopup.value = false
+    // 只在成功后清空说明 —— 失败时用户不用重新打一遍（手机上打字最贵）。
+    commitMessage.value = ""
+    uni.showToast({
+      title: buildCommitResultText({ committedFiles, selectedCount: files.length }),
+      icon: "none",
+    })
+    await loadPage()
+  } catch (error) {
+    // 「索引里什么都没有」这类失败只有服务端知道，原样透出它的话，不在客户端猜。
+    commitError.value = toErrorMessage(error, "提交失败")
+  } finally {
+    committing.value = false
+  }
+}
+
+/**
+ * 拉取远端更新。
+ *
+ * **冲突不是错误**：服务端把冲突信息放在成功响应里（pull 确实执行了、工作区确实变了）。
+ * 手机端合不了冲突，所以冲突走**常驻提示**而不是 toast —— 一闪而过会让用户以为同步成功。
+ */
+async function handlePull() {
+  if (pulling.value) return
+  if (!resolvedGateway.value || !props.projectPath) {
+    uni.showToast({ title: "连接不可用", icon: "none" })
+    return
+  }
+  pulling.value = true
+  try {
+    const outcome = await pullRemoteChanges(resolvedGateway.value, props.projectPath)
+    const view = buildPullOutcomeView(outcome)
+    pullConflictText.value = view.conflictText
+    uni.showToast({ title: view.text, icon: "none" })
+    await loadPage()
+  } catch (error) {
+    uni.showToast({ title: toErrorMessage(error, "拉取失败"), icon: "none" })
+  } finally {
+    pulling.value = false
+  }
+}
+
 async function submitReset() {
   if (!resolvedGateway.value || !props.projectPath || !currentCommitAction.value) return
 
@@ -643,9 +843,9 @@ function getToneColor(tone: "success" | "error" | "warning" | "info") {
   return getGitFileToneColor(tone)
 }
 
-function toErrorMessage(error: unknown) {
+function toErrorMessage(error: unknown, fallback = "读取 Git 信息失败") {
   if (error instanceof Error && error.message.trim()) return error.message.trim()
-  return "读取 Git 信息失败"
+  return fallback
 }
 
 defineExpose({ reload: loadPage })
@@ -959,5 +1159,85 @@ defineExpose({ reload: loadPage })
 
 .project-git-popup__actions {
   margin-top: 20rpx;
+}
+
+.project-git-commit-sheet {
+  padding: 28rpx 28rpx calc(28rpx + env(safe-area-inset-bottom));
+  border-radius: 24rpx 24rpx 0 0;
+}
+
+.project-git-conflict {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  margin-top: 16rpx;
+  padding: 14rpx 16rpx;
+  border-radius: 14rpx;
+  border: 1rpx solid color-mix(in srgb, var(--up-error, #fa3534) 40%, transparent 60%);
+  background: color-mix(in srgb, var(--up-error, #fa3534) 8%, var(--up-card-bg-color, #ffffff) 92%);
+}
+
+.project-git-conflict__text {
+  flex: 1;
+  min-width: 0;
+  font-size: 22rpx;
+  line-height: 1.4;
+  color: var(--up-error, #fa3534);
+  word-break: break-all;
+}
+
+.project-git-commit-sheet__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 20rpx;
+}
+
+.project-git-commit-sheet__label {
+  font-size: 24rpx;
+  color: var(--up-content-color, #606266);
+}
+
+.project-git-commit-sheet__list {
+  /* 半屏上限：文件多时可滚，又不至于把提交说明与按钮挤出屏幕。 */
+  max-height: 40vh;
+  margin-top: 12rpx;
+}
+
+.project-git-commit-row {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  padding: 14rpx 4rpx;
+  border-bottom: 1rpx solid var(--up-border-color, #ebedf0);
+}
+
+.project-git-commit-row__path {
+  flex: 1;
+  min-width: 0;
+  font-size: 24rpx;
+  color: var(--up-main-color, #303133);
+  word-break: break-all;
+}
+
+.project-git-commit-row__status {
+  flex-shrink: 0;
+  font-size: 22rpx;
+  color: var(--up-tips-color, #909193);
+}
+
+.project-git-commit-sheet__hint {
+  display: block;
+  margin-top: 16rpx;
+  font-size: 22rpx;
+  line-height: 1.4;
+  color: var(--up-tips-color, #909193);
+}
+
+.project-git-commit-sheet__error {
+  display: block;
+  margin-top: 12rpx;
+  font-size: 24rpx;
+  color: var(--up-error, #fa3534);
 }
 </style>

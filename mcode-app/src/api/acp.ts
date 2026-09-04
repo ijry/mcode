@@ -279,6 +279,21 @@ class AcpApiClient {
   }
 
   /**
+   * 停掉一条 AIR 异步任务（后台 shell / workflow / monitor）。
+   *
+   * 返回值是 **adapter 的裁决**：`false` 表示它拒绝停止，这是一个正常答复而不是失败
+   * （服务端因此用 200 + `false`，`web/handlers/acp.rs:464-476`）。调用方必须区分这两者，
+   * 否则「拒绝」会被当成网络错误提示成「请重试」。
+   */
+  async acpStopAsyncTask(connectionId: string, taskId: string): Promise<boolean> {
+    const result = await this.request("/acp_stop_async_task", {
+      connectionId,
+      taskId,
+    })
+    return result === true
+  }
+
+  /**
    * Fork 会话
    */
   async acpFork(connectionId: string): Promise<{
@@ -1417,6 +1432,10 @@ class AcpApiClient {
             description: describePermission(record.tool_call),
             details: record.tool_call,
             toolCall: record.tool_call,
+            // 「这条之后还排着几条授权」。服务端在 `permission_request` 上就带了
+            // （`acp/types.rs:336` 的 `queued`），此前读到即弃 —— 于是用户批完一条
+            // 才发现还有下一条，无法预估还要点几次。0 与缺失都按「没有排队」处理。
+            queued: firstNumber(record.queued) ?? 0,
             options: Array.isArray(record.options)
               ? record.options.map((option) => ({
                 id: firstString((option as Record<string, unknown>)?.option_id, (option as Record<string, unknown>)?.id),
@@ -1427,6 +1446,13 @@ class AcpApiClient {
               }))
               : [],
           },
+        }
+      case "permission_queue_depth":
+        // 授权队列深度的独立更新（批掉一条后服务端会重发）。载荷平铺、只有 `depth`。
+        return {
+          connectionId,
+          type: "permission_queue_depth",
+          data: { depth: firstNumber(record.depth) ?? 0 },
         }
       case "permission_resolved":
         return {
@@ -1487,6 +1513,48 @@ class AcpApiClient {
           },
         }
       }
+      case "turn_retrying": {
+        // codex 那侧的重试通道（`acp/types.rs:505`），与 Claude 的 `api_retry` 是同一件事的
+        // 两种上报方式，所以**归一到同一个运行时槽位**（`session.apiRetry`）而不是新开一个 ——
+        // 重试横幅只有一处，两条来源各写一份必然打架。
+        //
+        // 字段对应：`message` → `error`（横幅要显示的原因），其余同名。
+        return {
+          connectionId,
+          type: "api_retry",
+          data: {
+            sessionId: firstString(record.session_id, record.sessionId) || undefined,
+            attempt: firstNumber(record.attempt),
+            maxRetries: firstNumber(record.max_retries, record.maxRetries),
+            error: firstString(record.message) || undefined,
+            errorStatus: firstNumber(record.error_status, record.errorStatus),
+            retryDelayMs: firstNumber(record.retry_delay_ms, record.retryDelayMs),
+          },
+        }
+      }
+      case "async_task":
+        // AIR 异步任务增量。**原样透传整条 delta**，归一化与合并规则放在
+        // `services/conversation/asyncTasks.ts`，与快照那条路共用一份实现 ——
+        // 服务端 `SessionState::apply_event` 与客户端必须同规则，写两份必然漂移。
+        return {
+          connectionId,
+          type: "async_task",
+          data: { delta: record.delta ?? record },
+        }
+      case "background_activity":
+        // 转录派生的出轮次活动。`turns[]` 本期不消费（见
+        // `services/conversation/backgroundActivity.ts` 的说明），这里只透传计数与结算，
+        // **不要把 turns 一起带进来** —— 那是整轮消息数组，白占内存与 postMessage 带宽。
+        return {
+          connectionId,
+          type: "background_activity",
+          data: {
+            sessionId: firstString(record.session_id, record.sessionId),
+            outstanding: firstNumber(record.outstanding),
+            settled: Array.isArray(record.settled) ? record.settled : [],
+            watermark: firstNumber(record.watermark),
+          },
+        }
       case "session_failure": {
         // JetBrains AIR 结构化失败记录。**原样透传整条记录**，不在这里做取舍：
         // 单调合并（id + revision）必须与快照那条路用同一份实现，所以判定放在

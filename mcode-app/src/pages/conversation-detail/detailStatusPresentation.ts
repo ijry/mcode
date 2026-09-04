@@ -337,6 +337,39 @@ export function buildDetailStatusState(input: {
   }
 }
 
+/**
+ * 传输层横幅：外壳（`index.vue`）该不该为这个状态码画一条横幅。
+ *
+ * **只认桥接 / agent 连接这一层的状态码。** `runtime_error` / `api_retry` / `long_wait`
+ * 由 pane 在输入框附近渲染（`input-feedback--error` / `--retry` / 等待卡片），外壳再画一条
+ * 就是同一件事说两遍；而桥接断开、replay 丢帧、agent 进程没了这三类，pane 完全没有承接 ——
+ * 那正是「手机上看不到断线」的洞。
+ */
+const TRANSPORT_BANNER_CODES = new Set<DetailStatusCode>([
+  "bridge_recovered",
+  "bridge_reconnecting",
+  "bridge_error",
+  "replay_miss",
+  "agent_disconnected",
+])
+
+export function isTransportStatusCode(code: DetailStatusCode): boolean {
+  return TRANSPORT_BANNER_CODES.has(code)
+}
+
+/**
+ * 外壳横幅。`null` = 不画。
+ *
+ * `attach_settling` 刻意**不画**：那是 attach 之后「瞬态状态还没到齐」的 3 秒窗口，
+ * 正常会话每次进入都会经过它，画出来就是每次打开会话都闪一条横幅。
+ */
+export function buildTransportBanner(
+  state: DetailStatusState | null | undefined
+): DetailStatusState | null {
+  if (!state) return null
+  return isTransportStatusCode(state.code) ? state : null
+}
+
 export function buildRuntimeStatusLabel(input: {
   detailStatusCode: DetailStatusCode
   runtimeStatus: string

@@ -204,6 +204,64 @@
       </template>
 
       <template #status>
+        <!--
+          传输层横幅：断线 / 重连中 / replay 丢帧 / agent 进程没了 / 刚恢复。
+          外壳把状态算好传进来（见 `transportBanner` prop）。此前这条链算好了却没有任何
+          消费者 —— 手机上完全看不到断线，只能靠「怎么半天没反应」自己猜。
+          运行时错误与重试条仍在 composer 那一侧，两处不重叠（`buildTransportBanner` 只放行传输层码）。
+        -->
+        <view
+          v-if="props.transportBanner"
+          :class="[
+            'transport-banner',
+            `transport-banner--${props.transportBanner.severity}`,
+          ]"
+        >
+          <view class="transport-banner__row">
+            <up-loading-icon
+              v-if="props.transportBanner.loading"
+              mode="circle"
+              size="14"
+              :color="props.transportBanner.iconColor"
+            ></up-loading-icon>
+            <up-icon
+              v-else
+              :name="props.transportBanner.icon"
+              size="14"
+              :color="props.transportBanner.iconColor"
+            ></up-icon>
+            <text class="transport-banner__text">{{ props.transportBanner.text }}</text>
+            <view
+              v-if="props.transportBanner.actionKey"
+              class="transport-banner__action"
+              @click.stop="emit('status-action', props.transportBanner.actionKey)"
+            >
+              <text class="transport-banner__action-text">{{
+                props.transportBanner.actionLabel || "重试"
+              }}</text>
+            </view>
+            <view
+              v-if="props.transportBanner.details"
+              class="transport-banner__toggle"
+              @click.stop="showTransportBannerDetails = !showTransportBannerDetails"
+            >
+              <text class="transport-banner__toggle-text">{{
+                showTransportBannerDetails ? "收起" : "详情"
+              }}</text>
+            </view>
+          </view>
+          <!-- stderr 尾巴可能几十行，默认折叠。 -->
+          <scroll-view
+            v-if="props.transportBanner.details && showTransportBannerDetails"
+            scroll-y
+            class="transport-banner__details"
+          >
+            <text class="transport-banner__details-text">{{
+              props.transportBanner.details
+            }}</text>
+          </scroll-view>
+        </view>
+
         <view
           class="input-status-row"
           :class="[
@@ -238,6 +296,24 @@
               >计划 {{ completedTaskCount }}/{{ planTasks.length }}</text
             >
           </view>
+          <!--
+            后台任务胶囊。与「计划」并列而不是塞进状态文案里：它是可点开的入口，
+            而状态文案是一行只读文字。
+          -->
+          <view
+            v-if="backgroundSummary.visible"
+            class="input-status-row__background"
+            @click.stop="showBackgroundDrawer = true"
+          >
+            <up-icon
+              name="reload"
+              size="13"
+              :color="upThemeVar('--up-warning', '#f9ae3d')"
+            ></up-icon>
+            <text class="input-status-row__background-text">{{
+              backgroundSummary.chipLabel
+            }}</text>
+          </view>
         </view>
       </template>
 
@@ -252,6 +328,15 @@
           <view class="permission-card__header">
             <view class="permission-card__badge"></view>
             <text class="permission-card__title">需要授权</text>
+            <!--
+              「这条之后还排着几条」。服务端一直在 `permission_request.queued` 里带着它，
+              此前客户端读到即弃 —— 于是用户批完一条才发现还有下一条，无法预估要点几次。
+            -->
+            <text
+              v-if="permissionQueueDepth > 0"
+              class="permission-card__queued"
+              >还有 {{ permissionQueueDepth }} 条待授权</text
+            >
           </view>
           <view
             v-if="pendingPermissionTextParts.length > 0"
@@ -1189,6 +1274,65 @@
         </scroll-view>
       </view>
     </up-popup>
+
+    <!--
+      后台任务抽屉。清单**只列非终态**（结算的任务立即离开，结果归时间线），
+      并且要能表达「计数比清单多」——子智能体只上报数量，没有明细。
+    -->
+    <up-popup v-model:show="showBackgroundDrawer" mode="bottom" :round="20">
+      <view
+        :class="['plan-drawer', detailTheme && `plan-drawer--theme-${detailTheme}`]"
+        :style="cyberPanelStyle"
+      >
+        <view class="plan-drawer__hd">
+          <text class="plan-drawer__title">后台任务</text>
+          <text class="plan-drawer__count">{{ backgroundSummary.count }}</text>
+        </view>
+
+        <scroll-view scroll-y class="plan-drawer__list">
+          <view
+            v-for="row in backgroundSummary.rows"
+            :key="row.taskId"
+            class="bg-task"
+          >
+            <view class="bg-task__left">
+              <view
+                :class="['bg-task__dot', `bg-task__dot--${row.stateClass}`]"
+              ></view>
+            </view>
+            <view class="bg-task__main">
+              <text class="bg-task__name">{{ row.name }}</text>
+              <text class="bg-task__meta"
+                >{{ row.typeLabel }} · {{ row.stateLabel
+                }}{{ row.metaText ? ` · ${row.metaText}` : "" }}</text
+              >
+            </view>
+            <view
+              v-if="row.canStop"
+              class="bg-task__stop"
+              :class="
+                stoppingBackgroundTaskId === row.taskId && 'bg-task__stop--busy'
+              "
+              @click.stop="stopBackgroundTask(row.taskId)"
+            >
+              <text class="bg-task__stop-text">{{
+                stoppingBackgroundTaskId === row.taskId ? "停止中" : "停止"
+              }}</text>
+            </view>
+          </view>
+
+          <view v-if="backgroundSummary.hint" class="bg-task__hint">
+            <text class="bg-task__hint-text">{{ backgroundSummary.hint }}</text>
+          </view>
+
+          <view v-if="backgroundSummary.count === 0" class="plan-empty">
+            <up-empty mode="list" text="暂无后台任务"></up-empty>
+          </view>
+
+          <view class="plan-drawer__safe"></view>
+        </scroll-view>
+      </view>
+    </up-popup>
   </view>
 </template>
 
@@ -1330,6 +1474,13 @@ import {
   waitingStateFootnote as resolveWaitingStateFootnote,
   waitingStateTitle as resolveWaitingStateTitle,
 } from "./detailStatusPresentation";
+import type { DetailStatusState } from "./detailStatusPresentation";
+import {
+  backgroundBusyStatusLabel,
+  buildBackgroundSettledText,
+  buildBackgroundTaskSummary,
+  shouldShowBackgroundBusyStatus,
+} from "./detailBackgroundTasks";
 import {
   buildPlanFilterItems,
   buildPlanTasks,
@@ -1437,11 +1588,21 @@ const props = defineProps<{
    * 缺省时（比如别处复用这个 pane）什么都不做，所以它是可选的。
    */
   onBeforeSendPrompt?: () => Promise<void> | void;
+  /**
+   * 传输层横幅（桥接断开 / 重连中 / replay 丢帧 / agent 进程没了 / 刚恢复）。
+   *
+   * 由外壳算好传进来，而不是 pane 自己算：判据里的 `bridgeHealth`、
+   * `attachElapsedMs`、`longWaitElapsedMs` 全归外壳所有（`index.vue` 的 1Hz 计时器与
+   * bridge health 订阅）。pane 只负责渲染 —— 它已经拥有输入区上方那块「瞬态通知」区域，
+   * 把横幅画在别处会与运行时错误/重试条互相压。
+   */
+  transportBanner?: DetailStatusState | null;
 }>();
 
 const emit = defineEmits<{
   (event: "layout-change"): void;
   (event: "reload"): void;
+  (event: "status-action", actionKey: "reconnect" | "reconnect_agent" | "inspect"): void;
 }>();
 
 const auth = useAuthStore();
@@ -1544,6 +1705,10 @@ const askQuestionSelections = ref<Record<string, QuestionSelectionState>>({});
 const askQuestionTabIndex = ref(0);
 const sequence = ref(0);
 const showPlanDrawer = ref(false);
+const showBackgroundDrawer = ref(false);
+const showTransportBannerDetails = ref(false);
+/** 正在请求停止的那条任务 id。只锁按钮，不锁整张清单 —— 其它任务仍可停。 */
+const stoppingBackgroundTaskId = ref<string>("");
 const planStatusFilter = ref<PlanTaskFilter>("all");
 let historySyncToken = 0;
 let initialHistoryLoadingConversationId = 0;
@@ -1633,6 +1798,9 @@ const pendingPermissionCard = computed<PermissionRequest | null>(
 const pendingQuestionCard = computed<PendingQuestionState | null>(
   () => session.value.pendingQuestion || null,
 );
+const permissionQueueDepth = computed(() =>
+  Math.max(0, Math.trunc(Number(session.value.permissionQueueDepth || 0))),
+);
 const pendingPermissionDescription = computed(
   () => pendingPermissionCard.value?.description || "智能体请求继续当前操作",
 );
@@ -1719,13 +1887,35 @@ const runtimeStatusLabel = computed(() =>
     activeModelStatusLabel: "",
   }),
 );
-const inputStatusText = computed(() => runtimeStatusLabel.value || "空闲");
-const runtimeStatusClass = computed(() =>
-  buildRuntimeStatusClass({
-    detailStatusCode:
-      runtimeStatus.value === "idle" ? "idle" : (runtimeStatus.value as any),
-    runtimeStatus: runtimeStatus.value,
+// 后台任务：AIR 明细表与转录派生的计数在呈现层汇合（覆盖面不同，见 detailBackgroundTasks.ts）。
+const backgroundSummary = computed(() =>
+  buildBackgroundTaskSummary({
+    outstanding: session.value.backgroundOutstanding,
+    tasks: session.value.asyncTasks,
   }),
+);
+const showBackgroundBusyStatus = computed(() =>
+  shouldShowBackgroundBusyStatus({
+    runtimeStatus: runtimeStatus.value,
+    backgroundCount: backgroundSummary.value.count,
+  }),
+);
+// 「轮次已结束但后台还有活」是这一整块的核心信息：状态胶囊必须改口，否则用户看到
+// 「已连接 / 空闲」就以为可以合电脑了，而 PC 上的后台 shell 与子智能体还在跑。
+const inputStatusText = computed(() =>
+  showBackgroundBusyStatus.value
+    ? backgroundBusyStatusLabel(backgroundSummary.value.count)
+    : runtimeStatusLabel.value || "空闲",
+);
+const runtimeStatusClass = computed(() =>
+  // 后台有活时按 running 上色：胶囊的转圈动效延续，灰色会读作「什么都没在发生」。
+  showBackgroundBusyStatus.value
+    ? "running"
+    : buildRuntimeStatusClass({
+        detailStatusCode:
+          runtimeStatus.value === "idle" ? "idle" : (runtimeStatus.value as any),
+        runtimeStatus: runtimeStatus.value,
+      }),
 );
 /**
  * 本回合起点。**取 `liveMessage.timestamp` 而不是另存一个字段** —— 它已经是这条实时
@@ -1739,6 +1929,8 @@ const runtimeStatusClass = computed(() =>
 const runElapsedStartedAt = computed(() =>
   Number(session.value.liveMessage?.timestamp || 0),
 );
+// 已运行时间只跟**当前回合**（`shouldShowRunElapsed` 只认执行/等待四态），与
+// `showBackgroundBusyStatus`（轮次已结束、只剩后台任务）互斥，两者不会同时出现。
 const showRunElapsed = computed(() =>
   shouldShowRunElapsed(runtimeStatus.value, runElapsedStartedAt.value),
 );
@@ -2081,6 +2273,24 @@ watch(
     // 流式期间按 delta 触发，走节流版本：一次 sync 会 emit("layout-change") 把外壳的
     // 6 连选择器测量拉起来，紧跟着列表刚变高去测、测完又改布局输入。
     scheduleViewportSyncThrottled();
+  },
+);
+
+// 后台任务结算提示。桌面端对每条 `settled[]` 弹一次 OS 通知（`lib/notification.ts`），
+// mcode 没有任何通知通道（无推送、无本地通知），所以只能在页内提示 —— 至少在用户正看着
+// 这条会话时，「那个跑了 20 分钟的后台任务刚回来了」不会完全无声。
+//
+// 依赖 `backgroundSettledSeq` 而不是数组内容：同一个 taskId 可以被 `SendMessage` 唤醒后
+// 再次结算，按内容判新会漏掉第二次。
+watch(
+  () => session.value.backgroundSettledSeq || 0,
+  (next, previous) => {
+    if (!next || next === (previous || 0)) return;
+    const entries = session.value.backgroundSettled || [];
+    const latest = entries[entries.length - 1];
+    const text = buildBackgroundSettledText(latest);
+    if (!text) return;
+    uni.showToast({ title: text, icon: "none", duration: 2600 });
   },
 );
 
@@ -2433,6 +2643,38 @@ function persistDetailAgentConfigSelection() {
 
 function toggleConfigRow(key: ComposerConfigKey) {
   activateComposerConfigItem(key);
+}
+
+/**
+ * 停掉一条 AIR 后台任务。
+ *
+ * 三件事必须分清：
+ * - **`false` 是 adapter 的裁决而不是失败** —— 它拒绝停止（服务端因此回 200 + `false`），
+ *   提示要说「未能停止」而不是「请重试」；
+ * - **成功时不锁按钮**。行的消失由线上那条终态事件决定，那才是真的确认；成功后继续禁用
+ *   会让用户在 adapter 静默忽略时无路可走；
+ * - 不做本地乐观更新。任务表的唯一权威是服务端的合并结果，本地抢先把状态改成 `stopped`
+ *   会与随后到达的真实终态（可能是 `completed`）打架。
+ */
+async function stopBackgroundTask(taskId: string) {
+  if (!taskId || stoppingBackgroundTaskId.value) return;
+  const conn = firstString(session.value.connectionId);
+  if (!conn) {
+    uni.showToast({ title: "连接已断开，无法停止", icon: "none" });
+    return;
+  }
+  stoppingBackgroundTaskId.value = taskId;
+  try {
+    const stopped = await acpApi.acpStopAsyncTask(conn, taskId);
+    uni.showToast({
+      title: stopped ? "已请求停止" : "智能体未接受停止请求",
+      icon: "none",
+    });
+  } catch (error) {
+    uni.showToast({ title: toErrorMessage(error, "停止失败"), icon: "none" });
+  } finally {
+    stoppingBackgroundTaskId.value = "";
+  }
 }
 
 function activateComposerConfigItem(key: ComposerConfigKey) {

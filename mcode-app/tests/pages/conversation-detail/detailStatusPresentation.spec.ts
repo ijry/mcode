@@ -5,7 +5,9 @@ import {
   buildRuntimeRetryText,
   buildRuntimeStatusClass,
   buildRuntimeStatusLabel,
+  buildTransportBanner,
   formatRunElapsed,
+  isTransportStatusCode,
   shouldShowRunElapsed,
   waitingStateBadgeText,
   waitingStateDescription,
@@ -383,5 +385,46 @@ describe("detailStatusPresentation", () => {
       expect(shouldShowRunElapsed("thinking", 0)).toBe(false)
       expect(shouldShowRunElapsed("thinking", Number.NaN)).toBe(false)
     })
+  })
+})
+
+describe("传输层横幅门禁", () => {
+  const state = (code: string) =>
+    ({
+      code,
+      severity: "error",
+      text: "t",
+      icon: "i",
+      iconColor: "#000",
+      loading: false,
+    }) as any
+
+  it("放行桥接 / agent 连接这一层的状态码", () => {
+    for (const code of [
+      "bridge_recovered",
+      "bridge_reconnecting",
+      "bridge_error",
+      "replay_miss",
+      "agent_disconnected",
+    ]) {
+      expect(isTransportStatusCode(code as any)).toBe(true)
+      expect(buildTransportBanner(state(code))?.code).toBe(code)
+    }
+  })
+
+  it("挡掉 pane 已经在渲染的那几类 —— 否则同一件事说两遍", () => {
+    for (const code of ["runtime_error", "api_retry", "long_wait", "thinking", "idle"]) {
+      expect(isTransportStatusCode(code as any)).toBe(false)
+      expect(buildTransportBanner(state(code))).toBeNull()
+    }
+  })
+
+  it("attach_settling 不画：正常会话每次进入都会经过那 3 秒窗口", () => {
+    expect(isTransportStatusCode("attach_settling")).toBe(false)
+  })
+
+  it("空入参返回 null", () => {
+    expect(buildTransportBanner(null)).toBeNull()
+    expect(buildTransportBanner(undefined)).toBeNull()
   })
 })

@@ -459,6 +459,84 @@ export async function pushRemoteBranch(
   })
 }
 
+/**
+ * 提交工作区变更。
+ *
+ * 服务端 `git_commit`（`codeg-plus/src-tauri/src/commands/folders.rs:2694`）做两步：
+ * 先 `git add -- <files>`（**跳过已暂存的删除**，那些文件在工作区和索引里都不存在了，
+ * `git add` 会失败），再 `git commit -m <message>`。
+ *
+ * 两个必须知道的语义：
+ *
+ * 1. **提交的是整个索引，不是只有 `files`。** 第二步没有 pathspec，所以在别处（PC 上、
+ *    或智能体自己）暂存过的文件会一并进这个提交。UI 必须让用户明白他勾的是「额外要暂存的」，
+ *    而不是「只提交这些」。
+ * 2. **作者可能被覆盖**：服务端会按 git 账号配置解析 `user.name`/`user.email`
+ *    （`resolve_commit_author`），手机端无从干预，也不该干预。
+ *
+ * 返回 `committedFiles`（服务端字段 `committed_files`）—— 它数的是**这个提交里的文件数**，
+ * 因此可能大于勾选数，正是上面第 1 条的观测证据。
+ */
+export async function commitRemoteChanges(
+  gateway: CodegGateway,
+  path: string,
+  message: string,
+  files: string[],
+  folderId?: number | null
+): Promise<number> {
+  const result = await gateway.call<{ committed_files?: number; committedFiles?: number }>(
+    "git_commit",
+    {
+      path,
+      folderId: folderId ?? null,
+      message,
+      files,
+    }
+  )
+  const committed = result?.committed_files ?? result?.committedFiles
+  return typeof committed === "number" && Number.isFinite(committed) ? committed : files.length
+}
+
+/**
+ * 拉取远端更新（`git_pull`）。
+ *
+ * 返回 `{updated_files, conflict?}`。**冲突是一个正常返回值而不是错误**：服务端把
+ * `GitConflictInfo{has_conflicts, conflicted_files, operation, upstream_commit}` 放在
+ * 成功响应里（`codeg-plus/src-tauri/src/commands/folders.rs:181-192`），因为 pull 确实
+ * 执行了、工作区确实变了，只是留下了待解决的冲突。
+ *
+ * 手机端**解决不了冲突**（三栏合并编辑器是桌面端的能力），所以调用方必须把冲突文件名
+ * 明确列出来并让用户去电脑上处理 —— 静默当成成功是最糟的结果：用户以为同步好了，
+ * 实际工作区里躺着一堆冲突标记。
+ */
+export async function pullRemoteChanges(
+  gateway: CodegGateway,
+  path: string
+): Promise<{ updatedFiles: number; conflictFiles: string[] }> {
+  const result = await gateway.call<{
+    updated_files?: number
+    updatedFiles?: number
+    conflict?: {
+      has_conflicts?: boolean
+      hasConflicts?: boolean
+      conflicted_files?: string[]
+      conflictedFiles?: string[]
+    } | null
+  }>("git_pull", { path, credentials: null })
+  const updated = result?.updated_files ?? result?.updatedFiles
+  const conflict = result?.conflict
+  const conflictFiles =
+    conflict && (conflict.has_conflicts === true || conflict.hasConflicts === true)
+      ? (conflict.conflicted_files ?? conflict.conflictedFiles ?? []).filter(
+          (file): file is string => typeof file === "string" && file.trim().length > 0
+        )
+      : []
+  return {
+    updatedFiles: typeof updated === "number" && Number.isFinite(updated) ? updated : 0,
+    conflictFiles,
+  }
+}
+
 function extractErrorMessage(error: unknown) {
   if (error instanceof Error && error.message.trim()) {
     return error.message.trim()

@@ -249,6 +249,16 @@ export interface EventEnvelope {
      */
     | "feedback_submitted"
     | "feedback_consumed"
+    /**
+     * AIR 异步任务增量（`AsyncTaskDelta`）与转录派生的后台活动
+     * （`background_activity`）。两者载荷同样是**平铺**的，同样必须有显式 case。
+     *
+     * `permission_queue_depth` 也在此列：它只带一个 `depth`，是「这条授权后面还排着几条」
+     * 的唯一来源。
+     */
+    | "async_task"
+    | "background_activity"
+    | "permission_queue_depth"
     | "error"
   connectionId: string
   seq?: number
@@ -397,6 +407,101 @@ export interface ApiRetryEvent {
   error?: string
   errorStatus?: number | null
   retryDelayMs?: number | null
+}
+
+/**
+ * AIR 异步任务的累计开销（服务端 `AsyncTaskUsage`）。三个字段在上游要么整体存在、
+ * 要么整个 `usage` 缺失 —— adapter 宁可丢掉半份也不发局部。
+ */
+export interface AsyncTaskUsage {
+  totalTokens: number
+  toolUses: number
+  durationMs: number
+}
+
+/**
+ * 一条 AIR 异步任务的**合并投影**（服务端 `AsyncTaskRecord`）：Claude 的非智能体后台工作
+ * —— `Bash(run_in_background)` 的 shell、workflow、monitor。
+ *
+ * 它不是线上帧：adapter 用 `async_task_spawned` 宣告一次完整身份，随后只发局部增量
+ * （`AsyncTaskDelta`）。合并规则见 `services/conversation/asyncTasks.ts`，与服务端
+ * `SessionState::apply_event` 必须一致，否则「中途 attach 的客户端」与「收全了每条增量的
+ * 客户端」会收敛到不同的行。
+ *
+ * 子智能体**不在这条通道上**：adapter 把 `taskType: "local_agent"` 在此通道忽略，改走
+ * subagent 通道；它们只体现在 `background_activity.outstanding` 的计数里。
+ */
+export interface AsyncTaskRecord {
+  taskId: string
+  /** adapter 给的标签：workflow 名，否则是 description。 */
+  name: string
+  /** 已经是**友好名**：`shell` / `workflow` / `monitor` / `task`。保持字符串，未知的新类型原样显示。 */
+  taskType: string
+  description: string
+  /** 上游是否给它单独的 transcript 卡片。mcode 与桌面端一样无论如何都渲染清单行。 */
+  showInTranscript: boolean
+  /** 是否提供 `_session/async_task/stop`。**不要假定为真** —— 它是被携带的能力位。 */
+  canStop: boolean
+  /** `running` | `paused` | `completed` | `failed` | `stopped`；终态三个之外一律视为还活着。 */
+  state: string
+  summary?: string | null
+  lastToolName?: string | null
+  usage?: AsyncTaskUsage | null
+  outputFilePath?: string | null
+  /** 发起它的那次 tool call —— 回到 transcript 里那张卡的链路。 */
+  toolCallId?: string | null
+}
+
+/**
+ * 线上原样的一条增量。`taskId` 说改哪一行，`spawned` 说这一帧**能不能建行**，
+ * 其余字段都是可选修订：**缺省即保持原值**。
+ */
+export interface AsyncTaskDelta {
+  taskId: string
+  spawned: boolean
+  name?: string | null
+  taskType?: string | null
+  description?: string | null
+  showInTranscript?: boolean | null
+  canStop?: boolean | null
+  state?: string | null
+  summary?: string | null
+  lastToolName?: string | null
+  usage?: AsyncTaskUsage | null
+  outputFilePath?: string | null
+  toolCallId?: string | null
+}
+
+/**
+ * 一条被 `<task-notification>` 结算掉的后台任务（服务端 `BackgroundSettledInfo`）。
+ *
+ * `taskId` 是启动回执里的 `agentId`（异步子智能体）或 `backgroundTaskId`（后台 shell）；
+ * `status` 是通知里的 `<status>` 原样透传（成功是 `"completed"`）。**同一个 id 可以结算多次**
+ * —— 已完成的子智能体可以被 `SendMessage` 唤醒再通知一次。
+ */
+export interface BackgroundSettledEntry {
+  taskId: string
+  status: string
+  summary?: string | null
+  /** 发起它的 `tool_use` 块 id（Claude SDK 级的 `toolu_…`），后台 shell 没有。 */
+  toolUseId?: string | null
+  result?: string | null
+}
+
+/**
+ * `background_activity` 事件里 mcode 消费的那部分（`turns[]` 暂不消费，见
+ * `services/conversation/backgroundActivity.ts` 的说明）。
+ */
+export interface BackgroundActivityUpdate {
+  sessionId?: string | null
+  /**
+   * 已启动、未结算的后台任务数（异步子智能体 + 后台 shell）。
+   *
+   * `null` = **这一帧没报**，与 `0`（后台已空，权威结论）语义完全不同。
+   */
+  outstanding: number | null
+  settled: BackgroundSettledEntry[]
+  watermark?: number | null
 }
 
 export interface RealtimeBridgeHealth {
