@@ -437,3 +437,54 @@ export function waitingStateFootnote(input: {
   }
   return ""
 }
+
+/**
+ * 本回合已运行时间的紧凑文案：`45s` / `1m30s` / `30m` / `1h1m`。
+ *
+ * 三段规则与既有的 `formatSubagentDuration`（子智能体胶囊的耗时）保持同一形制 ——
+ * 无空格、最多两个单位、为 0 的低位单位省略。仓库里已经有那一份，界面上再出现一种
+ * `1h 1m 1s` 的写法只会让同一个概念读起来像两件事。
+ *
+ * **一小时以上不再显示秒。** 那个量级上秒是噪音，而且它决定了刷新频率：秒可见时标签
+ * 每秒变一次，跨过一小时后每分钟才变一次。
+ *
+ * 负值夹到 0：`startedAt` 在「中途接入正在跑的会话」这条路上来自**主机时钟**
+ * （attach 快照的 `live_message.started_at`），而这里用手机时钟做减法，两边有偏移。
+ * 主机快一点会算出负数，显示成 `0s` 无害；主机慢一点只能虚高，客户端无从校正。
+ */
+export function formatRunElapsed(ms: number): string {
+  const total = Number.isFinite(ms) ? Math.max(0, Math.floor(ms)) : 0
+  const hours = Math.floor(total / 3_600_000)
+  const minutes = Math.floor((total % 3_600_000) / 60_000)
+  const seconds = Math.floor((total % 60_000) / 1_000)
+
+  if (hours > 0) return minutes > 0 ? `${hours}h${minutes}m` : `${hours}h`
+  if (minutes > 0) return seconds > 0 ? `${minutes}m${seconds}s` : `${minutes}m`
+  return `${seconds}s`
+}
+
+/**
+ * 哪些运行状态该显示已运行时间。
+ *
+ * 四个状态都算「本回合还没结束」，与 PC 端一致 —— codeg-plus 的计时器挂在
+ * `connStatus === "prompting"` 上，而它的 `prompting` 并不因为挂起授权/提问而改变
+ * （`pending_permission` 是另一个字段）。手机端把那一个状态拆成了四个值，所以要逐个列出。
+ *
+ * 等待授权/提问期间**继续计时**是有意的：那时用户最想知道的恰恰是「它卡在这儿多久了」。
+ */
+const RUN_ELAPSED_STATUSES = new Set<string>([
+  "thinking",
+  "running_tool",
+  "waiting_permission",
+  "waiting_question",
+])
+
+/**
+ * 已运行时间的可见性。`startedAt` 为 0/缺失时不显示 —— 中途接入且快照里没有
+ * `live_message` 时拿不到回合起点，宁可不显示，也不要从 attach 那一刻重新计时
+ * （那会把一个跑了半小时的回合显示成刚开始）。
+ */
+export function shouldShowRunElapsed(runtimeStatus: string, startedAt: number): boolean {
+  if (!Number.isFinite(startedAt) || startedAt <= 0) return false
+  return RUN_ELAPSED_STATUSES.has(runtimeStatus)
+}

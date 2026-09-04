@@ -218,6 +218,11 @@
               :class="`runtime-dot--${runtimeStatusClass}`"
             ></view>
             <text class="input-status-row__text">{{ inputStatusText }}</text>
+            <ConversationDetailRunElapsed
+              v-if="showRunElapsed"
+              :started-at="runElapsedStartedAt"
+              :paused="!active"
+            />
           </view>
           <view
             v-if="planTasks.length > 0"
@@ -1254,6 +1259,7 @@ import type {
   SessionModeInfo,
 } from "@/types/acp";
 import ConversationDetailBody from "./ConversationDetailBody.vue";
+import ConversationDetailRunElapsed from "./ConversationDetailRunElapsed.vue";
 import type { CyberEffectPhase, DetailThemeId } from "./detailCyberMode";
 import { buildRenderMessageItems, findLatestUserMessage } from "./detailMessagePresentation";
 import {
@@ -1318,6 +1324,7 @@ import {
   buildRuntimeRetryText,
   buildRuntimeStatusClass,
   buildRuntimeStatusLabel,
+  shouldShowRunElapsed,
   waitingStateBadgeText as resolveWaitingStateBadgeText,
   waitingStateDescription as resolveWaitingStateDescription,
   waitingStateFootnote as resolveWaitingStateFootnote,
@@ -1719,6 +1726,21 @@ const runtimeStatusClass = computed(() =>
       runtimeStatus.value === "idle" ? "idle" : (runtimeStatus.value as any),
     runtimeStatus: runtimeStatus.value,
   }),
+);
+/**
+ * 本回合起点。**取 `liveMessage.timestamp` 而不是另存一个字段** —— 它已经是这条实时
+ * 轮次的时间戳：本端发起时由 `beginPlaceholderThinking` 打上 `Date.now()`，中途接入时
+ * 由 `mapSnapshotLiveMessage` 从 attach 快照的 `live_message.started_at` 解析出来
+ * （`stores/conversationRuntime.ts`）。与 PC 端 `LiveMessage.startedAt` 是同一个量。
+ *
+ * 这里不引入新的响应式依赖：pane 的渲染本来就依赖 `liveMessage`（它渲染实时气泡）。
+ * 每秒推进的那个计时器关在 `ConversationDetailRunElapsed` 里，见该组件注释。
+ */
+const runElapsedStartedAt = computed(() =>
+  Number(session.value.liveMessage?.timestamp || 0),
+);
+const showRunElapsed = computed(() =>
+  shouldShowRunElapsed(runtimeStatus.value, runElapsedStartedAt.value),
 );
 const canStopSession = computed(() =>
   isStoppableRuntimeStatus(runtimeStatus.value),

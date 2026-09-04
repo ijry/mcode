@@ -5,6 +5,8 @@ import {
   buildRuntimeRetryText,
   buildRuntimeStatusClass,
   buildRuntimeStatusLabel,
+  formatRunElapsed,
+  shouldShowRunElapsed,
   waitingStateBadgeText,
   waitingStateDescription,
   waitingStateFootnote,
@@ -325,6 +327,61 @@ describe("detailStatusPresentation", () => {
         runtimeStatus: "thinking",
         activeModelStatusLabel: "",
       })).toBe("同步中")
+    })
+  })
+
+  /**
+   * 状态胶囊里的已运行时间。对齐 PC 端 `LiveTurnStats` 那枚计时器，但文案形制取仓库
+   * 自己那份紧凑写法（`formatSubagentDuration`），不引入第二种时长读法。
+   */
+  describe("run elapsed", () => {
+    it("formats as at most two units with the zero low unit dropped", () => {
+      expect(formatRunElapsed(0)).toBe("0s")
+      expect(formatRunElapsed(45_000)).toBe("45s")
+      expect(formatRunElapsed(60_000)).toBe("1m")
+      expect(formatRunElapsed(90_000)).toBe("1m30s")
+      // 用户给的两个样例：`30m` 与 `1h1m`。
+      expect(formatRunElapsed(30 * 60_000)).toBe("30m")
+      expect(formatRunElapsed(30 * 60_000 + 12_000)).toBe("30m12s")
+      expect(formatRunElapsed(3_600_000)).toBe("1h")
+      expect(formatRunElapsed(3_600_000 + 60_000)).toBe("1h1m")
+    })
+
+    /** 一小时以上不再显示秒：那个量级上秒是噪音，也让标签每分钟才变一次。 */
+    it("drops seconds past an hour so the label only moves once a minute", () => {
+      expect(formatRunElapsed(3_600_000 + 60_000 + 59_000)).toBe("1h1m")
+      expect(formatRunElapsed(25 * 3_600_000 + 3_000)).toBe("25h")
+    })
+
+    /**
+     * 负值夹到 0：`startedAt` 在中途接入那条路上来自主机时钟，而减法用手机时钟，
+     * 两边有偏移。主机快一点会算出负数，显示 `0s` 无害，绝不能渲染出 `-1s`。
+     */
+    it("clamps a negative elapsed instead of rendering a negative label", () => {
+      expect(formatRunElapsed(-5_000)).toBe("0s")
+      expect(formatRunElapsed(Number.NaN)).toBe("0s")
+    })
+
+    /**
+     * 四个「回合还没结束」的状态都计时，等待授权/提问也算 —— 那时用户最想知道的正是
+     * 「它卡在这儿多久了」。与 PC 端一致：那边的 `prompting` 不因挂起授权而改变。
+     */
+    it("counts through every unfinished-turn status, waiting included", () => {
+      ;["thinking", "running_tool", "waiting_permission", "waiting_question"].forEach(
+        (status) => {
+          expect(shouldShowRunElapsed(status, 1_000)).toBe(true)
+        }
+      )
+    })
+
+    it("stays hidden once the turn is over or never started", () => {
+      ;["idle", "connected", "connecting", "disconnected", "error"].forEach((status) => {
+        expect(shouldShowRunElapsed(status, 1_000)).toBe(false)
+      })
+      // 中途接入且快照里没有 live_message 时拿不到起点：宁可不显示，也不要从 attach
+      // 那一刻重新计时（会把跑了半小时的回合显示成刚开始）。
+      expect(shouldShowRunElapsed("thinking", 0)).toBe(false)
+      expect(shouldShowRunElapsed("thinking", Number.NaN)).toBe(false)
     })
   })
 })
