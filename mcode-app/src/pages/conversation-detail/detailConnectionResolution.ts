@@ -162,7 +162,7 @@ function buildStoredConnectionPrimaryKey(conn: StoredConnectionItem): string {
 }
 
 function normalizeTargetAgent(value: unknown): ConnectionTargetAgent | null {
-  if (value === "codeg" || value === "opencode" || value === "mcode-desktop") {
+  if (value === "codeg" || value === "opencode" || value === "mcode-desktop" || value === "dsh") {
     return value
   }
   return null

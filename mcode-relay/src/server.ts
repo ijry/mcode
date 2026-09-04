@@ -32,6 +32,7 @@ import {
   JsonFileAdminCredentialStoreStorage,
   toSafeAdminCredentialRecord,
 } from "./admin/credentials.js"
+import { isTargetAgent } from "./protocol/types.js"
 import type {
   ClientIdentity,
   LocalServiceMetadata,
@@ -220,9 +221,7 @@ function getAdminTenantId(req: FastifyRequest): string | null {
 }
 
 function normalizeTargetAgent(value: unknown): TargetAgent | null {
-  return value === "codeg" || value === "opencode" || value === "mcode-desktop"
-    ? value
-    : null
+  return isTargetAgent(value) ? value : null
 }
 
 function normalizeCapabilities(value: unknown): string[] | undefined {

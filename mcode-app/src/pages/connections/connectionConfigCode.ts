@@ -140,6 +140,14 @@ function normalizeConfigCodeConnection(connection: ConfigCodeConnection): Connec
 function assertConfigCodeCredentials(record: ConnectionRecordV2) {
   if (record.routeMode === "direct") {
     if (!record.directBaseUrl) throw new Error("配置码缺少直连地址")
+    // DSH 手机桥的直连码带的是一次性配对码，而不是 token：Bearer token 绝不能放进
+    // 一张任何人都能拍下来的二维码里，所以这里换一次凭据（driver 在 connect() 时
+    // 用 pairCode/pairSecret 去桥上换 accessToken）。
+    if (record.targetAgent === "dsh") {
+      if (record.directToken) return
+      if (record.pairCode && record.pairSecret) return
+      throw new Error("配置码缺少配对码，无法向 DeepSeek Harness 换取令牌")
+    }
     if (!record.directToken) throw new Error("配置码缺少直连 token")
     return
   }

@@ -1,7 +1,15 @@
 import type { RelaySessionInfo } from "@/services/gateway"
 import { normalizeConnectionHostModelId } from "@/services/connectionHostCatalog"
 
-export type ConnectionTargetAgent = "codeg" | "opencode" | "mcode-desktop"
+/**
+ * 目标类型：手机在跟哪个宿主进程说话。
+ *
+ * `dsh` 是装了 `dsh-plugin-mobile-bridge` 的 DeepSeek Harness 桌面端。它自成一项
+ * 而不是 `mcode-desktop` 的一个能力位，因为那是另一个进程、另一套协议 ——
+ * 与 `codeg` / `opencode` 各自成项是同一个理由。它也**不是**「按 CLI 拆 target」：
+ * `mcode-desktop` 代理的官方 CLI 仍然只在 `mcode-desktop` 后面。
+ */
+export type ConnectionTargetAgent = "codeg" | "opencode" | "mcode-desktop" | "dsh"
 export type ConnectionRouteMode = "direct" | "gateway"
 export type ConnectionGatewayProvider = "official" | "custom"
 
@@ -30,7 +38,7 @@ export interface ConnectionRecordV2 {
   hostModelId?: string
 }
 
-const TARGET_AGENTS = new Set<ConnectionTargetAgent>(["codeg", "opencode", "mcode-desktop"])
+const TARGET_AGENTS = new Set<ConnectionTargetAgent>(["codeg", "opencode", "mcode-desktop", "dsh"])
 const ROUTE_MODES = new Set<ConnectionRouteMode>(["direct", "gateway"])
 const GATEWAY_PROVIDERS = new Set<ConnectionGatewayProvider>(["official", "custom"])
 

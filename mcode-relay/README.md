@@ -34,6 +34,22 @@ Standalone relay service for MCode remote control.
 - `PROXY_BODY_LIMIT_BYTES` default `8388608`, max `67108864`
 - `ALLOW_DEV_SECRETS` default `true`
 
+## Target Agents
+
+`targetAgent` names the host process a controller is paired with, and the list
+lives in `src/protocol/types.ts` (`TARGET_AGENTS` + `isTargetAgent`):
+
+- `codeg`, `opencode` — direct-capable hosts.
+- `mcode-desktop` — the Tauri host; the official CLIs it proxies stay behind it
+  and are never their own target agent.
+- `dsh` — a DeepSeek Harness desktop running the `dsh-plugin-mobile-bridge`
+  plugin. Its own process, its own protocol, therefore its own entry.
+
+Validation happens in three places (pair offers, target upsert, snapshot
+restore). They all read the one predicate on purpose: a value accepted by two of
+them and dropped by the third pairs successfully and then loses the target on the
+next relay restart.
+
 ## Pair Response Contract
 
 `POST /v1/pair` and `POST /v1/session/refresh` return target metadata when the paired target is known:

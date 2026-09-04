@@ -19,6 +19,7 @@ export const TARGET_AGENT_OPTIONS: TargetAgentOption[] = [
   { label: "Codeg", value: "codeg" },
   { label: "OpenCode", value: "opencode", hidden: true },
   { label: "MCode Desktop", value: "mcode-desktop", hidden: true },
+  { label: "DeepSeek Harness", value: "dsh", hidden: true },
 ]
 
 /**

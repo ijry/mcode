@@ -190,7 +190,7 @@ function toConnectionContext(record: ConnectionRecordV2): ConnectionContext {
 }
 
 function normalizeTargetAgent(value: unknown): ConnectionTargetAgent | null {
-  return value === "codeg" || value === "opencode" || value === "mcode-desktop"
+  return value === "codeg" || value === "opencode" || value === "mcode-desktop" || value === "dsh"
     ? value
     : null
 }
