@@ -479,7 +479,38 @@ const currentInstance = getCurrentInstance()
 const upThemeVar = (varName: string, fallbackColor?: string) =>
   currentInstance?.proxy?.upThemeVar?.(varName, fallbackColor) ?? (fallbackColor || "")
 const loading = ref(false)
+/** 输入框绑定的即时值 —— 打字必须跟手，所以它不能被防抖。 */
 const searchKeyword = ref("")
+/**
+ * 参与过滤的关键词，防抖后的镜像。
+ *
+ * `searchKeyword` 直接喂给 `overviewDisplayModel` 时，每敲一个字都要把所有可见卡重新
+ * 展开一遍（每张卡两次对象展开 + 每组三趟排序），还连带 `buildHistoryProjectSections`
+ * 扫全部项目的全部会话。同页的 forge（500ms）、circles（220ms）都有防抖，这里是唯一
+ * 的例外。
+ */
+const appliedSearchKeyword = ref("")
+const SEARCH_KEYWORD_DEBOUNCE_MS = 220
+let searchKeywordDebounceTimer: ReturnType<typeof setTimeout> | null = null
+
+function clearSearchKeywordDebounceTimer() {
+  if (!searchKeywordDebounceTimer) return
+  clearTimeout(searchKeywordDebounceTimer)
+  searchKeywordDebounceTimer = null
+}
+
+watch(searchKeyword, (next) => {
+  clearSearchKeywordDebounceTimer()
+  // 清空是「取消搜索」，要立刻生效 —— 让用户等 220ms 才看到完整列表回来很别扭。
+  if (!next) {
+    appliedSearchKeyword.value = ""
+    return
+  }
+  searchKeywordDebounceTimer = setTimeout(() => {
+    searchKeywordDebounceTimer = null
+    appliedSearchKeyword.value = searchKeyword.value
+  }, SEARCH_KEYWORD_DEBOUNCE_MS)
+})
 const showCreateDialog = ref(false)
 const showActionSheet = ref(false)
 const showDirectoryBrowser = ref(false)
@@ -593,7 +624,7 @@ const overviewDisplayModel = computed(() => {
     resolveAwaitingStatus: (instanceKey, conversationId) =>
       getAwaitingReply(instanceKey, conversationId)?.kind,
     instanceKeyByGroupKey: Object.fromEntries(connectionInstanceKeyMap),
-    keyword: searchKeyword.value,
+    keyword: appliedSearchKeyword.value,
     hideCompleted: hideCompletedConversations.value,
     livePreviewEnabled: livePreviewEnabled.value,
   })
@@ -603,7 +634,7 @@ const filteredConnectionGroups = computed(() => overviewDisplayModel.value.group
 
 const groupEmptyText = computed(() => resolveGroupEmptyText(hideCompletedConversations.value))
 const overviewEmptyText = computed(() =>
-  resolveOverviewEmptyText(searchKeyword.value, hideCompletedConversations.value)
+  resolveOverviewEmptyText(appliedSearchKeyword.value, hideCompletedConversations.value)
 )
 
 const showSelectionEntry = computed(() => {
@@ -658,7 +689,7 @@ const canCreateConversation = computed(() => {
 })
 
 const historyProjectSections = computed(() =>
-  buildHistoryProjectSections(projects.value, searchKeyword.value)
+  buildHistoryProjectSections(projects.value, appliedSearchKeyword.value)
 )
 watch(
   historyProjectSections,
@@ -741,6 +772,7 @@ onMounted(() => {
 onUnload(() => {
   disposeOverviewInvalidation?.()
   disposeOverviewInvalidation = null
+  clearSearchKeywordDebounceTimer()
   disposeOpenedTabsChangedMap.forEach((dispose) => dispose())
   disposeOpenedTabsChangedMap.clear()
   disposeActiveSessionsChangedMap.forEach((dispose) => dispose())
@@ -759,7 +791,10 @@ onUnload(() => {
   releaseAllLivePreviewOwnedSessions()
   livePreviewConnectPromiseMap.clear()
   livePreviewTransferredConversationIds.clear()
-  stopCreateProgressTimer()
+  // 这里曾经调 `stopCreateProgressTimer()` —— 那个名字在本文件里没有定义也没有 import
+  // （它是 `CreateConversationSheet.vue` 的 `<script setup>` 私有函数），所以这一句是
+  // onUnload 最后一句的 ReferenceError。清理已改为在持有 timer 的子组件里
+  // （`CreateConversationSheet` 的 `onBeforeUnmount`）做。
 })
 
 onHide(() => {
@@ -2139,6 +2174,16 @@ function formatTime(time?: string): string {
 }
 
 /* ===== 液态玻璃背景 ===== */
+/*
+ * 三个光斑是**静态**的，别再给它们加 animation。
+ *
+ * 原先各带一条 `liquidFloat ... infinite`，关键帧里是 `translate(...) scale(1.2)`。
+ * `scale` 一个 `blur(80rpx)` 的层每帧都要重新栅格化（不是纯合成器 transform），
+ * 于是三个 460/540/380rpx 的大模糊层永远在动、合成器永不空闲 —— 而本页是 tabBar 页，
+ * 永不卸载，`onHide` 也没有把它们关掉。零交互下显示管线就被顶在 60fps。
+ *
+ * 视觉上静态渐变与缓慢漂移几乎无差别，这是本页最便宜的一刀。
+ */
 .liquid-bg {
   position: fixed;
   inset: 0;
@@ -2160,7 +2205,6 @@ function formatTime(time?: string): string {
   top: -80rpx;
   right: -90rpx;
   background: color-mix(in srgb, var(--up-primary, #2f7cf6) 32%, transparent);
-  animation: liquidFloat 20s ease-in-out infinite alternate;
 }
 
 .liquid-blob--two {
@@ -2169,7 +2213,6 @@ function formatTime(time?: string): string {
   bottom: 120rpx;
   left: -160rpx;
   background: rgba(167, 139, 250, 0.22);
-  animation: liquidFloat 15s ease-in-out infinite alternate-reverse;
 }
 
 .liquid-blob--three {
@@ -2178,16 +2221,6 @@ function formatTime(time?: string): string {
   top: 42%;
   right: 40rpx;
   background: rgba(96, 165, 250, 0.2);
-  animation: liquidFloat 25s ease-in-out infinite alternate;
-}
-
-@keyframes liquidFloat {
-  from {
-    transform: translate(0, 0) scale(1);
-  }
-  to {
-    transform: translate(60rpx, 80rpx) scale(1.2);
-  }
 }
 
 .conversations-shell {

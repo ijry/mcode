@@ -77,6 +77,12 @@ import {
 } from "./conversationTimeline"
 
 /**
+ * 会话不存在时给 `getSubagentTranscripts` 的空视图。共享同一个实例是为了保持返回值的
+ * 身份稳定 —— 每次新建 `{}` 会让下游 prop 每次都变，正是要避免的事。
+ */
+const EMPTY_SUBAGENT_TRANSCRIPTS: Record<string, string> = Object.freeze({})
+
+/**
  * 会话运行时状态管理
  * 管理消息流、连接状态、乐观更新等
  */
@@ -121,7 +127,7 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         lastCompletedTurnAt: 0,
         historyBackfillInFlight: false,
         historyBackfillGeneration: 0,
-        subagentTranscripts: new Map<string, string>(),
+        subagentTranscripts: {} as Record<string, string>,
         stats: {
           inputTokens: 0,
           outputTokens: 0,
@@ -264,14 +270,14 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     delta: string
   ) {
     if (!delta) return
-    const previous = session.subagentTranscripts.get(parentToolUseId) || ""
+    const previous = session.subagentTranscripts[parentToolUseId] || ""
     const next = previous + delta
-    session.subagentTranscripts.set(
-      parentToolUseId,
+    // 就地改这一个 key。容器身份保持不变，所以 `getSubagentTranscripts` 的返回值
+    // 不会每个 chunk 都换新对象（那会让 v-for 里所有气泡的 prop 全部变化）。
+    session.subagentTranscripts[parentToolUseId] =
       next.length > SUBAGENT_TRANSCRIPT_MAX_CHARS
         ? next.slice(-SUBAGENT_TRANSCRIPT_MAX_CHARS)
         : next
-    )
   }
 
   /**
@@ -1513,17 +1519,24 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
   }
 
   /**
-   * 子智能体实时正文快照。转成普通对象是为了让 Vue 的 computed 能追踪 ——
-   * `Map` 在模板里不便直接消费，且组件侧只需要只读视图。
+   * 子智能体实时正文，按父 tool_call id 索引。
+   *
+   * **直接返回 session 上那个容器，不要每次拷一份新对象。** 原实现每次调用都
+   * `new` 一个 `Record`：它包在 pane 的 computed 里，子智能体每来一个 chunk 就让
+   * 容器变化 → computed 失效 → 返回**新的对象身份** → 而这个值是
+   * `:subagent-transcripts` 传给 v-for 里**每一个** MessageBubble 的，于是一个子智能体
+   * delta 就让整张列表所有气泡（各含 up-markdown）patch 一遍。
+   *
+   * 身份稳定之后，Vue 对 reactive 对象是**按属性追踪**的：气泡渲染时读
+   * `transcripts[ownToolCallId]` 只订阅自己那一个 key，别人的 chunk 不再触发它重渲染。
+   *
+   * 形状仍是普通对象（不是 Map）—— 组件侧要能直接 `transcripts[toolCall.id]`，
+   * 换成 Map 的话模板里取不到值**而且不报错**，胶囊只会永远空着。
    */
   function getSubagentTranscripts(conversationId: number): Record<string, string> {
     const session = sessions.value.get(conversationId)
-    if (!session || session.subagentTranscripts.size === 0) return {}
-    const snapshot: Record<string, string> = {}
-    session.subagentTranscripts.forEach((value, key) => {
-      snapshot[key] = value
-    })
-    return snapshot
+    if (!session) return EMPTY_SUBAGENT_TRANSCRIPTS
+    return session.subagentTranscripts
   }
 
   return {
@@ -1673,7 +1686,7 @@ interface RuntimeSession {
    * 带回结构化的 `agent_stats.tool_calls[]`（含耗时），严格优于实时尾巴。存下来只会
    * 得到两份互相矛盾、无法对账的渲染源。
    */
-  subagentTranscripts: Map<string, string>
+  subagentTranscripts: Record<string, string>
   stats: SessionStats
 }
 
@@ -1684,7 +1697,15 @@ function resetTurnScopedBackfillState(session: RuntimeSession) {
   // 子智能体实时正文只在本回合内有意义：回合结束后权威内容来自历史回填的
   // `agent_stats`。这里是所有回合边界（turn_complete / turn_cancelled / disconnect
   // / 缓存清理）的唯一漏斗，清在这里不会漏。
-  session.subagentTranscripts?.clear()
+  //
+  // 就地删 key 而不是换一个新对象：容器身份要保持稳定，否则每个回合边界都会让
+  // v-for 里所有气泡的 `:subagent-transcripts` prop 变一次。
+  const transcripts = session.subagentTranscripts
+  if (transcripts) {
+    for (const key of Object.keys(transcripts)) {
+      delete transcripts[key]
+    }
+  }
 }
 
 interface SharedPromptQueueState {
@@ -2560,8 +2581,21 @@ function cloneContentParts(parts: ContentPart[]): ContentPart[] {
   return JSON.parse(JSON.stringify(parts)) as ContentPart[]
 }
 
+/**
+ * 尾部 part 的**浅**拷贝，专供 `appendLiveContent` 的每个 delta 使用。
+ *
+ * 这里以前是 `JSON.parse(JSON.stringify(part))`。尾部那个 part 装着本轮到目前为止的
+ * **全部正文**，于是每个 delta 都要把整段已累积文本序列化 + 反序列化一遍 —— 整轮
+ * O(N²)。实测 1500 个 delta（最终 59K 字符）累计 260 ms（桌面 V8，手机 3~8 倍），
+ * 而且 delta 数翻倍耗时翻四倍。
+ *
+ * 浅拷贝在这里语义等价：本函数只服务 text / thinking / plan 三种合并类型
+ * （`shouldMergeWithTail` 要求 type 相同），前两者的载荷是字符串、`plan` 由
+ * `parsePlanDelta` 整体替换，都不会就地改到嵌套对象。tool_call / tool_result / image
+ * 永远走不到合并分支。
+ */
 function cloneContentPart(part: ContentPart): ContentPart {
-  return JSON.parse(JSON.stringify(part)) as ContentPart
+  return { ...part }
 }
 
 function clearPlaceholderLiveMessage(session: RuntimeSession) {

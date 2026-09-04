@@ -218,6 +218,39 @@ describe('subagent live transcript routing', () => {
     expect(store.getSubagentTranscripts(999)).toEqual({})
   })
 
+  // 这个容器是 `:subagent-transcripts`，传给 v-for 里**每一个** MessageBubble。
+  // 以前每次调用都拷一个新对象：子智能体每来一个 chunk → computed 失效 → 新身份 →
+  // 整张列表所有气泡（各含 up-markdown）patch 一遍。身份必须稳定，Vue 才能退化到
+  // 「按属性追踪」，让只读了自己那个 key 的气泡不受别人的 chunk 影响。
+  it('keeps the container identity stable across chunks and turn boundaries', async () => {
+    const { store, session } = prepareSession()
+    session.instanceKey = 'test-instance'
+
+    const first = store.getSubagentTranscripts(1)
+    store.handleEvent(streamBatch('A1', 'task-a'))
+    expect(store.getSubagentTranscripts(1)).toBe(first)
+
+    store.handleEvent(streamBatch('A2', 'task-a'))
+    store.handleEvent(streamBatch('B1', 'task-b'))
+    expect(store.getSubagentTranscripts(1)).toBe(first)
+
+    store.setLiveMessage(1, [{ type: 'text', text: '完成' }], true, {
+      id: 'live-1',
+      timestamp: 200,
+    })
+    await store.completeTurn(1)
+
+    // 回合边界是就地删 key，不是换新对象。
+    expect(store.getSubagentTranscripts(1)).toBe(first)
+    expect(store.getSubagentTranscripts(1)).toEqual({})
+  })
+
+  // 未知会话也要给同一个实例，否则调用点每次拿到的都是新身份。
+  it('returns a shared empty view for unknown conversations', () => {
+    const { store } = prepareSession()
+    expect(store.getSubagentTranscripts(998)).toBe(store.getSubagentTranscripts(999))
+  })
+
   it('keeps the authoritative subagent marker across tool_call_update', () => {
     const { store, session } = prepareSession()
     store.handleEvent({

@@ -1,10 +1,11 @@
 import {
   canEditSharedPromptQueue,
-  buildLiveActivitySignature,
+  buildTimelineTailSignature,
   draftSummary,
   formatQueueTime,
   formatTokenCountK,
   hasSharedPromptQueue,
+  isAssistantTailSignature,
   isSharedPromptQueueCancelDisabled,
   isSharedPromptQueueClearDisabled,
   isStoppableRuntimeStatus,
@@ -17,7 +18,6 @@ import {
   sharedPromptQueueSummary,
   sharedPromptQueueTitle,
 } from "@/pages/conversation-detail/detailRuntimePresentation"
-import type { ContentPart } from "@/types/acp"
 import type { QueuedDraft, UploadedAttachment } from "@/pages/conversation-detail/detailDataNormalization"
 
 const attachment = (name: string): UploadedAttachment => ({
@@ -46,38 +46,83 @@ describe("detailRuntimePresentation", () => {
     expect(isStoppableRuntimeStatus("connected")).toBe(false)
   })
 
-  it("builds stable live activity signatures from content parts", () => {
-    const parts: ContentPart[] = [
-      { type: "text", text: "hello" },
-      { type: "thinking", thinking: "think" },
-      {
-        type: "tool_call",
-        tool_call: {
-          id: "tool-1",
-          name: "Read",
-          status: "running",
-          input: { path: "a.txt" },
-          output: "",
-        },
-      },
-      {
-        type: "tool_result",
-        tool_result: {
-          tool_call_id: "tool-1",
-          output: "done",
-          is_error: false,
-        },
-      },
-      { type: "plan", plan: { steps: [{ description: "ship" }] } },
-    ]
+  // `buildTimelineTailSignature` 取代了原来的 `buildLiveActivitySignature`（后者把整条
+  // live 正文序列化成字符串，被两个 watch 在每个流式 delta 上各调一次）。这里锁的是
+  // 「常数长度 + 内容真变才变 + role 编在第一段」这三条契约。
+  describe("buildTimelineTailSignature", () => {
+    it("encodes assistant role first when a live message is streaming", () => {
+      const signature = buildTimelineTailSignature({
+        localTurns: [{ id: "t1", role: "user", status: "completed" }],
+        liveMessage: { id: "live-9", content: [{ type: "text", text: "hello" }] },
+      })
 
-    expect(buildLiveActivitySignature(parts)).toBe(JSON.stringify([
-      ["text", "hello"],
-      ["thinking", "think"],
-      ["tool_call", "tool-1", "Read", "running", JSON.stringify({ path: "a.txt" }), "", ""],
-      ["tool_result", "tool-1", "done", "0"],
-      ["plan", JSON.stringify({ steps: [{ description: "ship" }] })],
-    ]))
+      expect(isAssistantTailSignature(signature)).toBe(true)
+      expect(signature).toBe("assistant|live-9|1|text|5|||0")
+    })
+
+    it("falls back to the last completed turn when there is no live message", () => {
+      const signature = buildTimelineTailSignature({
+        localTurns: [
+          { id: "t1", role: "user", status: "completed" },
+          { id: "t2", role: "assistant", status: "completed" },
+        ],
+        liveMessage: null,
+      })
+
+      expect(signature).toBe("assistant|t2|2|completed")
+      expect(isAssistantTailSignature(signature)).toBe(true)
+    })
+
+    it("marks a user tail as not-assistant", () => {
+      const signature = buildTimelineTailSignature({
+        localTurns: [{ id: "t1", role: "user", status: "completed" }],
+        liveMessage: null,
+      })
+
+      expect(isAssistantTailSignature(signature)).toBe(false)
+    })
+
+    it("changes when the streaming tail grows and stays put when nothing moved", () => {
+      const build = (text: string) =>
+        buildTimelineTailSignature({
+          localTurns: [],
+          liveMessage: { id: "live-1", content: [{ type: "text", text }] },
+        })
+
+      expect(build("ab")).not.toBe(build("abc"))
+      expect(build("abc")).toBe(build("abc"))
+    })
+
+    it("tracks the tail tool call without serializing its payload", () => {
+      const signature = buildTimelineTailSignature({
+        localTurns: [],
+        liveMessage: {
+          id: "live-1",
+          content: [
+            { type: "text", text: "hi" },
+            {
+              type: "tool_call",
+              tool_call: {
+                id: "tool-7",
+                name: "Read",
+                status: "running",
+                // 大载荷不能进签名 —— 长度是常数级的，内容不是。
+                input: { path: "a".repeat(10_000) },
+                output: "b".repeat(10_000),
+              },
+            },
+          ],
+        },
+      })
+
+      expect(signature).toBe("assistant|live-1|2|tool_call|0|tool-7|running|10000")
+      expect(signature.length).toBeLessThan(80)
+    })
+
+    it("returns an empty signature for an empty timeline", () => {
+      expect(buildTimelineTailSignature({ localTurns: [], liveMessage: null })).toBe("")
+      expect(isAssistantTailSignature("")).toBe(false)
+    })
   })
 
   it("formats queued draft labels", () => {

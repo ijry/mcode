@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia'
+import { createDebouncedStorageAdapter } from './persistStorage'
 import type {
   PetState,
   SpeciesId,
@@ -296,9 +297,8 @@ export const usePetStore = defineStore('pet', {
   },
 
   persist: {
-    storage: {
-      getItem: (key: string) => uni.getStorageSync(key),
-      setItem: (key: string, value: string) => uni.setStorageSync(key, value),
-    },
+    // 经验值/统计计数是装饰性的，且被实时事件高频驱动（每次 `running_tool` 翻转都写
+    // 两次），没有任何理由在同一秒内同步落盘多次。防抖合并，切后台/关页面时冲。
+    storage: createDebouncedStorageAdapter(),
   },
 })

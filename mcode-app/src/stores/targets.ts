@@ -1,4 +1,5 @@
 import { defineStore } from "pinia"
+import { syncStorageAdapter } from "./persistStorage"
 
 import type { TargetProfile } from "@/services/gateway"
 
@@ -32,9 +33,6 @@ export const useTargetsStore = defineStore("targets", {
     },
   },
   persist: {
-    storage: {
-      getItem: (key: string) => uni.getStorageSync(key),
-      setItem: (key: string, value: string) => uni.setStorageSync(key, value),
-    },
+    storage: syncStorageAdapter,
   },
 })

@@ -1307,9 +1307,12 @@ import {
   type SendAttemptResult,
 } from "./detailPromptSend";
 import {
+  buildTimelineTailSignature,
   formatTokenCountK,
+  isAssistantTailSignature,
   isStoppableRuntimeStatus,
 } from "./detailRuntimePresentation";
+import { buildLiveMessageTurnId } from "@/stores/conversationTimeline";
 import {
   bottomGeneratingText as resolveBottomGeneratingText,
   buildRuntimeRetryText,
@@ -1503,8 +1506,6 @@ const messageScrollIntoView = ref("");
 const messageScrollWithAnimation = ref(false);
 const shouldAutoFollowBottom = ref(true);
 const hasUnreadBelow = ref(false);
-const pageScrollTop = ref(0);
-const lastMeasuredScrollTop = ref(0);
 const anchorMessageId = ref("");
 const loadingOlder = ref(false);
 const initialHistoryLoading = ref(false);
@@ -1573,6 +1574,23 @@ const messages = computed(() =>
 const renderMessageItems = computed(() =>
   buildRenderMessageItems(messages.value),
 );
+/**
+ * 时间线尾项的锚点 id，O(1)。
+ *
+ * 存在的理由是滚动回调：它需要「贴底时把锚点记成最后一条」，但**不能**去读
+ * `renderMessageItems`（流式期间那是脏的，一读就地触发整条投影链重算，而 @scroll
+ * 可达 ~60 次/秒）。这里的取值规则与 `buildRenderMessageItems` 的 `anchorId` 一致：
+ * 有 live 时尾项就是那条实时轮次，否则是最后一条已落盘轮次。
+ */
+const timelineTailAnchorId = computed(() => {
+  const current = session.value;
+  const live = current.liveMessage;
+  if (live) {
+    return buildLiveMessageTurnId(Number(props.conversationId || 0), live);
+  }
+  const turns = current.localTurns || [];
+  return turns[turns.length - 1]?.id || "";
+});
 /**
  * 子智能体实时正文，按父 tool_call id 索引。刻意**不落库**，所以只有正在流式的
  * 那一轮拿得到值；历史轮次的胶囊靠 `agent_stats` 展示，不靠这里。
@@ -2027,24 +2045,20 @@ watch(
 
 watch(
   () =>
-    renderMessageItems.value.map((item) => ({
-      id: item.anchorId,
-      role: item.message.role,
-      status: item.message.status,
-      content: JSON.stringify(item.message.content || []),
-    })),
-  (nextMessages, prevMessages) => {
-    const latest = nextMessages[nextMessages.length - 1];
-    const previousLatest = prevMessages?.[prevMessages.length - 1];
+    buildTimelineTailSignature({
+      localTurns: session.value.localTurns || [],
+      liveMessage: session.value.liveMessage,
+    }),
+  (next, previous) => {
     const hasAssistantDelta =
-      latest?.role === "assistant" &&
-      ((!!latest?.content && latest.content !== previousLatest?.content) ||
-        latest?.id !== previousLatest?.id);
+      isAssistantTailSignature(next) && next !== (previous || "");
     if (!shouldAutoFollowBottom.value && hasAssistantDelta) {
       hasUnreadBelow.value = true;
     }
     if (preservingHistoryAnchor) return;
-    scheduleViewportSync();
+    // 流式期间按 delta 触发，走节流版本：一次 sync 会 emit("layout-change") 把外壳的
+    // 6 连选择器测量拉起来，紧跟着列表刚变高去测、测完又改布局输入。
+    scheduleViewportSyncThrottled();
   },
 );
 
@@ -2496,10 +2510,32 @@ function scheduleViewportSync(forceBottom = false) {
       scrollToBottom(true);
       return;
     }
-    messageScrollWithAnimation.value = false;
-    messageScrollIntoView.value = "";
-    messageScrollTop.value = lastMeasuredScrollTop.value;
+    // **非跟随态什么都不做。**
+    //
+    // 这里原先会把 `:scroll-top` 赋回 `lastMeasuredScrollTop`。那个值由 scroll 事件
+    // 持续刷新，所以每次赋值都是一个**新数值** —— scroll-view 必然执行一次程序化滚动，
+    // 而这发生在用户惯性滑动的中途，表现为回弹/顿住（「划不动 / 被拽回去」）。
+    //
+    // 用户已经手动往上翻了，滚动位置就该完全由手指决定；我们要做的只有「别去动它」。
   });
+}
+
+const VIEWPORT_SYNC_THROTTLE_MS = 120;
+let viewportSyncThrottleTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** 流式路径专用：按 delta 触发时把 sync（含外壳的 6 连选择器测量）降到 ~8 次/秒。 */
+function scheduleViewportSyncThrottled() {
+  if (viewportSyncThrottleTimer) return;
+  viewportSyncThrottleTimer = setTimeout(() => {
+    viewportSyncThrottleTimer = null;
+    scheduleViewportSync();
+  }, VIEWPORT_SYNC_THROTTLE_MS);
+}
+
+function clearViewportSyncThrottleTimer() {
+  if (!viewportSyncThrottleTimer) return;
+  clearTimeout(viewportSyncThrottleTimer);
+  viewportSyncThrottleTimer = null;
 }
 
 function handleComposerLayoutChange() {
@@ -2730,8 +2766,9 @@ function handleMessageListScroll(event: any) {
   const scrollHeight = Math.max(0, Number(event?.detail?.scrollHeight || 0));
   const deltaY = Number(event?.detail?.deltaY || 0);
   const currentViewportHeight = Math.max(0, Number(event?.detail?.height || 0));
-  pageScrollTop.value = scrollTopValue;
-  lastMeasuredScrollTop.value = scrollTopValue;
+  // 这里原先还写两个 ref（`pageScrollTop` / `lastMeasuredScrollTop`）。它们在本组件里
+  // **没有任何读取方** —— 滚动断点的持久化归外壳 `index.vue` 所有 —— 等于每个滚动事件
+  // 白搭两次响应式写入，已删除。
   const nearBottomState = resolveNearBottomState({
     scrollTop: scrollTopValue,
     scrollHeight,
@@ -2742,9 +2779,12 @@ function handleMessageListScroll(event: any) {
     shouldAutoFollowBottom.value = nearBottomState.nearBottom;
     if (shouldAutoFollowBottom.value) {
       hasUnreadBelow.value = false;
-      const tail =
-        renderMessageItems.value[renderMessageItems.value.length - 1];
-      anchorMessageId.value = tail?.anchorId || "";
+      // **不要在滚动回调里读 `renderMessageItems`。** 流式期间那个 computed 是脏的，
+      // 这一读就地触发「时间线重建 + 渲染项投影」的完整重算 —— 而 @scroll 在
+      // scroll-view 上可达 ~60 次/秒。手指在滑、agent 在输出，两边交替把 computed
+      // 弄脏，于是每一帧都可能重算一次整条链，这正是「滑动不跟手」。
+      // `timelineTailAnchorId` 是 O(1) 的，从 store 的廉价字段直接算。
+      anchorMessageId.value = timelineTailAnchorId.value;
     }
   }
   // uni-app 的 scroll-view 里 deltaY = lastScrollTop - scrollTop，**向上滑是正值**
@@ -3408,6 +3448,7 @@ onUnmounted(() => {
   // In-flight settings/snapshot responses must not hydrate a session after
   // this pane has been destroyed or its tab has been replaced.
   realtimeFeedbackProbeToken += 1;
+  clearViewportSyncThrottleTimer();
   // 切 tab / 退出详情页都会销毁本组件（见上方说明）。防抖里还压着的那次必须**同步
   // 立即**落盘 —— 等它自己触发的话组件已经没了。
   clearDraftPersistTimer();

@@ -1,4 +1,5 @@
 import { defineStore } from "pinia"
+import { syncStorageAdapter } from "./persistStorage"
 
 import { createGateway } from "@/services/gateway"
 import { getDirectToken, setDirectToken } from "@/services/gateway/directTokenStore"
@@ -63,9 +64,6 @@ export const useAuthStore = defineStore("auth", {
     },
   },
   persist: {
-    storage: {
-      getItem: (key: string) => uni.getStorageSync(key),
-      setItem: (key: string, value: string) => uni.setStorageSync(key, value),
-    },
+    storage: syncStorageAdapter,
   },
 })

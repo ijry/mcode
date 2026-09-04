@@ -65,6 +65,8 @@ class AcpApiClient {
   private bridgeHealthListeners: Map<string, Set<(health: RealtimeBridgeHealth) => void>>
   private pollingStarted = false
   private pollingInstanceKey: string | null = null
+  private pollingTimer: ReturnType<typeof setTimeout> | null = null
+  private pollingFailureStreak = 0
   private ensureBridgePromises = new Map<string, Promise<BridgeState>>()
   private bridgeStates = new Map<string, BridgeState>()
   private relayRecoveryStates = new Map<string, RelayRecoveryState>()
@@ -586,14 +588,32 @@ class AcpApiClient {
     }
   }
 
+  /**
+   * 桥接失败后的兜底轮询。
+   *
+   * 这里有三条纪律，缺一条就变成「一旦启动就再也停不下来」的常驻 1 Hz 网络开销
+   * （冷启动时 `App.vue` 就会订阅全局事件，主机不可达一次即触发）：
+   *
+   * 1. **句柄必须保存**，否则没有任何停止入口。
+   * 2. **失败要退避**，不能不管超时/断网/502 都固定 1 秒重打。
+   * 3. **桥接恢复后要停**，否则 WebSocket 与轮询会并行跑到进程结束，
+   *    重复事件一路走完整条归一化 + 响应式写入，直到 seq 守卫处才被丢弃。
+   */
+  private static readonly POLL_BASE_DELAY_MS = 1000
+  private static readonly POLL_MAX_DELAY_MS = 30_000
+
   private startPolling(instanceKey?: string) {
     if (this.pollingStarted) return
     this.pollingStarted = true
     this.pollingInstanceKey = instanceKey || this.getCurrentDescriptor().instanceKey
+    this.pollingFailureStreak = 0
     const poll = async () => {
+      this.pollingTimer = null
+      if (!this.pollingStarted) return
       let shouldContinue = true
       try {
         const events = await this.request("/acp_poll_events", {})
+        this.pollingFailureStreak = 0
         if (Array.isArray(events)) {
           const targetKey = this.pollingInstanceKey || this.getCurrentDescriptor().instanceKey
           events.forEach((event: EventEnvelope) => {
@@ -608,17 +628,57 @@ class AcpApiClient {
           message.includes("not available in web mode")
         ) {
           shouldContinue = false
-          this.pollingStarted = false
-          this.pollingInstanceKey = null
+          this.stopPolling()
+        } else {
+          this.pollingFailureStreak += 1
         }
       }
 
-      if (shouldContinue) {
-        setTimeout(poll, 1000)
+      if (shouldContinue && this.pollingStarted) {
+        this.pollingTimer = setTimeout(poll, this.resolvePollDelayMs())
       }
     }
 
-    poll()
+    void poll()
+  }
+
+  /** 连续失败时指数退避到 30s 封顶；成功一次就回到基础间隔。 */
+  private resolvePollDelayMs() {
+    if (this.pollingFailureStreak <= 0) return AcpApiClient.POLL_BASE_DELAY_MS
+    const backoff =
+      AcpApiClient.POLL_BASE_DELAY_MS * 2 ** Math.min(this.pollingFailureStreak, 8)
+    return Math.min(AcpApiClient.POLL_MAX_DELAY_MS, backoff)
+  }
+
+  /**
+   * 停止兜底轮询。桥接就绪（`handleBridgeReady`）、以及 App 切后台时都要调。
+   */
+  stopPolling() {
+    if (this.pollingTimer) {
+      clearTimeout(this.pollingTimer)
+      this.pollingTimer = null
+    }
+    this.pollingStarted = false
+    this.pollingInstanceKey = null
+    this.pollingFailureStreak = 0
+  }
+
+  isPolling() {
+    return this.pollingStarted
+  }
+
+  /**
+   * App 回到前台时重新拉起实时通道。
+   *
+   * 切后台期间 socket 通常已经死了（`conversationTabBadgeService` 的注释也是这个前提）。
+   * 这里对每个已知实例重跑一次 `connectEventSource`：桥接能起来就走 WebSocket，
+   * 起不来才落回兜底轮询 —— 而 `onHide` 已经把轮询停掉了，所以「前台重连一次」是
+   * 轮询唯一的重新武装入口。
+   */
+  async resumeRealtimeAfterForeground() {
+    const keys = Array.from(this.bridgeStates.keys())
+    if (keys.length === 0) return
+    await Promise.allSettled(keys.map((key) => this.connectEventSource(key)))
   }
 
   /**
@@ -769,6 +829,10 @@ class AcpApiClient {
       if (readyHandled) return
       readyHandled = true
       bridge.reconnectAttempt = 0
+      // 桥接活了，兜底轮询必须停。不停的话 WebSocket 与 1 Hz 轮询会并行跑到进程结束，
+      // 重复事件一路走完整条归一化 + 响应式写入，直到 seq 守卫处才被丢弃 ——
+      // 活干完了才丢。
+      this.stopPolling()
       this.emitBridgeHealth(targetKey, this.buildBridgeHealth(targetKey, bridge))
       readyCallbacks.forEach((callback) => {
         try {
@@ -1022,6 +1086,15 @@ class AcpApiClient {
     this.requestHookForTest = hook
   }
 
+  /**
+   * 兜底轮询的入口在生产里只由 `connectEventSource` 的 catch 触发（需要让整条桥接建立
+   * 失败），单测里没法便宜地复现。这个 seam 只是把私有的 `startPolling` 暴露出来，
+   * 让「句柄 / 退避 / 停止」这三条纪律可以被回归测试锁住。
+   */
+  __startPollingForTest(instanceKey?: string) {
+    this.startPolling(instanceKey)
+  }
+
   private buildBridgeHealthForInstance(instanceKey: string): RealtimeBridgeHealth {
     const bridge = this.bridgeStates.get(instanceKey)
     if (bridge) return this.buildBridgeHealth(instanceKey, bridge)
@@ -1137,7 +1210,7 @@ class AcpApiClient {
           connectionId,
           type: "stream_batch",
           data: {
-            delta: firstString(record.text),
+            delta: rawStreamDelta(record.text),
             contentType: "text",
             // 子智能体正文的归属。服务端用 `skip_serializing_if = "Option::is_none"`
             // 下发，所以主线程内容上这个键根本不存在，`|| undefined` 保持载荷形状不变。
@@ -1150,7 +1223,7 @@ class AcpApiClient {
           connectionId,
           type: "stream_batch",
           data: {
-            delta: firstString(record.text),
+            delta: rawStreamDelta(record.text),
             contentType: "thinking",
             parentToolUseId:
               firstString(record.parent_tool_use_id, record.parentToolUseId) || undefined,
@@ -1502,6 +1575,20 @@ function firstString(...values: unknown[]) {
     if (typeof value === "string" && value.trim()) return value.trim()
   }
   return ""
+}
+
+/**
+ * 流式 delta 必须**原样**取，不能过 `firstString`。
+ *
+ * `firstString` 会 `trim()` 并且把纯空白判成假值。用在 delta 上有两个后果：
+ * chunk 的前后空白被吃掉（`"Hello"` + `" world"` 渲染成 `"Helloworld"`），
+ * 纯空白 chunk（`" "`、`"\n\n"`）整块丢弃 —— 独立成块的段落空行就此消失。
+ *
+ * 能否看见取决于服务端怎么切块，所以它可以潜伏很久；但语义上 delta 是字节流的一段，
+ * 不是「一个可能为空的字段」。
+ */
+function rawStreamDelta(value: unknown): string {
+  return typeof value === "string" ? value : ""
 }
 
 function firstNumber(...values: unknown[]) {

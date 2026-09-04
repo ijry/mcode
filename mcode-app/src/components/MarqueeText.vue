@@ -16,7 +16,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, getCurrentInstance, nextTick, onMounted, ref, watch } from "vue"
+import { computed, getCurrentInstance, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 
 const props = withDefaults(
   defineProps<{
@@ -68,18 +68,51 @@ function measure() {
   })
 }
 
-// 文字变化时重新测量并重启动画
+/**
+ * 文字变化时重新测量并重启动画 —— 但必须防抖。
+ *
+ * 这个组件用在会话列表的实时预览卡上（`:text="card.livePreviewText"`），流式期间那个值
+ * 每批 token 都变。一次 `measure()` 是两个 `boundingClientRect`（在 app-vue 下是跨线程
+ * 桥接往返），加上 `scrolling` 先 false 再 true 造成的两次重渲染与 CSS 动画重启（视觉上
+ * 还会闪）。不防抖就是每个预览卡每批 token 一轮强制布局。
+ */
+const MEASURE_DEBOUNCE_MS = 300
+let measureTimer: ReturnType<typeof setTimeout> | null = null
+
+function clearMeasureTimer() {
+  if (!measureTimer) return
+  clearTimeout(measureTimer)
+  measureTimer = null
+}
+
+function scheduleMeasure() {
+  if (measureTimer) return
+  measureTimer = setTimeout(() => {
+    measureTimer = null
+    void nextTick(() => measure())
+  }, MEASURE_DEBOUNCE_MS)
+}
+
 watch(
   () => props.text,
-  () => {
-    // 先回到静态态，再按新文本自然宽度重新判定
-    scrolling.value = false
-    void nextTick(() => measure())
+  (next, previous) => {
+    // 文本清空/首次出现是状态切换，立刻处理；持续增长走防抖。
+    if (!next || !previous) {
+      clearMeasureTimer()
+      scrolling.value = false
+      void nextTick(() => measure())
+      return
+    }
+    scheduleMeasure()
   }
 )
 
 onMounted(() => {
   void nextTick(() => measure())
+})
+
+onBeforeUnmount(() => {
+  clearMeasureTimer()
 })
 </script>
 

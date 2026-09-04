@@ -115,16 +115,31 @@ describe("P48 conversation detail tool call status styles", () => {
     expect(source).toContain(":deep(td)")
   })
 
-  it("keeps message code blocks horizontally scrollable", () => {
+  it("keeps message code blocks horizontally scrollable without making every markdown root a scroll container", () => {
+    // 横向滚动必须留着（代码块会超宽），但**不能**由 `._root` 提供：
+    // 纵向 scroll-view 里每条消息一个动量滚动容器，在 iOS WKWebView 下既各占一个
+    // 合成层、又会和外层纵向滚动抢手势（手指稍斜就被内层捕获，列表划不动）。
+    // 见 2026-09-03-23-57-detail-streaming-performance-audit 的 P0-10。
     const source = readComponent("MessageBubble.vue")
     const codeRule = source.match(/\.part-text\s*\{[\s\S]*?\n\}/)?.[0] || ""
 
     expect(codeRule).toContain("min-width: 0;")
     expect(source).toContain(":deep(.up-markdown ._root)")
-    expect(source).toContain("overflow-x: auto;")
     expect(source).toContain(":deep(.up-markdown-code)")
     expect(source).toContain("white-space: pre;")
-    expect(source).toContain("width: max-content;")
+
+    // `._root` 既不滚动，也不带动量滚动。
+    const rootRule =
+      source.match(/:deep\(\.up-markdown \._root\)\s*\{[\s\S]*?\n {2}\}/)?.[0] || ""
+    expect(rootRule).toContain("overflow: hidden;")
+    expect(rootRule).not.toContain("overflow-x: auto;")
+    expect(rootRule).not.toContain("-webkit-overflow-scrolling: touch;")
+
+    // 代码块自己是滚动容器。
+    const markdownCodeRule =
+      source.match(/:deep\(\.up-markdown-code\)\s*\{[\s\S]*?\n {2}\}/)?.[0] || ""
+    expect(markdownCodeRule).toContain("overflow-x: auto;")
+    expect(markdownCodeRule).not.toContain("width: max-content;")
   })
 
   it("renders the context-compaction system note as the same neutral pill", () => {

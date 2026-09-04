@@ -421,7 +421,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from "vue"
-import { onShow } from "@dcloudio/uni-app"
+import { onHide, onShow } from "@dcloudio/uni-app"
 import { createGateway } from "@/services/gateway"
 import type { RelaySessionInfo } from "@/services/gateway"
 import { buildWebSocketProtocols } from "@/services/gateway/wsProtocol"
@@ -1254,6 +1254,12 @@ function startScanImport() {
 }
 
 onShow(() => {
+  // 切回本页时把在线探测重新拉起来 —— `onHide` 会把 socket 与 3s 重连链全停掉。
+  // 本页是 tabBar 第 0 项，`onUnmounted` 实践中只有 reLaunch/退出才触发，所以只靠它
+  // 兜底等于「主机不在线时每条连接每 3 秒一次 WS 握手，持续整个应用生命周期」。
+  syncOnlineWatchers()
+  void refreshOnlineStatus()
+
   if (!scanImporting.value) return
   if (scanReturnFallbackTimer) {
     clearTimeout(scanReturnFallbackTimer)
@@ -1264,6 +1270,14 @@ onShow(() => {
     }
     scanReturnFallbackTimer = null
   }, 500)
+})
+
+onHide(() => {
+  if (scanReturnFallbackTimer) {
+    clearTimeout(scanReturnFallbackTimer)
+    scanReturnFallbackTimer = null
+  }
+  cleanupOnlineWatchers()
 })
 
 function normalizeBaseUrl(url: string): string {

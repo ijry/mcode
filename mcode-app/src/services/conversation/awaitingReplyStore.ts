@@ -113,8 +113,42 @@ export function ingestPetSessionsPayload(instanceKey: string, payload: unknown) 
     }
   }
 
+  const previous = awaitingByInstance.get(instanceKey)
   awaitingByInstance.set(instanceKey, map)
-  version += 1
+  // **只在真的变了才动版本号。**
+  //
+  // `version` 是会话列表 `overviewDisplayModel` 的依赖，而那个 computed 一旦失效就要
+  // 把所有可见卡重新展开一遍（每张卡两次对象展开 + 每组一次三趟排序），卡片对象身份
+  // 全变 → 模板整棵卡片子树重渲染。而 `pet://sessions` 是高频推送，其中绝大多数载荷
+  // 与上一次逐字相同（没人在等权限/提问时，两边都是空 Map）。
+  //
+  // 无条件 `version += 1` 等于把「智能体在跑」直接翻译成「列表持续重算重渲染」。
+  if (!areAwaitingMapsEqual(previous, map)) {
+    version += 1
+  }
+}
+
+/**
+ * 两张待回复表是否等价。条目只有三个标量字段，逐字段比即可。
+ */
+function areAwaitingMapsEqual(
+  left: Map<number, AwaitingReplyEntry> | undefined,
+  right: Map<number, AwaitingReplyEntry>
+): boolean {
+  if (!left) return right.size === 0
+  if (left.size !== right.size) return false
+  for (const [conversationId, entry] of right) {
+    const previousEntry = left.get(conversationId)
+    if (!previousEntry) return false
+    if (
+      previousEntry.kind !== entry.kind ||
+      previousEntry.requestId !== entry.requestId ||
+      previousEntry.title !== entry.title
+    ) {
+      return false
+    }
+  }
+  return true
 }
 
 /**

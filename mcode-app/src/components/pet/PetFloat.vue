@@ -79,7 +79,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { usePetStore } from '@/stores/pet'
 import { playPetTapSound } from '@/services/petAudio'
 import { SPECIES_LIST } from '@/services/petConfig'
@@ -88,6 +88,7 @@ import {
   petInteract,
   petInteractExcited,
   showLevelUpCelebration,
+  usePetEngine,
 } from '@/services/petEngine'
 import {
   PET_DOUBLE_TAP_WINDOW_MS,
@@ -107,7 +108,28 @@ const petStore = usePetStore()
 const speciesList = SPECIES_LIST
 
 // ── Engine ──
-const { currentEmotion, currentBubble, currentMotion, currentDecorations } = initPetEngine()
+// 引擎的 reactive 出口是模块级的，所以可以先拿到、再决定什么时候真正启动。
+const { currentEmotion, currentBubble, currentMotion, currentDecorations } = usePetEngine()
+
+/**
+ * 引擎只在用户真的养了宠物之后才起。
+ *
+ * 原先是无条件 `initPetEngine()`：即使 `petStore.initialized` 还是 false（悬浮球都没
+ * 显示，只有一个选宠弹窗），也会挂上 runtime 状态 watcher、10/30 分钟定时器、
+ * 8~15 秒的 ambient motion 链和启动问候（会走 TTS）。而那个 watcher 的回调
+ * （`onStatusChange`）在每次 `running_tool` 翻转时都要 `addExp` + `recordStat`，后者
+ * 会做一遍全表解锁扫描并触发持久化 —— 全都落在流式输出最忙的时刻。
+ *
+ * `initPetEngine` 自身有 `engineInitialized` 单例守卫，所以这里重复触发是安全的；
+ * 首次启动会在用户完成选宠（`initPet`）的那一刻发生。
+ */
+watch(
+  () => petStore.initialized,
+  (ready) => {
+    if (ready) initPetEngine()
+  },
+  { immediate: true }
+)
 
 // ── Setup flow ──
 const showSetup = ref(false)

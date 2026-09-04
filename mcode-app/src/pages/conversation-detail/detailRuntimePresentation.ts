@@ -1,5 +1,63 @@
-import type { ContentPart } from "@/types/acp"
+import type { LiveMessage, MessageTurn } from "@/types/acp"
 import type { QueuedDraft } from "./detailDataNormalization"
+
+export interface TimelineTailSignatureInput {
+  localTurns: Array<Pick<MessageTurn, "id" | "role" | "status">>
+  liveMessage: Pick<LiveMessage, "id" | "content"> | null | undefined
+}
+
+/**
+ * 「时间线尾项变了没有」的**常数长度**签名，`role` 编在第一段。
+ *
+ * 详情页外壳与 pane 各有一个 watch 想知道这件事，原先两边的 getter 都长这样：
+ *
+ * ```ts
+ * () => renderMessageItems.value.map((item) => ({
+ *   id: item.anchorId, role: ..., status: ...,
+ *   content: JSON.stringify(item.message.content || []),   // ← 每一条消息全量序列化
+ * }))
+ * ```
+ *
+ * 两层放大：一是把**整个会话**每条消息的 content 都序列化了一遍（回调其实只用尾项），
+ * 二是 getter 返回新数组、`hasChanged` 恒为真，于是回调每个 flush 必然执行一次。
+ *
+ * 这里改成从 store 的廉价字段直接拼，不做任何投影、不碰历史消息：
+ *
+ * - 有 live 时尾项就是那条实时气泡（合并后 role 必为 assistant），内容变化用
+ *   「part 数 + 尾 part 类型 + 尾部文本长度 + 尾 tool_call 的 id/status/输出长度」代表；
+ * - 没有 live 时尾项是最后一条已落盘轮次，而已完成轮次不会再变，`id + status` 足够。
+ *
+ * 返回字符串（而不是对象/数组）是关键：Vue 的 `hasChanged` 才能在真的没变时短路，
+ * 让回调不再每 flush 都跑。
+ */
+export function buildTimelineTailSignature(input: TimelineTailSignatureInput): string {
+  const live = input.liveMessage
+  if (live) {
+    const parts = live.content || []
+    const tail = parts[parts.length - 1]
+    const toolCall = tail?.type === "tool_call" ? tail.tool_call : null
+    return [
+      "assistant",
+      live.id || "",
+      parts.length,
+      tail?.type || "",
+      (tail?.text || tail?.thinking || "").length,
+      toolCall?.id || "",
+      toolCall?.status || "",
+      (toolCall?.output || "").length,
+    ].join("|")
+  }
+
+  const turns = input.localTurns || []
+  const tailTurn = turns[turns.length - 1]
+  if (!tailTurn) return ""
+  return [tailTurn.role || "", tailTurn.id || "", turns.length, tailTurn.status || ""].join("|")
+}
+
+/** 尾项是不是 assistant —— 与 `buildTimelineTailSignature` 的编码约定配套。 */
+export function isAssistantTailSignature(signature: string): boolean {
+  return signature.startsWith("assistant|")
+}
 
 export function formatTokenCountK(value: number) {
   const normalized = Number(value || 0)
@@ -18,36 +76,6 @@ export function isStoppableRuntimeStatus(status: string) {
     status === "waiting_permission" ||
     status === "waiting_question"
   )
-}
-
-export function buildLiveActivitySignature(parts: ContentPart[]): string {
-  return JSON.stringify((parts || []).map((part) => {
-    if (part.type === "text") return ["text", part.text || ""]
-    if (part.type === "thinking") return ["thinking", part.thinking || ""]
-    if (part.type === "tool_call") {
-      const toolCall = part.tool_call
-      return [
-        "tool_call",
-        toolCall?.id || "",
-        toolCall?.name || "",
-        toolCall?.status || "",
-        JSON.stringify(toolCall?.input || {}),
-        toolCall?.output || "",
-        toolCall?.error || "",
-      ]
-    }
-    if (part.type === "tool_result") {
-      const toolResult = part.tool_result
-      return [
-        "tool_result",
-        toolResult?.tool_call_id || "",
-        toolResult?.output || "",
-        toolResult?.is_error ? "1" : "0",
-      ]
-    }
-    if (part.type === "plan") return ["plan", JSON.stringify(part.plan || {})]
-    return [part.type]
-  }))
 }
 
 export function draftSummary(item: QueuedDraft): string {

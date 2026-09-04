@@ -1,4 +1,5 @@
 import { defineStore } from "pinia"
+import { syncStorageAdapter } from "./persistStorage"
 
 type SessionItem = Record<string, unknown>
 
@@ -29,9 +30,6 @@ export const useSessionStore = defineStore("session", {
     },
   },
   persist: {
-    storage: {
-      getItem: (key: string) => uni.getStorageSync(key),
-      setItem: (key: string, value: string) => uni.setStorageSync(key, value),
-    },
+    storage: syncStorageAdapter,
   },
 })

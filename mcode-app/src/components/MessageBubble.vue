@@ -94,10 +94,10 @@
           <!-- 文本 -->
           <view v-if="part.type === 'text'" class="part-text">
             <view v-if="shouldRenderCyberDecode(part.text || '', index)" class="part-text__cyber">
-              <up-markdown class="part-text__cyber-real" :content="part.text || ''"></up-markdown>
+              <up-markdown class="part-text__cyber-real" :content="partMarkdownText(part, index)"></up-markdown>
               <text class="part-text__cyber-overlay">{{ renderCyberDecodeText(part.text || '', index) }}</text>
             </view>
-            <up-markdown v-else :content="part.text || ''"></up-markdown>
+            <up-markdown v-else :content="partMarkdownText(part, index)"></up-markdown>
           </view>
 
           <!-- 思考 -->
@@ -302,6 +302,8 @@ const displayParts = computed<BubbleDisplayPart[]>(() =>
 )
 
 function subagentTranscript(toolCallId: string): string {
+  // 容器身份现在是稳定的（store 就地改单个 key），所以这次读取只订阅
+  // `[toolCallId]` 这一个属性 —— 别的子智能体来 chunk 时本气泡不再重渲染。
   return props.subagentTranscripts?.[toolCallId] || ""
 }
 
@@ -341,6 +343,79 @@ function toggleSystemNote() {
 }
 
 const isStreaming = computed(() => props.message.status === "streaming")
+
+/**
+ * 流式期间喂给 `up-markdown` 的正文做节流。
+ *
+ * `up-markdown` 的 `watch(content)` 每次变化都 `marked()` **全量**重解析，产出的 HTML
+ * 再交给 `up-parse` 重新分词成节点树、Vue 再 diff 一遍新树。对一条正在增长的回复
+ * 就是 O(n²)：实测 2000 个 delta / 117K 字符累计 606 ms（仅 marked，桌面 V8，
+ * 手机再乘 3~8 倍）。
+ *
+ * 这里把「尾段文本」的更新降到 ~8 次/秒。正文仍然是 markdown（不是退化成纯文本），
+ * 代价只是最多晚 120 ms 出现 —— 而重解析次数按节流比例下降。
+ *
+ * 只作用于**尾段**：前面那些段在本轮里不会再变，`up-markdown` 的 watch 本来就不会
+ * 重新触发。
+ */
+const STREAMING_MARKDOWN_THROTTLE_MS = 120
+
+const streamingTailText = computed<string | null>(() => {
+  if (!isStreaming.value) return null
+  const parts = displayParts.value
+  const tail = parts[parts.length - 1]
+  if (!tail || tail.type !== "text") return null
+  return tail.text || ""
+})
+
+const throttledStreamingTailText = ref("")
+let streamingMarkdownTimer: ReturnType<typeof setTimeout> | null = null
+
+function clearStreamingMarkdownTimer() {
+  if (!streamingMarkdownTimer) return
+  clearTimeout(streamingMarkdownTimer)
+  streamingMarkdownTimer = null
+}
+
+watch(
+  streamingTailText,
+  (next) => {
+    if (next === null) {
+      // 流式结束、或尾段不再是文本：放开节流，让模板落到 `part.text` 的最终值上。
+      // 不能让节流吞掉最后一帧。
+      clearStreamingMarkdownTimer()
+      throttledStreamingTailText.value = ""
+      return
+    }
+    if (!throttledStreamingTailText.value) {
+      // 首帧立即出，避免开头空白一个节流周期。
+      throttledStreamingTailText.value = next
+      return
+    }
+    if (streamingMarkdownTimer) return
+    streamingMarkdownTimer = setTimeout(() => {
+      streamingMarkdownTimer = null
+      throttledStreamingTailText.value = streamingTailText.value ?? ""
+    }, STREAMING_MARKDOWN_THROTTLE_MS)
+  },
+  { immediate: true }
+)
+
+/**
+ * 一个 text part 实际交给 `up-markdown` 的内容。尾段在流式期间走节流镜像，其余原样。
+ */
+function partMarkdownText(part: BubbleDisplayPart, index: number): string {
+  if (
+    isStreaming.value &&
+    index === displayParts.value.length - 1 &&
+    part.type === "text" &&
+    throttledStreamingTailText.value
+  ) {
+    return throttledStreamingTailText.value
+  }
+  return (part as { text?: string }).text || ""
+}
+
 const isCyberStreamingPhase = computed(() => {
   const phase = props.cyberEffectPhase || "idle"
   return phase === "streaming" || phase === "settle"
@@ -455,6 +530,7 @@ onBeforeUnmount(() => {
     clearInterval(cyberTimer)
     cyberTimer = null
   }
+  clearStreamingMarkdownTimer()
 })
 
 const agentLogoPath = computed(() => {
@@ -718,10 +794,6 @@ function renderCyberDecodeText(text: string, index: number) {
     color: inherit !important;
   }
 
-  :deep(.up-markdown ._root) {
-    color: inherit !important;
-  }
-
   :deep(.up-markdown rich-text) {
     color: inherit !important;
     font-size: 13px !important;
@@ -738,13 +810,26 @@ function renderCyberDecodeText(text: string, index: number) {
     overflow: hidden;
   }
 
+  /*
+   * `._root` 不能是滚动容器。
+   *
+   * 原先这里（以及 u-parse 自己的 `._root`）带 `overflow-x: auto` +
+   * `-webkit-overflow-scrolling: touch`，于是纵向 scroll-view 里**每条消息**
+   * （多 text part 时更多）各自成为一个动量滚动容器：iOS WKWebView 下每个都是一个
+   * 独立合成层，还会和外层纵向滚动抢手势 —— 手指稍微斜一点就被内层横向滚动捕获，
+   * 列表不动。230 条消息就是几百个嵌套滚动容器。
+   *
+   * 横向滚动下移到真正需要的 `.up-markdown-code` 与 `table` 上（见下面两条）；
+   * 长 URL 这类不可断词的内容改为强制换行，而不是溢出。
+   */
   :deep(.up-markdown ._root) {
+    color: inherit !important;
     width: 100%;
     min-width: 0;
     max-width: 100%;
-    overflow-x: auto;
-    overflow-y: hidden;
-    -webkit-overflow-scrolling: touch;
+    overflow: hidden;
+    -webkit-overflow-scrolling: auto;
+    overflow-wrap: anywhere;
   }
 
   /* up-markdown 在 H5 使用真实 table，在 uni 的 up-parse 节点树中使用
@@ -758,6 +843,14 @@ function renderCyberDecodeText(text: string, index: number) {
     background: var(--up-card-bg-color, #ffffff);
     color: var(--up-main-color, #303133);
     overflow-x: auto;
+  }
+
+  /* `._root` 不再滚动之后，真实 table 需要自己成为滚动容器才不会被裁掉。
+     `display: block` 让 overflow 生效，内部行仍由匿名 table 盒排版。
+     `._table` 本身就是 block view，`overflow-x: auto` 已直接生效，不用改。 */
+  :deep(table) {
+    display: block;
+    overflow-y: hidden;
   }
 
   :deep(thead),
@@ -798,11 +891,15 @@ function renderCyberDecodeText(text: string, index: number) {
     background: color-mix(in srgb, var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6)) 55%, transparent 45%);
   }
 
+  /* 代码块自己承担横向滚动。原先是 `width: max-content` + `overflow: visible`，
+     靠父级 `._root` 滚动 —— 那正是上面要去掉的东西。改成自己是滚动容器后，
+     动量滚动层的数量从「每条消息一个」降到「每个代码块一个」。 */
   :deep(.up-markdown-code) {
-    width: max-content;
-    min-width: 100%;
-    max-width: none;
-    overflow: visible;
+    width: auto;
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
     white-space: pre;
     word-break: normal;
     overflow-wrap: normal;

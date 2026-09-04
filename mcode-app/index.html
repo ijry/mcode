@@ -12,36 +12,30 @@
     <meta name="theme-color" content="#f3f4f6" />
     <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png" />
     <title>MCode</title>
+    <style>
+      /*
+       * 双击缩放抑制用声明式手段表达，不要用 `touchend` + `preventDefault`。
+       *
+       * 非 passive 的 touch 监听挂在 document 上会让滚动**无法走合成器快路径** ——
+       * 浏览器必须先等主线程执行完 handler 才能决定滚动能不能开始。主线程一忙
+       * （详情页流式时就是这样），滚动就在排队，表现为"滑动不跟手"。
+       * `touch-action: manipulation` 只保留平移与捏合，禁掉双击缩放，
+       * 语义等价且完全不占主线程。
+       */
+      html,
+      body {
+        touch-action: manipulation;
+      }
+    </style>
     <script>
       ;(() => {
         const ua = navigator.userAgent || ""
         const isIos = /iPhone|iPad|iPod/i.test(ua)
         if (!isIos) return
 
-        let lastTouchEnd = 0
-
-        document.addEventListener(
-          "touchstart",
-          (event) => {
-            if (event.touches.length > 1) {
-              event.preventDefault()
-            }
-          },
-          { passive: false }
-        )
-
-        document.addEventListener(
-          "touchend",
-          (event) => {
-            const now = Date.now()
-            if (now - lastTouchEnd <= 300) {
-              event.preventDefault()
-            }
-            lastTouchEnd = now
-          },
-          { passive: false }
-        )
-
+        // iOS Safari 会忽略 viewport 的 `user-scalable=no`，捏合缩放只能靠
+        // `gesturestart` 拦。它不是滚动路径上的事件类型（合成器的快路径判定只看
+        // touchstart / touchmove / wheel 上有没有非 passive 监听），所以留着不影响滚动。
         document.addEventListener(
           "gesturestart",
           (event) => {

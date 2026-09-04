@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, getCurrentInstance, ref } from "vue"
-import { onLoad, onPullDownRefresh, onShow, onUnload } from "@dcloudio/uni-app"
+import { onHide, onLoad, onPullDownRefresh, onShow, onUnload } from "@dcloudio/uni-app"
 import { acpApi } from "@/api/acp"
 import TaskStatusChip from "../tasks/components/TaskStatusChip.vue"
 import TaskMergeSheet from "../tasks/components/TaskMergeSheet.vue"
@@ -207,6 +207,10 @@ onLoad((options) => {
 
 onShow(() => {
   // 从会话详情页返回时任务可能已经推进（用户在会话里回答了权限请求）。
+  if (gateway.value) {
+    // onHide 把订阅拆了，回来要接回去（内部有幂等守卫）。
+    ensureTaskChangedSubscription(gateway.value)
+  }
   if (gateway.value && route.value.taskId > 0) void loadTask()
 })
 
@@ -214,20 +218,38 @@ onPullDownRefresh(() => {
   void reload().finally(() => uni.stopPullDownRefresh())
 })
 
-onUnload(() => {
-  if (disposeTaskChanged) {
-    try {
-      disposeTaskChanged()
-    } catch (error) {
-      console.warn("dispose task detail subscription failed:", error)
-    }
-    disposeTaskChanged = null
-  }
+/**
+ * 切走本页就停表停订阅。
+ *
+ * 一次 `scheduleRefresh()` 是三连请求（`getWorkTask` + `listWorkTaskEvents` +
+ * `listWorkTaskChangedFiles`）。原先只在 `onUnload` 清理，于是切到别的页面之后，主机
+ * 每推一次 `task://changed` 仍然会打出这三个请求，而结果没人看。
+ */
+onHide(() => {
+  teardownTaskDetailSubscription()
   if (refreshTimer) {
     clearTimeout(refreshTimer)
     refreshTimer = null
   }
 })
+
+onUnload(() => {
+  teardownTaskDetailSubscription()
+  if (refreshTimer) {
+    clearTimeout(refreshTimer)
+    refreshTimer = null
+  }
+})
+
+function teardownTaskDetailSubscription() {
+  if (!disposeTaskChanged) return
+  try {
+    disposeTaskChanged()
+  } catch (error) {
+    console.warn("dispose task detail subscription failed:", error)
+  }
+  disposeTaskChanged = null
+}
 
 /* ===== 加载 ===== */
 

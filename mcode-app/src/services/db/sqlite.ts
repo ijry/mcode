@@ -59,6 +59,27 @@ async function openH5Database() {
   clearLegacyH5Storage()
   const stored = await readStoredH5Database()
   h5Db = stored ? new sqlJs.Database(stored) : new sqlJs.Database()
+  installH5PersistOnPageHide()
+}
+
+/**
+ * 落盘改成防抖之后，「页面被关掉」这条路径必须自己兜住 —— 否则最后 400ms 内的写会丢。
+ * `pagehide` 覆盖关标签/前后退/切后台，`visibilitychange` 兜住移动端 Safari 不发
+ * `pagehide` 的情况。两者都只注册一次。
+ */
+let h5PersistOnPageHideInstalled = false
+
+function installH5PersistOnPageHide() {
+  if (h5PersistOnPageHideInstalled) return
+  if (typeof window === "undefined" || typeof document === "undefined") return
+  h5PersistOnPageHideInstalled = true
+  const flush = () => {
+    void flushH5Database().catch(() => {})
+  }
+  window.addEventListener("pagehide", flush)
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") flush()
+  })
 }
 
 function getH5Database() {
@@ -90,9 +111,57 @@ async function queryAppSql<T>(sql: string) {
   })
 }
 
-async function persistH5Database() {
+/**
+ * H5 侧的落盘。
+ *
+ * `h5Db.export()` 会**物化整个数据库**，之后还要经 `new Uint8Array` /
+ * `buffer.slice` / IndexedDB structured clone 各拷一遍。原实现在**每条 `execute`**
+ * 之后都无条件跑一次（只在事务内被抑制），于是：
+ *
+ * - 每个 `status_changed`（每次工具调用都翻转）→ 摘要镜像 → 一次整库重写；
+ * - 每 800ms 打字防抖的草稿落盘 → 一次整库重写；
+ * - 冷启动 13 条 DDL（见 migrations）→ 13 次整库重写。
+ *
+ * 现在改成「脏标记 + 尾防抖」：写只置脏，真正的导出按静默期合并成一次。
+ * `flushH5Database()` 给必须落地的时刻用（事务结束、页面隐藏/卸载）。
+ */
+const H5_PERSIST_DEBOUNCE_MS = 400
+let h5Dirty = false
+let h5PersistTimer: ReturnType<typeof setTimeout> | null = null
+
+function markH5Dirty() {
   if (!h5Db) return
+  h5Dirty = true
   if (transactionDepth > 0) return
+  scheduleH5Persist()
+}
+
+function scheduleH5Persist() {
+  if (h5PersistTimer) return
+  h5PersistTimer = setTimeout(() => {
+    h5PersistTimer = null
+    void flushH5Database().catch((error) => {
+      console.warn("sqlite persist failed", error)
+    })
+  }, H5_PERSIST_DEBOUNCE_MS)
+}
+
+/**
+ * 立刻把当前数据库落盘。写路径不该直接调它 —— 调 `markH5Dirty()`。
+ */
+export async function flushH5Database() {
+  if (h5PersistTimer) {
+    clearTimeout(h5PersistTimer)
+    h5PersistTimer = null
+  }
+  if (!h5Db || !h5Dirty) return
+  if (transactionDepth > 0) {
+    // 事务里导出的是未提交的中间态，没有意义。重新排一次，别把这次脏状态丢在这里
+    // （`transaction()` 的 finally 也会冲，这只是双保险）。
+    scheduleH5Persist()
+    return
+  }
+  h5Dirty = false
   const bytes = new Uint8Array(h5Db.export())
   h5PersistQueue = h5PersistQueue
     .catch(() => {})
@@ -231,7 +300,7 @@ export const sqliteDriver: SqliteDriver = {
 
     const database = getH5Database()
     database.run(sql, normalizeParams(params))
-    await persistH5Database()
+    markH5Dirty()
   },
 
   async query<T>(sql: string, params?: unknown[]) {
@@ -268,7 +337,9 @@ export const sqliteDriver: SqliteDriver = {
     } finally {
       transactionDepth = Math.max(0, transactionDepth - 1)
       if (!isAppPlusRuntime()) {
-        await persistH5Database()
+        // 事务是「一批语句」的天然边界，这里直接冲盘而不是再等一个防抖窗口 ——
+        // 大批量写（replaceCompletedTurns 一次上千条语句）之后立刻落地更安全。
+        await flushH5Database()
       }
     }
   },

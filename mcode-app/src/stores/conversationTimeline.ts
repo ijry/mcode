@@ -145,12 +145,17 @@ function countCoveredTrailingAssistantTurns(
   liveMessage: LiveMessage
 ): number {
   const maxCount = Math.min(runLength, MAX_LIVE_OWNED_TRAILING_ASSISTANT_TURNS)
+  // live 侧的投影在整个循环里是不变量，必须提到循环外。以前每次迭代都经 isContentPrefix
+  // 重建一遍（两次 buildContentSignature(fullParts) + 一次 buildTextProjection），而
+  // fullParts 是整条 live 正文（含本轮所有 tool_call 的 input/output）—— 最坏 32 次迭代
+  // × 3 遍全量序列化。实测尾串 32 条 + 602KB live 正文时单次 59 ms（桌面 V8，手机 3~8 倍）。
+  const probe = createContentPrefixProbe(liveMessage.content)
   // 从最长的后缀往回试：命中的段数越多，说明这一整串确实属于当前 live 轮次。
   for (let count = maxCount; count >= 1; count -= 1) {
     const combined = turns
       .slice(turns.length - count)
       .flatMap((turn) => turn.content || [])
-    if (isContentPrefix(combined, liveMessage.content)) return count
+    if (probe.covers(combined)) return count
   }
   return 0
 }
@@ -173,10 +178,12 @@ function suppressAnchoredAssistantPartials(
   )
   const endIndex = nextUserIndex < 0 ? turns.length : nextUserIndex
   let changed = false
+  // 同一条 live 内容要和区间内每个候选轮次比一遍，同样只构建一次投影。
+  const probe = createContentPrefixProbe(liveMessage.content)
   const filtered = turns.filter((turn, index) => {
     if (index <= userIndex || index >= endIndex) return true
     if (turn.role !== "assistant") return true
-    const covered = isContentPrefix(turn.content, liveMessage.content)
+    const covered = probe.covers(turn.content)
     if (covered) changed = true
     return !covered
   })
@@ -184,24 +191,55 @@ function suppressAnchoredAssistantPartials(
   return changed ? filtered : turns
 }
 
-function isContentPrefix(prefixParts: MessageTurn["content"], fullParts: MessageTurn["content"]) {
-  if (isSignaturePrefix(prefixParts, fullParts, buildPartSignature)) return true
-  // 同一个 tool_call 在「已落盘轮次」和「实时累加器」里的 status/output/input 常常不一致：
-  // 落盘的是 JSONL 里 tool_use 记录的初始态，实时的是 active_tool_calls 的当前态
-  // （codeg-plus session_state.rs 的 push_tool_call_ref_if_absent 只追加引用，
-  // 快照时才解析成实体）。所以退一步只按 id+name 认这次调用。
-  if (isSignaturePrefix(prefixParts, fullParts, buildStablePartSignature)) return true
-  return isTextProjectionPrefix(prefixParts, fullParts)
+/**
+ * live 侧内容的「前缀探针」：三种投影各构建一次并留在闭包里，之后可以对任意多个候选
+ * 前缀复用。调用方通常要试 1~32 个候选，所以这里省掉的是整段 live 正文的重复序列化。
+ *
+ * 文本投影按需构建 —— 只有前两种签名都没命中时才用得上，保持和原先的惰性一致。
+ */
+function createContentPrefixProbe(fullParts: MessageTurn["content"]) {
+  const fullPartSignature = buildContentSignature(fullParts, buildPartSignature)
+  const fullStableSignature = buildContentSignature(fullParts, buildStablePartSignature)
+  let fullTextProjection: string | null = null
+
+  return {
+    covers(prefixParts: MessageTurn["content"]) {
+      if (hasSignaturePrefix(prefixParts, fullPartSignature, buildPartSignature)) {
+        return true
+      }
+      // 同一个 tool_call 在「已落盘轮次」和「实时累加器」里的 status/output/input 常常不
+      // 一致：落盘的是 JSONL 里 tool_use 记录的初始态，实时的是 active_tool_calls 的当前态
+      // （codeg-plus session_state.rs 的 push_tool_call_ref_if_absent 只追加引用，快照时
+      // 才解析成实体）。所以退一步只按 id+name 认这次调用。
+      if (hasSignaturePrefix(prefixParts, fullStableSignature, buildStablePartSignature)) {
+        return true
+      }
+      if (prefixParts.length === 0) return false
+      if (!prefixParts.every(isTextualContentPart)) return false
+      if (fullTextProjection === null) {
+        fullTextProjection = buildTextProjection(fullParts)
+      }
+      const prefixText = buildTextProjection(prefixParts)
+      return (
+        prefixText.length > 0 &&
+        fullTextProjection.length >= prefixText.length &&
+        fullTextProjection.startsWith(prefixText)
+      )
+    },
+  }
 }
 
-function isSignaturePrefix(
+function hasSignaturePrefix(
   prefixParts: MessageTurn["content"],
-  fullParts: MessageTurn["content"],
+  fullSignature: string,
   toSignature: (part: MessageTurn["content"][number]) => string
 ) {
   const prefix = buildContentSignature(prefixParts, toSignature)
-  const full = buildContentSignature(fullParts, toSignature)
-  return prefix.length > 0 && full.length >= prefix.length && full.startsWith(prefix)
+  return (
+    prefix.length > 0 &&
+    fullSignature.length >= prefix.length &&
+    fullSignature.startsWith(prefix)
+  )
 }
 
 function buildContentSignature(
@@ -242,21 +280,6 @@ function buildPartSignature(part: MessageTurn["content"][number]) {
   return ""
 }
 
-function isTextProjectionPrefix(
-  prefixParts: MessageTurn["content"],
-  fullParts: MessageTurn["content"]
-) {
-  if (prefixParts.length === 0) return false
-  if (!prefixParts.every(isTextualContentPart)) return false
-  const prefixText = buildTextProjection(prefixParts)
-  const fullText = buildTextProjection(fullParts)
-  return (
-    prefixText.length > 0 &&
-    fullText.length >= prefixText.length &&
-    fullText.startsWith(prefixText)
-  )
-}
-
 function isTextualContentPart(part: MessageTurn["content"][number]) {
   return part.type === "text" || part.type === "thinking"
 }
@@ -295,12 +318,16 @@ function dedupeEntriesByRoleAndId<T>(
   // 先出现的那一个身份上，避免本地缓存 id 与服务端 id 各占一行。
   const identityByDedupeKey = new Map<string, string>()
 
+  // 键用 `\u0000` 拼接而不是 JSON.stringify —— 这里每轮都要算一次（时间线在每个流式
+  // delta 上重建），而 role 只有三种字面量、id 里不会出现 NUL，拼接的歧义风险为零。
+  const buildIdentityKey = (role: string, id: string) => `${role}\u0000${id}`
+
   const resolveRetainKey = (turn: MessageTurn) => {
-    const ownKey = JSON.stringify([turn.role, turn.id])
+    const ownKey = buildIdentityKey(turn.role, turn.id)
     const dedupeKey = normalizeDedupeKey(turn)
     if (!dedupeKey) return ownKey
 
-    const groupKey = JSON.stringify([turn.role, dedupeKey])
+    const groupKey = buildIdentityKey(turn.role, dedupeKey)
     const existing = identityByDedupeKey.get(groupKey)
     if (existing !== undefined) return existing
     identityByDedupeKey.set(groupKey, ownKey)

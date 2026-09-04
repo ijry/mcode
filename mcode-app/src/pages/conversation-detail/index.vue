@@ -473,9 +473,10 @@ import {
   type PlanTaskFilter,
 } from "./detailPlanPresentation"
 import {
-  buildLiveActivitySignature,
+  buildTimelineTailSignature,
   canEditSharedPromptQueue,
   hasSharedPromptQueue,
+  isAssistantTailSignature,
   isSharedPromptQueueCancelDisabled,
   isSharedPromptQueueClearDisabled,
   isStoppableRuntimeStatus,
@@ -675,7 +676,6 @@ const longWaitStartedAt = ref(0)
 // 重连智能体在途标记：防止连点发出多个 connect（每个都会先 invalidate，互相把对方
 // 刚建好的连接拆掉）。
 const reconnectingDetailAgent = ref(false)
-const measuredPageHeight = ref(0)
 let detailBridgeHealthUnsubscribe: (() => void) | null = null
 let longWaitTimer: ReturnType<typeof setInterval> | null = null
 let bridgeRecoveryTimer: ReturnType<typeof setTimeout> | null = null
@@ -788,23 +788,39 @@ function isCurrentDetailTarget(input: {
   return true
 }
 
-const timelineTurns = computed(() => {
-  if (!conversationId.value) return []
-  return runtime.getTimelineTurns(conversationId.value)
-})
-
-const messages = computed(() => {
-  return timelineTurns.value.map((entry) => entry.turn)
-})
-
-const renderMessageItems = computed<RenderMessageItem[]>(() =>
-  buildRenderMessageItems(messages.value)
-)
-
 const session = computed(() => {
   if (!conversationId.value) return null
   return runtime.getOrCreateSession(conversationId.value)
 })
+
+/**
+ * 详情页外壳**不渲染消息列表** —— 列表由 `ConversationDetailInteractivePane` 负责
+ * （模板里那个 swiper-item 就是它），而 pane 自己建了一份同源的
+ * `messages` / `renderMessageItems`。
+ *
+ * 外壳这边以前也常驻一条 `timelineTurns → messages → renderMessageItems` 的 computed 链，
+ * 于是每个流式 delta 上「时间线重建 + 渲染项投影」的代价要跑两遍，其中一遍渲染不出
+ * 任何东西。而外壳的消费者全都只需要标量（有没有消息 / 尾项 id）。
+ *
+ * 所以这里只留两样：
+ *
+ * - `hasRenderedMessages`：从 store 的廉价字段判定，不投影。
+ *   `buildConversationTimeline` 的抑制逻辑只在有 liveMessage 时才会摘掉尾部轮次，
+ *   且 live 条目一定会被追加，所以「localTurns 非空 或 有 liveMessage」与
+ *   「时间线非空」等价。
+ * - `collectRenderMessageItems()`：**按需**投影，只给锚点解析这类点击态路径用，
+ *   不进任何 computed。
+ */
+const hasRenderedMessages = computed(() => {
+  const current = session.value
+  if (!current) return false
+  return current.localTurns.length > 0 || Boolean(current.liveMessage)
+})
+
+function collectRenderMessageItems(): RenderMessageItem[] {
+  if (!conversationId.value) return []
+  return buildRenderMessageItems(runtime.getMessages(conversationId.value))
+}
 const sharedPromptQueue = computed(() => session.value?.sharedPromptQueue || null)
 const showSharedPromptQueue = computed(() => hasSharedPromptQueue(sharedPromptQueue.value))
 const sharedPromptQueueItems = computed(() => sharedPromptQueue.value?.items || [])
@@ -1005,9 +1021,6 @@ const cyberEffectPhase = computed<CyberEffectPhase>(() =>
   })
 )
 const canStopSession = computed(() => isStoppableRuntimeStatus(runtimeStatus.value))
-const liveActivitySignature = computed(() =>
-  buildLiveActivitySignature(session.value?.liveMessage?.content || [])
-)
 watch(
   () => session.value?.liveMessage?.id || "",
   (next, previous) => {
@@ -1021,15 +1034,35 @@ watch(
   },
   { flush: "sync" }
 )
+/**
+ * 「有没有活动」的签名，只服务卡死检测（`handleLiveActivityChange`）。
+ *
+ * 以前这里是三重全量序列化：`buildLiveActivitySignature` 先把整条 live 正文
+ * （含本轮所有 tool_call 的 input/output）序列化成字符串，外层再把这个长字符串当字段
+ * **二次序列化**（带转义，比首次更贵），同时把最新那条合并消息的全部 content 序列化
+ * 第三遍 —— 每个流式 delta 一次。而 `ENABLE_STUCK_PROMPT_DETECTION` 写死 false，
+ * 也就是这些代价一直是纯浪费。
+ *
+ * 现在：开关关着就恒返回空串（computed 无依赖，永不失效）；开着时用常数长度的量拼一个
+ * 短签名 —— 卡死检测只需要知道「和上次比有没有动」，不需要内容本身。
+ */
 const conversationActivitySignature = computed(() => {
-  const latest = renderMessageItems.value[renderMessageItems.value.length - 1]
-  return JSON.stringify({
-    live: liveActivitySignature.value,
-    count: renderMessageItems.value.length,
-    latestId: latest?.anchorId || "",
-    latestStatus: latest?.message.status || "",
-    latestContent: JSON.stringify(latest?.message.content || []),
-  })
+  if (!ENABLE_STUCK_PROMPT_DETECTION) return ""
+  const current = session.value
+  const live = current?.liveMessage
+  const liveParts = live?.content || []
+  const tailPart = liveParts[liveParts.length - 1]
+  const tailToolCall = tailPart?.type === "tool_call" ? tailPart.tool_call : null
+  return [
+    live?.id || "",
+    liveParts.length,
+    tailPart?.type || "",
+    (tailPart?.text || tailPart?.thinking || "").length,
+    tailToolCall?.id || "",
+    tailToolCall?.status || "",
+    (tailToolCall?.output || "").length,
+    current?.localTurns.length ?? 0,
+  ].join("|")
 })
 const pendingPermissionCard = computed<PermissionRequest | null>(() => session.value?.pendingPermission || null)
 const pendingPermissionDescription = computed(() => {
@@ -1196,6 +1229,19 @@ const showBridgeRecoveredBanner = computed(() => {
   if (!bridgeRecoveredAt.value) return false
   return Date.now() - bridgeRecoveredAt.value < 3000
 })
+/**
+ * 注意：这条状态链（`detailStatusState` → `detailStatusBanner` / `runtimeStatusLabel` /
+ * `runtimeStatusClass` → `toolbarStatusText` → `toolbarNoticeItems`）以及
+ * `handleDetailStatusAction` 目前在外壳里**没有任何消费者** —— 状态条整套已经归
+ * `ConversationDetailInteractivePane` 所有（它自己算 `runtimeStatusLabel` /
+ * `runtimeStatusClass` 并渲染 `input-status-row`）。这里保留是为了不在性能改动里
+ * 夹带删除，清理另开一次。
+ *
+ * 因此下面的 `planTaskCount` 在计划抽屉关闭时是 0（`planTasks` 已改为抽屉门禁，
+ * 见其注释）。它只影响 `long_wait` 分支里「查看计划 / 查看最近一步」这个文案。
+ * **如果哪天要把这条链接回 UI**，`planTaskCount` 得换成一个不扫全表的判据
+ * （或者由 pane 把它已经算好的数量 emit 上来），不要把常驻的全表扫描加回去。
+ */
 const detailStatusState = computed<DetailStatusState>(() =>
   buildDetailStatusState({
     bridgeHealth: bridgeHealth.value,
@@ -1224,7 +1270,6 @@ const showRuntimeErrorFeedback = computed(() =>
   Boolean(runtimeErrorText.value) &&
   !showNetworkReachabilityFeedback.value
 )
-const hasRenderedMessages = computed(() => renderMessageItems.value.length > 0)
 const hasPendingInteraction = computed(() =>
   Boolean(pendingPermissionCard.value || pendingQuestionCard.value)
 )
@@ -1506,12 +1551,28 @@ function parseColorToRgb(color: string): [number, number, number] | null {
 
 const planStatusFilter = ref<PlanTaskFilter>("all")
 
-const planTasks = computed<PlanTask[]>(() =>
-  buildPlanTasks({
-    messages: messages.value,
+/**
+ * 计划任务**只在抽屉打开时**才算。
+ *
+ * `buildPlanTasks` 要遍历会话内每条消息的每个 part（每个 tool_call 还要走一遍
+ * `isSubagentToolCall` + 名称归一化，命中 tasklist/taskcreate 时还要 `JSON.parse`
+ * 工具输出），而它的输入含 `liveMessage.content` —— 做成常驻 computed 就等于每个流式
+ * delta 全表扫一遍。外壳这边唯一的消费者是下面那个抽屉，关着的时候不需要算。
+ *
+ * 状态条上的「计划 N/M」胶囊归 pane 所有（它自己有一份 `planTasks`），不走这里。
+ */
+const planTasks = computed<PlanTask[]>(() => {
+  if (!showPlanDrawer.value) return []
+  return collectPlanTasks()
+})
+
+function collectPlanTasks(): PlanTask[] {
+  if (!conversationId.value) return []
+  return buildPlanTasks({
+    messages: runtime.getMessages(conversationId.value),
     liveContent: session.value?.liveMessage?.content || [],
   })
-)
+}
 
 const completedTaskCount = computed(
   () => planTasks.value.filter((task) => task.status === "completed").length
@@ -1524,7 +1585,7 @@ const filteredPlanTasks = computed(() => {
 
 const showScrollToBottomFab = computed(
   () =>
-    renderMessageItems.value.length > 0 &&
+    hasRenderedMessages.value &&
     !shouldAutoFollowBottom.value &&
     !isRestoringScroll.value
 )
@@ -2312,6 +2373,7 @@ onHide(() => {
   clearBridgeRecoveryTimer()
   clearCyberSettleTimer()
   clearStuckPromptTimer()
+  clearViewportSyncThrottleTimer()
   captureActiveDetailLocalState()
   persistDetailRuntimeState()
   needsResumeRefresh.value = true
@@ -2326,6 +2388,7 @@ onUnload(() => {
   clearBridgeRecoveryTimer()
   clearCyberSettleTimer()
   clearStuckPromptTimer()
+  clearViewportSyncThrottleTimer()
   detailOpenedTabsUnsubscribe?.()
   detailOverviewInvalidationUnsubscribe?.()
   detailOpenedTabsUnsubscribe = null
@@ -2681,7 +2744,9 @@ function handleDetailStatusAction(actionKey?: "reconnect" | "reconnect_agent" | 
     return
   }
   if (actionKey === "inspect") {
-    if (planTasks.value.length > 0) {
+    // 按需扫一遍（这是点击态，不是渲染路径）。不能读 `planTasks` —— 它由
+    // `showPlanDrawer` 门禁，抽屉还没打开时恒为空数组。
+    if (collectPlanTasks().length > 0) {
       showPlanDrawer.value = true
       return
     }
@@ -2741,24 +2806,22 @@ onBackPress(() => {
 })
 
 watch(
-  () => renderMessageItems.value.map((item) => ({
-    id: item.anchorId,
-    role: item.message.role,
-    status: item.message.status,
-    content: JSON.stringify(item.message.content || []),
-  })),
-  (nextMessages, prevMessages) => {
+  () =>
+    buildTimelineTailSignature({
+      localTurns: session.value?.localTurns || [],
+      liveMessage: session.value?.liveMessage,
+    }),
+  (next, previous) => {
     if (loading.value || !hasInitialBottomScroll.value || isRestoringScroll.value) return
-    const latest = nextMessages[nextMessages.length - 1]
-    const previousLatest = prevMessages?.[prevMessages.length - 1]
     const hasAssistantDelta =
-      latest?.role === "assistant" &&
-      (!!latest?.content && latest.content !== previousLatest?.content || latest?.id !== previousLatest?.id)
+      isAssistantTailSignature(next) && next !== (previous || "")
 
     if (!shouldAutoFollowBottom.value && hasAssistantDelta) {
       hasUnreadBelow.value = true
     }
-    scheduleViewportSync()
+    // 流式期间这条 watch 会按 delta 触发，测量走节流版本；交互路径（composer 高度变化、
+    // 发送、tab 切换）仍走立即版本。
+    scheduleViewportSyncThrottled()
   }
 )
 
@@ -3965,10 +4028,6 @@ function measureMessageListHeight() {
       const effectiveTopHeight = topHeight > 0 ? topHeight : fallbackTopHeight
       const effectiveBottomHeight = bottomHeight > 0 ? bottomHeight : bottomComposerHeight.value
       const availableHeight = Math.max(0, currentDetailViewportHeight - effectiveTopHeight - effectiveBottomHeight)
-      measuredPageHeight.value = Math.max(
-        currentDetailViewportHeight,
-        effectiveTopHeight + effectiveBottomHeight + Math.max(contentHeight, availableHeight)
-      )
       if (availableHeight > 0) {
         detailDebugLog("message-list-height", {
           detailViewportHeight: currentDetailViewportHeight,
@@ -3992,7 +4051,7 @@ function measureMessageListHeight() {
 }
 
 function scrollToBottom(force = false) {
-  if (!renderMessageItems.value.length) return
+  if (!hasRenderedMessages.value) return
   if (!force && !shouldAutoFollowBottom.value) return
   shouldAutoFollowBottom.value = true
   hasUnreadBelow.value = false
@@ -4007,9 +4066,11 @@ function messageAnchorId(messageId: string) {
 }
 
 function resolveRenderAnchorId(messageId: string) {
+  // 恢复滚动位置时才调，一次一次的，不在渲染/流式路径上 —— 所以这里按需投影一次
+  // （`collectRenderMessageItems`），而不是常驻一条 computed 链。
   return resolveRenderAnchorIdValue({
     messageId,
-    items: renderMessageItems.value,
+    items: collectRenderMessageItems(),
   })
 }
 
@@ -4079,6 +4140,32 @@ function scheduleViewportSync(forceBottom = false) {
       messageScrollTop.value = action.scrollTop
     }
   })
+}
+
+/**
+ * 流式路径专用的节流版 `scheduleViewportSync`。
+ *
+ * `measureMessageListHeight()` 一次要发 6 个 `boundingClientRect`，而且它写回的
+ * `detailViewportHeight / topChromeHeight / bottomComposerHeight` 正是 scroll-view
+ * `:style` 的来源 —— 紧跟着列表变高去测、测完又改布局输入，是典型的 layout thrash。
+ * 按 delta 触发时必须降频；交互路径（composer 高度变化、发送、tab 切换）仍走立即版本，
+ * 那些是低频且要求即时响应的。
+ */
+const VIEWPORT_SYNC_THROTTLE_MS = 120
+let viewportSyncThrottleTimer: ReturnType<typeof setTimeout> | null = null
+
+function scheduleViewportSyncThrottled() {
+  if (viewportSyncThrottleTimer) return
+  viewportSyncThrottleTimer = setTimeout(() => {
+    viewportSyncThrottleTimer = null
+    scheduleViewportSync()
+  }, VIEWPORT_SYNC_THROTTLE_MS)
+}
+
+function clearViewportSyncThrottleTimer() {
+  if (!viewportSyncThrottleTimer) return
+  clearTimeout(viewportSyncThrottleTimer)
+  viewportSyncThrottleTimer = null
 }
 
 function closeMentionPanel() {

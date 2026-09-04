@@ -74,8 +74,19 @@ export function parseAskQuestionInput(input: unknown): AskQuestion[] {
   return questions
 }
 
+/**
+ * 超过这个长度的工具输出不再当作 ask_question 的候选来解析。
+ *
+ * `isAskQuestionToolCall` 的兜底分支会把**任意**工具输出丢进
+ * `parseAskQuestionOutcome`：一次 `JSON.parse`（非 JSON 时抛异常，V8 每次都要构造带栈的
+ * SyntaxError）+ 一次全文正则 + 按行 split 后每行两条正则。一个 Read 返回 200KB 就是
+ * 5000 行 × 2 条正则 —— 而 ask_question 的输出是几行结构化文本，永远不会这么长。
+ */
+const ASK_QUESTION_OUTPUT_MAX_CHARS = 8_000
+
 export function parseAskQuestionOutcome(output: unknown): AskQuestionOutcome | null {
   const outputText = typeof output === "string" ? output : ""
+  if (outputText.length > ASK_QUESTION_OUTPUT_MAX_CHARS) return null
   const parsed = parseMaybeJson(output)
   const fromJson = parseOutcomeJson(parsed)
   if (fromJson) return fromJson
@@ -206,6 +217,12 @@ function parseMaybeJson(value: unknown): unknown {
 
   const text = value.trim()
   if (!text) return null
+
+  // 先看首字符再决定要不要 parse。绝大多数工具输出是纯文本，直接 `JSON.parse` 会让
+  // V8 为每一次失败构造一个带栈的 SyntaxError —— 而这个函数在工具组展开时对每条工具
+  // 输出都会走一遍。
+  const first = text[0]
+  if (first !== "{" && first !== "[" && first !== '"') return value
 
   try {
     return JSON.parse(text)

@@ -1,4 +1,4 @@
-import type { ContentPart, MessageTurn } from "@/types/acp"
+import type { MessageTurn } from "@/types/acp"
 
 export interface RenderMessageItem {
   key: string
@@ -50,10 +50,6 @@ export function findLatestUserMessage(messages: MessageTurn[]): MessageTurn | un
   return latest
 }
 
-function cloneContentParts(parts: ContentPart[]): ContentPart[] {
-  return JSON.parse(JSON.stringify(parts || [])) as ContentPart[]
-}
-
 export function buildRenderMessageItems(messages: MessageTurn[]): RenderMessageItem[] {
   if (!Array.isArray(messages) || messages.length === 0) return []
 
@@ -78,13 +74,24 @@ export function buildRenderMessageItems(messages: MessageTurn[]): RenderMessageI
     const first = assistantBuffer[0]
     const last = assistantBuffer[assistantBuffer.length - 1]
     result.push({
-      key: `merged-${first.id}-${last.id}`,
+      // key 只用**首条**的 id。用过 `merged-${first.id}-${last.id}`：尾随 assistant 串
+      // 的成员在流式期间会变（新轮次落盘、`suppressCoveredTrailingAssistantPartial`
+      // 按内容前缀动态增删尾部轮次、live 结束换成落盘 id），`last.id` 一变 key 就变，
+      // Vue 视为不同节点，把整个合并气泡销毁重建 —— 里面所有 up-markdown 重新
+      // marked() + 重新走 up-parse。锚点仍然用 `last.id`，那才是要滚到的位置。
+      key: `merged-${first.id}`,
       anchorId: last.id,
       sourceIds: assistantBuffer.map((item) => item.id),
       message: {
         ...last,
         id: last.id,
-        content: assistantBuffer.flatMap((item) => cloneContentParts(item.content || [])),
+        // **不要深拷贝。** 这里曾是 `JSON.parse(JSON.stringify(...))`：解析器会把一条
+        // 逻辑回复拆成多条连续 assistant 记录，所以合并分支往往覆盖「整串尾随 assistant
+        // 轮次 + 整条 live 正文」，而这个函数在 `renderMessageItems` computed 里、
+        // 每个流式 delta 都会重跑一次。除了 CPU，深拷贝还让每个 part 对象换身份，
+        // 于是气泡内所有 ToolCallBlock / plan / tool_result 子组件的 prop 引用全变、
+        // 每个 delta 全部重渲染。下游只读，直接拼引用即可。
+        content: assistantBuffer.flatMap((item) => item.content || []),
         timestamp: last.timestamp,
       },
     })

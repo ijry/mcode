@@ -227,7 +227,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, getCurrentInstance, ref, watch } from "vue"
+import { computed, getCurrentInstance, onBeforeUnmount, ref, watch } from "vue"
 import { acpApi } from "@/api/acp"
 import { useConversationRuntimeStore } from "@/stores/conversationRuntime"
 import {
@@ -513,6 +513,14 @@ watch(creating, (active) => {
   } else {
     stopCreateProgressTimer()
   }
+})
+
+// `watch(creating)` 是唯一的停表路径，所以「creating 期间组件被销毁」会漏掉那个
+// 1.8s interval。页面侧本想兜底，但 `conversations/index.vue` 的 onUnload 里写的是
+// 一个**本文件私有、未导出**的名字（运行时 ReferenceError），等于没有兜底。
+// 兜底就该放在持有 timer 的这一侧。
+onBeforeUnmount(() => {
+  stopCreateProgressTimer()
 })
 
 function closeSheet() {

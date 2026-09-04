@@ -161,7 +161,7 @@
 
 <script setup lang="ts">
 import { computed, getCurrentInstance, onMounted, reactive, ref, watch } from "vue"
-import { onPullDownRefresh, onShow, onUnload } from "@dcloudio/uni-app"
+import { onHide, onPullDownRefresh, onShow, onUnload } from "@dcloudio/uni-app"
 import { acpApi } from "@/api/acp"
 import TaskPageHeader from "./components/TaskPageHeader.vue"
 import TaskCard from "./components/TaskCard.vue"
@@ -423,12 +423,35 @@ onMounted(() => {
 
 onShow(() => {
   // 从详情页返回、或从别处切回来时重新拉一次：详情页里的操作会改状态，而
-  // `task://changed` 在本页被 onUnload 拆掉过（tabBar 页切换不卸载，但订阅可能
+  // `task://changed` 在本页被 onHide 拆掉过（tabBar 页切换不卸载，但订阅可能
   // 因为断线重连而错过事件）。
-  if (connections.value.length > 0) {
-    void loadTasks()
-  } else {
-    void reload()
+  if (!nowTimer) {
+    nowTimer = setInterval(() => {
+      now.value = Date.now()
+    }, 60_000)
+  }
+  // **必须走 `reload()`**：`onHide` 把订阅拆了，而只有 `prepareConnections()` 会重新
+  // `ensureTaskChangedSubscription`。单独 `loadTasks()` 只刷数据、不会把订阅接回来。
+  void reload()
+})
+
+/**
+ * 切走本页就停表停订阅。
+ *
+ * 本页是 tabBar 页，`onUnload` 实践中几乎不触发 —— 只靠它清理的话，切到别的 tab 之后
+ * 主机每推一次 `task://changed`，这里仍然会打出一整轮**全量**列表请求
+ * （每条已连接 bucket 一次 `listWorkTasks(gateway, null)`），而结果没人看。
+ * 60s 的 `nowTimer` 同理：它只驱动时间文案，隐藏时每分钟让整列表重渲染一次纯属浪费。
+ */
+onHide(() => {
+  teardownSubscriptions()
+  if (refreshTimer) {
+    clearTimeout(refreshTimer)
+    refreshTimer = null
+  }
+  if (nowTimer) {
+    clearInterval(nowTimer)
+    nowTimer = null
   }
 })
 

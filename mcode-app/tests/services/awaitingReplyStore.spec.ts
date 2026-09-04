@@ -102,6 +102,100 @@ describe("awaitingReplyStore", () => {
     expect(v2).toBeGreaterThan(v1)
   })
 
+  // `version` 是会话列表 `overviewDisplayModel` 的依赖，一失效就要把所有可见卡重新
+  // 展开一遍、卡片对象身份全变、模板整棵子树重渲染。而 `pet://sessions` 是高频推送，
+  // 绝大多数载荷与上一次逐字相同 —— 无条件 +1 等于把「智能体在跑」翻译成「列表持续
+  // 重算重渲染」。
+  describe("version only moves when the table actually changed", () => {
+    it("stays put for an identical payload", () => {
+      const payload = {
+        sessions: [
+          { conversationId: 1, blockedOn: { kind: "question", requestId: "r1", title: "T" } },
+          { conversationId: 2, blockedOn: { kind: "permission", requestId: "r2" } },
+        ],
+      }
+
+      ingestPetSessionsPayload("inst-same", payload)
+      const afterFirst = getAwaitingReplyStoreVersion()
+
+      ingestPetSessionsPayload("inst-same", payload)
+      ingestPetSessionsPayload("inst-same", payload)
+      expect(getAwaitingReplyStoreVersion()).toBe(afterFirst)
+    })
+
+    it("stays put when both payloads have no blocked session", () => {
+      ingestPetSessionsPayload("inst-empty", { sessions: [{ conversationId: 9 }] })
+      const afterFirst = getAwaitingReplyStoreVersion()
+
+      // 会话在跑但没人在等 —— 这正是流式期间最常见的那一类载荷。
+      ingestPetSessionsPayload("inst-empty", { sessions: [{ conversationId: 9 }] })
+      ingestPetSessionsPayload("inst-empty", { sessions: [] })
+      expect(getAwaitingReplyStoreVersion()).toBe(afterFirst)
+    })
+
+    it("moves when a request id changes", () => {
+      ingestPetSessionsPayload("inst-req", {
+        sessions: [{ conversationId: 1, blockedOn: { kind: "question", requestId: "r1" } }],
+      })
+      const afterFirst = getAwaitingReplyStoreVersion()
+
+      ingestPetSessionsPayload("inst-req", {
+        sessions: [{ conversationId: 1, blockedOn: { kind: "question", requestId: "r2" } }],
+      })
+      expect(getAwaitingReplyStoreVersion()).toBeGreaterThan(afterFirst)
+    })
+
+    it("moves when the kind or title changes", () => {
+      ingestPetSessionsPayload("inst-kind", {
+        sessions: [{ conversationId: 1, blockedOn: { kind: "question", requestId: "r1" } }],
+      })
+      const afterQuestion = getAwaitingReplyStoreVersion()
+
+      ingestPetSessionsPayload("inst-kind", {
+        sessions: [{ conversationId: 1, blockedOn: { kind: "permission", requestId: "r1" } }],
+      })
+      const afterPermission = getAwaitingReplyStoreVersion()
+      expect(afterPermission).toBeGreaterThan(afterQuestion)
+
+      ingestPetSessionsPayload("inst-kind", {
+        sessions: [{ conversationId: 1, blockedOn: { kind: "permission", requestId: "r1", title: "T" } }],
+      })
+      expect(getAwaitingReplyStoreVersion()).toBeGreaterThan(afterPermission)
+    })
+
+    it("moves when a session appears or disappears", () => {
+      ingestPetSessionsPayload("inst-set", {
+        sessions: [{ conversationId: 1, blockedOn: { kind: "question", requestId: "r1" } }],
+      })
+      const afterOne = getAwaitingReplyStoreVersion()
+
+      ingestPetSessionsPayload("inst-set", {
+        sessions: [
+          { conversationId: 1, blockedOn: { kind: "question", requestId: "r1" } },
+          { conversationId: 2, blockedOn: { kind: "permission", requestId: "r2" } },
+        ],
+      })
+      const afterTwo = getAwaitingReplyStoreVersion()
+      expect(afterTwo).toBeGreaterThan(afterOne)
+
+      ingestPetSessionsPayload("inst-set", { sessions: [] })
+      expect(getAwaitingReplyStoreVersion()).toBeGreaterThan(afterTwo)
+    })
+
+    it("keeps instances independent", () => {
+      ingestPetSessionsPayload("inst-a", {
+        sessions: [{ conversationId: 1, blockedOn: { kind: "question", requestId: "r1" } }],
+      })
+      const afterA = getAwaitingReplyStoreVersion()
+
+      // 另一个实例第一次拿到同样的表 —— 对它来说是变化，必须 +1。
+      ingestPetSessionsPayload("inst-b", {
+        sessions: [{ conversationId: 1, blockedOn: { kind: "question", requestId: "r1" } }],
+      })
+      expect(getAwaitingReplyStoreVersion()).toBeGreaterThan(afterA)
+    })
+  })
+
   it("replaces map on ingest, not merge", () => {
     ingestPetSessionsPayload("inst-4", {
       sessions: [

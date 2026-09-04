@@ -78,7 +78,6 @@ function toggleExpanded() {
 function classifyToolCall(toolCall: ToolCall): "command" | "file_change" | "network" | "other" {
   const name = String(toolCall.name || "").trim().toLowerCase()
   const input = toolCall.input || {}
-  const inputText = JSON.stringify(input).toLowerCase()
 
   if (
     /shell|command|terminal|bash|powershell|cmd|exec|run/.test(name) ||
@@ -97,7 +96,11 @@ function classifyToolCall(toolCall: ToolCall): "command" | "file_change" | "netw
     "old_string" in input ||
     "new_string" in input ||
     "content" in input ||
-    /apply_patch|create_file|write_file|replace_in_file/.test(inputText)
+    // 最后一条兜底才需要看 input 的**文本**。以前 `JSON.stringify(input).toLowerCase()`
+    // 写在函数开头、无条件执行：一个 Write/Edit 的 input 可能是几十 KB 文件内容，而
+    // `classifiedCounts` 在气泡里每次 props 变化都要把每个工具走一遍。
+    // 挪到真正需要它的位置（前面的分支都不用），命中率极低的那条兜底才付这个钱。
+    matchesFileChangeInputText(input)
   ) {
     return "file_change"
   }
@@ -107,6 +110,17 @@ function classifyToolCall(toolCall: ToolCall): "command" | "file_change" | "netw
   }
 
   return "other"
+}
+
+const FILE_CHANGE_INPUT_TEXT_RE = /apply_patch|create_file|write_file|replace_in_file/
+
+/** 兜底：input 的键名没命中，但值里带着「这是一次文件改写」的标记。 */
+function matchesFileChangeInputText(input: Record<string, unknown>): boolean {
+  for (const value of Object.values(input)) {
+    if (typeof value !== "string") continue
+    if (FILE_CHANGE_INPUT_TEXT_RE.test(value.toLowerCase())) return true
+  }
+  return false
 }
 </script>
 

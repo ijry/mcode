@@ -146,6 +146,7 @@ function onStatusChange(newStatus: string) {
       happyTimer = null
       currentEmotion.value = computeEmotion()
       startIdleTimers()
+      scheduleAmbientMotion()
     }, 5000)
 
     lastStatus = newStatus
@@ -170,6 +171,10 @@ function onStatusChange(newStatus: string) {
 
   currentEmotion.value = computeEmotion()
   startIdleTimers()
+  // `clearAllTimers()`（本函数第一行）会把 `motionTimer` 一起清掉，而此前没有任何地方
+  // 重新排它 —— 于是智能体状态第一次变化之后，桌宠的随机动作就永久不再播了。
+  // 这里补上重排。`scheduleAmbientMotion` 自己会先清后排，重复调用是安全的。
+  scheduleAmbientMotion()
 
   lastStatus = newStatus
 }
@@ -179,6 +184,19 @@ function isActiveStatus(status: string): boolean {
 }
 
 function startIdleTimers() {
+  // 先清后排。`initPetEngine` 里 `watch(..., { immediate: true })` 会同步走一次
+  // `onStatusChange`，那条路径末尾已经调过 `startIdleTimers()`，紧接着 init 又调一次 ——
+  // 不清的话就留下两个无法取消的孤儿 setTimeout（10 分钟 / 30 分钟），到点把
+  // `currentEmotion` 改成 bored / sleeping。
+  if (idleTimer) {
+    clearTimeout(idleTimer)
+    idleTimer = null
+  }
+  if (sleepTimer) {
+    clearTimeout(sleepTimer)
+    sleepTimer = null
+  }
+
   idleTimer = setTimeout(() => {
     if (currentEmotion.value === 'idle') {
       currentEmotion.value = 'bored'
