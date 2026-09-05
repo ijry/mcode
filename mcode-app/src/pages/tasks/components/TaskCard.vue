@@ -36,8 +36,15 @@ const props = defineProps<{
   mergeQueueRank?: number
   /** 共享的渲染时刻，让同一屏所有相对时间口径一致。 */
   now: number
-  /** 正在执行的动作集合（格式 `${taskId}:${actionId}`）。 */
-  pendingActions?: Set<string>
+  /**
+   * 这张卡上**正在飞**的那个动作 id，空串 = 没有。
+   *
+   * 刻意是个**字符串**而不是 `Set` / `Map`：小程序的 props 要过 `setData` 的 JSON
+   * 序列化，集合类型到不了子组件（在 H5 上却能跑，所以这种错只会在打小程序包时才炸）。
+   * 一张卡同一时刻最多只有一个直发命令的动作在飞，所以一个标量就够，顺带让 `setData`
+   * 的 diff 只落在真正变了的那张卡上。
+   */
+  pendingAction?: string
 }>()
 
 const emit = defineEmits<{
@@ -104,11 +111,9 @@ const sourceLabel = computed(() => {
   return meta.owner_repo ? `#${meta.number} · ${meta.owner_repo}` : `#${meta.number}`
 })
 
-/** 检查某个动作是否正在执行 */
+/** 这个动作是不是正在飞 —— 主动作与次动作共用同一判定。 */
 function isActionPending(actionId: string): boolean {
-  if (!props.pendingActions) return false
-  const key = `${task.value.id}:${actionId}`
-  return props.pendingActions.has(key)
+  return Boolean(props.pendingAction) && props.pendingAction === actionId
 }
 </script>
 
@@ -200,10 +205,18 @@ function isActionPending(actionId: string): boolean {
       <view
         v-for="item in actions.secondaries"
         :key="item.id"
-        class="task-card__icon-btn"
+        :class="['task-card__icon-btn', isActionPending(item.id) && 'task-card__icon-btn--loading']"
         @click.stop="emit('action', item.id)"
       >
+        <!-- 归档 / 取消排队也是直发命令，作为次动作时同样要给个在转的反馈。 -->
+        <up-loading-icon
+          v-if="isActionPending(item.id)"
+          mode="circle"
+          size="14"
+          :color="upThemeVar('--up-tips-color', '#909193')"
+        ></up-loading-icon>
         <up-icon
+          v-else
           :name="item.icon"
           size="16"
           :color="item.danger ? upThemeVar('--up-error', '#fa3534') : upThemeVar('--up-tips-color', '#909193')"
@@ -410,5 +423,10 @@ function isActionPending(actionId: string): boolean {
 .task-card__icon-btn:active {
   opacity: 0.7;
   transform: scale(0.95);
+}
+
+.task-card__icon-btn--loading {
+  opacity: 0.7;
+  pointer-events: none;
 }
 </style>

@@ -64,7 +64,7 @@
             :entry="entry"
             :now="now"
             :mergeQueueRank="queueRanks.get(entry.task.id)"
-            :pendingActions="pendingActions"
+            :pendingAction="pendingActionByTask[entry.task.id] || ''"
             @open="openTaskDetail(entry)"
             @action="handleCardAction(entry, $event)"
           />
@@ -309,8 +309,14 @@ let nowTimer: ReturnType<typeof setInterval> | null = null
 let loadPromise: Promise<void> | null = null
 /** 有请求在飞时又被调用过 —— 飞完要补跑一趟（见 `loadTasks`）。 */
 let loadDirty = false
-/** 正在执行的动作 —— 用于显示加载状态，格式为 `${taskId}:${actionId}`。 */
-const pendingActions = ref<Set<string>>(new Set())
+/**
+ * 每个任务上**正在飞**的那个直发命令动作：`taskId → actionId`。
+ *
+ * 用普通对象而不是 `Map`/`Set`：它要经 props 下发到卡片，而小程序的 props 走
+ * `setData` 的 JSON 序列化，集合类型过不去（H5 上却能跑，于是这种错只在打小程序包
+ * 时才暴露）。卡片拿到的又只是其中一个字符串，见 `TaskCard.pendingAction`。
+ */
+const pendingActionByTask = ref<Record<number, string>>({})
 
 /* ===== 派生 ===== */
 
@@ -841,9 +847,9 @@ async function runAction(
     return
   }
 
-  const pendingKey = actionId ? `${entry.task.id}:${actionId}` : ""
-  if (pendingKey) {
-    pendingActions.value.add(pendingKey)
+  const pendingTaskId = actionId ? entry.task.id : 0
+  if (pendingTaskId) {
+    markPendingAction(pendingTaskId, actionId as TaskActionId)
   }
 
   try {
@@ -851,11 +857,29 @@ async function runAction(
   } catch (error) {
     uni.showToast({ title: toErrorMessage(error), icon: "none", duration: 3000 })
   } finally {
-    if (pendingKey) {
-      pendingActions.value.delete(pendingKey)
+    if (pendingTaskId) {
+      clearPendingAction(pendingTaskId, actionId as TaskActionId)
     }
     await loadTasks()
   }
+}
+
+/**
+ * 整个对象换新，而不是原地改一个键。
+ *
+ * `setData` 的 diff 与小程序端的 props 更新都认引用变化，原地改键在部分平台上不会
+ * 触发卡片重渲染 —— 那正是「点了没反应」的另一种写法。
+ */
+function markPendingAction(taskId: number, actionId: TaskActionId) {
+  pendingActionByTask.value = { ...pendingActionByTask.value, [taskId]: actionId }
+}
+
+/** 只有还是自己那个动作时才清 —— 别把后一个动作的转圈提前抹掉。 */
+function clearPendingAction(taskId: number, actionId: TaskActionId) {
+  if (pendingActionByTask.value[taskId] !== actionId) return
+  const next = { ...pendingActionByTask.value }
+  delete next[taskId]
+  pendingActionByTask.value = next
 }
 
 function refreshAfterAction() {
