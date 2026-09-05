@@ -6,7 +6,9 @@ import {
   formatRelativeTime,
   resolveTaskListEmptyText,
   taskCardNote,
+  taskCardNoteOverflows,
   taskCardTimestamp,
+  TASK_CARD_NOTE_CLAMP_LINES,
   taskDiffStat,
   taskEventDetail,
   taskEventLabel,
@@ -246,6 +248,43 @@ describe("taskPresentation", () => {
       expect(taskCardNote(makeTask({ status: "review", result_summary: "改完了" }))).toEqual({
         text: "改完了",
         tone: "summary",
+      })
+    })
+
+    /**
+     * 副行折叠的判定。`TaskCard` 只在这个函数为真时才挂行截断，所以「短文本判成要截断」
+     * 只是多给一个没用的按钮，而「长文本判成不要截断」会真的藏起文字 —— 断言里两边都钉住。
+     */
+    describe("note collapsing", () => {
+      it("leaves a short note alone", () => {
+        expect(taskCardNoteOverflows("改完了")).toBe(false)
+        expect(taskCardNoteOverflows("")).toBe(false)
+      })
+
+      it("collapses a summary that runs past two lines", () => {
+        // 60 个全宽字 = 120 个半宽单位，超过两行（56 × 2）。
+        expect(taskCardNoteOverflows("改".repeat(60))).toBe(true)
+        expect(taskCardNoteOverflows("a".repeat(120))).toBe(true)
+      })
+
+      /** 全宽字符占两倍宽度：同样 60 个字符，中文要截断，ASCII 还在两行内。 */
+      it("counts full-width characters as two units", () => {
+        expect(taskCardNoteOverflows("改".repeat(60))).toBe(true)
+        expect(taskCardNoteOverflows("a".repeat(60))).toBe(false)
+      })
+
+      /**
+       * 折叠态是空白折叠的（换行渲染成空格），所以缩进与空行不该把短文本判成要截断 ——
+       * 否则一条「结果\n\n改完了」会白给一个展开按钮。
+       */
+      it("ignores indentation and blank lines", () => {
+        expect(taskCardNoteOverflows(`结果\n\n${"  ".repeat(40)}改完了`)).toBe(false)
+        expect(taskCardNoteOverflows("   \n\n  ")).toBe(false)
+      })
+
+      /** `TaskCard` 的 `-webkit-line-clamp` 是写死的字面量，改这里就要改那边。 */
+      it("pins the clamp line count", () => {
+        expect(TASK_CARD_NOTE_CLAMP_LINES).toBe(2)
       })
     })
 

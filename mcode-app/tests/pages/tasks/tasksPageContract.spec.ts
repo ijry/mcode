@@ -303,6 +303,56 @@ describe("tasks page contract", () => {
   })
 
   /**
+   * 卡片副行（错误 / 实时进展 / 结果摘要）默认截断，点一下展开。
+   *
+   * 三条不变量，每条都对着一个具体的坑：截断与展开按钮必须由**同一个判定**驱动，
+   * 展开行必须吃掉点击，展开状态必须留在组件里。
+   */
+  describe("card note", () => {
+    const card = read("pages/tasks/components/TaskCard.vue")
+    const presentation = read("pages/tasks/taskPresentation.ts")
+
+    /**
+     * 行截断与展开按钮同源。只挂截断不给按钮 = 文字被藏起来且没法看；只给按钮不挂截断 =
+     * 点了什么都不变。两者都由 `taskCardNoteOverflows` 派生出的那一对 computed 决定。
+     */
+    it("drives the clamp and the toggle off the same predicate", () => {
+      expect(card).toContain("taskCardNoteOverflows")
+      expect(card).toContain("noteCollapsible")
+      expect(card).toContain("noteCollapsible.value && !noteExpanded.value")
+      expect(card).toContain("task-card__note-text--clamped")
+      expect(card).toContain('v-if="noteCollapsible"')
+    })
+
+    /** 整卡点击 = 打开详情，所以展开行必须 `.stop`，否则点「展开」会顺手跳走。 */
+    it("stops the toggle tap from opening the detail page", () => {
+      expect(card).toContain('@click.stop="toggleNote"')
+    })
+
+    /**
+     * CSS 里的行数是写死的字面量（`-webkit-line-clamp` 不吃 CSS 变量以外的东西，而这个
+     * 值又要参与 TS 侧的宽度估算），两处必须一致 —— 只改一边就会出现「截断三行、按四行
+     * 估算」这种对不上的折叠。
+     */
+    it("keeps the CSS clamp in step with the TS constant", () => {
+      const cssLines = card.match(/-webkit-line-clamp:\s*(\d+)/)
+      const tsLines = presentation.match(/TASK_CARD_NOTE_CLAMP_LINES\s*=\s*(\d+)/)
+      expect(cssLines?.[1]).toBeTruthy()
+      expect(tsLines?.[1]).toBeTruthy()
+      expect(cssLines?.[1]).toBe(tsLines?.[1])
+    })
+
+    /**
+     * 展开状态是组件本地的 `ref`，不当 prop 上提：它只是这张卡的观看姿态，上提一层就要
+     * 让页面为每张卡记一份状态，还得多过一次小程序的 `setData`。
+     */
+    it("keeps the expanded state inside the component", () => {
+      expect(card).toContain("const noteExpanded = ref(false)")
+      expect(extractPropsBlock(card)).not.toContain("noteExpanded")
+    })
+  })
+
+  /**
    * 不可撤销的动作要先问一句。
    *
    * 只覆盖**直发命令**的那几个：它们点下去就生效，而卡片上的按钮挨得很近。打开弹层的

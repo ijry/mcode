@@ -190,6 +190,66 @@ export function taskCardNote(task: WorkTask): { text: string; tone: "error" | "p
   return null
 }
 
+/**
+ * 副行折叠成几行。
+ *
+ * 两行是列表卡片能给的最大让步：一行读不出信息，三行起卡片高度又开始随文本失控 ——
+ * 一条几十行的错误栈能把一张卡撑满整屏。`TaskCard` 的 `-webkit-line-clamp` 必须与这个
+ * 数字一致（有源码扫描契约钉着）。
+ */
+export const TASK_CARD_NOTE_CLAMP_LINES = 2
+
+/**
+ * 副行一行放得下多少个「半宽字符」。
+ *
+ * 750rpx 屏减掉页面左右各 24rpx 得卡片宽度，再减掉卡片 20rpx 与副行 18rpx 的左右内距：
+ * 750 - 48 - 40 - 36 = 626rpx。22rpx 字号下一个半宽字符约 11rpx，于是一行约 56 个单位。
+ */
+const NOTE_UNITS_PER_LINE = 56
+
+/**
+ * 副行会不会超出折叠高度 —— 也就是「要不要给展开按钮」。
+ *
+ * 刻意**不量真实节点**：卡片在列表里成批渲染，`latest_progress` 还会边跑边变。量高度
+ * 既要每张卡一次 selectorQuery，又会在文本变化后留下过期结果 —— uview-plus 的
+ * `u-read-more` 正是只在 `mounted` 里量一次，所以这里用不了它。按字符宽度估算换来的是
+ * 纯函数、可裸测、跟着文本同步变。
+ *
+ * 折叠态是 CSS 行截断且**空白折叠**（换行渲染成空格），所以估算前先把连续空白压成一个
+ * 空格：缩进和空行不占折叠后的宽度。CJK 等全宽字符算 2 个单位。
+ *
+ * 估算宁可偏小：调用方只在这个函数为真时才挂行截断，于是低估的后果是「不截断、不给按钮、
+ * 文本照常显示」，而不是「截断了却没法展开」。
+ */
+export function taskCardNoteOverflows(text: string): boolean {
+  const collapsed = text.replace(/\s+/g, " ").trim()
+  if (!collapsed) return false
+  return displayWidth(collapsed) > NOTE_UNITS_PER_LINE * TASK_CARD_NOTE_CLAMP_LINES
+}
+
+/** 半宽算 1、全宽（CJK / 假名 / 全角标点等）算 2 的显示宽度。 */
+function displayWidth(text: string): number {
+  let width = 0
+  // 按码点遍历，代理对不会被算成两个字符。
+  for (const char of text) {
+    width += isFullWidth(char.codePointAt(0) as number) ? 2 : 1
+  }
+  return width
+}
+
+function isFullWidth(code: number): boolean {
+  return (
+    (code >= 0x1100 && code <= 0x115f) || // 韩文字母
+    (code >= 0x2e80 && code <= 0xa4cf) || // CJK 部首 / 假名 / 注音 / CJK 统一表意
+    (code >= 0xac00 && code <= 0xd7a3) || // 韩文音节
+    (code >= 0xf900 && code <= 0xfaff) || // CJK 兼容表意
+    (code >= 0xfe30 && code <= 0xfe6f) || // CJK 兼容形式
+    (code >= 0xff00 && code <= 0xff60) || // 全角 ASCII
+    (code >= 0xffe0 && code <= 0xffe6) || // 全角符号
+    (code >= 0x20000 && code <= 0x3fffd) // CJK 扩展 B 及以后
+  )
+}
+
 /** 变更规模，没有改动时返回 null（不画一个 `+0 -0` 的空壳）。 */
 export function taskDiffStat(
   task: WorkTask

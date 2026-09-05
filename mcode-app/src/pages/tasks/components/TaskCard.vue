@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, getCurrentInstance } from "vue"
+import { computed, getCurrentInstance, ref } from "vue"
 import TaskStatusChip from "./TaskStatusChip.vue"
 import type { TaskListEntry } from "../taskPresentation"
 import {
   formatRelativeTime,
   taskCardNote,
+  taskCardNoteOverflows,
   taskCardTimestamp,
   taskDiffStat,
 } from "../taskPresentation"
@@ -28,7 +29,8 @@ import {
  * 可做事项。
  *
  * 副行（错误 / 实时进展 / 结果摘要）只在任务确实有话说时出现，优先级见
- * `taskPresentation.taskCardNote`。
+ * `taskPresentation.taskCardNote`；超过两行时默认截断，点「展开」看全文 —— 结果摘要和
+ * 错误栈都可能几十行，任由它撑高会把整屏列表挤成一张卡。
  */
 const props = defineProps<{
   entry: TaskListEntry
@@ -69,6 +71,25 @@ const agentLogoClass = computed(() => overviewAgentLogoClass(agentType.value))
 const actions = computed(() => buildTaskActions(task.value))
 const note = computed(() => taskCardNote(task.value))
 const stat = computed(() => taskDiffStat(task.value))
+
+/**
+ * 副行展开状态。**组件本地**，不上提到页面：它纯粹是这张卡的观看姿态，页面不需要知道，
+ * 小程序也不用为它多走一次 `setData`。列表的 `v-for` 按 `连接键-任务 id` 取 key，所以
+ * 实例与任务一一对应，展开状态不会在滚动或刷新后串到别的任务上。
+ */
+const noteExpanded = ref(false)
+const noteCollapsible = computed(
+  () => Boolean(note.value) && taskCardNoteOverflows(note.value!.text)
+)
+const noteClamped = computed(() => noteCollapsible.value && !noteExpanded.value)
+
+/** 展开按钮跟着副行的语气走，免得在红底上出现一行看着像禁用的灰字。 */
+const noteToggleIconColor = computed(() => {
+  if (note.value?.tone === "error") return upThemeVar("--up-error", "#fa3534")
+  if (note.value?.tone === "progress") return upThemeVar("--up-primary", "#2979ff")
+  return upThemeVar("--up-light-color", "#c0c4cc")
+})
+
 const whenText = computed(() =>
   formatRelativeTime(taskCardTimestamp(task.value), props.now)
 )
@@ -114,6 +135,10 @@ const sourceLabel = computed(() => {
 /** 这个动作是不是正在飞 —— 主动作与次动作共用同一判定。 */
 function isActionPending(actionId: string): boolean {
   return Boolean(props.pendingAction) && props.pendingAction === actionId
+}
+
+function toggleNote() {
+  noteExpanded.value = !noteExpanded.value
 }
 </script>
 
@@ -175,7 +200,26 @@ function isActionPending(actionId: string): boolean {
     <text v-if="sourceLabel" class="task-card__source">{{ sourceLabel }}</text>
 
     <view v-if="note" :class="['task-card__note', `task-card__note--${note.tone}`]">
-      <text class="task-card__note-text">{{ note.text }}</text>
+      <text
+        :class="[
+          'task-card__note-text',
+          noteClamped && 'task-card__note-text--clamped',
+          noteCollapsible && noteExpanded && 'task-card__note-text--expanded',
+        ]"
+      >{{ note.text }}</text>
+      <!-- 只有这一行吃掉点击，副行文本本身仍然是「点卡片进详情」的一部分。 -->
+      <view
+        v-if="noteCollapsible"
+        class="task-card__note-toggle"
+        @click.stop="toggleNote"
+      >
+        <text class="task-card__note-toggle-text">{{ noteExpanded ? "收起" : "展开" }}</text>
+        <up-icon
+          :name="noteExpanded ? 'arrow-up' : 'arrow-down'"
+          size="12"
+          :color="noteToggleIconColor"
+        ></up-icon>
+      </view>
     </view>
 
     <view
@@ -350,6 +394,9 @@ function isActionPending(actionId: string): boolean {
 }
 
 .task-card__note {
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
   padding: 14rpx 18rpx;
   border-radius: 16rpx;
   background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
@@ -362,6 +409,44 @@ function isActionPending(actionId: string): boolean {
   word-break: break-word;
 }
 
+/*
+  两行截断：行高要可预测（与 `ForgeIssueRow` 的两行标题同法）。行数必须等于
+  `taskPresentation.TASK_CARD_NOTE_CLAMP_LINES`，源码扫描契约钉着这一条。
+
+  只在 `taskCardNoteOverflows` 判定为真时才挂上，所以判定偏小只会退化成「不截断」，
+  不会出现「截断了却没有展开按钮」。
+*/
+.task-card__note-text--clamped {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* 展开后才保留换行：错误栈和分段摘要靠换行才读得懂，折叠态则把空白压平换信息密度。 */
+.task-card__note-text--expanded {
+  white-space: pre-wrap;
+}
+
+.task-card__note-toggle {
+  align-self: flex-start;
+  min-height: 36rpx;
+  padding-right: 12rpx;
+  display: flex;
+  align-items: center;
+  gap: 6rpx;
+}
+
+.task-card__note-toggle:active {
+  opacity: 0.7;
+}
+
+.task-card__note-toggle-text {
+  font-size: 20rpx;
+  line-height: 1.2;
+  color: var(--up-tips-color, #909193);
+}
+
 .task-card__note--error {
   background: color-mix(in srgb, var(--up-error, #fa3534) 10%, var(--up-card-bg-color, #ffffff) 90%);
 }
@@ -370,7 +455,15 @@ function isActionPending(actionId: string): boolean {
   color: var(--up-error, #fa3534);
 }
 
+.task-card__note--error .task-card__note-toggle-text {
+  color: var(--up-error, #fa3534);
+}
+
 .task-card__note--progress .task-card__note-text {
+  color: var(--up-primary, #2979ff);
+}
+
+.task-card__note--progress .task-card__note-toggle-text {
   color: var(--up-primary, #2979ff);
 }
 
