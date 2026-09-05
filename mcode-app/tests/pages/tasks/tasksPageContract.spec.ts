@@ -149,10 +149,7 @@ describe("tasks page contract", () => {
      * 真相打架，所以每个写操作都是「发出去 → 重新拉取」。
      */
     it("refetches after every mutation instead of updating optimistically", () => {
-      const block = extractFunctionBlock(
-        source,
-        "async function runAction(entry: TaskListEntry, fn: (gateway: CodegGateway) => Promise<unknown>)"
-      )
+      const block = extractFunctionBlock(source, "async function runAction(")
       expect(block).toContain("await loadTasks()")
       expect(block).toContain("finally")
     })
@@ -196,10 +193,7 @@ describe("tasks page contract", () => {
     /** 任务 id 只在它自己的连接里唯一，动作必须落在那条连接的网关上。 */
     it("resolves the gateway per entry rather than using a global one", () => {
       expect(source).toContain("function bucketFor(entry: TaskListEntry)")
-      const block = extractFunctionBlock(
-        source,
-        "async function runAction(entry: TaskListEntry, fn: (gateway: CodegGateway) => Promise<unknown>)"
-      )
+      const block = extractFunctionBlock(source, "async function runAction(")
       expect(block).toContain("bucketFor(entry)")
       expect(block).toContain("bucket.gateway")
     })

@@ -38,7 +38,7 @@ const props = defineProps<{
   now: number
   /** 正在执行的动作集合（格式 `${taskId}:${actionId}`）。 */
   pendingActions?: Set<string>
-})()
+}>()
 
 const emit = defineEmits<{
   (event: "open"): void
