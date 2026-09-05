@@ -388,14 +388,7 @@ import {
 } from "@/services/connectionContext"
 import { getRelayClientId } from "@/services/gateway/relayClientIdentity"
 import { usePetStore } from "@/stores/pet"
-import {
-  buildAgentConfigContextKey,
-  createEmptyDetailAgentConfigState,
-  projectDetailConfigOptions,
-  type DetailAgentConfigState,
-} from "@/services/conversation/composerTools"
 import type {
-  AgentOptionsSnapshot,
   OpenedTabItem,
   RealtimeBridgeHealth,
   PermissionRequest,
@@ -514,11 +507,6 @@ import {
   resolveDetailShellViewportHeight,
   resolveBottomComposerHeight,
 } from "./detailLayoutPresentation"
-import {
-  activeModelStatusLabel as resolveActiveModelStatusLabel,
-  detailConfigOptionSummary,
-  detailPermissionSummary,
-} from "./detailComposerPresentation"
 import {
   normalizeSlashCommandsFromSnapshot,
   type SlashCommandItem,
@@ -683,7 +671,6 @@ let detailBridgeHealthUnsubscribe: (() => void) | null = null
 let longWaitTimer: ReturnType<typeof setInterval> | null = null
 let bridgeRecoveryTimer: ReturnType<typeof setTimeout> | null = null
 let cyberSettleTimer: ReturnType<typeof setTimeout> | null = null
-const detailAgentConfig = ref<DetailAgentConfigState>(createEmptyDetailAgentConfigState())
 const currentAgentType = ref("claude_code")
 const detailProjectEntries = ref<DetailProjectEntry[]>([])
 const detailTabsVersion = ref(0)
@@ -1086,56 +1073,9 @@ const questionSubmitReady = computed(() => {
   const pending = pendingQuestionCard.value
   return Boolean(pending && pending.questions.length > 0 && questionAnsweredCount.value === pending.questions.length)
 })
-const detailConfigProjection = computed(() =>
-  projectDetailConfigOptions(detailAgentConfig.value.configOptions)
-)
-const modelOption = computed(() => detailConfigProjection.value.modelOption)
-const reasoningOption = computed(() => detailConfigProjection.value.reasoningOption)
-const permissionOption = computed(() => detailConfigProjection.value.permissionOption)
-const hasModelOptions = computed(() => Boolean(modelOption.value))
-const hasPermissionOptions = computed(() =>
-  Boolean(detailAgentConfig.value.modes?.available_modes?.length || permissionOption.value)
-)
-const modelSummary = computed(() =>
-  detailConfigOptionSummary({
-    status: detailAgentConfig.value.status,
-    option: modelOption.value,
-    selectedValues: detailAgentConfig.value.selectedValues,
-    message: detailAgentConfig.value.message,
-  })
-)
-const reasoningSummary = computed(() =>
-  detailConfigOptionSummary({
-    status: detailAgentConfig.value.status,
-    option: reasoningOption.value,
-    selectedValues: detailAgentConfig.value.selectedValues,
-    message: detailAgentConfig.value.message,
-  })
-)
-const permissionSummary = computed(() =>
-  detailPermissionSummary({
-    status: detailAgentConfig.value.status,
-    state: detailAgentConfig.value,
-    permissionOption: permissionOption.value,
-  })
-)
-const activeModelStatusLabel = computed(() =>
-  resolveActiveModelStatusLabel({
-    modelSummary: modelSummary.value,
-    runtimeStatus: runtimeStatus.value,
-  })
-)
 const detailProjectPath = computed(() => {
   const matched = detailProjectEntries.value.find((item) => Number(item?.id || 0) === folderId.value)
   return String(matched?.path || "").trim()
-})
-const detailAgentConfigContextKey = computed(() => {
-  return buildAgentConfigContextKey(
-    detailConnectionKey.value,
-    currentAgentType.value,
-    detailProjectPath.value,
-    conversationId.value || null
-  )
 })
 const stats = computed(() => session.value?.stats || {
   inputTokens: 0,
@@ -1261,7 +1201,9 @@ const detailStatusState = computed<DetailStatusState>(() =>
     attachElapsedMs: attachElapsedMs.value,
     failureSuggestsRetry: detailFailureSuggestsRetry.value,
     longWaitElapsedMs: longWaitElapsedMs.value,
-    activeModelStatusLabel: activeModelStatusLabel.value,
+    // 外壳不持有 agent 配置（那份在 pane 的 composer 里），所以状态文案里没有模型名。
+    // pane 自己那三处状态计算同样传空串。
+    activeModelStatusLabel: "",
     planTaskCount: planTasks.value.length,
     themeColor: upThemeVar,
   })
@@ -1310,7 +1252,7 @@ const showBottomGeneratingIndicator = computed(() =>
   (runtimeStatus.value === "thinking" || runtimeStatus.value === "running_tool")
 )
 const bottomGeneratingText = computed(() =>
-  resolveBottomGeneratingText(runtimeStatus.value, activeModelStatusLabel.value)
+  resolveBottomGeneratingText(runtimeStatus.value, "")
 )
 const waitingStateBadgeText = computed(() => resolveWaitingStateBadgeText(runtimeStatus.value))
 const waitingStateTitle = computed(() => resolveWaitingStateTitle(runtimeStatus.value))
@@ -1331,7 +1273,7 @@ const runtimeStatusLabel = computed(() =>
   buildRuntimeStatusLabel({
     detailStatusCode: detailStatusState.value.code,
     runtimeStatus: runtimeStatus.value,
-    activeModelStatusLabel: activeModelStatusLabel.value,
+    activeModelStatusLabel: "",
   })
 )
 

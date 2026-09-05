@@ -2,6 +2,7 @@ import {
   effectiveTaskAgentSelection,
   hasTaskAgentConfigChoices,
   isInheritedTaskAgentSelection,
+  mergeTaskAgentSelection,
   readTaskAgentSelection,
   selectableTaskConfigOptions,
   taskAgentConfigPlaceholderState,
@@ -346,6 +347,65 @@ describe("hasTaskAgentConfigChoices", () => {
           { modes: null, config_options: [MODEL_OPTION] },
           { mode_id: null, config_values: {} }
         )
+      )
+    ).toBe(true)
+  })
+})
+
+/**
+ * 把「本机上次为这个 agent 配好的选项」叠在记录值之上。
+ *
+ * 这是「新建任务记住上次配置」的换算核心，两个方向都会静默出错：叠得太狠会抹掉记录里
+ * 记忆不认识的取值（可能是 PC 端配的），叠得不够则功能形同不存在。
+ */
+describe("mergeTaskAgentSelection", () => {
+  const base = { mode_id: "default", config_values: { model: "sonnet-5", effort: "medium" } }
+
+  it("returns the record untouched when nothing was remembered", () => {
+    expect(mergeTaskAgentSelection(base, null)).toEqual(base)
+  })
+
+  it("does not hand back the caller's own object", () => {
+    // 调用方会把结果继续投影，共享引用会让一次投影改到记录 ref 上。
+    const merged = mergeTaskAgentSelection(base, null)
+    expect(merged.config_values).not.toBe(base.config_values)
+  })
+
+  it("lets the memory win per field", () => {
+    expect(
+      mergeTaskAgentSelection(base, {
+        mode_id: "bypassPermissions",
+        config_values: { model: "opus-4.6" },
+      })
+    ).toEqual({
+      mode_id: "bypassPermissions",
+      // effort 只在记录里有 —— 逐字段覆盖必须留着它。
+      config_values: { model: "opus-4.6", effort: "medium" },
+    })
+  })
+
+  it("keeps the record's mode when the memory has none", () => {
+    expect(
+      mergeTaskAgentSelection(base, { mode_id: null, config_values: { model: "opus-4.6" } })
+    ).toEqual({ mode_id: "default", config_values: { model: "opus-4.6", effort: "medium" } })
+  })
+
+  it("adds options the record never had", () => {
+    expect(
+      mergeTaskAgentSelection(
+        { mode_id: null, config_values: {} },
+        { mode_id: "plan", config_values: { model: "opus-4.6" } }
+      )
+    ).toEqual({ mode_id: "plan", config_values: { model: "opus-4.6" } })
+  })
+
+  it("stays inherited when neither side defines anything", () => {
+    expect(
+      isInheritedTaskAgentSelection(
+        mergeTaskAgentSelection({ mode_id: null, config_values: {} }, {
+          mode_id: null,
+          config_values: {},
+        })
       )
     ).toBe(true)
   })

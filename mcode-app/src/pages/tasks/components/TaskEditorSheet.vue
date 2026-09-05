@@ -19,6 +19,8 @@ import {
   effectiveTaskAgentSelection,
   hasTaskAgentConfigChoices,
   INHERITED_TASK_AGENT_SELECTION,
+  isInheritedTaskAgentSelection,
+  mergeTaskAgentSelection,
   readTaskAgentSelection,
   taskAgentConfigPlaceholderState,
   taskAgentConfigStateFromSnapshot,
@@ -28,6 +30,10 @@ import {
   withTaskAgentMode,
   type TaskAgentConfigSelection,
 } from "../taskAgentConfig"
+import {
+  readTaskAgentOptionMemory,
+  writeTaskAgentOptionMemory,
+} from "@/services/taskAgentOptionMemory"
 import { AGENT_DISPLAY_ORDER, AGENT_LABELS } from "@/services/remoteSettings"
 import type { CodegGateway } from "@/services/gateway"
 import type { AgentOptionsSnapshot } from "@/types/acp"
@@ -56,6 +62,18 @@ import type { WorkTask, WorkTaskDraft, WorkTaskTemplate } from "@/types/workTask
  * 之后留下一份跨 agent 的垃圾配置。这也是 PC 端
  * `codeg-plus/src/components/tasks/task-editor-dialog.tsx` 的做法（一个 `agentDirty`
  * 管三样，换 agent 时清空另外两样）。
+ *
+ * **新建任务会沿用本机上次为该 agent 配好的选项**（`services/taskAgentOptionMemory.ts`）。
+ * 三条判定：
+ *
+ * 1. **只在新建时读**。编辑已有任务必须显示服务端那一行的真实值 —— 否则用户改个标题
+ *    就把这个任务的模型换了。
+ * 2. **记忆只覆盖选项，不覆盖 agent**。选哪个 agent 仍由文件夹生效设置（或用户显式挑选）
+ *    决定，记忆只在「这个 agent 的选项」这一层生效，因此不与 `default_agent_type` 打架。
+ * 3. **`agentDirty` 与「draft 是否带覆盖」分开**（`agentOverridden`）。`agentDirty` 仍然只
+ *    表示「用户在本弹层里动过 agent 或选项」，它同时是 `syncEffectiveAgent()` 的闸门；
+ *    若让记忆也置 `agentDirty`，换项目时 agent 就不再跟随新项目的默认值了。而 draft 那边
+ *    必须把记忆算成覆盖：界面显示着 Opus 却存 `agent_type: null`，是「显示一套、跑另一套」。
  */
 const props = defineProps<{
   show: boolean
@@ -114,11 +132,40 @@ const agentConfig = ref<DetailAgentConfigState>(createEmptyDetailAgentConfigStat
 const storedSelection = ref<TaskAgentConfigSelection>({ ...INHERITED_TASK_AGENT_SELECTION })
 /** 上次保存时记下的人类可读名字；探测不到时靠它显示「Opus 4.6」而不是一串 id。 */
 const storedLabels = ref<Record<string, unknown> | null>(null)
+/**
+ * 本机记忆：这台连接上、这个 agent 上次配好的选项。**只在新建任务时有值**。
+ * null = 没记过，此时一切照旧走文件夹生效设置。
+ */
+const rememberedSelection = ref<TaskAgentConfigSelection | null>(null)
+const rememberedLabels = ref<Record<string, unknown> | null>(null)
+/** 本机记忆这道闸是否开着；见 `loadRememberedSelection()` 的说明。 */
+const agentMemoryEnabled = ref(false)
 /** 在途探测的序号 —— 切项目/切 agent/关弹层后回来的旧响应据此丢弃。 */
 let agentProbeToken = 0
 
 const isEdit = computed(() => props.task != null)
 const sheetTitle = computed(() => (isEdit.value ? "编辑任务" : "新建任务"))
+
+/** 记忆真的贡献了取值（空记忆不算，那会盖住文件夹生效设置）。 */
+const agentRemembered = computed(
+  () => rememberedSelection.value != null && !isInheritedTaskAgentSelection(rememberedSelection.value)
+)
+/**
+ * draft 是否要带上 `agent_type` + 选项这份覆盖。
+ *
+ * 与 `agentDirty` 刻意分开：那一位管的是「用户动过没有」（也是 `syncEffectiveAgent` 的
+ * 闸门），而这里管的是「界面上显示的这套配置要不要存进去」。记忆命中时界面显示的是
+ * 记忆里那套，不存就成了「显示一套、跑另一套」。
+ */
+const agentOverridden = computed(() => agentDirty.value || agentRemembered.value)
+/** 投影与保存都用这一份：记录值打底，本机记忆叠在上面。 */
+const projectedSelection = computed(() =>
+  mergeTaskAgentSelection(storedSelection.value, rememberedSelection.value)
+)
+/** 摘要行的兜底名字：记忆命中时用记忆那份，否则用记录那份。 */
+const projectedLabels = computed(() =>
+  agentRemembered.value ? rememberedLabels.value || storedLabels.value : storedLabels.value
+)
 
 const projectColumns = computed(() => [
   props.projects.map((project) => ({
@@ -146,8 +193,8 @@ const selectedAgentLabel = computed(
 const agentConfigSummary = computed(() =>
   taskAgentConfigSummary({
     state: agentConfig.value,
-    stored: storedSelection.value,
-    fallbackLabels: storedLabels.value,
+    stored: projectedSelection.value,
+    fallbackLabels: projectedLabels.value,
   })
 )
 const agentConfigOpenable = computed(
@@ -215,6 +262,9 @@ function seedForm() {
       ? readTaskAgentSelection(task.config)
       : { ...INHERITED_TASK_AGENT_SELECTION }
     storedLabels.value = task.config?.label_snapshot || null
+    // 编辑已有任务不读本机记忆 —— 那一行的真实值必须胜出。
+    agentMemoryEnabled.value = false
+    loadRememberedSelection()
     return
   }
   title.value = ""
@@ -225,6 +275,56 @@ function seedForm() {
   agentType.value = "claude_code"
   storedSelection.value = { ...INHERITED_TASK_AGENT_SELECTION }
   storedLabels.value = null
+  agentMemoryEnabled.value = true
+  // 先按 `claude_code` 读一份；`syncEffectiveAgent()` 拿到生效 agent 后会再读一次。
+  loadRememberedSelection()
+}
+
+/**
+ * 读「上次为这个 agent 配好的选项」，写进 `rememberedSelection` 叠加层。
+ *
+ * 三处调用：`seedForm()`（新建）、`syncEffectiveAgent()`（生效 agent 到手后）、
+ * `onAgentConfirm()`（换了 agent）。**刻意不用 watch(agentType)**：`applyTemplate()` 与
+ * `resetAgentOverride()` 都会改 `agentType` 或撤下叠加层，watch 会在它们之后异步把记忆
+ * 又叠回去 —— 于是「恢复继承」看起来点了没反应、模板里的模型被记忆盖掉。
+ *
+ * `agentMemoryEnabled` 就是这道闸：编辑态、套过模板、点过「恢复继承」之后一律关掉，
+ * 直到用户重新挑一个 agent（那一下会把旧选择清空，此时需要一份新默认值）。
+ */
+function loadRememberedSelection() {
+  if (!agentMemoryEnabled.value) {
+    rememberedSelection.value = null
+    rememberedLabels.value = null
+    return
+  }
+  const entry = readTaskAgentOptionMemory(resolveInstanceKey(), agentType.value)
+  rememberedSelection.value = entry
+    ? { mode_id: entry.mode_id, config_values: { ...entry.config_values } }
+    : null
+  rememberedLabels.value = entry?.label_snapshot || null
+}
+
+/** 记下这次的选择，供下一个新建任务沿用。编辑态也记 —— 那同样是一次显式配置。 */
+function rememberCurrentSelection() {
+  const selection = effectiveTaskAgentSelection(agentConfig.value, projectedSelection.value)
+  writeTaskAgentOptionMemory(resolveInstanceKey(), agentType.value, {
+    mode_id: selection.mode_id,
+    config_values: selection.config_values,
+    label_snapshot: taskAgentLabelSnapshot({
+      agentType: agentType.value,
+      state: agentConfig.value,
+      selection,
+    }),
+  })
+}
+
+function resolveInstanceKey() {
+  try {
+    return props.gateway?.getRemoteInstanceDescriptor().instanceKey || ""
+  } catch (error) {
+    console.warn("resolve task editor instance key failed:", error)
+    return ""
+  }
 }
 
 /**
@@ -243,6 +343,8 @@ async function syncEffectiveAgent() {
     agentType.value = settings.default_agent_type || "claude_code"
     storedSelection.value = readTaskAgentSelection(settings)
     storedLabels.value = settings.label_snapshot || null
+    // 生效 agent 到手了才知道该读哪一份记忆（`seedForm()` 那次用的是 claude_code）。
+    loadRememberedSelection()
     // 探测已经落地时把继承来的那份选择投影上去（探测比设置先回来是常态）。
     reprojectStoredSelection()
   } catch (error) {
@@ -284,7 +386,7 @@ async function loadAgentConfig() {
   )
   const cached = readFreshAgentConfigCache(contextKey)
   if (cached) {
-    agentConfig.value = taskAgentConfigStateFromSnapshot(cached, storedSelection.value)
+    agentConfig.value = taskAgentConfigStateFromSnapshot(cached, projectedSelection.value)
     return
   }
 
@@ -296,7 +398,7 @@ async function loadAgentConfig() {
     })
     if (token !== agentProbeToken) return
     persistAgentConfigCache(contextKey, snapshot)
-    agentConfig.value = taskAgentConfigStateFromSnapshot(snapshot, storedSelection.value)
+    agentConfig.value = taskAgentConfigStateFromSnapshot(snapshot, projectedSelection.value)
   } catch (error) {
     if (token !== agentProbeToken) return
     console.warn("probe task agent options failed:", error)
@@ -307,7 +409,10 @@ async function loadAgentConfig() {
   }
 }
 
-/** 存储那份选择变了（生效设置回来了、套了模板）时，重新投影到已有快照上。 */
+/**
+ * 存储那份选择变了（生效设置回来了、套了模板、读到本机记忆）时，重新投影到已有快照上。
+ * 投影用的是 `projectedSelection` —— 记录值打底、本机记忆叠在上面的那一份。
+ */
 function reprojectStoredSelection() {
   if (agentConfig.value.status !== "ready") return
   agentConfig.value = taskAgentConfigStateFromSnapshot(
@@ -315,7 +420,7 @@ function reprojectStoredSelection() {
       modes: agentConfig.value.modes,
       config_options: agentConfig.value.configOptions,
     },
-    storedSelection.value
+    projectedSelection.value
   )
 }
 
@@ -358,6 +463,11 @@ function onAgentConfirm(event: any) {
     // 新 agent 上变成一份必被拒绝（或更糟：静默忽略）的配置。新的探测会填上新默认值。
     storedSelection.value = { ...INHERITED_TASK_AGENT_SELECTION }
     storedLabels.value = null
+    // 旧选择既然清空了，就该给新 agent 一份默认值 —— 优先用它自己的那份本机记忆。
+    // 编辑态不开这道闸：那一行的真实值只在用户显式换 agent 之后才应被替换，而这里正是
+    // 那个显式动作，所以两种模式都放行。
+    agentMemoryEnabled.value = true
+    loadRememberedSelection()
   } else if (option) {
     agentDirty.value = true
   }
@@ -368,6 +478,13 @@ function resetAgentOverride() {
   agentDirty.value = false
   storedSelection.value = { ...INHERITED_TASK_AGENT_SELECTION }
   storedLabels.value = null
+  // 本机记忆这道闸一起关掉，否则「恢复继承」之后选项行还显示着上次那份配置，看起来
+  // 点了没反应。**不删**存储里那条记录：这一下是针对本任务的取舍，不是「以后都别记了」。
+  agentMemoryEnabled.value = false
+  loadRememberedSelection()
+  // 立刻把界面拉回远端默认值。只靠下面那句 `syncEffectiveAgent()` 不够 —— 它在没有
+  // 网关或没选项目时直接 return，那时选项行会继续显示刚被撤下的那份配置。
+  reprojectStoredSelection()
   void syncEffectiveAgent()
 }
 
@@ -380,6 +497,7 @@ function openAgentConfigSheet() {
 function selectAgentMode(modeId: string) {
   agentConfig.value = withTaskAgentMode(agentConfig.value, modeId)
   agentDirty.value = true
+  rememberCurrentSelection()
 }
 
 function selectAgentConfigValue(payload: { configId: string; valueId: string }) {
@@ -389,6 +507,7 @@ function selectAgentConfigValue(payload: { configId: string; valueId: string }) 
     payload.valueId
   )
   agentDirty.value = true
+  rememberCurrentSelection()
 }
 
 /**
@@ -402,10 +521,13 @@ function selectAgentConfigValue(payload: { configId: string; valueId: string }) 
  * 选项部分走 `effectiveTaskAgentSelection`：存的是界面上**正在显示**的那个具体值，
  * 而不是「用户动过的那几个」。理由见 `taskAgentConfig.ts` —— 存空值等于跟随远端默认，
  * 而远端默认将来会变，同一个任务半年后会跑在另一个模型上。
+ *
+ * 分支判据是 `agentOverridden` 而不是 `agentDirty`：本机记忆命中时用户虽然没动过任何
+ * 控件，界面上显示的却已经是记忆里那套配置，走继承分支就成了「显示一套、跑另一套」。
  */
 function buildDraft(): WorkTaskDraft {
   const displayText = prompt.value.trim()
-  if (!agentDirty.value) {
+  if (!agentOverridden.value) {
     return {
       folder_id: folderId.value,
       title: title.value.trim(),
@@ -418,7 +540,7 @@ function buildDraft(): WorkTaskDraft {
       },
     }
   }
-  const selection = effectiveTaskAgentSelection(agentConfig.value, storedSelection.value)
+  const selection = effectiveTaskAgentSelection(agentConfig.value, projectedSelection.value)
   return {
     folder_id: folderId.value,
     title: title.value.trim(),
@@ -460,6 +582,9 @@ function applyTemplate(template: WorkTaskTemplate) {
     // 模板存的是三件套，一起套用 —— 只套 agent 会让模板里的模型选择静默丢掉。
     storedSelection.value = readTaskAgentSelection(template.config)
     storedLabels.value = template.config?.label_snapshot || null
+    // 模板是刚刚显式挑的，比本机记忆更新 —— 关掉那道闸，别把记忆叠在模板上面。
+    agentMemoryEnabled.value = false
+    loadRememberedSelection()
     reprojectStoredSelection()
   } else {
     resetAgentOverride()
@@ -574,12 +699,19 @@ async function removeTemplate(template: WorkTaskTemplate) {
               <text class="task-form-readonly__text">{{ selectedAgentLabel }}</text>
               <up-icon name="arrow-down" size="14" :color="upThemeVar('--up-light-color', '#c0c4cc')"></up-icon>
             </view>
-            <text v-if="!agentDirty" class="task-form-helper">
+            <text v-if="!agentOverridden" class="task-form-helper">
               继承自任务设置，修改后仅对本任务生效
             </text>
-            <view v-else class="task-editor__reset" @click="resetAgentOverride">
-              <text class="task-editor__reset-text">恢复继承</text>
-            </view>
+            <template v-else>
+              <!-- 用户没动过、只是沿用了本机记忆时要说清楚为什么选项已经填好了，
+                   否则这份覆盖看起来像凭空出现的。 -->
+              <text v-if="!agentDirty" class="task-form-helper">
+                已沿用上次为「{{ selectedAgentLabel }}」配置的智能体选项
+              </text>
+              <view class="task-editor__reset" @click="resetAgentOverride">
+                <text class="task-editor__reset-text">恢复继承</text>
+              </view>
+            </template>
           </view>
 
           <!-- 智能体选项（授权模式 / 模型 / 推理程度）。与 agent 同一个 dirty 位：

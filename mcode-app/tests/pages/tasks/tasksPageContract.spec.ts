@@ -322,7 +322,9 @@ describe("tasks page contract", () => {
      */
     it("saves the pinned selection rather than the raw selected values", () => {
       const draft = extractFunctionBlock(editor, "function buildDraft(): WorkTaskDraft")
-      expect(draft).toContain("effectiveTaskAgentSelection(agentConfig.value, storedSelection.value)")
+      expect(draft).toContain(
+        "effectiveTaskAgentSelection(agentConfig.value, projectedSelection.value)"
+      )
       expect(draft).toContain("mode_id: selection.mode_id")
       expect(draft).toContain("config_values: selection.config_values")
       expect(draft).toContain("taskAgentLabelSnapshot")
@@ -332,6 +334,83 @@ describe("tasks page contract", () => {
       const save = extractFunctionBlock(settings, "async function save()")
       expect(save).toContain("effectiveTaskAgentSelection(agentConfig.value, storedSelection.value)")
       expect(save).toContain("taskAgentLabelSnapshot")
+    })
+
+    /**
+     * 「记住每个 agent 上次配的选项」这条本机记忆。四条判定错了都不报错：要么记不住
+     * （功能形同不存在），要么把一份用户没要的配置悄悄冻进任务里。
+     */
+    it("carries the per-agent option memory into a new task", () => {
+      const memory = read("services/taskAgentOptionMemory.ts")
+
+      // 记忆按 agent 分桶（这就是需求本身），且不按项目路径分桶 —— 模型/推理程度是
+      // agent 级的概念，快照里已消失的取值由共享投影自然丢掉。
+      expect(memory).toContain("export function readTaskAgentOptionMemory(")
+      expect(memory).toContain("export function writeTaskAgentOptionMemory(")
+      expect(memory).toContain("normalizeAgentType")
+      expect(memory).not.toContain("projectPath")
+
+      // 投影与保存都用叠加后的那一份，否则记忆只影响界面、存的还是文件夹默认值。
+      expect(editor).toContain("mergeTaskAgentSelection(storedSelection.value, rememberedSelection.value)")
+      const probe = extractFunctionBlock(editor, "async function loadAgentConfig()")
+      expect(probe).toContain("taskAgentConfigStateFromSnapshot(cached, projectedSelection.value)")
+      expect(probe).toContain("taskAgentConfigStateFromSnapshot(snapshot, projectedSelection.value)")
+
+      // draft 的分支判据不能再是 `agentDirty`：记忆命中时用户没动过任何控件，界面上
+      // 却已经显示着记忆里那套配置，走继承分支就是「显示一套、跑另一套」。
+      const draft = extractFunctionBlock(editor, "function buildDraft(): WorkTaskDraft")
+      expect(draft).toContain("if (!agentOverridden.value)")
+      expect(draft).not.toContain("if (!agentDirty.value)")
+
+      // 但 `agentDirty` 本身仍然只表示「用户动过」—— 它是 `syncEffectiveAgent()` 的闸门，
+      // 被记忆置真的话换项目时 agent 就不再跟随新项目的默认值了。
+      const sync = extractFunctionBlock(editor, "async function syncEffectiveAgent()")
+      expect(sync).toContain("if (agentDirty.value ||")
+      expect(sync).toContain("loadRememberedSelection()")
+    })
+
+    /**
+     * 记忆只在**新建**时读。编辑已有任务必须显示服务端那一行的真实值 —— 否则用户改个
+     * 标题就把这个任务的模型换了。模板与「恢复继承」同样要压住记忆，不然一个显式动作
+     * 会被一份旧偏好悄悄盖回去。
+     */
+    it("lets the record, the template and the reset win over the memory", () => {
+      const seed = extractFunctionBlock(editor, "function seedForm()")
+      // 编辑分支关闸、新建分支开闸。
+      expect(seed).toContain("agentMemoryEnabled.value = false")
+      expect(seed).toContain("agentMemoryEnabled.value = true")
+
+      const template = extractFunctionBlock(
+        editor,
+        "function applyTemplate(template: WorkTaskTemplate)"
+      )
+      expect(template).toContain("agentMemoryEnabled.value = false")
+
+      const reset = extractFunctionBlock(editor, "function resetAgentOverride()")
+      expect(reset).toContain("agentMemoryEnabled.value = false")
+      // 关闸之后要立刻把叠加层撤下来，否则「恢复继承」看起来点了没反应。
+      expect(reset).toContain("loadRememberedSelection()")
+
+      // 换 agent 时重新开闸：旧选择已经清空，此时正需要新 agent 自己那份默认值。
+      const confirm = extractFunctionBlock(editor, "function onAgentConfirm(event: any)")
+      expect(confirm).toContain("agentMemoryEnabled.value = true")
+      expect(confirm).toContain("loadRememberedSelection()")
+
+      // 写入只发生在用户真的点了选项那两处，不在提交时 —— 否则一次「什么都没改就创建」
+      // 会把探测快照的远端默认值冻成偏好。
+      const mode = extractFunctionBlock(editor, "function selectAgentMode(modeId: string)")
+      expect(mode).toContain("rememberCurrentSelection()")
+      const value = extractFunctionBlock(
+        editor,
+        "function selectAgentConfigValue(payload: { configId: string; valueId: string })"
+      )
+      expect(value).toContain("rememberCurrentSelection()")
+      expect(extractFunctionBlock(editor, "function submit()")).not.toContain(
+        "rememberCurrentSelection()"
+      )
+
+      // 设置弹层是**共享**的文件夹默认值，不该被一台手机的个人偏好带着走。
+      expect(settings).not.toContain("taskAgentOptionMemory")
     })
 
     /**
@@ -393,7 +472,6 @@ describe("tasks page contract", () => {
         "reprojectStoredSelection()"
       )
     })
-
     /**
      * 探测的 watch **不能依赖 `props.gateway`**：它是个对象，而列表每次后台刷新都会重建
      * 连接桶（于是换一个新实例）。依赖它会让一次刷新重新投影状态，把用户刚在弹层里

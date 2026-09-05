@@ -4,7 +4,6 @@ import {
   detailConfigOptionSummary,
   detailPermissionSummary,
   nextExpandedConfigKey,
-  pendingComposerConfigActions,
   withSelectedDetailConfigValue,
   withSelectedDetailMode,
 } from "@/pages/conversation-detail/detailComposerPresentation"
@@ -131,7 +130,7 @@ describe("detailComposerPresentation", () => {
     expect(state.selectedValues.model).toBe("gpt-5")
   })
 
-  it("builds persistence payloads and pending apply actions", () => {
+  it("builds persistence payloads without sharing the state's objects", () => {
     const state = configState({
       selectedModeId: "plan",
       selectedValues: {
@@ -142,17 +141,19 @@ describe("detailComposerPresentation", () => {
     const payload = detailAgentConfigSelectionPayload(state)
     payload.selectedValues.model = "changed"
     expect(state.selectedValues.model).toBe("gpt-5-mini")
-
-    expect(pendingComposerConfigActions(state)).toEqual({
-      modeId: "plan",
-      configValues: [
-        { configId: "model", valueId: "gpt-5-mini" },
-        { configId: "reasoning", valueId: "medium" },
-      ],
-    })
+    expect(payload.selectedModeId).toBe("plan")
   })
 
-  it("P53 does not replay mode config mirrors when session modes are available", () => {
+  /**
+   * P53：有真实会话模式时，那个 id 为 `mode` 的配置项是 UI 镜像，必须从投影结果里摘掉 ——
+   * 对它调 `acp_set_config_option` 会被拒绝。
+   *
+   * 这里只断言投影本身。曾经还有一个 `pendingComposerConfigActions()` 助手把这份状态摊成
+   * 「待补发的 mode/config 动作」，它随「不自动重放会话配置」那次决定
+   * （`docs/mcode-architecture-notes/2026-07-03-detail-session-config-no-auto-replay.md`）
+   * 一起作废，现已删除 —— 保留它只会让人以为重放这条路还在。
+   */
+  it("P53 drops the mirrored mode config option when session modes exist", () => {
     const state = createReadyDetailAgentConfigState({
       modes: {
         current_mode_id: "default",
@@ -173,9 +174,8 @@ describe("detailComposerPresentation", () => {
     })
 
     expect(state.configOptions.map((item) => item.id)).toEqual(["model"])
-    expect(pendingComposerConfigActions(state)).toEqual({
-      modeId: "default",
-      configValues: [{ configId: "model", valueId: "gpt-5" }],
-    })
+    // 模式仍然留在模式通道里（`acp_set_mode` 用它），只是不再作为配置项出现。
+    expect(state.selectedModeId).toBe("default")
+    expect(state.selectedValues.mode).toBeUndefined()
   })
 })

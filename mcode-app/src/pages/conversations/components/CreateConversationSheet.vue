@@ -258,6 +258,7 @@ import {
   type AgentListOption,
 } from "@/services/conversation/composerTools"
 import { normalizeAgentType } from "@/services/conversation/agentType"
+import { rememberConversationSessionMode } from "@/services/conversation/sessionModeMemory"
 import { parseConversationId } from "@/services/conversation/conversationIdentity"
 import { seedCreatedConversationSummary } from "@/services/conversation/createdConversationSeed"
 import { METADATA_ONLY_CONVERSATION_TAIL_TURNS } from "@/services/conversation/conversationHistoryWindowContract"
@@ -989,6 +990,26 @@ async function confirmCreate() {
     const newConversationId = parseConversationId(createResult)
     if (!newConversationId) {
       throw new Error("创建会话失败：返回数据异常")
+    }
+
+    /*
+     * 把新建时选的授权模式记进会话记忆，这样它能活过第一次重连。
+     *
+     * 上面那次 `acp_connect` 只作用于这一条连接，而空闲连接会被 codeg-plus 收走
+     * （`acp/manager.rs::sweep_idle`）；重连时适配器按 `~/.claude` 的
+     * `permissions.defaultMode` 重新播种，用户于是在下一条回复时莫名回到「Manual」。
+     * 详见 `services/conversation/sessionModeMemory.ts`。
+     *
+     * **只记模式，不记模型/推理程度**：那两样多半是探测快照里的远端默认值（用户看过但
+     * 没挑过），把它们钉死会让会话在几天后仍跑在一个早已过期的默认模型上；而权限模式
+     * 是用户显式挑的、且退回默认会实际改变 agent 的行为。
+     */
+    if (preferredModeId) {
+      rememberConversationSessionMode({
+        conversationId: newConversationId,
+        agentType,
+        modeId: preferredModeId,
+      })
     }
 
     const taskContent = newTaskContent.value.trim()

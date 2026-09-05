@@ -98,15 +98,3 @@ export function withSelectedDetailConfigValue(input: {
     },
   }
 }
-
-export function pendingComposerConfigActions(state: DetailAgentConfigState) {
-  return {
-    modeId: state.selectedModeId || "",
-    configValues: state.configOptions
-      .map((option) => ({
-        configId: option.id,
-        valueId: state.selectedValues[option.id] || "",
-      }))
-      .filter((item) => item.configId && item.valueId),
-  }
-}

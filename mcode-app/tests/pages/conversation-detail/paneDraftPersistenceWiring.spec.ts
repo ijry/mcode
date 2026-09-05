@@ -89,10 +89,14 @@ describe("pane draft persistence wiring contract", () => {
     expect(source).not.toContain("attachmentsJson: JSON.stringify(attachments.value)")
     expect(source).not.toContain("draftQueueJson: JSON.stringify(draftQueue.value)")
 
-    // 注意断言范围只到**数据库层**。index.vue 里还有两处往内存缓存 / uni.storage 写
-    // 空草稿的调用（`persistConversationDraftSnapshot` 与 `cacheStore.persistViewState`），
-    // 它们同样是死代码，但**不会**干扰 pane —— pane 的恢复只读 SQLite 那一层，
-    // 不查内存缓存和 uni.storage。它们随下一步的死代码清理一起删，那时这条测试再收紧。
+    // 内存缓存 / uni.storage 那两处写空草稿的残留（`persistConversationDraftSnapshot` 与
+    // 带草稿字段的 `cacheStore.persistViewState`）已随死代码清理删掉，所以断言收紧到
+    // 「页面里连这些 composer ref 都不存在」—— 少了它们，任何新的写入都无从下手。
+    for (const gone of ["inputText", "attachments", "draftQueue"]) {
+      expect(source).not.toContain(`${gone}.value`)
+    }
+    // `persistViewState` 本身留着：滚动位置确实归外壳所有。
+    expect(source).toContain("cacheStore.persistViewState({")
   })
 
   // PC 端 opened-tab 预热在抽离 pane 时丢过一次：`ensurePcTabReadyForPrompt` 留在了

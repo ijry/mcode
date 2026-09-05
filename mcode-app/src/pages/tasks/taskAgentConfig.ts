@@ -59,12 +59,39 @@ export function isInheritedTaskAgentSelection(selection: TaskAgentConfigSelectio
 }
 
 /**
+ * 把「本机上次为这个 agent 配好的选项」叠在记录值之上。
+ *
+ * 逐字段覆盖而不是整份替换：记录里可能配了记忆没有的选项（PC 端配的、或这台机器上
+ * 的 agent 版本还不认的），整份替换会把它们抹掉 —— 与 `effectiveTaskAgentSelection`
+ * 「快照没广告过的取值一律保留」是同一条理由。
+ *
+ * `overlay` 为 null 表示没有记忆，原样返回记录值（**不是**返回一份空选择：那会被当成
+ * 「显式选了空」而盖住文件夹生效设置）。
+ */
+export function mergeTaskAgentSelection(
+  base: TaskAgentConfigSelection,
+  overlay: TaskAgentConfigSelection | null
+): TaskAgentConfigSelection {
+  if (!overlay) {
+    return { mode_id: base.mode_id, config_values: { ...base.config_values } }
+  }
+  return {
+    mode_id: overlay.mode_id || base.mode_id,
+    config_values: { ...base.config_values, ...overlay.config_values },
+  }
+}
+
+/**
  * 探测快照 + 存储里的那份选择 → 界面状态。
  *
  * 存储那份走 `previousState` 传进去，所以它会被**投影**到快照上：仍然存在的取值保留，
- * 已经消失的取值退回该选项的当前值。刻意**不读**新建会话弹层那份持久化选择
- * （`readPersistedAgentConfigSelection`）—— 任务的选择来自服务端记录，不是本机上次
- * 在 composer 里挑的东西。
+ * 已经消失的取值退回该选项的当前值。
+ *
+ * 刻意**不读**新建会话弹层那份持久化选择（`composerTools.readPersistedAgentConfigSelection`）
+ * —— 那份按会话分桶，语义是「这条会话里的现场选择」，任务不在客户端起会话。任务这条路
+ * 的本机记忆是 `services/taskAgentOptionMemory.ts`，由调用方先用
+ * {@link mergeTaskAgentSelection} 叠在记录值之上再传进来，**且只在新建任务时叠** ——
+ * 编辑已有任务必须显示服务端那一行的真实值，否则用户改个标题就把模型换了。
  */
 export function taskAgentConfigStateFromSnapshot(
   snapshot: AgentOptionsSnapshot,

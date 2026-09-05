@@ -547,7 +547,13 @@ describe("ConversationDetailBody", () => {
     expect(paneSource).toContain("void loadDetailAgentConfig()");
     expect(paneSource).not.toContain("void applyPendingComposerConfig()");
 
-    // index.vue 只保留仍归它所有的 `/` 命令表，不再持有 agent 配置。
+    // 配置的缓存键**按会话分桶**：一条会话的模型/权限选择不能渗到另一条恰好用同一个
+    // (连接, agent, 项目路径) 的会话上。这条断言此前锁在 index.vue 那份死代码上，
+    // 现在跟着实现挪到 pane。
+    expect(paneSource).toContain("Number(props.conversationId || 0) || null");
+
+    // index.vue 只保留仍归它所有的 `/` 命令表，不再持有 agent 配置 —— 那份从未被赋值、
+    // 也从未被渲染的副本已删除，所以这里连状态名都不该再出现。
     const pageSource = fs.readFileSync(
       path.resolve(
         __dirname,
@@ -555,8 +561,9 @@ describe("ConversationDetailBody", () => {
       ),
       "utf8",
     );
-    expect(pageSource).toContain("conversationId.value || null");
     expect(pageSource).not.toContain("loadDetailAgentConfig");
+    expect(pageSource).not.toContain("detailAgentConfig");
+    expect(pageSource).not.toContain("buildAgentConfigContextKey");
   });
 
   it("does not append the route conversation while hydrating detail tabs", () => {

@@ -1,5 +1,6 @@
 import { acpApi } from "@/api/acp"
 import { useAuthStore } from "@/stores/auth"
+import { readConversationSessionSelection } from "@/services/conversation/sessionModeMemory"
 import type { ConnectionInfo } from "@/types/acp"
 
 export interface ManagedConversationConnection {
@@ -77,12 +78,27 @@ export const connectionSessionManager = {
     }
 
     const instanceKey = input.instanceKey || getCurrentInstanceKey()
+    /*
+     * 把用户在这条会话里显式选过的授权模式 / 配置取值一起交上去。
+     *
+     * 必须在这里交，因为 ACP 会话的模式活在 agent 进程里，而 codeg-plus 会把空闲连接
+     * 收走（`acp/manager.rs::sweep_idle`）；重连时新会话由适配器按 `~/.claude` 的
+     * `permissions.defaultMode` 播种，于是用户在手机上切的 bypass 每隔几分钟就退回
+     * 「Manual」。见 `services/conversation/sessionModeMemory.ts` 的完整说明。
+     *
+     * 这**不是** 2026-07-03 那条「不自动重放」所禁止的行为：codeg-plus 的 `spawn_agent`
+     * 先做连接去重，命中已有会话时直接复用并跳过 `apply_preferred_session_options`，
+     * 所以这两个字段只在「连接由我们新建」时生效 —— 那时没有活着的会话会被打扰。
+     */
+    const remembered = readConversationSessionSelection(input.conversationId, input.agentType)
     const connection = await acpApi.acpConnect(
       input.agentType,
       input.workingDir,
       input.sessionId,
-      undefined,
-      undefined,
+      remembered?.modeId || undefined,
+      remembered && Object.keys(remembered.configValues).length > 0
+        ? remembered.configValues
+        : undefined,
       { instanceKey }
     )
 

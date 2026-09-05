@@ -1368,6 +1368,10 @@ import {
   type ComposerConfigKey,
   type DetailAgentConfigState,
 } from "@/services/conversation/composerTools";
+import {
+  rememberConversationSessionConfigValue,
+  rememberConversationSessionMode,
+} from "@/services/conversation/sessionModeMemory";
 import { touchHotConversation } from "@/services/conversation/hotConversationCoordinator";
 import {
   applyMentionReference,
@@ -2702,6 +2706,7 @@ async function selectDetailMode(modeId: string) {
       modeId,
     );
     persistDetailAgentConfigSelection();
+    rememberSessionMode(modeId);
     return;
   }
   try {
@@ -2711,12 +2716,30 @@ async function selectDetailMode(modeId: string) {
       modeId,
     );
     persistDetailAgentConfigSelection();
+    rememberSessionMode(modeId);
   } catch (error) {
     uni.showToast({
       title: `模型切换失败: ${toErrorMessage(error)}`,
       icon: "none",
     });
   }
+}
+
+/**
+ * 除了本机 UI 的持久化，还要把这次显式选择记到会话记忆里 —— 它会在下一次建连时
+ * 作为 `preferredModeId` 交回去。
+ *
+ * 两份存储各管一件事，不能合：`persistDetailAgentConfigSelection()` 存的是**这台设备
+ * 上这块界面**该显示什么（键里含项目路径与 instanceKey，只给 UI 用）；这一份是**要发
+ * 回远端的意图**，因此只按 `conversationId` + agent 分桶 —— 建连路径拿不到项目路径，
+ * 也不认识详情页那套 instanceKey。详见 `services/conversation/sessionModeMemory.ts`。
+ */
+function rememberSessionMode(modeId: string) {
+  rememberConversationSessionMode({
+    conversationId: Number(props.conversationId || 0),
+    agentType: normalizedAgentType.value,
+    modeId,
+  });
 }
 
 async function selectDetailConfigValue(configId: string, valueId: string) {
@@ -2729,6 +2752,7 @@ async function selectDetailConfigValue(configId: string, valueId: string) {
       valueId,
     });
     persistDetailAgentConfigSelection();
+    rememberSessionConfigValue(configId, valueId);
     return;
   }
   try {
@@ -2739,12 +2763,22 @@ async function selectDetailConfigValue(configId: string, valueId: string) {
       valueId,
     });
     persistDetailAgentConfigSelection();
+    rememberSessionConfigValue(configId, valueId);
   } catch (error) {
     uni.showToast({
       title: `配置切换失败: ${toErrorMessage(error)}`,
       icon: "none",
     });
   }
+}
+
+function rememberSessionConfigValue(configId: string, valueId: string) {
+  rememberConversationSessionConfigValue({
+    conversationId: Number(props.conversationId || 0),
+    agentType: normalizedAgentType.value,
+    configId,
+    valueId,
+  });
 }
 
 function scrollToBottom(force = false) {
