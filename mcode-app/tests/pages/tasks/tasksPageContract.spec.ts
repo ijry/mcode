@@ -16,6 +16,14 @@ function extractFunctionBlock(source: string, signature: string) {
   return source.slice(start, end < 0 ? undefined : end + 2)
 }
 
+/** `defineProps<{ … }>()` 里那段类型字面量；没有 `defineProps` 的组件返回空串。 */
+function extractPropsBlock(source: string) {
+  const start = source.indexOf("defineProps<{")
+  if (start < 0) return ""
+  const end = source.indexOf("}>()", start)
+  return source.slice(start, end < 0 ? undefined : end)
+}
+
 /**
  * 任务页的**源码扫描契约**。
  *
@@ -149,10 +157,7 @@ describe("tasks page contract", () => {
      * 真相打架，所以每个写操作都是「发出去 → 重新拉取」。
      */
     it("refetches after every mutation instead of updating optimistically", () => {
-      const block = extractFunctionBlock(
-        source,
-        "async function runAction(entry: TaskListEntry, fn: (gateway: CodegGateway) => Promise<unknown>)"
-      )
+      const block = extractFunctionBlock(source, "async function runAction(")
       expect(block).toContain("await loadTasks()")
       expect(block).toContain("finally")
     })
@@ -196,12 +201,35 @@ describe("tasks page contract", () => {
     /** 任务 id 只在它自己的连接里唯一，动作必须落在那条连接的网关上。 */
     it("resolves the gateway per entry rather than using a global one", () => {
       expect(source).toContain("function bucketFor(entry: TaskListEntry)")
-      const block = extractFunctionBlock(
-        source,
-        "async function runAction(entry: TaskListEntry, fn: (gateway: CodegGateway) => Promise<unknown>)"
-      )
+      const block = extractFunctionBlock(source, "async function runAction(")
       expect(block).toContain("bucketFor(entry)")
       expect(block).toContain("bucket.gateway")
+    })
+
+    /**
+     * 直发命令的动作（开始 / 归档 / 取消排队）在往返期间必须有个在转的东西 ——
+     * 否则就是最初那个 bug：点了「开始」像没反应，过一会儿才发现真的开始了。
+     */
+    it("marks the in-flight action so the card can show it spinning", () => {
+      expect(source).toContain(":pendingAction=\"pendingActionByTask[entry.task.id] || ''\"")
+      const block = extractFunctionBlock(source, "async function runAction(")
+      expect(block).toContain("markPendingAction")
+      expect(block).toContain("clearPendingAction")
+      // 清理必须在 finally 里，失败路径也要把转圈收掉。
+      expect(block).toContain("finally")
+    })
+
+    /**
+     * 原地改一个键在部分平台上不触发子组件更新（`setData` 与小程序端的 props 更新
+     * 都认引用变化）—— 那会让转圈一直停在那儿，或者根本不出现。
+     */
+    it("replaces the pending map instead of mutating a key in place", () => {
+      expect(extractFunctionBlock(source, "function markPendingAction(")).toContain(
+        "...pendingActionByTask.value"
+      )
+      expect(extractFunctionBlock(source, "function clearPendingAction(")).toContain(
+        "...pendingActionByTask.value"
+      )
     })
 
     /** 任务的会话跑在 worktree 里，用项目 folder_id 会让详情页定位到错误的目录。 */
@@ -271,6 +299,82 @@ describe("tasks page contract", () => {
       const block = extractFunctionBlock(source, "function openSettingsSheet()")
       expect(block).toContain("activeBucket.value?.projects")
       expect(block).toContain("settingsFolderPath.value")
+    })
+  })
+
+  /**
+   * 不可撤销的动作要先问一句。
+   *
+   * 只覆盖**直发命令**的那几个：它们点下去就生效，而卡片上的按钮挨得很近。打开弹层的
+   * 动作（合并 / 取消 / 重试 / 验收…）本身就是一次确认，再套一层是多余的；归档与取消
+   * 归档互为逆操作，撤销成本就是再点一次 —— 所以这里有一条**反向**断言守着它们不被
+   * 顺手加上确认框。
+   */
+  describe("confirmations", () => {
+    const list = read("pages/tasks/index.vue")
+    const detail = read("pages/task-detail/index.vue")
+
+    it("confirms starting a task on both the list and the detail page", () => {
+      ;[list, detail].forEach((source) => {
+        const block = extractFunctionBlock(
+          source,
+          source === list
+            ? "function handleCardAction(entry: TaskListEntry, id: TaskActionId)"
+            : "function handleZoneAction(id: TaskActionId)"
+        )
+        expect(block).toContain("uni.showModal")
+        expect(block).toContain("开始任务")
+        // 只在用户点了确认之后才发命令。
+        expect(block).toContain("if (!res.confirm) return")
+      })
+    })
+
+    it("confirms pulling a task out of the merge queue", () => {
+      ;[list, detail].forEach((source) => {
+        expect(source).toContain("取消排队")
+        expect(source).toContain("确定取消该任务的合并排队吗？")
+      })
+    })
+
+    /** 清理会删掉 worktree 目录与工作分支，删完没法撤 —— 文案要把这句说出来。 */
+    it("spells out that retrying the cleanup deletes the worktree for good", () => {
+      const block = extractFunctionBlock(detail, "function retryCleanup()")
+      expect(block).toContain("uni.showModal")
+      expect(block).toContain("不可恢复")
+      expect(block).toContain("if (!res.confirm) return")
+    })
+
+    /** 反向断言：归档是可逆的，别给它套确认框。 */
+    it("leaves the reversible archive toggle unconfirmed", () => {
+      const block = extractFunctionBlock(
+        list,
+        "function handleCardAction(entry: TaskListEntry, id: TaskActionId)"
+      )
+      const archiveCase = block.slice(block.indexOf('case "archive":'))
+      expect(archiveCase).toContain("archiveWorkTask")
+      expect(archiveCase).not.toContain("uni.showModal")
+    })
+  })
+
+  /**
+   * 小程序的 props 要经 `setData` 的 JSON 序列化 —— `Set` / `Map` 到不了子组件。
+   * 而 H5 是引用传递、跑得好好的，所以这类错**只在打小程序包时才炸**，只能按源码锁住。
+   */
+  describe("mini-program prop compatibility", () => {
+    it("keeps every task component prop JSON-serializable", () => {
+      const dir = path.join(root, "pages/tasks/components")
+      const components = fs.readdirSync(dir).filter((file) => file.endsWith(".vue"))
+      expect(components.length).toBeGreaterThan(0)
+      components.forEach((file) => {
+        const block = extractPropsBlock(read(`pages/tasks/components/${file}`))
+        if (!block) return
+        expect(block).not.toMatch(/:\s*(Set|Map|WeakSet|WeakMap)\s*</)
+      })
+    })
+
+    /** 在飞的动作下发成一个标量字符串，而不是把整张表塞给每张卡片。 */
+    it("hands the card a scalar pending action", () => {
+      expect(read("pages/tasks/components/TaskCard.vue")).toContain("pendingAction?: string")
     })
   })
 

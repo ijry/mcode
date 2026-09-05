@@ -36,6 +36,15 @@ const props = defineProps<{
   mergeQueueRank?: number
   /** 共享的渲染时刻，让同一屏所有相对时间口径一致。 */
   now: number
+  /**
+   * 这张卡上**正在飞**的那个动作 id，空串 = 没有。
+   *
+   * 刻意是个**字符串**而不是 `Set` / `Map`：小程序的 props 要过 `setData` 的 JSON
+   * 序列化，集合类型到不了子组件（在 H5 上却能跑，所以这种错只会在打小程序包时才炸）。
+   * 一张卡同一时刻最多只有一个直发命令的动作在飞，所以一个标量就够，顺带让 `setData`
+   * 的 diff 只落在真正变了的那张卡上。
+   */
+  pendingAction?: string
 }>()
 
 const emit = defineEmits<{
@@ -101,6 +110,11 @@ const sourceLabel = computed(() => {
   if (!meta || !meta.number) return ""
   return meta.owner_repo ? `#${meta.number} · ${meta.owner_repo}` : `#${meta.number}`
 })
+
+/** 这个动作是不是正在飞 —— 主动作与次动作共用同一判定。 */
+function isActionPending(actionId: string): boolean {
+  return Boolean(props.pendingAction) && props.pendingAction === actionId
+}
 </script>
 
 <template>
@@ -170,20 +184,39 @@ const sourceLabel = computed(() => {
     >
       <view
         v-if="actions.primary"
-        class="task-card__primary"
+        :class="['task-card__primary', isActionPending(actions.primary.id) && 'task-card__primary--loading']"
         @click.stop="emit('action', actions.primary.id)"
       >
-        <up-icon :name="actions.primary.icon" size="14" color="#ffffff"></up-icon>
+        <up-loading-icon
+          v-if="isActionPending(actions.primary.id)"
+          mode="circle"
+          size="14"
+          color="#ffffff"
+        ></up-loading-icon>
+        <up-icon
+          v-else
+          :name="actions.primary.icon"
+          size="14"
+          color="#ffffff"
+        ></up-icon>
         <text class="task-card__primary-text">{{ actions.primary.label }}</text>
       </view>
       <view class="task-card__spacer"></view>
       <view
         v-for="item in actions.secondaries"
         :key="item.id"
-        class="task-card__icon-btn"
+        :class="['task-card__icon-btn', isActionPending(item.id) && 'task-card__icon-btn--loading']"
         @click.stop="emit('action', item.id)"
       >
+        <!-- 归档 / 取消排队也是直发命令，作为次动作时同样要给个在转的反馈。 -->
+        <up-loading-icon
+          v-if="isActionPending(item.id)"
+          mode="circle"
+          size="14"
+          :color="upThemeVar('--up-tips-color', '#909193')"
+        ></up-loading-icon>
         <up-icon
+          v-else
           :name="item.icon"
           size="16"
           :color="item.danger ? upThemeVar('--up-error', '#fa3534') : upThemeVar('--up-tips-color', '#909193')"
@@ -201,10 +234,15 @@ const sourceLabel = computed(() => {
   flex-direction: column;
   gap: 14rpx;
   padding: 22rpx 20rpx;
-  border-radius: 24rpx;
+  border-radius: 20rpx;
   background: var(--up-card-bg-color, #ffffff);
   border: 1rpx solid var(--up-border-color, #dadbde);
-  box-shadow: 0 10rpx 26rpx rgba(15, 23, 42, 0.06);
+  box-shadow: 0 4rpx 12rpx rgba(15, 23, 42, 0.04);
+  transition: box-shadow 0.2s ease;
+}
+
+.task-card:active {
+  box-shadow: 0 2rpx 8rpx rgba(15, 23, 42, 0.06);
 }
 
 .task-card--archived {
@@ -348,14 +386,20 @@ const sourceLabel = computed(() => {
   display: inline-flex;
   align-items: center;
   gap: 8rpx;
-  padding: 12rpx 26rpx;
+  padding: 12rpx 24rpx;
   border-radius: 999rpx;
   background: var(--up-primary, #2979ff);
+  transition: opacity 0.2s ease, transform 0.1s ease;
+}
+
+.task-card__primary--loading {
+  opacity: 0.7;
+  pointer-events: none;
 }
 
 .task-card__primary-text {
   font-size: 24rpx;
-  font-weight: 700;
+  font-weight: 600;
   color: #ffffff;
 }
 
@@ -373,5 +417,16 @@ const sourceLabel = computed(() => {
   justify-content: center;
   border-radius: 50%;
   background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
+  transition: opacity 0.2s ease, transform 0.1s ease;
+}
+
+.task-card__icon-btn:active {
+  opacity: 0.7;
+  transform: scale(0.95);
+}
+
+.task-card__icon-btn--loading {
+  opacity: 0.7;
+  pointer-events: none;
 }
 </style>

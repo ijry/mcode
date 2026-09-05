@@ -64,6 +64,7 @@
             :entry="entry"
             :now="now"
             :mergeQueueRank="queueRanks.get(entry.task.id)"
+            :pendingAction="pendingActionByTask[entry.task.id] || ''"
             @open="openTaskDetail(entry)"
             @action="handleCardAction(entry, $event)"
           />
@@ -308,6 +309,14 @@ let nowTimer: ReturnType<typeof setInterval> | null = null
 let loadPromise: Promise<void> | null = null
 /** 有请求在飞时又被调用过 —— 飞完要补跑一趟（见 `loadTasks`）。 */
 let loadDirty = false
+/**
+ * 每个任务上**正在飞**的那个直发命令动作：`taskId → actionId`。
+ *
+ * 用普通对象而不是 `Map`/`Set`：它要经 props 下发到卡片，而小程序的 props 走
+ * `setData` 的 JSON 序列化，集合类型过不去（H5 上却能跑，于是这种错只在打小程序包
+ * 时才暴露）。卡片拿到的又只是其中一个字符串，见 `TaskCard.pendingAction`。
+ */
+const pendingActionByTask = ref<Record<number, string>>({})
 
 /* ===== 派生 ===== */
 
@@ -827,19 +836,50 @@ async function submitEditor(draft: WorkTaskDraft) {
 }
 
 /** 派发成功后统一重新拉取；失败提示统一走这里，避免每个动作各写一遍 try/catch。 */
-async function runAction(entry: TaskListEntry, fn: (gateway: CodegGateway) => Promise<unknown>) {
+async function runAction(
+  entry: TaskListEntry,
+  fn: (gateway: CodegGateway) => Promise<unknown>,
+  actionId?: TaskActionId
+) {
   const bucket = bucketFor(entry)
   if (!bucket?.gateway) {
     uni.showToast({ title: "连接不可用，请下拉刷新", icon: "none" })
     return
   }
+
+  const pendingTaskId = actionId ? entry.task.id : 0
+  if (pendingTaskId) {
+    markPendingAction(pendingTaskId, actionId as TaskActionId)
+  }
+
   try {
     await fn(bucket.gateway)
   } catch (error) {
     uni.showToast({ title: toErrorMessage(error), icon: "none", duration: 3000 })
   } finally {
+    if (pendingTaskId) {
+      clearPendingAction(pendingTaskId, actionId as TaskActionId)
+    }
     await loadTasks()
   }
+}
+
+/**
+ * 整个对象换新，而不是原地改一个键。
+ *
+ * `setData` 的 diff 与小程序端的 props 更新都认引用变化，原地改键在部分平台上不会
+ * 触发卡片重渲染 —— 那正是「点了没反应」的另一种写法。
+ */
+function markPendingAction(taskId: number, actionId: TaskActionId) {
+  pendingActionByTask.value = { ...pendingActionByTask.value, [taskId]: actionId }
+}
+
+/** 只有还是自己那个动作时才清 —— 别把后一个动作的转圈提前抹掉。 */
+function clearPendingAction(taskId: number, actionId: TaskActionId) {
+  if (pendingActionByTask.value[taskId] !== actionId) return
+  const next = { ...pendingActionByTask.value }
+  delete next[taskId]
+  pendingActionByTask.value = next
 }
 
 function refreshAfterAction() {
@@ -876,6 +916,11 @@ function handleAccepted(payload: { mode: "complete" | "deliver"; url: string }) 
  * 每个动作先用 `isTaskActionAllowed` 对着**实时**那一行再校验一次：卡片可能已经过期
  * （引擎在用户点击的瞬间领走了这个任务），服务端的 CAS 也会拒绝，但那会以一条错误
  * toast 的形式砸到用户脸上 —— 而这次点击本身是合理的。
+ *
+ * 二次确认只加在**直接发命令**的动作上（开始、取消排队）：它们点下去就生效，而卡片
+ * 上的按钮挨得很近，误触的代价是让 agent 白跑一趟或把一次已经排好的合并踢出队列。
+ * 打开弹层的动作（合并、取消、重试、验收……）已经自带一次确认，再套一层是多余的；
+ * 归档 / 取消归档也不问 —— 它们互为逆操作，撤销的成本就是再点一次。
  */
 function handleCardAction(entry: TaskListEntry, id: TaskActionId) {
   const live = findLiveTask(entry.task.id) || entry.task
@@ -888,7 +933,16 @@ function handleCardAction(entry: TaskListEntry, id: TaskActionId) {
   actionGateway.value = bucket?.gateway || null
   switch (id) {
     case "start":
-      void runAction(entry, (gateway) => startWorkTask(gateway, live.id))
+      uni.showModal({
+        title: "开始任务",
+        content: `确定开始任务「${live.title}」吗？Agent 将在后台开始处理。`,
+        confirmText: "开始",
+        cancelText: "取消",
+        success: (res) => {
+          if (!res.confirm) return
+          void runAction(entry, (gateway) => startWorkTask(gateway, live.id), "start")
+        },
+      })
       return
     case "schedule":
       scheduleTask.value = live
@@ -915,7 +969,16 @@ function handleCardAction(entry: TaskListEntry, id: TaskActionId) {
       showMergeSheet.value = true
       return
     case "unqueueMerge":
-      void runAction(entry, (gateway) => unqueueWorkTaskMerge(gateway, live.id))
+      uni.showModal({
+        title: "取消排队",
+        content: "确定取消该任务的合并排队吗？",
+        confirmText: "确定",
+        cancelText: "取消",
+        success: (res) => {
+          if (!res.confirm) return
+          void runAction(entry, (gateway) => unqueueWorkTaskMerge(gateway, live.id), "unqueueMerge")
+        },
+      })
       return
     case "complete":
       acceptTask.value = live
@@ -932,10 +995,10 @@ function handleCardAction(entry: TaskListEntry, id: TaskActionId) {
       showFollowUpSheet.value = true
       return
     case "archive":
-      void runAction(entry, (gateway) => archiveWorkTask(gateway, live.id, true))
+      void runAction(entry, (gateway) => archiveWorkTask(gateway, live.id, true), "archive")
       return
     case "unarchive":
-      void runAction(entry, (gateway) => archiveWorkTask(gateway, live.id, false))
+      void runAction(entry, (gateway) => archiveWorkTask(gateway, live.id, false), "unarchive")
       return
     case "edit":
       // 编辑必须落在**任务自己的**连接上，而不是当前筛选那条 —— 否则 draft 会发到

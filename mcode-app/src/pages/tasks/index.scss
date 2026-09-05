@@ -75,13 +75,13 @@
   align-items: center;
   gap: 4rpx;
   max-width: 100%;
-  padding: 4rpx 12rpx;
+  padding: 6rpx 14rpx;
   border-radius: 999rpx;
   background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
 }
 
 .task-badge__text {
-  font-size: 18rpx;
+  font-size: 20rpx;
   font-weight: 600;
   line-height: 1.2;
   color: var(--up-tips-color, #909193);
@@ -164,6 +164,11 @@
   justify-content: center;
   border-radius: 50%;
   background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
+  transition: opacity 0.2s ease;
+}
+
+.task-sheet__close:active {
+  opacity: 0.7;
 }
 
 .task-sheet__scroll {
