@@ -125,15 +125,23 @@
   padding: 80rpx 0;
 }
 
-/* ===== 底部弹层（形状与 pages/tasks/index.scss 的 task-sheet__* 一致） ===== */
+/* ===== 底部弹层（形状与 pages/tasks/index.scss 的 task-sheet__* 一致） =====
+ *
+ * 七个弹层共用这一组类：forge 的 Scope / Filter / NewIssue / Start / Settings，
+ * forge-item 的 Merge，forge-accounts 的 Token。
+ */
 
+/* 这一层**故意没有 `max-height`**：整个弹层的高度由 `.forge-sheet__body` 的上限
+   反推（上限 + 头尾 ≈ 66–82vh，六个视口实测都还留得住遮罩，见 __body 的注释）。
+   给这一层加上限会有两个后果：body 被 flex 压扁而里层滚动容器不跟着压 →
+   又滚不动；以及内容溢出到卡片背景之外（背景只有 max-height 那么高），
+   文字直接压在半透明遮罩上。 */
 .forge-sheet {
   padding: 28rpx 28rpx calc(28rpx + env(safe-area-inset-bottom));
   display: flex;
   flex-direction: column;
   gap: 20rpx;
   background: var(--up-card-bg-color, #ffffff);
-  max-height: 76vh;
 }
 
 .forge-sheet__hd {
@@ -174,9 +182,32 @@
   flex-shrink: 0;
 }
 
+/**
+ * 滚动区的高度上限。**必须落在 scroll-view 自己身上，不能改回 `flex: 1`。**
+ *
+ * uni-app H5 把 `<scroll-view>` 编译成三层：`uni-scroll-view`（宿主，`display: block`
+ * 无高度）→ `.uni-scroll-view`（真正 `overflow-y: auto` 的那层，框架样式是
+ * `height: 100%; max-height: inherit`）→ `.uni-scroll-view-content`。
+ *
+ * 原来这里写的是 `flex: 1; min-height: 0`，宿主确实被 flex 压到了正确高度，但里层的
+ * `height: 100%` **解析不出来**：`.forge-sheet` 当时是 `max-height` 撑出来的内容盒，
+ * 按 css-flexbox §9.8.3，容器主轴尺寸不确定时 flex item 的高度也不算确定，百分比高度
+ * 只能退回 `auto`。于是里层滚动容器长成内容全高，`scrollHeight === clientHeight` ——
+ * **一点都滚不动**，溢出的部分直接落到屏幕外。实测 40 个项目、375×667 视口：滚动容器
+ * 2578px，`scrollTop` 只能停在 0，最后一行在 y=2770。
+ *
+ * `max-height` 走的是 uni 自己留的口子 —— 里层的 `max-height: inherit` 会继承到这个
+ * 值，滚动容器被钉住而内容照长，overflow 才成立。`pages/tasks/index.scss` 的
+ * `.task-sheet__scroll` 一直是这么写的，所以取同一个 56vh。
+ *
+ * 56vh 不是随手取的整数：`.forge-option` 行高随视口宽度在 50–67px 之间，56vh 在
+ * 320×480 / 320×568 / 360×640 / 375×667 / 390×844 / 430×932 六个视口上都**露半行**，
+ * 而 50vh、52vh 有几个视口恰好切在整行边界上 —— 那看起来像「列表就这么长」。
+ * 改这个值前先确认它不落在行高整数倍上（同
+ * docs/mcode-architecture-notes/2026-08-27-08-58-slash-panel-max-height-scroll.md）。
+ */
 .forge-sheet__body {
-  flex: 1;
-  min-height: 0;
+  max-height: 56vh;
 }
 
 .forge-sheet__group {

@@ -1105,6 +1105,66 @@ describe("forge page contract", () => {
     })
   })
 
+  /**
+   * 底部弹层的内部滚动。
+   *
+   * uni-app H5 的 `<scroll-view>` 里层是 `.uni-scroll-view { height: 100%;
+   * max-height: inherit }`。宿主用 `flex: 1` 撑时，`.forge-sheet` 是 `max-height`
+   * 撑出来的内容盒（主轴尺寸不确定），里层的 `height: 100%` 退回 `auto`，滚动容器
+   * 长成内容全高 —— `scrollHeight === clientHeight`，**一点都滚不动**。
+   * 上限必须落在 scroll-view 自己身上，让 `max-height: inherit` 接得到。
+   * 详见 index.scss 里 `.forge-sheet__body` 的注释。
+   */
+  describe("bottom sheet scrolling", () => {
+    const shared = read("pages/forge/index.scss")
+
+    /** 只取声明块，注释里出现的 `flex: 1` / `max-height` 不该让断言误判。 */
+    function ruleBody(className: string) {
+      const start = shared.indexOf(`\n.${className} {`)
+      if (start < 0) throw new Error(`rule not found: .${className}`)
+      const end = shared.indexOf("\n}", start)
+      return shared
+        .slice(start, end)
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .split("\n")
+        .filter((line) => !line.trim().startsWith("//"))
+        .join("\n")
+    }
+
+    it("caps the scroll area on the scroll-view itself, not with flex", () => {
+      const body = ruleBody("forge-sheet__body")
+      expect(body).toMatch(/max-height:\s*56vh/)
+      // 回归闸：改回 flex 撑高就是把这个 bug 放回去。
+      expect(body).not.toMatch(/flex(-grow)?\s*:/)
+    })
+
+    /**
+     * 弹层这一层不能有 `max-height`：它一 clamp，body 就被 flex 压扁而里层滚动容器
+     * 不跟着压（又滚不动），而且内容会溢出到卡片背景之外压在遮罩上。总高由 body
+     * 的上限反推（≈ 66–82vh，六个视口实测都留得住遮罩）。
+     */
+    it("lets the sheet height follow its parts instead of clamping", () => {
+      expect(ruleBody("forge-sheet")).not.toMatch(/max-height/)
+    })
+
+    /** 七个弹层共用这一组类，任何一个把长内容放在 scroll-view 外面都会顶出屏幕。 */
+    it("puts every sheet's long content inside the shared scroll body", () => {
+      ;[
+        "pages/forge/components/ForgeScopeSheet.vue",
+        "pages/forge/components/ForgeFilterSheet.vue",
+        "pages/forge/components/ForgeNewIssueSheet.vue",
+        "pages/forge/components/ForgeStartSheet.vue",
+        "pages/forge/components/ForgeSettingsSheet.vue",
+        "pages/forge-item/components/ForgeMergeSheet.vue",
+        "pages/forge-accounts/components/ForgeAccountTokenSheet.vue",
+      ].forEach((file) => {
+        const source = read(file)
+        expect(source).toContain('<view class="forge-sheet"')
+        expect(source).toMatch(/<scroll-view scroll-y class="forge-sheet__body">/)
+      })
+    })
+  })
+
   /** `<style scoped>` 不跨组件边界，共享类必须住在 index.scss 里且每个消费方 import。 */
   it("shares the cross-component classes through one stylesheet", () => {
     const shared = read("pages/forge/index.scss")
