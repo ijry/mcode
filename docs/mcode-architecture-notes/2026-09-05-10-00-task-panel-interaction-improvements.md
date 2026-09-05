@@ -2,11 +2,42 @@
 
 ## 概述
 
-改进任务面板的交互体验和视觉样式，解决"开始"按钮点击无反馈、主按钮视觉过重等问题。
+改进任务面板的交互体验和视觉样式，解决"开始"按钮点击无反馈、主按钮视觉过重等问题。新增重要操作的二次确认。
 
 ## 核心改进
 
-### 1. 动作加载状态
+### 1. 重要操作二次确认
+
+**问题**：用户可能误触重要操作按钮，导致意外启动任务或取消排队。
+
+**解决方案**：
+为以下关键操作添加 `uni.showModal` 确认弹窗：
+
+- **开始任务** (`start`)：启动 Agent 后台处理，不可撤销
+- **取消合并排队** (`unqueueMerge`)：将任务从合并队列中移除
+
+**实现细节**：
+```typescript
+case "start":
+  uni.showModal({
+    title: "开始任务",
+    content: `确定开始任务「${live.title}」吗？Agent 将在后台开始处理。`,
+    confirmText: "开始",
+    cancelText: "取消",
+    success: (res) => {
+      if (res.confirm) {
+        void runAction(entry, (gateway) => startWorkTask(gateway, live.id), "start")
+      }
+    },
+  })
+  return
+```
+
+**设计原则**：
+- 需要确认：不可逆或影响较大的操作（启动、取消排队）
+- 不需要确认：可逆操作（归档/取消归档）、打开弹窗的操作（已有二次界面）
+
+### 2. 动作加载状态
 
 **问题**：点击"开始"按钮后无即时反馈，用户需等待一段时间才发现任务真的开始了。
 
@@ -46,7 +77,7 @@ async function runAction(
 - `unqueueMerge` - 取消排队合并
 - `archive` / `unarchive` - 归档/取消归档
 
-### 2. TaskCard 加载 UI
+### 3. TaskCard 加载 UI
 
 在 `TaskCard.vue` 中：
 - 接收 `pendingActions` prop
@@ -71,7 +102,7 @@ async function runAction(
 </view>
 ```
 
-### 3. 视觉样式优化
+### 4. 视觉样式优化
 
 **卡片样式**：
 - 减小阴影强度：`0 4rpx 12rpx rgba(15, 23, 42, 0.04)` (原 `0 10rpx 26rpx 0.06`)
@@ -102,6 +133,10 @@ async function runAction(
   ↓
 handleCardAction("start")
   ↓
+uni.showModal 二次确认
+  ↓
+用户确认
+  ↓
 runAction(entry, startWorkTask, "start")
   ↓
 pendingActions.add("${taskId}:start")
@@ -120,6 +155,7 @@ await loadTasks() 刷新列表
 - 弹层已有的 `submitting` 状态保持不变（TaskCancelSheet、TaskMergeSheet 等）
 - 仅对卡片上的即时动作添加加载状态
 - 需要用户输入的动作（合并、取消、重启）打开弹层，弹层自己管理 submitting
+- 二次确认仅适用于不可逆或影响较大的操作
 
 ## 原生复刻指南
 
@@ -131,12 +167,15 @@ await loadTasks() 刷新列表
 5. 卡片阴影减小、圆角 10pt/10dp
 6. 按钮字重 SemiBold (600)
 7. 添加触摸反馈动画
+8. 重要操作使用 AlertDialog / UIAlertController 二次确认
 
 ## 测试要点
 
-- 点击"开始"立即显示加载图标
+- 点击"开始"弹出确认弹窗
+- 确认后立即显示加载图标
 - 加载期间按钮不可再次点击
 - 操作成功后加载状态消失、列表刷新
 - 操作失败后加载状态消失、显示错误提示
 - 多个任务同时操作互不干扰
 - 样式在深色模式下正常显示
+- 取消确认弹窗不执行操作

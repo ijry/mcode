@@ -892,6 +892,11 @@ function handleAccepted(payload: { mode: "complete" | "deliver"; url: string }) 
  * 每个动作先用 `isTaskActionAllowed` 对着**实时**那一行再校验一次：卡片可能已经过期
  * （引擎在用户点击的瞬间领走了这个任务），服务端的 CAS 也会拒绝，但那会以一条错误
  * toast 的形式砸到用户脸上 —— 而这次点击本身是合理的。
+ *
+ * 二次确认只加在**直接发命令**的动作上（开始、取消排队）：它们点下去就生效，而卡片
+ * 上的按钮挨得很近，误触的代价是让 agent 白跑一趟或把一次已经排好的合并踢出队列。
+ * 打开弹层的动作（合并、取消、重试、验收……）已经自带一次确认，再套一层是多余的；
+ * 归档 / 取消归档也不问 —— 它们互为逆操作，撤销的成本就是再点一次。
  */
 function handleCardAction(entry: TaskListEntry, id: TaskActionId) {
   const live = findLiveTask(entry.task.id) || entry.task
@@ -904,7 +909,16 @@ function handleCardAction(entry: TaskListEntry, id: TaskActionId) {
   actionGateway.value = bucket?.gateway || null
   switch (id) {
     case "start":
-      void runAction(entry, (gateway) => startWorkTask(gateway, live.id), "start")
+      uni.showModal({
+        title: "开始任务",
+        content: `确定开始任务「${live.title}」吗？Agent 将在后台开始处理。`,
+        confirmText: "开始",
+        cancelText: "取消",
+        success: (res) => {
+          if (!res.confirm) return
+          void runAction(entry, (gateway) => startWorkTask(gateway, live.id), "start")
+        },
+      })
       return
     case "schedule":
       scheduleTask.value = live
@@ -931,7 +945,16 @@ function handleCardAction(entry: TaskListEntry, id: TaskActionId) {
       showMergeSheet.value = true
       return
     case "unqueueMerge":
-      void runAction(entry, (gateway) => unqueueWorkTaskMerge(gateway, live.id), "unqueueMerge")
+      uni.showModal({
+        title: "取消排队",
+        content: "确定取消该任务的合并排队吗？",
+        confirmText: "确定",
+        cancelText: "取消",
+        success: (res) => {
+          if (!res.confirm) return
+          void runAction(entry, (gateway) => unqueueWorkTaskMerge(gateway, live.id), "unqueueMerge")
+        },
+      })
       return
     case "complete":
       acceptTask.value = live

@@ -402,7 +402,16 @@ function handleZoneAction(id: TaskActionId) {
   }
   switch (id) {
     case "start":
-      void runAction((target) => startWorkTask(target, current.id))
+      uni.showModal({
+        title: "开始任务",
+        content: `确定开始任务「${current.title}」吗？Agent 将在后台开始处理。`,
+        confirmText: "开始",
+        cancelText: "取消",
+        success: (res) => {
+          if (!res.confirm) return
+          void runAction((target) => startWorkTask(target, current.id))
+        },
+      })
       return
     case "schedule":
       showScheduleSheet.value = true
@@ -424,7 +433,16 @@ function handleZoneAction(id: TaskActionId) {
       showMergeSheet.value = true
       return
     case "unqueueMerge":
-      void runAction((target) => unqueueWorkTaskMerge(target, current.id))
+      uni.showModal({
+        title: "取消排队",
+        content: "确定取消该任务的合并排队吗？",
+        confirmText: "确定",
+        cancelText: "取消",
+        success: (res) => {
+          if (!res.confirm) return
+          void runAction((target) => unqueueWorkTaskMerge(target, current.id))
+        },
+      })
       return
     case "complete":
       acceptMode.value = "complete"
@@ -507,7 +525,17 @@ async function confirmDelete() {
 function retryCleanup() {
   const current = task.value
   if (!current) return
-  void runAction((target) => cleanupWorkTask(target, current.id))
+  // 清理会删掉 worktree 目录与工作分支 —— 不可撤销，所以必须先问一句。
+  uni.showModal({
+    title: "重试清理",
+    content: "将删除该任务的 worktree 目录与工作分支，且不可恢复。确定继续吗？",
+    confirmText: "清理",
+    cancelText: "取消",
+    success: (res) => {
+      if (!res.confirm) return
+      void runAction((target) => cleanupWorkTask(target, current.id))
+    },
+  })
 }
 
 /**
