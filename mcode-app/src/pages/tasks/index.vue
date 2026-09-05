@@ -64,6 +64,7 @@
             :entry="entry"
             :now="now"
             :mergeQueueRank="queueRanks.get(entry.task.id)"
+            :pendingActions="pendingActions"
             @open="openTaskDetail(entry)"
             @action="handleCardAction(entry, $event)"
           />
@@ -308,6 +309,8 @@ let nowTimer: ReturnType<typeof setInterval> | null = null
 let loadPromise: Promise<void> | null = null
 /** 有请求在飞时又被调用过 —— 飞完要补跑一趟（见 `loadTasks`）。 */
 let loadDirty = false
+/** 正在执行的动作 —— 用于显示加载状态，格式为 `${taskId}:${actionId}`。 */
+const pendingActions = ref<Set<string>>(new Set())
 
 /* ===== 派生 ===== */
 
@@ -827,17 +830,30 @@ async function submitEditor(draft: WorkTaskDraft) {
 }
 
 /** 派发成功后统一重新拉取；失败提示统一走这里，避免每个动作各写一遍 try/catch。 */
-async function runAction(entry: TaskListEntry, fn: (gateway: CodegGateway) => Promise<unknown>) {
+async function runAction(
+  entry: TaskListEntry,
+  fn: (gateway: CodegGateway) => Promise<unknown>,
+  actionId?: TaskActionId
+) {
   const bucket = bucketFor(entry)
   if (!bucket?.gateway) {
     uni.showToast({ title: "连接不可用，请下拉刷新", icon: "none" })
     return
   }
+
+  const pendingKey = actionId ? `${entry.task.id}:${actionId}` : ""
+  if (pendingKey) {
+    pendingActions.value.add(pendingKey)
+  }
+
   try {
     await fn(bucket.gateway)
   } catch (error) {
     uni.showToast({ title: toErrorMessage(error), icon: "none", duration: 3000 })
   } finally {
+    if (pendingKey) {
+      pendingActions.value.delete(pendingKey)
+    }
     await loadTasks()
   }
 }
@@ -888,7 +904,7 @@ function handleCardAction(entry: TaskListEntry, id: TaskActionId) {
   actionGateway.value = bucket?.gateway || null
   switch (id) {
     case "start":
-      void runAction(entry, (gateway) => startWorkTask(gateway, live.id))
+      void runAction(entry, (gateway) => startWorkTask(gateway, live.id), "start")
       return
     case "schedule":
       scheduleTask.value = live
@@ -915,7 +931,7 @@ function handleCardAction(entry: TaskListEntry, id: TaskActionId) {
       showMergeSheet.value = true
       return
     case "unqueueMerge":
-      void runAction(entry, (gateway) => unqueueWorkTaskMerge(gateway, live.id))
+      void runAction(entry, (gateway) => unqueueWorkTaskMerge(gateway, live.id), "unqueueMerge")
       return
     case "complete":
       acceptTask.value = live
@@ -932,10 +948,10 @@ function handleCardAction(entry: TaskListEntry, id: TaskActionId) {
       showFollowUpSheet.value = true
       return
     case "archive":
-      void runAction(entry, (gateway) => archiveWorkTask(gateway, live.id, true))
+      void runAction(entry, (gateway) => archiveWorkTask(gateway, live.id, true), "archive")
       return
     case "unarchive":
-      void runAction(entry, (gateway) => archiveWorkTask(gateway, live.id, false))
+      void runAction(entry, (gateway) => archiveWorkTask(gateway, live.id, false), "unarchive")
       return
     case "edit":
       // 编辑必须落在**任务自己的**连接上，而不是当前筛选那条 —— 否则 draft 会发到

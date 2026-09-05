@@ -36,7 +36,9 @@ const props = defineProps<{
   mergeQueueRank?: number
   /** 共享的渲染时刻，让同一屏所有相对时间口径一致。 */
   now: number
-}>()
+  /** 正在执行的动作集合（格式 `${taskId}:${actionId}`）。 */
+  pendingActions?: Set<string>
+})()
 
 const emit = defineEmits<{
   (event: "open"): void
@@ -101,6 +103,13 @@ const sourceLabel = computed(() => {
   if (!meta || !meta.number) return ""
   return meta.owner_repo ? `#${meta.number} · ${meta.owner_repo}` : `#${meta.number}`
 })
+
+/** 检查某个动作是否正在执行 */
+function isActionPending(actionId: string): boolean {
+  if (!props.pendingActions) return false
+  const key = `${task.value.id}:${actionId}`
+  return props.pendingActions.has(key)
+}
 </script>
 
 <template>
@@ -170,10 +179,21 @@ const sourceLabel = computed(() => {
     >
       <view
         v-if="actions.primary"
-        class="task-card__primary"
+        :class="['task-card__primary', isActionPending(actions.primary.id) && 'task-card__primary--loading']"
         @click.stop="emit('action', actions.primary.id)"
       >
-        <up-icon :name="actions.primary.icon" size="14" color="#ffffff"></up-icon>
+        <up-loading-icon
+          v-if="isActionPending(actions.primary.id)"
+          mode="circle"
+          size="14"
+          color="#ffffff"
+        ></up-loading-icon>
+        <up-icon
+          v-else
+          :name="actions.primary.icon"
+          size="14"
+          color="#ffffff"
+        ></up-icon>
         <text class="task-card__primary-text">{{ actions.primary.label }}</text>
       </view>
       <view class="task-card__spacer"></view>
@@ -201,10 +221,15 @@ const sourceLabel = computed(() => {
   flex-direction: column;
   gap: 14rpx;
   padding: 22rpx 20rpx;
-  border-radius: 24rpx;
+  border-radius: 20rpx;
   background: var(--up-card-bg-color, #ffffff);
   border: 1rpx solid var(--up-border-color, #dadbde);
-  box-shadow: 0 10rpx 26rpx rgba(15, 23, 42, 0.06);
+  box-shadow: 0 4rpx 12rpx rgba(15, 23, 42, 0.04);
+  transition: box-shadow 0.2s ease;
+}
+
+.task-card:active {
+  box-shadow: 0 2rpx 8rpx rgba(15, 23, 42, 0.06);
 }
 
 .task-card--archived {
@@ -348,14 +373,20 @@ const sourceLabel = computed(() => {
   display: inline-flex;
   align-items: center;
   gap: 8rpx;
-  padding: 12rpx 26rpx;
+  padding: 12rpx 24rpx;
   border-radius: 999rpx;
   background: var(--up-primary, #2979ff);
+  transition: opacity 0.2s ease, transform 0.1s ease;
+}
+
+.task-card__primary--loading {
+  opacity: 0.7;
+  pointer-events: none;
 }
 
 .task-card__primary-text {
   font-size: 24rpx;
-  font-weight: 700;
+  font-weight: 600;
   color: #ffffff;
 }
 
@@ -373,5 +404,11 @@ const sourceLabel = computed(() => {
   justify-content: center;
   border-radius: 50%;
   background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
+  transition: opacity 0.2s ease, transform 0.1s ease;
+}
+
+.task-card__icon-btn:active {
+  opacity: 0.7;
+  transform: scale(0.95);
 }
 </style>
