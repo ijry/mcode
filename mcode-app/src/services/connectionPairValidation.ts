@@ -19,5 +19,6 @@ function formatTargetAgentLabel(targetAgent: string) {
   if (targetAgent === "opencode") return "OpenCode"
   if (targetAgent === "mcode-desktop") return "MCode Desktop"
   if (targetAgent === "codeg") return "Codeg"
+  if (targetAgent === "dsh") return "DeepSeek Harness"
   return targetAgent
 }

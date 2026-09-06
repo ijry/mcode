@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname } from "node:path"
 import { sha256Hex } from "../auth/tokens.js"
+import { isTargetAgent } from "../protocol/types.js"
 import type { LocalServiceMetadata, TargetAgent } from "../protocol/types.js"
 
 const DEFAULT_TENANT_ID = "default"
@@ -513,7 +514,7 @@ function requireProtocolVersion(input?: string): string {
 }
 
 function normalizeTargetAgent(input?: TargetAgent): TargetAgent {
-  if (input === "codeg" || input === "opencode" || input === "mcode-desktop") {
+  if (isTargetAgent(input)) {
     return input
   }
   throw new Error("targetAgent is required")
@@ -541,10 +542,7 @@ function normalizeTenantRecord(input: Partial<TenantRecord>): TenantRecord | nul
 
 function normalizeTargetRecord(input: Partial<TargetRecord>): TargetRecord | null {
   const targetId = normalizeOptionalString(input.targetId)
-  const targetAgent =
-    input.targetAgent === "codeg" || input.targetAgent === "opencode" || input.targetAgent === "mcode-desktop"
-      ? input.targetAgent
-      : null
+  const targetAgent = isTargetAgent(input.targetAgent) ? input.targetAgent : null
   const protocolVersion = normalizeProtocolVersion(input.protocolVersion)
   if (!targetId || !targetAgent || !protocolVersion) return null
   return {

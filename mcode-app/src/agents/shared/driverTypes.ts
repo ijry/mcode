@@ -20,6 +20,7 @@ export type ConnectionDriverId =
   | "opencode-gateway"
   | "desktop-direct"
   | "desktop-gateway"
+  | "dsh-direct"
 
 export interface PairResultMetadata {
   targetId?: string
@@ -138,7 +139,7 @@ export function toConnectionRuntimeContext(record: ConnectionRecordV2): Connecti
   return { ...record }
 }
 
-function withRegisteredDescriptor(gateway: CodegGateway): CodegGateway {
+export function withRegisteredDescriptor(gateway: CodegGateway): CodegGateway {
   const getRemoteInstanceDescriptor = gateway.getRemoteInstanceDescriptor.bind(gateway)
   gateway.getRemoteInstanceDescriptor = () => {
     const descriptor = getRemoteInstanceDescriptor()
@@ -184,7 +185,7 @@ function buildTargetProfileFromSession(
 }
 
 function normalizeTargetAgent(value: unknown): ConnectionTargetAgent | null {
-  if (value === "codeg" || value === "opencode" || value === "mcode-desktop") {
+  if (value === "codeg" || value === "opencode" || value === "mcode-desktop" || value === "dsh") {
     return value
   }
   return null

@@ -1,4 +1,26 @@
-export type TargetAgent = "codeg" | "opencode" | "mcode-desktop"
+/**
+ * Every host process a controller can be paired with.
+ *
+ * `dsh` is a DeepSeek Harness desktop running the `dsh-plugin-mobile-bridge`
+ * plugin. It is its own entry rather than a capability of `mcode-desktop`
+ * because it is a different process speaking a different protocol — the same
+ * reason `codeg` and `opencode` are separate. What it is NOT is a per-CLI
+ * target: the CLIs `mcode-desktop` proxies stay behind `mcode-desktop`.
+ *
+ * The array is the single source of truth. Relay validates `targetAgent` in
+ * three places (pair offers, target upsert, snapshot restore), and before this
+ * list existed each one carried its own copy of the union — which is exactly how
+ * a new value gets accepted by two of them and silently dropped by the third.
+ */
+export const TARGET_AGENTS = ["codeg", "opencode", "mcode-desktop", "dsh"] as const
+
+export type TargetAgent = (typeof TARGET_AGENTS)[number]
+
+/** Narrow an unknown value to a {@link TargetAgent}. */
+export function isTargetAgent(value: unknown): value is TargetAgent {
+  return typeof value === "string" && (TARGET_AGENTS as readonly string[]).includes(value)
+}
+
 
 export interface TargetMetadata {
   targetId: string

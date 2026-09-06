@@ -7,7 +7,7 @@ import {
 } from "@/pages/connections/connectionTargetAgentOptions"
 
 describe("connection target agent options", () => {
-  it("hides opencode and mcode-desktop for new connections", () => {
+  it("hides every non-codeg target for new connections", () => {
     expect(getVisibleTargetAgentOptions("codeg").map((option) => option.value)).toEqual(["codeg"])
     expect(getVisibleTargetAgentOptions(undefined).map((option) => option.value)).toEqual(["codeg"])
   })
@@ -17,6 +17,7 @@ describe("connection target agent options", () => {
       "codeg",
       "opencode",
       "mcode-desktop",
+      "dsh",
     ])
   })
 

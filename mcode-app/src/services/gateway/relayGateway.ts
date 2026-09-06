@@ -53,7 +53,10 @@ function normalizePairTargetMetadata(input: unknown): PairTargetMetadata {
 
   return {
     ...(typeof raw.targetId === "string" && raw.targetId.trim() ? { targetId: raw.targetId.trim() } : {}),
-    ...(raw.targetAgent === "codeg" || raw.targetAgent === "opencode" || raw.targetAgent === "mcode-desktop"
+    ...(raw.targetAgent === "codeg" ||
+    raw.targetAgent === "opencode" ||
+    raw.targetAgent === "mcode-desktop" ||
+    raw.targetAgent === "dsh"
       ? { targetAgent: raw.targetAgent }
       : {}),
     ...(typeof raw.displayName === "string" && raw.displayName.trim()

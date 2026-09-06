@@ -4,7 +4,7 @@ export type GatewayMode = "relay" | "direct"
 
 export interface PairTargetMetadata {
   targetId?: string
-  targetAgent?: "codeg" | "opencode" | "mcode-desktop"
+  targetAgent?: "codeg" | "opencode" | "mcode-desktop" | "dsh"
   displayName?: string
   capabilities?: string[]
   protocolVersion?: string

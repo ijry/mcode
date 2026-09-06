@@ -3,6 +3,7 @@ import {
   getConnectionHostModel,
   type ConnectionHostKind,
 } from "@/services/connectionHostCatalog"
+import { getDshCapabilityLabels } from "@/agents/dsh/capabilities"
 import { getDesktopCapabilityLabels } from "@/agents/mcode-desktop/capabilities"
 
 export function getConnectionTargetLabel(
@@ -10,6 +11,7 @@ export function getConnectionTargetLabel(
 ): string {
   if (connection.targetAgent === "opencode") return "OpenCode"
   if (connection.targetAgent === "mcode-desktop") return "MCode Desktop"
+  if (connection.targetAgent === "dsh") return "DeepSeek Harness"
   return "Codeg"
 }
 
@@ -93,6 +95,9 @@ export function getConnectionCapabilityChips(
   const capabilities = connection.targetProfile?.capabilities || []
   if (connection.targetAgent === "mcode-desktop") {
     return getDesktopCapabilityLabels(capabilities)
+  }
+  if (connection.targetAgent === "dsh") {
+    return getDshCapabilityLabels(capabilities)
   }
   const labels = capabilities.flatMap((value) => {
     return []
