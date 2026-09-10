@@ -106,6 +106,70 @@ describe('conversationRuntime ACP error handling', () => {
     return { store, session }
   }
 
+  it('hydrates and updates live session selector state', () => {
+    const { store, session } = prepareSession()
+
+    store.hydrateLiveSnapshot(1, {
+      event_seq: 20,
+      status: 'connected',
+      selectors_ready: true,
+      modes: {
+        current_mode_id: 'agent',
+        available_modes: [{ id: 'agent', name: 'Agent' }],
+      },
+      config_options: [{
+        id: 'reasoning_effort',
+        name: 'Reasoning effort',
+        kind: { type: 'select', current_value: 'medium', options: [], groups: [] },
+      }],
+    })
+
+    expect(session.selectorsReady).toBe(true)
+    expect(session.modes?.current_mode_id).toBe('agent')
+    expect(session.configOptions?.[0]?.id).toBe('reasoning_effort')
+
+    store.handleEventForConversation(1, {
+      connectionId: 'conn-1',
+      seq: 21,
+      type: 'mode_changed',
+      data: { mode_id: 'agent-full-access' },
+    } as any)
+
+    expect(session.modes?.current_mode_id).toBe('agent-full-access')
+  })
+
+  it('applies acknowledged selector choices to the live runtime state', () => {
+    const { store, session } = prepareSession()
+    store.hydrateLiveSnapshot(1, {
+      selectors_ready: true,
+      modes: {
+        current_mode_id: 'agent',
+        available_modes: [
+          { id: 'agent', name: 'Agent' },
+          { id: 'agent-full-access', name: 'Full access' },
+        ],
+      },
+      config_options: [{
+        id: 'reasoning_effort',
+        name: 'Reasoning effort',
+        kind: {
+          type: 'select',
+          current_value: 'medium',
+          options: [
+            { value: 'medium', name: 'Medium' },
+            { value: 'high', name: 'High' },
+          ],
+          groups: [],
+        },
+      }],
+    })
+
+    expect(store.applyAcknowledgedModeSelection(1, 'agent-full-access')).toBe(true)
+    expect(store.applyAcknowledgedConfigSelection(1, 'reasoning_effort', 'high')).toBe(true)
+    expect(session.modes?.current_mode_id).toBe('agent-full-access')
+    expect(session.configOptions?.[0]?.kind.current_value).toBe('high')
+  })
+
   function buildPersistedUserTurn(id: string, text: string, conversationId = 1) {
     return {
       id,

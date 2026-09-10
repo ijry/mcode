@@ -6,6 +6,7 @@ import {
   persistSelectedAgentType,
   readFreshAgentListCache,
   readPersistedSelectedAgentType,
+  resolveDetailAgentConfigState,
 } from "@/services/conversation/composerTools"
 
 describe("buildAgentConfigContextKey", () => {
@@ -31,6 +32,94 @@ describe("buildAgentConfigContextKey", () => {
       current_mode_id: "agent",
       available_modes: [{ id: "agent", name: "Agent" }],
     })).toBe(true)
+  })
+})
+
+describe("detail agent config state resolution", () => {
+  it("prefers live session selector state over the transient probe snapshot", () => {
+    const fallback = {
+      status: "ready" as const,
+      modes: {
+        current_mode_id: "agent",
+        available_modes: [{ id: "agent", name: "Agent" }],
+      },
+      configOptions: [],
+      selectedModeId: "agent",
+      selectedValues: {},
+      message: "",
+    }
+
+    const state = resolveDetailAgentConfigState({
+      selectorsReady: true,
+      modes: {
+        current_mode_id: "agent-full-access",
+        available_modes: [{ id: "agent-full-access", name: "Full access" }],
+      },
+      configOptions: [],
+      fallback,
+    })
+
+    expect(state.status).toBe("ready")
+    expect(state.modes?.current_mode_id).toBe("agent-full-access")
+    expect(state.selectedModeId).toBe("agent-full-access")
+  })
+
+  it("keeps live current values authoritative when stale fallback values are still available", () => {
+    const state = resolveDetailAgentConfigState({
+      selectorsReady: true,
+      modes: {
+        current_mode_id: "agent-full-access",
+        available_modes: [
+          { id: "agent", name: "Agent" },
+          { id: "agent-full-access", name: "Full access" },
+        ],
+      },
+      configOptions: [{
+        id: "model",
+        name: "Model",
+        kind: {
+          type: "select",
+          current_value: "gpt-5.6-sol",
+          options: [
+            { value: "gpt-5.5", name: "GPT-5.5" },
+            { value: "gpt-5.6-sol", name: "GPT-5.6 Sol" },
+          ],
+          groups: [],
+        },
+      }],
+      fallback: {
+        status: "ready",
+        modes: {
+          current_mode_id: "agent",
+          available_modes: [{ id: "agent", name: "Agent" }],
+        },
+        configOptions: [],
+        selectedModeId: "agent",
+        selectedValues: { model: "gpt-5.5" },
+        message: "",
+      },
+    })
+
+    expect(state.selectedModeId).toBe("agent-full-access")
+    expect(state.selectedValues.model).toBe("gpt-5.6-sol")
+  })
+
+  it("falls back to the probe snapshot before selectors are ready", () => {
+    const fallback = {
+      status: "loading" as const,
+      modes: null,
+      configOptions: [],
+      selectedModeId: null,
+      selectedValues: {},
+      message: "loading",
+    }
+
+    expect(resolveDetailAgentConfigState({
+      selectorsReady: false,
+      modes: null,
+      configOptions: null,
+      fallback,
+    })).toBe(fallback)
   })
 })
 

@@ -948,13 +948,13 @@
                   :key="mode.id"
                   :class="[
                     'composer-config-option',
-                    detailAgentConfig.selectedModeId === mode.id &&
+                    activeDetailAgentConfig.selectedModeId === mode.id &&
                       'composer-config-option--active',
                   ]"
                   @click.stop="selectDetailMode(mode.id)"
                 >
                   <text class="composer-config-option__check">{{
-                    detailAgentConfig.selectedModeId === mode.id ? "✓" : ""
+                    activeDetailAgentConfig.selectedModeId === mode.id ? "✓" : ""
                   }}</text>
                   <view class="composer-config-option__body">
                     <text class="composer-config-option__title">{{
@@ -978,7 +978,7 @@
                   :key="value.value"
                   :class="[
                     'composer-config-option',
-                    detailAgentConfig.selectedValues[
+                    activeDetailAgentConfig.selectedValues[
                       activeConfigOption.id
                     ] === value.value && 'composer-config-option--active',
                   ]"
@@ -987,7 +987,7 @@
                   "
                 >
                   <text class="composer-config-option__check">{{
-                    detailAgentConfig.selectedValues[activeConfigOption.id] ===
+                    activeDetailAgentConfig.selectedValues[activeConfigOption.id] ===
                     value.value
                       ? "✓"
                       : ""
@@ -1365,6 +1365,7 @@ import {
   projectDetailConfigOptions,
   readFreshAgentConfigCache,
   readPersistedAgentConfigSelection,
+  resolveDetailAgentConfigState,
   type ComposerConfigKey,
   type DetailAgentConfigState,
 } from "@/services/conversation/composerTools";
@@ -1744,6 +1745,14 @@ const detailAgentConfigContextKey = computed(() =>
 const session = computed(() =>
   runtime.getOrCreateSession(Number(props.conversationId || 0)),
 );
+const activeDetailAgentConfig = computed(() =>
+  resolveDetailAgentConfigState({
+    selectorsReady: session.value.selectorsReady,
+    modes: session.value.modes,
+    configOptions: session.value.configOptions,
+    fallback: detailAgentConfig.value,
+  }),
+);
 const messages = computed(() =>
   runtime.getMessages(Number(props.conversationId || 0)),
 );
@@ -2036,7 +2045,7 @@ const showInputToolMenu = computed(
   () => toolRowExpanded.value && !showComposerPanel.value,
 );
 const detailConfigProjection = computed(() =>
-  projectDetailConfigOptions(detailAgentConfig.value.configOptions),
+  projectDetailConfigOptions(activeDetailAgentConfig.value.configOptions),
 );
 const modelOption = computed(() => detailConfigProjection.value.modelOption);
 const reasoningOption = computed(
@@ -2047,31 +2056,31 @@ const permissionOption = computed(
 );
 const hasModelOptions = computed(() => Boolean(modelOption.value));
 const hasPermissionOptions = computed(() =>
-  Boolean(
-    detailAgentConfig.value.modes?.available_modes?.length ||
-    permissionOption.value,
-  ),
+    Boolean(
+      activeDetailAgentConfig.value.modes?.available_modes?.length ||
+      permissionOption.value,
+    ),
 );
 const modelSummary = computed(() =>
   detailConfigOptionSummary({
-    status: detailAgentConfig.value.status,
+    status: activeDetailAgentConfig.value.status,
     option: modelOption.value,
-    selectedValues: detailAgentConfig.value.selectedValues,
-    message: detailAgentConfig.value.message,
+    selectedValues: activeDetailAgentConfig.value.selectedValues,
+    message: activeDetailAgentConfig.value.message,
   }),
 );
 const reasoningSummary = computed(() =>
   detailConfigOptionSummary({
-    status: detailAgentConfig.value.status,
+    status: activeDetailAgentConfig.value.status,
     option: reasoningOption.value,
-    selectedValues: detailAgentConfig.value.selectedValues,
-    message: detailAgentConfig.value.message,
+    selectedValues: activeDetailAgentConfig.value.selectedValues,
+    message: activeDetailAgentConfig.value.message,
   }),
 );
 const permissionSummary = computed(() =>
   detailPermissionSummary({
-    status: detailAgentConfig.value.status,
-    state: detailAgentConfig.value,
+    status: activeDetailAgentConfig.value.status,
+    state: activeDetailAgentConfig.value,
     permissionOption: permissionOption.value,
   }),
 );
@@ -2125,7 +2134,7 @@ const activeConfigValues = computed<SessionConfigOptionValueInfo[]>(() =>
   activeConfigOption.value?.kind.options || [],
 );
 const activePermissionModes = computed<SessionModeInfo[]>(
-  () => detailAgentConfig.value.modes?.available_modes || [],
+  () => activeDetailAgentConfig.value.modes?.available_modes || [],
 );
 const showPermissionModeValues = computed(
   () =>
@@ -2411,9 +2420,13 @@ watch(
       firstString(session.value.connectionId),
       detailProjectPath.value,
       Boolean(props.active),
+      Boolean(session.value.selectorsReady),
     ] as const,
-  ([conversationId, agentType, , , active]) => {
-    if (!conversationId || !agentType || !active) return;
+  ([conversationId, agentType, , , active, selectorsReady]) => {
+    if (!conversationId || !agentType || !active || selectorsReady) {
+      detailAgentProbeToken += 1;
+      return;
+    }
     void loadDetailAgentConfig();
   },
   { immediate: true },
@@ -2611,6 +2624,7 @@ async function loadDetailAgentConfig() {
 
   try {
     const gateway = await getDetailGateway();
+    if (token !== detailAgentProbeToken || session.value.selectorsReady) return;
     const snapshot = await gateway.call<AgentOptionsSnapshot>(
       "acp_describe_agent_options",
       {
@@ -2618,7 +2632,7 @@ async function loadDetailAgentConfig() {
         workingDir: detailProjectPath.value || null,
       },
     );
-    if (token !== detailAgentProbeToken) return;
+    if (token !== detailAgentProbeToken || session.value.selectorsReady) return;
     persistAgentConfigCache(contextKey, snapshot);
     detailAgentConfig.value = createReadyDetailAgentConfigState(
       snapshot,
@@ -2711,6 +2725,10 @@ async function selectDetailMode(modeId: string) {
   }
   try {
     await acpApi.acpSetMode(conn, modeId);
+    runtime.applyAcknowledgedModeSelection(
+      Number(props.conversationId || 0),
+      modeId,
+    );
     detailAgentConfig.value = withSelectedDetailMode(
       detailAgentConfig.value,
       modeId,
@@ -2757,6 +2775,11 @@ async function selectDetailConfigValue(configId: string, valueId: string) {
   }
   try {
     await acpApi.acpSetConfigOption(conn, configId, valueId);
+    runtime.applyAcknowledgedConfigSelection(
+      Number(props.conversationId || 0),
+      configId,
+      valueId,
+    );
     detailAgentConfig.value = withSelectedDetailConfigValue({
       state: detailAgentConfig.value,
       configId,

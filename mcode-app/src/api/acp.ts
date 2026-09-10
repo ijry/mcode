@@ -1613,6 +1613,38 @@ class AcpApiClient {
           },
         }
       }
+      case "session_modes": {
+        const modes = toRecord(record.modes)
+        if (!modes) return null
+        return {
+          connectionId,
+          type: "session_modes",
+          data: { modes },
+        }
+      }
+      case "session_config_options": {
+        if (!Array.isArray(record.config_options)) return null
+        return {
+          connectionId,
+          type: "session_config_options",
+          data: { config_options: record.config_options },
+        }
+      }
+      case "selectors_ready":
+        return {
+          connectionId,
+          type: "selectors_ready",
+          data: {},
+        }
+      case "mode_changed": {
+        const modeId = firstString(record.mode_id, record.modeId)
+        if (!modeId) return null
+        return {
+          connectionId,
+          type: "mode_changed",
+          data: { mode_id: modeId },
+        }
+      }
       case "error":
         return {
           connectionId,
