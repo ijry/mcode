@@ -241,7 +241,35 @@ describe("ConversationDetailBody", () => {
     expect(source).toContain("if (!active) return");
     expect(source).toContain("Boolean(props.active),");
     expect(source).toContain(
-      "if (!conversationId || !agentType || !active) return",
+      "if (!conversationId || !agentType || !active || selectorsReady) {",
+    );
+  });
+
+  it("uses live selector state for checked values and cancels stale probes", () => {
+    const source = fs.readFileSync(
+      path.resolve(
+        __dirname,
+        "../../../src/pages/conversation-detail/ConversationDetailInteractivePane.vue",
+      ),
+      "utf8",
+    );
+
+    expect(source).toContain(
+      "activeDetailAgentConfig.selectedModeId === mode.id",
+    );
+    expect(source).toContain("activeDetailAgentConfig.selectedValues[");
+    expect(source).toMatch(
+      /\[\s*Number\(props\.conversationId \|\| 0\),\s*normalizedAgentType\.value,\s*firstString\(session\.value\.connectionId\),\s*detailProjectPath\.value,\s*Boolean\(props\.active\),\s*Boolean\(session\.value\.selectorsReady\),?\s*\]/,
+    );
+    expect(source).toMatch(
+      /\(\[conversationId, agentType, , , active, selectorsReady\]\) => \{\s*if \(!conversationId \|\| !agentType \|\| !active \|\| selectorsReady\) \{\s*detailAgentProbeToken \+= 1;\s*return;/,
+    );
+    expect(source).toContain(
+      "if (token !== detailAgentProbeToken || session.value.selectorsReady) return",
+    );
+    expect(source).toContain("runtime.applyAcknowledgedModeSelection(");
+    expect(source).toContain(
+      "runtime.applyAcknowledgedConfigSelection(",
     );
   });
 

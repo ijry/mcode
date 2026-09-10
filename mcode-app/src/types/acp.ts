@@ -259,6 +259,10 @@ export interface EventEnvelope {
     | "async_task"
     | "background_activity"
     | "permission_queue_depth"
+    | "session_modes"
+    | "session_config_options"
+    | "selectors_ready"
+    | "mode_changed"
     | "error"
   connectionId: string
   seq?: number

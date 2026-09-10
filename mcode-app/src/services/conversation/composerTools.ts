@@ -447,3 +447,16 @@ export function createReadyDetailAgentConfigState(
     message: !modes && configOptions.length === 0 ? "该智能体将使用远端默认配置" : "",
   }
 }
+
+export function resolveDetailAgentConfigState(input: {
+  selectorsReady: boolean
+  modes: SessionModeStateInfo | null
+  configOptions: SessionConfigOptionInfo[] | null
+  fallback: DetailAgentConfigState
+}): DetailAgentConfigState {
+  if (!input.selectorsReady) return input.fallback
+  return createReadyDetailAgentConfigState({
+    modes: input.modes,
+    config_options: input.configOptions ?? [],
+  })
+}

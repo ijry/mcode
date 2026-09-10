@@ -19,6 +19,8 @@ import type {
   FeedbackNote,
   RuntimeErrorEvent,
   SessionFailureRecord,
+  SessionConfigOptionInfo,
+  SessionModeStateInfo,
   TurnQueueEvent,
 } from "@/types/acp"
 import { acpApi } from "@/api/acp"
@@ -95,6 +97,28 @@ import {
  */
 const EMPTY_SUBAGENT_TRANSCRIPTS: Record<string, string> = Object.freeze({})
 
+function normalizeSessionModes(raw: unknown): SessionModeStateInfo | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null
+  const record = raw as Record<string, unknown>
+  const currentModeId = firstString(record.current_mode_id, record.currentModeId)
+  const availableModes = Array.isArray(record.available_modes)
+    ? record.available_modes
+    : Array.isArray(record.availableModes)
+      ? record.availableModes
+      : []
+  if (!currentModeId || availableModes.length === 0) return null
+  return {
+    current_mode_id: currentModeId,
+    available_modes: availableModes as SessionModeStateInfo["available_modes"],
+  }
+}
+
+function normalizeSessionConfigOptions(raw: unknown): SessionConfigOptionInfo[] {
+  return Array.isArray(raw)
+    ? raw.filter((item): item is SessionConfigOptionInfo => Boolean(item && typeof item === "object"))
+    : []
+}
+
 /**
  * 会话运行时状态管理
  * 管理消息流、连接状态、乐观更新等
@@ -129,6 +153,9 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         pendingPermission: null,
         pendingQuestion: null,
         permissionQueueDepth: 0,
+        selectorsReady: false,
+        modes: null,
+        configOptions: null,
         asyncTasks: [],
         backgroundOutstanding: 0,
         backgroundSettled: [],
@@ -410,6 +437,15 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     // 清零发生在 disconnect / 换连接；native 还可由提交结果明确降级，墓碑会阻止迟到旧快照
     // 再把它升回去。
     applyFeedbackSnapshotState(session, snapshot)
+    if (snapshot.selectors_ready !== undefined) {
+      session.selectorsReady = snapshot.selectors_ready === true
+    }
+    if (snapshot.modes !== undefined || snapshot.selectors_ready === true) {
+      session.modes = normalizeSessionModes(snapshot.modes)
+    }
+    if (snapshot.config_options !== undefined || snapshot.selectors_ready === true) {
+      session.configOptions = normalizeSessionConfigOptions(snapshot.config_options)
+    }
     // 本轮便签也在快照里（`session_state.rs:1653`，注释写明是为「mid-turn attach 的
     // 客户端渲染那些一次性 feedback_submitted 不会重放的便签」准备的）。冷启动 /
     // 重连进一个进行中的会话时，这是唯一来源。
@@ -914,6 +950,26 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         syncManagedSendPermission(session.conversationId)
         break
 
+      case "session_modes":
+        session.modes = normalizeSessionModes(event.data?.modes)
+        break
+
+      case "session_config_options":
+        session.configOptions = normalizeSessionConfigOptions(event.data?.config_options)
+        break
+
+      case "selectors_ready":
+        session.selectorsReady = true
+        break
+
+      case "mode_changed": {
+        const modeId = firstString(event.data?.mode_id, event.data?.modeId)
+        if (modeId && session.modes) {
+          session.modes = { ...session.modes, current_mode_id: modeId }
+        }
+        break
+      }
+
       case "permission_request":
         touchHotConversation(session.conversationId)
         session.status = "waiting_permission"
@@ -1104,6 +1160,47 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     }
   }
 
+  function applyAcknowledgedModeSelection(conversationId: number, modeId: string) {
+    const session = getOrCreateSession(conversationId)
+    const nextModeId = firstString(modeId)
+    if (
+      !nextModeId
+      || !session.selectorsReady
+      || !session.modes
+      || !session.modes.available_modes.some((mode) => mode.id === nextModeId)
+    ) {
+      return false
+    }
+    session.modes = { ...session.modes, current_mode_id: nextModeId }
+    return true
+  }
+
+  function applyAcknowledgedConfigSelection(
+    conversationId: number,
+    configId: string,
+    valueId: string
+  ) {
+    const session = getOrCreateSession(conversationId)
+    const nextConfigId = firstString(configId)
+    const nextValueId = firstString(valueId)
+    if (!nextConfigId || !nextValueId || !session.selectorsReady || !session.configOptions) {
+      return false
+    }
+
+    let updated = false
+    const nextOptions = session.configOptions.map((option) => {
+      if (option.id !== nextConfigId) return option
+      updated = true
+      return {
+        ...option,
+        kind: { ...option.kind, current_value: nextValueId },
+      }
+    })
+    if (!updated) return false
+    session.configOptions = nextOptions
+    return true
+  }
+
   /**
    * 连接到代理
    */
@@ -1158,6 +1255,9 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       // connection takes ownership, so do not carry the old channel across.
       session.nativeSteeringAvailable = false
       session.nativeSteeringDowngraded = false
+      session.selectorsReady = false
+      session.modes = null
+      session.configOptions = null
       resetBackgroundActivityState(session)
       session.feedbackToolAvailable = false
       session.feedbackNotes = []
@@ -1260,6 +1360,9 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
         // 会话被别的连接接管了：能力位属于旧那条，必须清掉等新快照重新声明。
         session.nativeSteeringAvailable = false
         session.nativeSteeringDowngraded = false
+        session.selectorsReady = false
+        session.modes = null
+        session.configOptions = null
         resetBackgroundActivityState(session)
         session.feedbackToolAvailable = false
         session.feedbackNotes = []
@@ -1354,6 +1457,9 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
       // 是另一个 agent / 另一个版本。留着它会让重连到 codex 后仍然显示插入入口。
       session.nativeSteeringAvailable = false
       session.nativeSteeringDowngraded = false
+      session.selectorsReady = false
+      session.modes = null
+      session.configOptions = null
       resetBackgroundActivityState(session)
       session.feedbackToolAvailable = false
       // 便签同理：它们属于那条已经断掉的连接的当前回合。
@@ -1383,6 +1489,9 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     // 同 disconnect：能力位属于那条已经作废的连接，不能带到下一条上。
     session.nativeSteeringAvailable = false
     session.nativeSteeringDowngraded = false
+    session.selectorsReady = false
+    session.modes = null
+    session.configOptions = null
     resetBackgroundActivityState(session)
     session.feedbackToolAvailable = false
     session.feedbackNotes = []
@@ -1514,6 +1623,9 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     session.inFlightUserTurnId = null
     session.nativeSteeringAvailable = false
     session.nativeSteeringDowngraded = false
+    session.selectorsReady = false
+    session.modes = null
+    session.configOptions = null
     resetBackgroundActivityState(session)
     session.feedbackToolAvailable = false
     session.feedbackNotes = []
@@ -1665,6 +1777,8 @@ export const useConversationRuntimeStore = defineStore("conversationRuntime", ()
     handleEvent,
     handleEventForConversation,
     hydrateLiveSnapshot,
+    applyAcknowledgedModeSelection,
+    applyAcknowledgedConfigSelection,
     hydrateFeedbackSnapshot,
     markNativeSteeringUnavailable,
     connect,
@@ -1734,6 +1848,9 @@ interface RuntimeSession {
    * 「还有 2 条」挂在一个其实已经空了的队列上，会让用户以为还得守着。
    */
   permissionQueueDepth: number
+  selectorsReady: boolean
+  modes: SessionModeStateInfo | null
+  configOptions: SessionConfigOptionInfo[] | null
   /**
    * AIR 异步任务表（`services/conversation/asyncTasks.ts`）：Claude 的非智能体后台工作
    * —— `run_in_background` 的 shell、workflow、monitor。
