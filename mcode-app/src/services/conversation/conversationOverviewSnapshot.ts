@@ -15,6 +15,13 @@ export interface ConversationOverviewConversation {
   status?: string
   external_id?: string
   externalId?: string
+  /**
+   * 是否置顶。
+   *
+   * 服务端用 snake_case（`is_pinned`，与标签的同名字段一致），本地 DB 行是
+   * `isPinned` —— 两边各自归口，进快照时统一成卡上的 `isPinned`。
+   */
+  is_pinned?: boolean
 }
 
 export interface ConversationOverviewProject {
@@ -51,6 +58,8 @@ export interface ConversationOverviewCard {
   activityAt: number
   status: string
   isActive: boolean
+  /** 会话是否置顶。置顶只影响分组内的排位，不参与 `activityAt` 的时间排序。 */
+  isPinned: boolean
   /**
    * 这张卡是否来自「打开中的标签」。
    *
@@ -122,6 +131,7 @@ export function buildConnectionConversationSnapshot(
         activityAt: activity.at,
         status: normalizeConversationStatus(conversation?.status),
         isActive: Boolean(tab.is_active),
+        isPinned: Boolean(conversation?.is_pinned),
         isOpenTab: true,
       } satisfies ConversationOverviewCard
     })
@@ -157,6 +167,7 @@ export function buildConnectionConversationSnapshot(
         activityAt: activity.at,
         status: normalizeConversationStatus(conversation.status),
         isActive: false,
+        isPinned: Boolean(conversation.is_pinned),
         isOpenTab: false,
       } satisfies ConversationOverviewCard
     })
@@ -217,6 +228,9 @@ export function mapConversationSummaryRecordToConversation(
     last_message_at: formatTimestamp(record.lastMessageAt),
     folder_id: record.folderId,
     status: normalizeConversationStatus(record.status),
+    // 本地行用 isPinned。不带上它，离线首屏（先读本地再刷远程）会把置顶抹成未置顶，
+    // 列表会先跳一下再跳回来。
+    is_pinned: Boolean(record.isPinned),
   }
 }
 
@@ -244,7 +258,8 @@ export function mapConversationToSummaryRecord(
     lastTurnId: null,
     lastMessageAt,
     unreadCount: 0,
-    isPinned: false,
+    // 曾经写死 false：远程落库时会把已经置顶的会话抹平，再刷新又跳回置顶态。
+    isPinned: Boolean(conversation.is_pinned),
     deletedAt: null,
     updatedAt,
   }

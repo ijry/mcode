@@ -6,7 +6,8 @@
       selectionMode && selectable && 'conv-row--selecting',
       selected && 'conv-row--selected',
     ]"
-    @click="emit('open')"
+    @click="handleClick"
+    @longpress="handleLongPress"
   >
     <!-- 批量选择：只在选择模式且有可选中身份时出现，避免「点了个不能选的会话」。 -->
     <view
@@ -102,7 +103,31 @@ const props = defineProps<{
 const emit = defineEmits<{
   (event: "open"): void
   (event: "toggle-select"): void
+  /** 长按。菜单由页面弹 —— 只有页面知道连接、网关和刷新链路。 */
+  (event: "menu"): void
 }>()
+
+/**
+ * 长按之后要不要再当一次点击。
+ *
+ * 部分端（H5 尤其明显）在长按结束、手指抬起时还会补发一次 click。不吞掉它的话，
+ * 长按的结果是「菜单弹出来了，会话也顺手被打开了」—— 用户只想看菜单。
+ * 这个标记在补发的 click 里被消费掉，下一次正常点击不受影响。
+ */
+let longPressConsumedClick = false
+
+function handleLongPress() {
+  longPressConsumedClick = true
+  emit("menu")
+}
+
+function handleClick() {
+  if (longPressConsumedClick) {
+    longPressConsumedClick = false
+    return
+  }
+  emit("open")
+}
 
 const layout = computed(() => resolveConversationListRowLayout(props.listStyle))
 const title = computed(() => resolveRowTitle(props.title))

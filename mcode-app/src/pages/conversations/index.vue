@@ -71,6 +71,7 @@
                 :selected-keys="selectedConversationKeys"
                 @open="handleFolderCardOpen(folder, $event)"
                 @toggle-select="handleFolderCardToggleSelect(folder, $event)"
+                @menu="handleRowMenu(folder, $event)"
                 @create="openAddProjectBrowser(folder.connectionKey)"
               />
 
@@ -165,6 +166,19 @@
       @select="handleRemoteFolderSelected"
     />
 
+    <!--
+      会话行长按菜单。条目由 `buildConversationRowActions` 按会话状态现算：
+      置顶 / 归档各自只出现当前该出现的那一半，正在进行的会话没有删除项。
+      目标会话与所属连接一起存，因为改名、置顶、归档都要按连接取网关。
+    -->
+    <up-action-sheet
+      :show="rowActionSheetVisible"
+      :actions="rowActionList"
+      :title="rowActionSheetTitle"
+      @select="handleRowActionSelect"
+      @close="closeRowActionSheet"
+    ></up-action-sheet>
+
   </view>
 </template>
 
@@ -187,6 +201,15 @@ import {
   resolveConversationListStyleLabel,
   type ConversationListStyleId,
 } from "@/pages/conversations/conversationListPresentation"
+import {
+  CONVERSATION_ARCHIVED_STATUS,
+  CONVERSATION_PIN_COMMAND,
+  CONVERSATION_UNARCHIVED_STATUS,
+  buildConversationRowActions,
+  canDeleteConversation,
+  resolveRowActionSheetTitle,
+  resolveSelectedRowAction,
+} from "@/pages/conversations/conversationRowActions"
 import CreateConversationSheet from "@/pages/conversations/components/CreateConversationSheet.vue"
 import {
   buildBulkSelectionItem,
@@ -329,6 +352,34 @@ const showDirectoryBrowser = ref(false)
 const directoryBrowserGateway = ref<CodegGateway | null>(null)
 const directoryBrowserConnectionKey = ref("")
 const addingProject = ref(false)
+/**
+ * 长按菜单的目标：卡片 + 所属连接，两者必须一起存。
+ *
+ * 卡片自己不带连接键（那归文件夹分组所有），而改名、置顶、归档都要按连接取网关 ——
+ * 只存卡片的话，写操作就得回头去猜它属于哪条连接。
+ */
+const rowActionTarget = ref<{
+  card: DisplayLiveSessionCard
+  connectionKey: string
+} | null>(null)
+const rowActionSheetVisible = ref(false)
+
+/**
+ * 菜单条目按目标会话的当前状态现算。
+ *
+ * 状态优先取 `displayStatus`（它是 `status` 叠上实时会话后的结果），取不到才退回
+ * `status`：用原始 status 判断「是否正在进行」会把一个正在跑、但库里还写着 completed
+ * 的会话判成可删。
+ */
+const rowActionList = computed(() =>
+  buildConversationRowActions({
+    status: rowActionTarget.value?.card?.displayStatus || rowActionTarget.value?.card?.status,
+    isPinned: rowActionTarget.value?.card?.isPinned === true,
+  })
+)
+const rowActionSheetTitle = computed(() =>
+  resolveRowActionSheetTitle(rowActionTarget.value?.card?.title)
+)
 let overviewLoadPromise: Promise<void> | null = null
 let lastOverviewLoadedAt = 0
 const overviewRefreshPromiseMap = new Map<string, Promise<void>>()
@@ -374,6 +425,8 @@ interface LiveSessionCard {
   activityAt: number
   status: string
   isActive: boolean
+  /** 置顶。快照里写死的字段，分组排序与长按菜单都读它。 */
+  isPinned: boolean
   isOpenTab: boolean
 }
 
@@ -832,6 +885,184 @@ function handleFolderCardOpen(folder: { connectionKey: string }, card: LiveSessi
 
 function handleFolderCardToggleSelect(folder: { connectionKey: string }, card: LiveSessionCard) {
   toggleConversationSelection(card, folder.connectionKey)
+}
+
+/* ── 会话行长按菜单 ────────────────────────────────────────────────── */
+
+function handleRowMenu(folder: { connectionKey: string }, card: DisplayLiveSessionCard) {
+  // 选择模式下长按不弹菜单：那时手指在勾选，弹层会直接打断批量操作。
+  if (selectionMode.value) return
+  // 没有会话号的卡（还没建会话的空标签）没有任何可操作对象。
+  if (Number(card?.conversationId || 0) <= 0) return
+  rowActionTarget.value = { card, connectionKey: folder.connectionKey }
+  rowActionSheetVisible.value = true
+}
+
+function closeRowActionSheet() {
+  rowActionSheetVisible.value = false
+}
+
+function handleRowActionSelect(event: any) {
+  const target = rowActionTarget.value
+  // 按 index 取回；某些端只给 name，所以用 name 兜底。
+  const action = resolveSelectedRowAction(rowActionList.value, event)
+  rowActionSheetVisible.value = false
+  if (!target || !action) return
+
+  switch (action.id) {
+    case "rename":
+      requestRenameRowConversation(target)
+      break
+    case "pin":
+    case "unpin":
+      void toggleRowConversationPinned(target, action.id === "pin")
+      break
+    case "archive":
+    case "unarchive":
+      void toggleRowConversationArchived(target, action.id === "archive")
+      break
+    case "delete":
+      requestDeleteRowConversation(target)
+      break
+  }
+}
+
+/**
+ * 取目标会话所在连接的网关。
+ *
+ * 三个写操作都要它，失败文案也一致（连接断了 / 已删），所以收在一处。
+ */
+async function resolveRowGateway(connectionKey: string) {
+  const conn = findConnectedConnection(connectionKey)
+  if (!conn) {
+    uni.showToast({ title: "连接不存在或已断开", icon: "none" })
+    return null
+  }
+  try {
+    return await openConnectionGateway(conn)
+  } catch (error) {
+    uni.showToast({ title: toErrorMessage(error), icon: "none", duration: 3000 })
+    return null
+  }
+}
+
+/** 写操作落地后统一刷新：标脏 + 重载，让列表立刻反映新状态。 */
+async function refreshAfterRowAction() {
+  markConversationListDirty()
+  await loadData()
+}
+
+function requestRenameRowConversation(target: {
+  card: DisplayLiveSessionCard
+  connectionKey: string
+}) {
+  const previousTitle = String(target.card.title || "未命名会话")
+  uni.showModal({
+    title: "改名",
+    editable: true,
+    placeholderText: previousTitle,
+    success: (result) => {
+      if (!result.confirm) return
+      const nextTitle = String(result.content || "").trim()
+      if (!nextTitle || nextTitle === previousTitle) return
+      void renameRowConversation(target, nextTitle)
+    },
+  })
+}
+
+async function renameRowConversation(
+  target: { card: DisplayLiveSessionCard; connectionKey: string },
+  title: string
+) {
+  const gateway = await resolveRowGateway(target.connectionKey)
+  if (!gateway) return
+  try {
+    await gateway.call("update_conversation_title", {
+      conversationId: Number(target.card.conversationId || 0),
+      title,
+    })
+    uni.showToast({ title: "已改名", icon: "success" })
+    await refreshAfterRowAction()
+  } catch (error) {
+    uni.showToast({ title: toErrorMessage(error, "改名失败"), icon: "none", duration: 3000 })
+  }
+}
+
+async function toggleRowConversationPinned(
+  target: { card: DisplayLiveSessionCard; connectionKey: string },
+  pinned: boolean
+) {
+  const gateway = await resolveRowGateway(target.connectionKey)
+  if (!gateway) return
+  try {
+    await gateway.call(CONVERSATION_PIN_COMMAND, {
+      conversationId: Number(target.card.conversationId || 0),
+      pinned,
+    })
+    uni.showToast({ title: pinned ? "已置顶" : "已取消置顶", icon: "success" })
+    await refreshAfterRowAction()
+  } catch (error) {
+    uni.showToast({
+      title: toErrorMessage(error, pinned ? "置顶失败" : "取消置顶失败"),
+      icon: "none",
+      duration: 3000,
+    })
+  }
+}
+
+async function toggleRowConversationArchived(
+  target: { card: DisplayLiveSessionCard; connectionKey: string },
+  archived: boolean
+) {
+  const gateway = await resolveRowGateway(target.connectionKey)
+  if (!gateway) return
+  try {
+    await gateway.call("update_conversation_status", {
+      conversationId: Number(target.card.conversationId || 0),
+      status: archived ? CONVERSATION_ARCHIVED_STATUS : CONVERSATION_UNARCHIVED_STATUS,
+    })
+    uni.showToast({ title: archived ? "已归档" : "已取消归档", icon: "success" })
+    await refreshAfterRowAction()
+  } catch (error) {
+    uni.showToast({
+      title: toErrorMessage(error, archived ? "归档失败" : "取消归档失败"),
+      icon: "none",
+      duration: 3000,
+    })
+  }
+}
+
+function requestDeleteRowConversation(target: {
+  card: DisplayLiveSessionCard
+  connectionKey: string
+}) {
+  // 二次守卫：菜单是按**弹开那一刻**的状态算的，弹出之后会话可能已经开始跑。
+  if (!canDeleteConversation(target.card.displayStatus || target.card.status)) {
+    uni.showToast({ title: "会话正在进行，无法删除", icon: "none" })
+    return
+  }
+  uni.showModal({
+    title: "删除会话",
+    content: `确定删除「${String(target.card.title || "未命名会话")}」吗？此操作不可恢复。`,
+    confirmColor: "#fa3534",
+    success: (result) => {
+      if (!result.confirm) return
+      void deleteRowConversation(target)
+    },
+  })
+}
+
+async function deleteRowConversation(target: {
+  card: DisplayLiveSessionCard
+  connectionKey: string
+}) {
+  try {
+    await acpApi.deleteConversation(Number(target.card.conversationId || 0))
+    uni.showToast({ title: "已删除", icon: "success" })
+    await refreshAfterRowAction()
+  } catch (error) {
+    uni.showToast({ title: toErrorMessage(error, "删除失败"), icon: "none", duration: 3000 })
+  }
 }
 
 function scheduleLivePreviewReconcile() {

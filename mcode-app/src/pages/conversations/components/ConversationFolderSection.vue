@@ -48,6 +48,7 @@
           :selected="isSelected(card)"
           @open="emit('open', card)"
           @toggle-select="emit('toggle-select', card)"
+          @menu="emit('menu', card)"
         />
       </template>
 
@@ -96,6 +97,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   (event: "open", card: any): void
   (event: "toggle-select", card: any): void
+  /** 长按某一行。卡片本身不带连接键（那归分组所有），由页面补齐上下文。 */
+  (event: "menu", card: any): void
   (event: "create"): void
   (event: "toggle-collapse", collapsed: boolean): void
 }>()

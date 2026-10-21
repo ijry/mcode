@@ -211,6 +211,8 @@ export function resolveRowTimeText(updatedAt?: string) {
 export interface ConversationFolderCardLike {
   folderId: number
   projectName: string
+  /** 置顶。可选是因为上游的卡片形态不止一种，没有这个字段时按未置顶处理。 */
+  isPinned?: boolean
 }
 
 export interface ConversationFolderGroupLike<C extends ConversationFolderCardLike> {
@@ -271,11 +273,34 @@ export function buildConversationFolderGroups<C extends ConversationFolderCardLi
     // 只有连接作用域的空槽（`folderId = 0` 且没有任何卡）没有意义，跳过。
     bucket.forEach((folder) => {
       if (folder.folderId === 0 && folder.cards.length === 0) return
+      // 置顶在**文件夹内**生效：不这么做，置顶只写了个字段，用户什么都看不到 ——
+      // 全局排序键是活跃时间，置顶不参与它就是个空开关。
+      folder.cards = sortFolderCardsWithPinnedFirst(folder.cards)
       out.push(folder)
     })
   })
 
   return out
+}
+
+/**
+ * 分组内的置顶优先排序。
+ *
+ * 只把置顶的提到前面，**其余保持原顺序**（下游已经按活跃时间排好了，这里不能重新
+ * 洗牌）—— 所以是稳定的：用原下标做 tiebreak，而不是再比一次时间。
+ */
+export function sortFolderCardsWithPinnedFirst<C extends ConversationFolderCardLike>(
+  cards: C[]
+): C[] {
+  return cards
+    .map((card, index) => ({ card, index }))
+    .sort((left, right) => {
+      const pinnedDiff =
+        Number(Boolean(right.card.isPinned)) - Number(Boolean(left.card.isPinned))
+      if (pinnedDiff !== 0) return pinnedDiff
+      return left.index - right.index
+    })
+    .map((entry) => entry.card)
 }
 
 /**
