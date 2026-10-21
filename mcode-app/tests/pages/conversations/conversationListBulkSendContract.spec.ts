@@ -36,15 +36,14 @@ describe("P67 conversation list bulk send contract", () => {
     expect(section).toContain('@open="emit(\'open\', card)"')
     expect(page).toContain("function handleFolderCardOpen(folder: { connectionKey: string }, card: LiveSessionCard) {")
 
-    // 终点用批量操作条的开标签：历史列表块里不许出现选择控件。
-    const historyBlock = extractBlock(
-      page,
-      '<view v-else class="history-list">',
-      '<view v-if="selectionMode" class="bulk-action-bar"'
-    )
-    expect(historyBlock).not.toContain("conv-row__check")
-    expect(historyBlock).not.toContain("toggleConversationSelection")
-    expect(historyBlock).not.toContain("handleFolderCardOpen")
+    // 历史会话不再单独开面板 —— 它和活跃会话在同一份列表里，靠分组的「查看更多」
+    // 分批放出。于是「选择控件不该出现在历史里」这条约束升级成：整个页面只有一条
+    // 列表通道（FolderSection → Row），没有第二处会自己渲染行。
+    expect(page).not.toContain("history-list")
+    expect(page).not.toContain("history-scroll")
+    expect(page).not.toContain("conv-card")
+    // 行的选择事件只经文件夹分组上抛，页面不再自己渲染任何行。
+    expect(page).toContain("function handleFolderCardToggleSelect(")
   })
 
   it("routes top-level card taps to selection toggling before detail navigation", () => {
@@ -88,10 +87,12 @@ describe("P67 conversation list bulk send contract", () => {
       "async function sendBulkSelectionItem(",
       "\nasync function ensureBulkSendConnection("
     )
+    // 收尾 token 用 `formatTime` —— 它紧跟在批量发送这一簇函数后面。别写成某个
+    // 「下一个业务函数」：那一簇被重排时会静默取不到块。
     const ensureBlock = extractBlock(
       source,
       "async function ensureBulkSendConnection(",
-      "\nfunction showConversationMenu("
+      "\nfunction formatTime("
     )
 
     expect(confirmBlock).toContain("for (const item of items)")

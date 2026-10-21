@@ -8,7 +8,6 @@
     height="46px"
     bgColor="transparent"
     :statusBarBgColor="NAVBAR_GLASS_BG_COLOR"
-    @leftClick="emit('back')"
   >
     <!--
       M08 顶栏三件套：左「视图」· 中「连接」· 右「搜索」。
@@ -16,28 +15,18 @@
       左侧按钮切列表展示形态，中间胶囊切连接，右侧按钮唤出搜索。
     -->
     <template #left>
-      <!-- 历史面板模式：退回箭头，行为不变。 -->
-      <view v-if="historyMode" class="conv-nav__btn" @click="emit('back')">
-        <up-icon name="arrow-left" size="18" :color="iconColor"></up-icon>
-      </view>
-      <view v-else class="conv-nav__btn" @click="emit('filter')">
+      <view class="conv-nav__btn" @click="emit('filter')">
         <up-icon name="list-dot" size="18" :color="iconColor"></up-icon>
       </view>
     </template>
 
     <template #center>
-      <view
-        v-if="historyMode"
-        class="conv-nav__title-wrap"
-      >
-        <text class="conv-nav__title">{{ title }}</text>
-      </view>
       <!--
         连接切换胶囊。设计稿宽 104、高 32、圆角 12，文字 14 SemiBold + 12 的箭头。
         不给固定宽度：连接名可能是「MacBook Pro」也可能是「办公室的 Mac mini」，
         固定 104 会把长的截断、短的留一片空白。max-width 兜住极长名字。
       -->
-      <view v-else class="conv-nav__conn" @click="emit('connection')">
+      <view class="conv-nav__conn" @click="emit('connection')">
         <text class="conv-nav__conn-name">{{ connectionName || "未连接" }}</text>
         <up-icon name="arrow-down" size="11" :color="chevronColor"></up-icon>
       </view>
@@ -62,13 +51,9 @@
  * 这样「视图切换」「连接切换」两个面板都能复用页面里已有的 action sheet 逻辑，
  * 顶栏不必知道列表有几种展示形态。
  *
- * 三种形态（视图 / 历史 / 搜索展开）共用同一套尺寸，只有内容不同。
+ * 三种状态（视图 / 搜索展开）共用同一套尺寸，只有内容不同。
  */
 defineProps<{
-  /** 历史面板模式（左键变返回箭头、中间显示分组标题）。 */
-  historyMode?: boolean
-  /** 历史模式下的标题。 */
-  title?: string
   /** 当前连接名，显示在中间胶囊里。 */
   connectionName?: string
   /** 搜索条是否已展开（决定右侧按钮的高亮态）。 */
@@ -76,7 +61,6 @@ defineProps<{
 }>()
 
 const emit = defineEmits<{
-  (event: "back"): void
   (event: "filter"): void
   (event: "connection"): void
   (event: "search"): void
@@ -177,20 +161,4 @@ const activeIconColor = "var(--up-primary, #2979ff)"
   white-space: nowrap;
 }
 
-.conv-nav__title-wrap {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  max-width: 60vw;
-}
-
-.conv-nav__title {
-  font-size: 16px;
-  line-height: 22px;
-  font-weight: 600;
-  color: var(--up-main-color, #3c3c43);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 </style>

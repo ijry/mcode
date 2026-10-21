@@ -27,19 +27,21 @@ describe("conversation list navbar header contract", () => {
     expect(source).toContain(':autoBack="false"')
     // M08 导航栏高度 46（设计稿节点 9:1661）。
     expect(source).toContain('height="46px"')
-    // 返回动作作为事件上抛，页面接住后再决定是否关历史面板。
-    expect(source).toContain('@leftClick="emit(\'back\')"')
+    // 顶栏不再自带返回：历史面板取消后，tab 页没有任何「返回上一屏」的目标，
+    // 留着 @leftClick 只会让左上角那块空白变成一个沉默的死点。
+    expect(source).not.toContain("@leftClick")
+    expect(source).not.toContain("arrow-left")
   })
 
   it("wires the navbar to the page's connection / view / search state", () => {
     const source = read(PAGE)
 
     expect(source).toContain("<ConversationsNavbar")
-    expect(source).toContain(':history-mode="showHistoryPanel"')
-    expect(source).toContain(':title="historyGroupTitle"')
     expect(source).toContain(':connection-name="activeConnectionName"')
     expect(source).toContain(':search-active="searchVisible"')
-    expect(source).toContain('@back="handleNavbarLeftClick"')
+    // 顶栏零历史状态：没有第二块列表，也就没有「历史模式」这回事。
+    expect(source).not.toContain("history-mode")
+    expect(source).not.toContain("@back=")
     // 视图面板（列表形态 / 隐藏已完成 / 选择）由页面开，顶栏只抛事件。
     expect(source).toContain('@filter="openViewFilterSheet"')
     expect(source).toContain('@connection="openConnectionPicker"')
@@ -60,20 +62,17 @@ describe("conversation list navbar header contract", () => {
     }
   })
 
-  // 概览模式 leftIcon 为空，但 .u-navbar__content__left 区域仍然存在且可点
-  // （见 node_modules/uview-plus/components/u-navbar/u-navbar.vue 模板与 leftClick 方法）。
-  // 少了这道守卫，点左上角空白会静默清掉一遍历史状态。**守卫留在页面**（它读 showHistoryPanel
-  // 这个页面状态），子组件只负责在历史模式下渲染返回图标。
-  it("guards the navbar left hit area outside history mode", () => {
-    const source = read(PAGE)
+  // 左上角那块 `.u-navbar__content__left` 即使 leftIcon 为空也依然存在且可点
+  // （见 uview-plus `u-navbar.vue` 模板与 leftClick 方法）。历史面板取消后它没有
+  // 任何可返回的去向，所以顶栏不再接 `@leftClick`、页面也不再留守卫函数 ——
+  // 留着只会是一个「点了没反应」的死区。
+  it("leaves no dead left hit area now that history mode is gone", () => {
+    const page = read(PAGE)
+    const navbar = read(NAVBAR)
 
-    expect(source).toContain("function handleNavbarLeftClick() {")
-    const block = source.slice(
-      source.indexOf("function handleNavbarLeftClick() {"),
-      source.indexOf("}", source.indexOf("function handleNavbarLeftClick() {")) + 1
-    )
-    expect(block).toContain("if (!showHistoryPanel.value) return")
-    expect(block).toContain("closeHistoryPanel()")
+    expect(page).not.toContain("handleNavbarLeftClick")
+    expect(navbar).not.toContain("@leftClick")
+    expect(navbar).not.toContain("emit('back')")
   })
 
   /**
@@ -123,15 +122,15 @@ describe("conversation list navbar header contract", () => {
     expect(source).toContain("buildConversationListStyleActions(listStyle.value)")
   })
 
-  // 中间槽在概览模式是连接胶囊，历史模式才换成标题。
+  // 中间槽只有一种形态：连接胶囊。历史模式取消后不再有「标题态」。
   it("shows the connection pill in the centre slot", () => {
     const source = read(NAVBAR)
 
     expect(source).toContain("<template #center>")
     expect(source).toContain('class="conv-nav__conn"')
     expect(source).toContain('{{ connectionName || "未连接" }}')
-    expect(source).toContain('v-if="historyMode"')
-    expect(source).toContain('class="conv-nav__title"')
+    expect(source).not.toContain("historyMode")
+    expect(source).not.toContain("conv-nav__title")
   })
 
   it("moves the create-conversation plus into the search row", () => {
@@ -191,16 +190,16 @@ describe("conversation list navbar header contract", () => {
   })
 
   // 选择模式下底部是批量操作条，新建会打断选择流程（这条规则从原顶栏的
-  // `v-if="!selectionMode"` 继承）；历史模式没有分组键时新建弹层没有默认连接可用。
+  // `v-if="!selectionMode"` 继承）。历史模式那半条判据随面板一起取消 ——
+  // 现在新建永远发生在当前连接上，不需要「有没有分组键」这个前提。
   it("keeps the create button's visibility rules", () => {
     const source = read(PAGE)
-    const block = source.slice(
-      source.indexOf("const canCreateConversation = computed(() => {"),
-      source.indexOf("})", source.indexOf("const canCreateConversation = computed(() => {")) + 2
-    )
+    // 按行取：这条 computed 是一行箭头函数，用 `})` 当收尾会一路吃到下一个块。
+    const start = source.indexOf("const canCreateConversation = computed(")
+    const block = source.slice(start, source.indexOf("\n", start))
 
-    expect(block).toContain("if (selectionMode.value) return false")
-    expect(block).toContain("if (showHistoryPanel.value) return Boolean(historyGroupKey.value)")
+    expect(block).toContain("selectionMode.value")
+    expect(block).not.toContain("showHistoryPanel")
   })
 
   it("hides the title field from the create sheet", () => {
@@ -215,11 +214,11 @@ describe("conversation list navbar header contract", () => {
     expect(source).not.toContain("newConversationTitle")
   })
 
-  it("switches the navbar into history mode without new reactive state", () => {
+  it("keeps the navbar a stateless controlled component", () => {
     const source = read(NAVBAR)
 
-    expect(source).toContain('name="arrow-left"')
-    expect(source).toContain('v-if="historyMode"')
+    expect(source).not.toContain("historyMode")
+    expect(source).not.toContain('name="arrow-left"')
     // 顶栏零状态：没有 ref / watch，只有 props + emit。
     expect(source).not.toContain("ref(")
     expect(source).not.toContain("watch(")
@@ -282,23 +281,20 @@ describe("conversation list navbar header contract", () => {
     expect(source).toContain("color: var(--up-main-color, #3c3c43);")
   })
 
-  // 高度由 flex 链决定（.conversations-shell → .main-wrap--history → .history-list）。
-  it("lets the history scroll area size itself through flex", () => {
+  // 高度由 flex 链决定（.conversations-shell → .main-wrap → .conv-panel）。
+  // 历史面板取消后不再有「第二块 fixed 屏」，`46px` 那个偏移也随之消失 ——
+  // 它当初是为「历史面板顶到 navbar 下沿」服务的，留着只会把列表整体推下去。
+  it("lets the single list panel size itself through flex", () => {
     const source = read(PAGE)
 
     expect(source).not.toContain("height: calc(100vh - 390rpx")
+    expect(source).not.toContain("conversations-shell--history")
+    expect(source).not.toContain("top: calc(var(--window-top, 0px) + 46px);")
     const block = source.slice(
-      source.indexOf(".history-scroll {"),
-      source.indexOf("}", source.indexOf(".history-scroll {")) + 1
+      source.indexOf(".main-wrap {"),
+      source.indexOf("}", source.indexOf(".main-wrap {")) + 1
     )
     expect(block).toContain("flex: 1")
     expect(block).toContain("min-height: 0")
-  })
-
-  // 历史面板是 fixed 定位，顶到 navbar 下沿；navbar 高度从 44 改成 46 后这里必须同步，
-  // 否则顶部漏出 2px 的页面底色（会在浅色主题下看到一条白边）。
-  it("pins the history panel right under the 46px navbar", () => {
-    const source = read(PAGE)
-    expect(source).toContain("top: calc(var(--window-top, 0px) + 46px);")
   })
 })

@@ -1,12 +1,9 @@
 <template>
   <view class="page conversations-page" :style="[upThemeVars, upThemePageStyle]">
-    <view :class="['conversations-shell', showHistoryPanel && 'conversations-shell--history']">
+    <view class="conversations-shell">
       <ConversationsNavbar
-        :history-mode="showHistoryPanel"
-        :title="historyGroupTitle"
         :connection-name="activeConnectionName"
         :search-active="searchVisible"
-        @back="handleNavbarLeftClick"
         @filter="openViewFilterSheet"
         @connection="openConnectionPicker"
         @search="toggleSearchBar"
@@ -34,15 +31,9 @@
         </up-empty>
       </view>
 
-      <view
-        v-else
-        :class="[
-          'main-wrap',
-          showHistoryPanel ? 'main-wrap--history' : 'main-wrap--overview',
-        ]"
-      >
-        <!-- 默认：按文件夹分组的会话总览（M08 名称前缀 Logo 版） -->
-        <view v-if="!showHistoryPanel" class="conv-panel">
+      <view class="main-wrap main-wrap--overview">
+        <!-- 按文件夹分组的会话总览（M08 名称前缀 Logo 版） -->
+        <view class="conv-panel">
           <view v-if="loading && folderGroups.length === 0" class="inline-loading">
             <up-loading-icon color="#2979ff" size="28"></up-loading-icon>
             <text class="inline-loading__text">加载中...</text>
@@ -83,88 +74,9 @@
                 @create="openAddProjectBrowser(folder.connectionKey)"
               />
 
-              <!--
-                历史会话入口。设计稿里没有这一行，但「查看已结束会话」是历史面板的唯一
-                入口 —— 换成一条与列表同族的窄行，压在最后，不抢主列表的视觉层级。
-              -->
-              <view
-                v-if="activeConnectionGroup"
-                class="conv-history-entry"
-                @click="openHistoryPanel(activeConnectionGroup)"
-              >
-                <view class="conv-history-entry__icon">
-                  <up-icon name="clock" size="15" :color="upThemeVar('--up-tips-color', '#8a8a8e')"></up-icon>
-                </view>
-                <text class="conv-history-entry__text">历史会话 · 查看已结束</text>
-                <up-icon name="arrow-right" size="12" :color="upThemeVar('--up-light-color', '#c0c4cc')"></up-icon>
-              </view>
-
               <view class="safe-bottom"></view>
             </view>
           </view>
-        </view>
-        <view v-else class="history-list">
-          <view v-if="historyLoading && historyProjectSections.length === 0" class="inline-loading">
-            <up-loading-icon color="#2979ff" size="28"></up-loading-icon>
-            <text class="inline-loading__text">加载中...</text>
-          </view>
-          <view v-else-if="historyProjectSections.length === 0" class="empty-fullpage">
-            <up-empty mode="list" text="暂无历史会话"></up-empty>
-          </view>
-
-          <scroll-view v-else class="history-scroll" scroll-y enhanced>
-            <up-collapse
-              class="history-collapse"
-              :value="activeHistoryProjectId"
-              accordion
-              :border="false"
-              @open="handleHistoryCollapseOpen"
-              @close="handleHistoryCollapseClose"
-            >
-              <up-collapse-item
-                v-for="section in historyProjectSections"
-                :key="section.projectId"
-                class="history-collapse-item"
-                :name="section.projectId"
-                :border="false"
-              >
-                <template #title>
-                  <view class="history-section__header">
-                    <view class="history-section__text">
-                      <text class="history-section__title u-line-1">{{ section.title }}</text>
-                      <text v-if="section.path" class="history-section__path u-line-1">{{ section.path }}</text>
-                    </view>
-                    <text class="history-section__count">{{ section.count }}</text>
-                  </view>
-                </template>
-
-                <view class="conv-list conv-list--history">
-                  <view
-                    v-for="conv in section.conversations"
-                    :key="conv.id"
-                    class="conv-card conv-card--history"
-                    :style="upThemeCardStyle"
-                    @click="openConversation(conv, historyGroupKey)"
-                  >
-                    <view class="conv-card__icon">
-                      <up-icon name="chat-fill" size="17" color="#2979ff"></up-icon>
-                    </view>
-                    <view class="conv-card__body">
-                      <text class="conv-card__title u-line-1">{{ conv.title || "未命名会话" }}</text>
-                      <text class="conv-card__subtitle u-line-1">{{ getHistoryConversationMeta(conv) }}</text>
-                    </view>
-                    <view class="conv-card__actions">
-                      <view class="conv-card__menu" @click.stop="showConversationMenu(conv)">
-                        <up-icon name="more-dot-fill" size="16" :color="upThemeVar('--up-tips-color', '#909193')"></up-icon>
-                      </view>
-                      <up-icon name="arrow-right" size="12" :color="upThemeVar('--up-light-color', '#c0c4cc')"></up-icon>
-                    </view>
-                  </view>
-                </view>
-              </up-collapse-item>
-            </up-collapse>
-            <view class="safe-bottom"></view>
-          </scroll-view>
         </view>
       </view>
     </view>
@@ -245,14 +157,6 @@
         <view class="safe-bottom"></view>
       </view>
     </up-popup>
-
-    <!-- 会话操作菜单 -->
-    <up-action-sheet
-      :show="showActionSheet"
-      :actions="conversationActions"
-      @select="handleActionSelect"
-      @close="showActionSheet = false"
-    ></up-action-sheet>
 
     <RemoteDirectoryBrowser
       v-model:show="showDirectoryBrowser"
@@ -369,10 +273,6 @@ import {
   type ConversationOverviewProject,
   type ConversationOverviewOpenedTab,
 } from "@/services/conversation/conversationOverviewSnapshot"
-import {
-  buildHistoryProjectSections,
-  formatHistoryConversationMeta,
-} from "@/pages/conversations/historyPresentation"
 import { normalizeConversationSummaryStatus } from "@/services/conversation/conversationSummaryStatus"
 import {
   listConversationSummaries,
@@ -399,9 +299,8 @@ const searchKeyword = ref("")
  * 参与过滤的关键词，防抖后的镜像。
  *
  * `searchKeyword` 直接喂给 `overviewDisplayModel` 时，每敲一个字都要把所有可见卡重新
- * 展开一遍（每张卡两次对象展开 + 每组三趟排序），还连带 `buildHistoryProjectSections`
- * 扫全部项目的全部会话。同页的 forge（500ms）、circles（220ms）都有防抖，这里是唯一
- * 的例外。
+ * 展开一遍（每张卡两次对象展开 + 每组三趟排序）。同页的 forge（500ms）、circles（220ms）
+ * 都有防抖，这里是唯一的例外。
  */
 const appliedSearchKeyword = ref("")
 const SEARCH_KEYWORD_DEBOUNCE_MS = 220
@@ -426,20 +325,12 @@ watch(searchKeyword, (next) => {
   }, SEARCH_KEYWORD_DEBOUNCE_MS)
 })
 const showCreateDialog = ref(false)
-const showActionSheet = ref(false)
 const showDirectoryBrowser = ref(false)
 const directoryBrowserGateway = ref<CodegGateway | null>(null)
 const directoryBrowserConnectionKey = ref("")
 const addingProject = ref(false)
-const currentConversation = ref<Conversation | null>(null)
-const showHistoryPanel = ref(false)
-const historyGroupKey = ref("")
-const historyGroupTitle = ref("")
-const historyLoading = ref(false)
-const activeHistoryProjectId = ref<string | number>("")
 let overviewLoadPromise: Promise<void> | null = null
 let lastOverviewLoadedAt = 0
-const historyLoadPromiseMap = new Map<string, Promise<void>>()
 const overviewRefreshPromiseMap = new Map<string, Promise<void>>()
 let overviewConnectionPreparePromise: Promise<void> | null = null
 const connectionFolderSnapshotMap = new Map<string, Project[]>()
@@ -499,7 +390,6 @@ interface ConnectionGroup extends ConnectionConversationSnapshot {
   cards: LiveSessionCard[]
 }
 
-const projects = ref<Project[]>([])
 const connectionGroups = ref<ConnectionGroup[]>([])
 const selectionMode = ref(false)
 /**
@@ -600,12 +490,11 @@ const overviewEmptyText = computed(() =>
   resolveOverviewEmptyText(appliedSearchKeyword.value, hideCompletedConversations.value)
 )
 
-const showSelectionEntry = computed(() => {
-  if (showHistoryPanel.value) return false
-  return filteredConnectionGroups.value.some((group) =>
+const showSelectionEntry = computed(() =>
+  filteredConnectionGroups.value.some((group) =>
     group.cards.some((card) => isSelectableOverviewCard(card))
   )
-})
+)
 
 const selectedBulkItems = computed<BulkSelectionItem[]>(() =>
   Object.values(selectedConversationMap.value)
@@ -630,46 +519,18 @@ const bulkSendSubmitDisabled = computed(() =>
 /**
  * 打开新建弹层时用哪条连接作默认。
  *
- * 历史面板里就是那个分组，概览里退回第一条 —— 判断依赖 `showHistoryPanel` /
- * `historyGroupKey`，两者都归页面，所以由页面算好传给子组件（子组件不该知道历史面板
- * 这回事）。空串时子组件自己退回 `connectionGroups[0]`。
+ * 空串：让子组件自己退回 `connectionGroups[0]`。页面不再持有一个「当前在哪个面板」
+ * 的状态 —— 列表只有一种形态，新建永远发生在当前连接上。
  */
-const createSheetDefaultConnectionKey = computed(() =>
-  showHistoryPanel.value ? historyGroupKey.value : ""
-)
+const createSheetDefaultConnectionKey = computed(() => "")
 
 /**
  * 搜索行右侧的「＋」是否可见。
  *
  * 选择模式下藏掉：那时底部是批量操作条，新建会打断选择流程（这条规则从原顶栏的
- * `v-if="!selectionMode"` 继承而来）。历史模式必须有分组键，否则新建弹层没有默认连接
- * 可用 —— 这是原 `canCreateInHistory` 的判据。
+ * `v-if="!selectionMode"` 继承而来）。
  */
-const canCreateConversation = computed(() => {
-  if (selectionMode.value) return false
-  if (showHistoryPanel.value) return Boolean(historyGroupKey.value)
-  return true
-})
-
-const historyProjectSections = computed(() =>
-  buildHistoryProjectSections(projects.value, appliedSearchKeyword.value)
-)
-watch(
-  historyProjectSections,
-  (sections) => {
-    if (sections.length === 0) {
-      activeHistoryProjectId.value = ""
-      return
-    }
-    const hasActiveProject = sections.some(
-      (section) => section.projectId === activeHistoryProjectId.value
-    )
-    if (!hasActiveProject) {
-      activeHistoryProjectId.value = sections[0].projectId
-    }
-  },
-  { immediate: true }
-)
+const canCreateConversation = computed(() => !selectionMode.value)
 
 watch(
   () => livePreviewEnabled.value,
@@ -708,11 +569,6 @@ watch(
     }
   }
 )
-
-const conversationActions = [
-  { name: "重命名", color: "#2979ff" },
-  { name: "删除",   color: "#fa3534" },
-]
 
 const hasActiveConnection = computed(() => {
   if (hasConversationOverviewConnections()) return true
@@ -769,11 +625,6 @@ onHide(() => {
 })
 
 onPullDownRefresh(() => {
-  if (showHistoryPanel.value) {
-    uni.stopPullDownRefresh()
-    return
-  }
-
   loadOverviewDataAfterConnectionPrepare({ force: true }).finally(() => {
     void refreshConversationTabBadge()
     uni.stopPullDownRefresh()
@@ -1207,8 +1058,6 @@ async function loadOverviewDataInternal() {
     const savedConnections = getConversationOverviewConnections()
     if (!savedConnections.length) {
       connectionGroups.value = []
-      showHistoryPanel.value = false
-      projects.value = []
       connectionInstanceKeyMap.clear()
       livePreviewTransferredConversationIds.clear()
       // 角标归 `conversationTabBadgeService` 管，这里只是通知它重算一次
@@ -1235,26 +1084,6 @@ async function loadOverviewDataInternal() {
       })
     )
     connectionGroups.value = groups.filter((group) => !!group)
-    if (connectionGroups.value.length === 0) {
-      showHistoryPanel.value = false
-      projects.value = []
-      return
-    }
-
-    if (showHistoryPanel.value && historyGroupKey.value) {
-      const current = connectionGroups.value.find((group) => group.key === historyGroupKey.value)
-      if (current) {
-        projects.value = current.projects
-        void ensureHistoryProjectsLoaded(current)
-      } else {
-        showHistoryPanel.value = false
-        historyGroupKey.value = ""
-        historyGroupTitle.value = ""
-        projects.value = []
-      }
-    } else {
-      projects.value = []
-    }
     lastOverviewLoadedAt = Date.now()
   } finally {
     loading.value = false
@@ -1745,9 +1574,6 @@ function replaceConnectionGroup(nextGroup: ConnectionGroup) {
   const nextGroups = [...connectionGroups.value]
   nextGroups.splice(index, 1, nextGroup)
   connectionGroups.value = nextGroups
-  if (showHistoryPanel.value && historyGroupKey.value === nextGroup.key) {
-    projects.value = nextGroup.projects
-  }
 }
 
 function firstString(...values: unknown[]) {
@@ -1808,19 +1634,6 @@ function loadData() {
   return loadOverviewDataAfterConnectionPrepare({ force: true })
 }
 
-
-function handleHistoryCollapseOpen(name: string | number) {
-  activeHistoryProjectId.value = name
-}
-
-function handleHistoryCollapseClose(name: string | number) {
-  if (activeHistoryProjectId.value === name) {
-    activeHistoryProjectId.value = ""
-  }
-}
-function getHistoryConversationMeta(conversation: Conversation): string {
-  return formatHistoryConversationMeta(conversation, formatOverviewAgentLabel, formatTime)
-}
 function goToConnections() {
   uni.switchTab({ url: "/pages/connections/index" })
 }
@@ -1888,59 +1701,6 @@ function handleLiveCardClick(card: LiveSessionCard, groupKey: string) {
     return
   }
   openLiveSession(card, groupKey)
-}
-
-function openHistoryPanel(group: ConnectionGroup) {
-  exitSelectionMode()
-  historyGroupKey.value = group.key
-  historyGroupTitle.value = group.name
-  projects.value = group.projects
-  showHistoryPanel.value = true
-  void ensureHistoryProjectsLoaded(group)
-}
-
-function closeHistoryPanel() {
-  showHistoryPanel.value = false
-  historyGroupKey.value = ""
-  historyGroupTitle.value = ""
-  projects.value = []
-}
-
-/**
- * `up-navbar` 的 `.u-navbar__content__left` 是个固定尺寸的点击区，`leftIcon` 为空时它依然
- * 存在且可点（见 uview-plus `u-navbar.vue` 模板）。概览模式下没有返回目标，少了这道守卫，
- * 点左上角空白会静默清掉一遍历史状态。
- */
-function handleNavbarLeftClick() {
-  if (!showHistoryPanel.value) return
-  closeHistoryPanel()
-}
-
-async function ensureHistoryProjectsLoaded(group: ConnectionGroup) {
-  if (group.loadError) return
-
-  const key = group.key
-  if (historyLoadPromiseMap.has(key)) {
-    await historyLoadPromiseMap.get(key)
-    return
-  }
-
-  const task = (async () => {
-    historyLoading.value = true
-    try {
-      const conn = findConnectedConnection(key)
-      if (!conn) return
-      await refreshConnectionGroupFromRemote(conn, group)
-    } catch (error) {
-      console.warn("load history projects skipped:", error)
-    } finally {
-      historyLoading.value = false
-      historyLoadPromiseMap.delete(key)
-    }
-  })()
-
-  historyLoadPromiseMap.set(key, task)
-  await task
 }
 
 function openLiveSession(card: LiveSessionCard, groupKey?: string) {
@@ -2179,56 +1939,6 @@ async function ensureBulkSendConnection(
   )
 }
 
-function showConversationMenu(conv: Conversation) {
-  currentConversation.value = conv
-  showActionSheet.value = true
-}
-
-async function handleActionSelect(e: any) {
-  if (!currentConversation.value) return
-  if (e.name === "删除") {
-    uni.showModal({
-      title: "确认删除",
-      content: "确定要删除这个会话吗？此操作不可恢复。",
-      success: async (res) => {
-        if (res.confirm) {
-          try {
-            await acpApi.deleteConversation(currentConversation.value!.id)
-            uni.showToast({ title: "删除成功", icon: "success" })
-            markConversationListDirty()
-            await loadData()
-          } catch (err) {
-            uni.showToast({ title: "删除失败", icon: "none" })
-          }
-        }
-      },
-    })
-  } else if (e.name === "重命名") {
-    uni.showModal({
-      title: "重命名会话",
-      editable: true,
-      placeholderText: currentConversation.value.title || "未命名会话",
-      success: async (res) => {
-        if (res.confirm && res.content) {
-          try {
-            const gateway = auth.gateway()
-            await gateway.call("update_conversation_title", {
-              conversationId: currentConversation.value!.id,
-              title: res.content,
-            })
-            uni.showToast({ title: "重命名成功", icon: "success" })
-            markConversationListDirty()
-            await loadData()
-          } catch {
-            uni.showToast({ title: "重命名失败", icon: "none" })
-          }
-        }
-      },
-    })
-  }
-  showActionSheet.value = false
-}
-
 function formatTime(time?: string): string {
   return formatOverviewRelativeTime(time)
 }
@@ -2275,40 +1985,6 @@ function formatTime(time?: string): string {
 
 .main-wrap--overview {
   display: block;
-}
-
-/* 历史模式下必须给 shell 一个**确定高度**（而不仅是 min-height 这个下界），
-   否则内部 `flex: 1` 无从解析，会一路退化成内容高度 —— scroll-view 长到几千 px、
-   自身滚动失效、列表钻到 tabbar 底下。
-
-   用 `position: fixed` + 四边定位表达「从 navbar 底下铺到可视区底部」，而不是 `100vh`
-   减一串数字：顶部层数将来再变也不会失准 —— 写死的 390rpx 当初就是这么估错的。
-
-   bottom 取 0 而不是 --window-bottom：H5 下 fixed 的包含块本就是**已扣掉 tabbar 的**
-   可视区，再减一次会在列表和 tabbar 之间留出一条 50px 空带（并把总高顶到 894 > 844
-   导致整页多滚 50px）。 */
-.conversations-shell--history {
-  position: fixed;
-  top: calc(var(--window-top, 0px) + 46px);
-  bottom: 0;
-  left: 0;
-  right: 0;
-  min-height: 0;
-  /* fixed 脱离了原来的文档流，shell 的 padding-bottom 不再有意义；
-     左右内边距要保留，否则卡片贴到屏幕边缘。 */
-  padding: 0 32rpx;
-  overflow: hidden;
-}
-
-/* 历史模式要让内层 scroll-view 自己滚，就必须有一个**确定高度**的祖先。
-   这里只做 flex 收缩，真正的高度上界由 .conversations-shell--history 给。
-   不用写死的 390rpx —— 那个数会随顶部层数变化而失准，这也正是它当初估错的原因。 */
-.main-wrap--history {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
 }
 
 /* ── 会话总览（M08）─────────────────────────────────────────────────────
@@ -2360,38 +2036,6 @@ function formatTime(time?: string): string {
   white-space: nowrap;
 }
 
-/* 历史会话入口：与列表同族的窄行，压在最后。 */
-.conv-history-entry {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 10px 0 10px 12px;
-}
-
-.conv-history-entry:active {
-  opacity: 0.6;
-}
-
-.conv-history-entry__icon {
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.conv-history-entry__text {
-  flex: 1;
-  min-width: 0;
-  font-size: 13px;
-  line-height: 18px;
-  color: var(--up-tips-color, #8a8a8e);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .inline-loading {
   min-height: 220rpx;
   display: flex;
@@ -2403,89 +2047,6 @@ function formatTime(time?: string): string {
 
 .inline-loading__text {
   font-size: 24rpx;
-  color: var(--up-tips-color, #909193);
-}
-
-.history-list {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-/* 高度交给 flex 链算（.conversations-shell → .main-wrap--history → .history-list）。
-   这里曾写死 calc(100vh - 390rpx)，那是按「大标题 + 搜索框 + 模式栏」三层顶部估的预算；
-   navbar 改造删掉了其中两层，继续写死会让列表底部空出约 190rpx。 */
-.history-scroll {
-  flex: 1;
-  min-height: 0;
-}
-
-.history-collapse {
-  display: flex;
-  flex-direction: column;
-  gap: 18rpx;
-  padding-top: 20rpx;
-}
-
-.history-collapse-item {
-  overflow: hidden;
-  border-radius: 22rpx;
-  background: var(--up-card-bg-color, #ffffff);
-  border: 1rpx solid var(--up-border-color, #dadbde);
-  box-shadow: 0 10rpx 26rpx rgba(15, 23, 42, 0.08);
-}
-
-.history-collapse-item :deep(.u-cell) {
-  background: transparent !important;
-  box-shadow: none;
-}
-
-.history-collapse-item :deep(.u-cell__body) {
-  align-items: center;
-}
-
-.history-collapse-item :deep(.u-collapse-item__content__text) {
-  margin: 0;
-  padding: 24rpx 16rpx 16rpx !important;
-  background: transparent;
-}
-
-.history-section__header {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 12rpx;
-}
-
-.history-section__text {
-  flex: 1;
-  min-width: 0;
-}
-
-.history-section__title {
-  display: block;
-  font-size: 28rpx;
-  font-weight: 700;
-  color: var(--up-main-color, #303133);
-}
-
-.history-section__count {
-  min-width: 34rpx;
-  height: 30rpx;
-  padding: 0 10rpx;
-  border-radius: 999rpx;
-  background: color-mix(in srgb, var(--up-primary, #2979ff) 12%, var(--up-card-bg-color, #ffffff) 88%);
-  font-size: 18rpx;
-  line-height: 30rpx;
-  text-align: center;
-  color: var(--up-primary, #2979ff);
-}
-
-.history-section__path {
-  display: block;
-  margin-top: 6rpx;
-  font-size: 20rpx;
   color: var(--up-tips-color, #909193);
 }
 
@@ -2502,93 +2063,6 @@ function formatTime(time?: string): string {
 .conversations-empty-fullpage {
   min-height: 52vh;
 }
-
-/* ===== 会话列表 ===== */
-.conv-list {
-  padding: 8rpx 12rpx;
-  display: flex;
-  flex-direction: column;
-  gap: 10rpx;
-}
-
-.conv-list--history {
-  gap: 12rpx;
-  padding: 0;
-}
-
-.conv-card {
-  display: flex;
-  align-items: center;
-  gap: 12rpx;
-  padding: 14rpx 12rpx;
-  background-color: var(--up-card-bg-color, #ffffff);
-  border: 1rpx solid var(--up-border-color, #dadbde);
-  border-radius: 18rpx;
-  box-shadow: none;
-  transition: transform 0.15s;
-
-  &:active { transform: scale(0.985); }
-}
-
-.conv-card--history {
-  gap: 18rpx;
-  padding: 18rpx 16rpx;
-  border-radius: 22rpx;
-  background: var(--up-card-bg-color, #ffffff) !important;
-  box-shadow: none !important;
-}
-
-.conv-card__icon {
-  width: 52rpx;
-  height: 52rpx;
-  background-color: color-mix(in srgb, var(--up-primary, #2979ff) 10%, var(--up-card-bg-color, #ffffff) 90%);
-  border-radius: 14rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.conv-card__body {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4rpx;
-}
-
-.conv-card__title {
-  font-size: 24rpx;
-  font-weight: 500;
-  color: var(--up-main-color, #303133);
-  line-height: 1.3;
-}
-
-.conv-card__subtitle {
-  display: block;
-  margin-top: 4rpx;
-  font-size: 22rpx;
-  color: var(--up-content-color, #606266);
-  line-height: 1.3;
-}
-
-
-.conv-card__actions {
-  display: flex;
-  align-items: center;
-  gap: 8rpx;
-  flex-shrink: 0;
-}
-
-.conv-card__menu {
-  width: 44rpx;
-  height: 44rpx;
-  border-radius: 12rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
 
 /* ===== 创建弹层 ===== */
 .bulk-action-bar {
