@@ -57,9 +57,10 @@ describe("conversations shared stylesheet contract", () => {
   })
 
   it("keeps the agent logo type modifiers with the shared sheet, not the page", () => {
-    // 这条最容易在拆分时丢：`overviewAgentLogoClass()` 返回 `agent-logo--<type>`，而两个
-    // 消费者的容器 class 完全不同（概览卡 `.agent-logo`、新建弹层 `.agent-card__logo`）——
-    // 修饰符是**跨容器**的。搬走弹层而不搬这组规则，真机上 logo 的白底描边会静默消失。
+    // 这条最容易在拆分时丢：`overviewAgentLogoClass()` 返回 `agent-logo--<type>`，
+    // 而消费者的容器 class 完全不同（新建弹层 `.agent-card__logo`、会话行
+    // `.conv-row__logo`）—— 修饰符是**跨容器**的。搬走弹层而不搬这组规则，真机上
+    // logo 的白底描边会静默消失。
     const shared = read(SHARED)
     const page = read(PAGE)
 
@@ -67,9 +68,14 @@ describe("conversations shared stylesheet contract", () => {
     expect(shared).toContain(".agent-logo--cline {")
     expect(page).not.toContain("\n.agent-logo--claude_code,")
 
-    // 容器自己的规则**留在各自组件**：概览卡的 `.agent-logo` 基样式仍归页面。
-    expect(page).toContain("\n.agent-logo {")
-    expect(shared).not.toContain("\n.agent-logo {")
+    // 会话行的 Logo 用的是**自己的一套渐变兜底**（没有 SVG 时显示两字母彩色方块），
+    // 命名空间必须与共享修饰符分开，否则两套规则会互相覆盖。
+    const row = fs.readFileSync(
+      path.resolve(__dirname, "../../../src/pages/conversations/components/ConversationListRow.vue"),
+      "utf8"
+    )
+    expect(row).toContain(".conv-row__logo.conv-row__logo--claude_code")
+    expect(row).not.toContain(".agent-logo--claude_code")
   })
 
   it("keeps page-only rules out of the shared stylesheet", () => {

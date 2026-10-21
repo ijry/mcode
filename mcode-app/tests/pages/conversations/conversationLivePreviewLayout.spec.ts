@@ -12,11 +12,14 @@ function read(relativePath: string) {
 
 describe("conversation live preview layout contract", () => {
   it("renders live preview text through the marquee component", () => {
-    const source = read("../../../src/pages/conversations/index.vue")
+    // 预览行随会话行一起搬到 ConversationListRow.vue（设计稿没有这一行，只在不为空时出现）。
+    const source = read("../../../src/pages/conversations/components/ConversationListRow.vue")
 
     expect(source).toContain('import MarqueeText from "@/components/MarqueeText.vue"')
-    expect(source).toContain('<MarqueeText class="live-card__preview" :text="card.livePreviewText" />')
-    expect(source).toContain(".live-card__preview-row")
+    expect(source).toContain('<MarqueeText class="conv-row__preview-text" :text="previewText" />')
+    expect(source).toContain(".conv-row__preview")
+    // 空串不渲染：静态列表必须与设计稿一致，不能常驻一条空行。
+    expect(source).toContain('v-if="previewText"')
   })
 
   // 排序实现已搬进 `conversationOverviewPresentation.ts`（`sortRunningOverviewCardsFirst`），
@@ -64,15 +67,24 @@ describe("conversation live preview layout contract", () => {
     expect(source).not.toContain("[...snapshot.openTabCards, ...snapshot.recentActiveCards]")
   })
 
-  // 顺序不再表达「这个会话在 PC 上开着」，所以那个信息必须落到一枚角标上，
-  // 否则合并排序之后它就彻底消失了。
-  it("marks open tabs with a badge instead of a position", () => {
-    const source = read("../../../src/pages/conversations/index.vue")
+  // 顺序不再表达「这个会话在 PC 上开着」，那个信息不能跟着排序一起消失。
+  //
+  // 旧实现用一枚「标签」角标；M08 的元信息行只有「智能体 · 状态   时间」三格，
+  // 再塞一枚胶囊会直接破坏两行结构。改成**状态位兜底**：没有其它状态可显示时，
+  // 元信息行显示「· 已打开」—— 信息保留，形态不变。
+  it("keeps the open-tab signal in the status slot instead of a badge", () => {
+    const presentation = read("../../../src/pages/conversations/conversationListPresentation.ts")
 
-    expect(source).toContain('v-if="card.isOpenTab"')
-    expect(source).toContain(".live-card__tab-flag")
-    // 深色模式：色值只能作为 var() 的 fallback（AGENTS.md）。
-    expect(source).toContain("color: var(--up-primary, #2979ff);")
+    expect(presentation).toContain("isOpenTab")
+    expect(presentation).toContain('return "已打开"')
+    // 有真实状态时优先显示状态，不能被「已打开」顶掉。
+    const row = read("../../../src/pages/conversations/components/ConversationListRow.vue")
+    expect(row).toContain("resolveRowStatusText(")
+    // 行组件只读 prop，`card.isOpenTab` 由文件夹分组传下来（行不知道卡片形状）。
+    const section = read(
+      "../../../src/pages/conversations/components/ConversationFolderSection.vue"
+    )
+    expect(section).toContain(':is-open-tab="card.isOpenTab === true"')
   })
 
   it("measures overflow before enabling marquee scrolling", () => {

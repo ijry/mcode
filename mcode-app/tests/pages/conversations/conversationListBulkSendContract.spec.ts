@@ -16,30 +16,35 @@ function extractBlock(source: string, startToken: string, endToken: string) {
 
 describe("P67 conversation list bulk send contract", () => {
   it("renders selection controls only on top-level live cards", () => {
-    const source = read("../../../src/pages/conversations/index.vue")
+    const page = read("../../../src/pages/conversations/index.vue")
+    const section = read(
+      "../../../src/pages/conversations/components/ConversationFolderSection.vue"
+    )
+    const row = read("../../../src/pages/conversations/components/ConversationListRow.vue")
 
-    // 顶栏的「选择」按钮已随 ConversationsNavbar.vue 抽走（形制断言见
-    // conversationListNavbarHeader.spec.ts）；这里只验页面把选择模式接到了 navbar 上。
-    expect(source).toContain('@toggle-selection="toggleSelectionMode"')
-    // 「可选中」判据已收口到 conversationOverviewPresentation.ts 的
-    // isSelectableOverviewCard（此前页面内有五处各自的实现）。模板仍在顶层卡上门控
-    // 选择控件，只是判据换了名字。
-    expect(source).toContain('v-if="selectionMode && isSelectableOverviewCard(card)"')
-    expect(source).toContain("bulk-select-check")
-    expect(source).toContain('@click="handleLiveCardClick(card, group.key)"')
+    // 「选择」入口随顶栏改造进了页面侧的视图面板（见 conversationListNavbarHeader.spec.ts），
+    // 这里只验选择模式接到了列表上。
+    expect(page).toContain("toggleSelectionMode,")
+    expect(page).toContain(':selection-mode="selectionMode"')
 
-    // 终点用批量操作条的开标签，而不是某条注释：注释会随重构消失（原来那个终点是
-    // 「创建会话底部弹层」的注释，弹层抽成 CreateConversationSheet 后它就没了，
-    // `extractBlock` 直接抛异常）。`v-if="selectionMode"` 这个块是历史列表的下一个
-    // 兄弟节点，且它自己就是选择模式的产物 —— 不会先于选择功能被删掉。
+    // 「可选中」判据仍收口在 isSelectableOverviewCard，且只作用在会话行上。
+    expect(section).toContain(":selectable=\"isSelectableOverviewCard(card)\"")
+    expect(row).toContain("v-if=\"selectionMode && selectable\"")
+    expect(row).toContain("conv-row__check")
+
+    // 点击仍经页面转译成「带连接上下文的会话」——行组件不知道连接。
+    expect(section).toContain('@open="emit(\'open\', card)"')
+    expect(page).toContain("function handleFolderCardOpen(folder: { connectionKey: string }, card: LiveSessionCard) {")
+
+    // 终点用批量操作条的开标签：历史列表块里不许出现选择控件。
     const historyBlock = extractBlock(
-      source,
+      page,
       '<view v-else class="history-list">',
       '<view v-if="selectionMode" class="bulk-action-bar"'
     )
-    expect(historyBlock).not.toContain("bulk-select-check")
+    expect(historyBlock).not.toContain("conv-row__check")
     expect(historyBlock).not.toContain("toggleConversationSelection")
-    expect(historyBlock).not.toContain("handleLiveCardClick")
+    expect(historyBlock).not.toContain("handleFolderCardOpen")
   })
 
   it("routes top-level card taps to selection toggling before detail navigation", () => {

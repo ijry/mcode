@@ -1,24 +1,23 @@
 <template>
   <view class="page conversations-page" :style="[upThemeVars, upThemePageStyle]">
-    <!-- 液态玻璃背景光斑 -->
-    <view class="liquid-bg" aria-hidden="true">
-      <view class="liquid-blob liquid-blob--one"></view>
-      <view class="liquid-blob liquid-blob--two"></view>
-      <view class="liquid-blob liquid-blob--three"></view>
-    </view>
     <view :class="['conversations-shell', showHistoryPanel && 'conversations-shell--history']">
       <ConversationsNavbar
         :history-mode="showHistoryPanel"
         :title="historyGroupTitle"
-        :hide-completed="hideCompletedConversations"
-        :show-selection-entry="showSelectionEntry"
-        :selection-mode="selectionMode"
+        :connection-name="activeConnectionName"
+        :search-active="searchVisible"
         @back="handleNavbarLeftClick"
-        @toggle-hide-completed="toggleHideCompletedConversations"
-        @toggle-selection="toggleSelectionMode"
+        @filter="openViewFilterSheet"
+        @connection="openConnectionPicker"
+        @search="toggleSearchBar"
       />
 
+      <!--
+        搜索条默认收起。设计稿（M08）把搜索收成顶栏右侧的一枚 32×32 图标，
+        常驻的输入框会让「列表本身」成为次要内容；点开才占位。
+      -->
       <ConversationsSearchBar
+        v-if="searchVisible"
         v-model="searchKeyword"
         :can-create="canCreateConversation"
         @create="createConversation()"
@@ -42,162 +41,68 @@
           showHistoryPanel ? 'main-wrap--history' : 'main-wrap--overview',
         ]"
       >
-        <!-- 默认：连接分组会话总览 -->
-        <view v-if="!showHistoryPanel" class="group-panel">
-          <view v-if="loading && filteredConnectionGroups.length === 0" class="inline-loading">
+        <!-- 默认：按文件夹分组的会话总览（M08 名称前缀 Logo 版） -->
+        <view v-if="!showHistoryPanel" class="conv-panel">
+          <view v-if="loading && folderGroups.length === 0" class="inline-loading">
             <up-loading-icon color="#2979ff" size="28"></up-loading-icon>
             <text class="inline-loading__text">加载中...</text>
           </view>
-          <view v-if="!loading && filteredConnectionGroups.length === 0" class="empty-fullpage">
+
+          <view v-else-if="folderGroups.length === 0" class="empty-fullpage">
             <up-empty mode="list" :text="overviewEmptyText"></up-empty>
           </view>
 
-          <view v-else class="group-list">
-            <view
-              v-for="group in filteredConnectionGroups"
-              :key="group.key"
-              class="group-section"
-            >
-              <view class="group-section__header">
-                <view class="group-section__title-row">
-                  <text class="group-section__title">{{ group.name }}</text>
-                  <view
-                    v-if="group.loadError"
-                    class="group-section__error"
-                    @click.stop="showGroupError(group)"
-                  >
-                    <up-icon name="warning-fill" size="14" color="#fa3534"></up-icon>
-                  </view>
-                </view>
-                <view
-                  v-if="!group.loadError"
-                  class="group-section__add"
-                  @click.stop="openAddProjectBrowser(group.key)"
-                >
-                  <up-icon name="plus" size="13" :color="upThemeVar('--up-primary', '#2979ff')"></up-icon>
-                  <text class="group-section__add-text">项目</text>
-                </view>
+          <view v-else class="conv-scroll">
+            <view class="conv-content">
+              <!--
+                连接加载失败时的提示。原先每条连接的分组头右侧挂一枚感叹号图标，
+                现在分组是文件夹、不再对应连接，所以改成内容区顶部的一条横幅 ——
+                错误属于「这条连接没取到数据」，不该混进文件夹层级里。
+              -->
+              <view
+                v-if="activeConnectionLoadError"
+                class="conv-error-banner"
+                @click="showActiveConnectionError"
+              >
+                <up-icon name="warning-fill" size="14" color="#fa3534"></up-icon>
+                <text class="conv-error-banner__text">{{ activeConnectionLoadError }}</text>
               </view>
 
-              <view class="group-section__cards">
-                <view
-                  v-if="group.cards.length === 0 && group.projects.length === 0 && !group.loadError"
-                  class="group-add-empty"
-                  :style="upThemeCardStyle"
-                  @click="openAddProjectBrowser(group.key)"
-                >
-                  <view class="group-add-empty__icon">
-                    <up-icon name="folder" size="22" :color="upThemeVar('--up-primary', '#2979ff')"></up-icon>
-                  </view>
-                  <view class="group-add-empty__copy">
-                    <text class="group-add-empty__title">添加文件夹</text>
-                    <text class="group-add-empty__text">选择这台连接上的目录，作为 MCode 项目使用。</text>
-                  </view>
-                  <up-icon name="arrow-right" size="13" :color="upThemeVar('--up-tips-color', '#909193')"></up-icon>
+              <ConversationFolderSection
+                v-for="folder in folderGroups"
+                :key="folder.key"
+                :name="folder.name"
+                :folder-id="folder.folderId"
+                :connection-key="folder.connectionKey"
+                :cards="folder.cards"
+                :list-style="listStyle"
+                :selection-mode="selectionMode"
+                :selected-keys="selectedConversationKeys"
+                @open="handleFolderCardOpen(folder, $event)"
+                @toggle-select="handleFolderCardToggleSelect(folder, $event)"
+                @create="openAddProjectBrowser(folder.connectionKey)"
+              />
+
+              <!--
+                历史会话入口。设计稿里没有这一行，但「查看已结束会话」是历史面板的唯一
+                入口 —— 换成一条与列表同族的窄行，压在最后，不抢主列表的视觉层级。
+              -->
+              <view
+                v-if="activeConnectionGroup"
+                class="conv-history-entry"
+                @click="openHistoryPanel(activeConnectionGroup)"
+              >
+                <view class="conv-history-entry__icon">
+                  <up-icon name="clock" size="15" :color="upThemeVar('--up-tips-color', '#8a8a8e')"></up-icon>
                 </view>
-
-                <view v-else-if="group.cards.length === 0" class="group-empty">
-                  <text class="group-empty__text">
-                    {{ group.loadError || groupEmptyText }}
-                  </text>
-                </view>
-
-                <view
-                  v-for="card in group.cards"
-                  :key="`${group.key}-${card.tabId}`"
-                  :class="[
-                    'live-card',
-                    selectionMode && isSelectableOverviewCard(card) && 'live-card--selecting',
-                    isConversationSelected(card, group.key) && 'live-card--selected',
-                  ]"
-                  :style="upThemeCardStyle"
-                  @click="handleLiveCardClick(card, group.key)"
-                >
-                  <view
-                    v-if="selectionMode && isSelectableOverviewCard(card)"
-                    :class="[
-                      'bulk-select-check',
-                      isConversationSelected(card, group.key) && 'bulk-select-check--active',
-                    ]"
-                    @click.stop="toggleConversationSelection(card, group.key)"
-                  >
-                    <up-icon
-                      v-if="isConversationSelected(card, group.key)"
-                      name="checkmark"
-                      size="14"
-                      color="#ffffff"
-                    ></up-icon>
-                  </view>
-                  <view class="live-card__main">
-                    <view
-                      :class="[
-                        'agent-logo',
-                        overviewAgentLogoClass(card.agentType),
-                        overviewAgentLogoPath(card.agentType) && 'agent-logo--real',
-                      ]"
-                    >
-                      <image
-                        v-if="overviewAgentLogoPath(card.agentType)"
-                        class="agent-logo__img"
-                        :src="overviewAgentLogoPath(card.agentType)"
-                        mode="aspectFit"
-                      />
-                      <text v-else class="agent-logo__text">{{ overviewAgentLogoText(card.agentType) }}</text>
-                    </view>
-
-                    <view class="live-card__body">
-                      <text class="live-card__project-title u-line-1">{{ card.projectName }}</text>
-                      <text class="live-card__session-name u-line-1">{{ card.title || "未命名会话" }}</text>
-                    </view>
-
-                    <view class="live-card__side">
-                      <view class="live-card__badges">
-                        <!-- 列表已改为纯按时间排序，「PC 上开着」只能靠这枚角标表达。 -->
-                        <text v-if="card.isOpenTab" class="live-card__tab-flag">标签</text>
-                        <view :class="['status-chip', `status-chip--${overviewStatusClass(card.displayStatus)}` ]">
-                          <text class="status-chip__text">{{ overviewStatusLabel(card.displayStatus) }}</text>
-                        </view>
-                      </view>
-                      <text class="live-card__stamp">{{ formatTime(card.updatedAt) }}</text>
-                    </view>
-                  </view>
-
-                  <view v-if="card.livePreviewText" class="live-card__preview-row">
-                    <MarqueeText class="live-card__preview" :text="card.livePreviewText" />
-                    <view class="live-card__dots">
-                      <text class="live-card__dot"></text>
-                      <text class="live-card__dot"></text>
-                      <text class="live-card__dot"></text>
-                    </view>
-                  </view>
-                </view>
-
-                <view
-                  v-if="group.projects.length > 0 || group.cards.length > 0"
-                  class="live-card live-card--history"
-                  :style="upThemeCardStyle"
-                  @click="openHistoryPanel(group)"
-                >
-                  <view class="agent-logo agent-logo--history">
-                    <up-icon name="clock" size="18" color="#2f7cf6"></up-icon>
-                  </view>
-                  <view class="live-card__body">
-                    <text class="live-card__project-title u-line-1">历史会话</text>
-                    <text class="live-card__session-name u-line-1">查看已结束或已完成会话</text>
-                  </view>
-                  <view class="live-card__side live-card__side--history">
-                    <view class="status-chip status-chip--history">
-                      <text class="status-chip__text">查看</text>
-                    </view>
-                    <up-icon name="arrow-right" size="12" color="#c0c4cc"></up-icon>
-                  </view>
-                </view>
+                <text class="conv-history-entry__text">历史会话 · 查看已结束</text>
+                <up-icon name="arrow-right" size="12" :color="upThemeVar('--up-light-color', '#c0c4cc')"></up-icon>
               </view>
+
+              <view class="safe-bottom"></view>
             </view>
           </view>
         </view>
-
-        <!-- 历史模式：项目分组列表 -->
         <view v-else class="history-list">
           <view v-if="historyLoading && historyProjectSections.length === 0" class="inline-loading">
             <up-loading-icon color="#2979ff" size="28"></up-loading-icon>
@@ -369,6 +274,15 @@ import RemoteDirectoryBrowser from "@/components/remote/RemoteDirectoryBrowser.v
 import MarqueeText from "@/components/MarqueeText.vue"
 import ConversationsSearchBar from "@/pages/conversations/components/ConversationsSearchBar.vue"
 import ConversationsNavbar from "@/pages/conversations/components/ConversationsNavbar.vue"
+import ConversationFolderSection from "@/pages/conversations/components/ConversationFolderSection.vue"
+import {
+  CONVERSATION_LIST_STYLE_STORAGE_KEY,
+  buildConversationFolderGroups,
+  buildConversationListStyleActions,
+  normalizeConversationListStyle,
+  resolveConversationListStyleLabel,
+  type ConversationListStyleId,
+} from "@/pages/conversations/conversationListPresentation"
 import CreateConversationSheet from "@/pages/conversations/components/CreateConversationSheet.vue"
 import {
   buildBulkSelectionItem,
@@ -588,6 +502,23 @@ interface ConnectionGroup extends ConnectionConversationSnapshot {
 const projects = ref<Project[]>([])
 const connectionGroups = ref<ConnectionGroup[]>([])
 const selectionMode = ref(false)
+/**
+ * 会话列表的展示形态（M08 三种画板）。
+ *
+ * 只影响「一行里 Logo 放哪儿 / 分隔线要不要缩进」，不改数据结构 —— 所以它是页面级
+ * 的纯展示偏好，落盘在 `mcode_conversations_list_style_v1`。
+ */
+const listStyle = ref<ConversationListStyleId>("logo-prefix")
+/** 搜索条是否展开。设计稿把搜索收成顶栏右侧一枚图标，默认不占位。 */
+const searchVisible = ref(false)
+/**
+ * 当前查看的连接。
+ *
+ * 空串表示「还没选过」，一律回落到第一条连接（`activeConnectionGroup`）——
+ * 不能把空串当成「全部连接」：设计稿的中间胶囊永远显示一条具体的连接名，
+ * 且分组语义是文件夹，多连接混在一起时同名文件夹会撞在一起。
+ */
+const activeConnectionKey = ref("")
 const selectedConversationMap = ref<Record<string, BulkSelectionItem>>({})
 const showBulkSendDialog = ref(false)
 const bulkSendText = ref("")
@@ -631,6 +562,38 @@ const overviewDisplayModel = computed(() => {
 })
 
 const filteredConnectionGroups = computed(() => overviewDisplayModel.value.groups)
+
+/**
+ * 当前查看的那条连接。
+ *
+ * 回落到第一条是刻意的：连接全删光、或用户点的那条刚好被删时，列表不能空着 ——
+ * 空列表只会被读成「没有会话」，而实际上只是选择器指错了对象。
+ */
+const activeConnectionGroup = computed<any | null>(() => {
+  const groups = filteredConnectionGroups.value as any[]
+  if (groups.length === 0) return null
+  return groups.find((group) => group.key === activeConnectionKey.value) || groups[0] || null
+})
+
+const activeConnectionName = computed(() => String(activeConnectionGroup.value?.name || ""))
+const activeConnectionLoadError = computed(() =>
+  String(activeConnectionGroup.value?.loadError || "")
+)
+
+/**
+ * 把「按连接分组」重排成「按文件夹分组」（M08 的分组头是文件夹名 + 文件夹图标）。
+ *
+ * 只跑当前连接 —— 设计稿的列表永远只呈现一条连接的会话，中间胶囊负责切换；
+ * 多连接并排渲染会让同名文件夹（`otools` 在两条机器上都有）撞在一起，分组头无法区分。
+ */
+const folderGroups = computed(() => {
+  const group = activeConnectionGroup.value
+  if (!group) return []
+  return buildConversationFolderGroups([group])
+})
+
+/** 批量选择集的 key 列表，传给行组件判断勾选态。 */
+const selectedConversationKeys = computed(() => Object.keys(selectedConversationMap.value))
 
 const groupEmptyText = computed(() => resolveGroupEmptyText(hideCompletedConversations.value))
 const overviewEmptyText = computed(() =>
@@ -760,6 +723,7 @@ const hasActiveConnection = computed(() => {
 onMounted(() => {
   loadConversationLivePreviewPreference()
   loadHideCompletedPreference()
+  restoreListStylePreference()
   scheduleLivePreviewReconcile()
   if (!disposeOverviewInvalidation) {
     disposeOverviewInvalidation = subscribeConversationOverviewInvalidation((instanceKey) => {
@@ -821,6 +785,7 @@ onShow(() => {
   livePreviewTransferredConversationIds.clear()
   loadConversationLivePreviewPreference()
   loadHideCompletedPreference()
+  restoreListStylePreference()
   syncConversationListNativeStatusBar()
   // 追上页面未挂载期间常驻服务 ingest 的待回复状态，否则第一屏的 chip 要等下一次推送才出现。
   awaitingReplyVersion.value = getAwaitingReplyStoreVersion()
@@ -899,6 +864,123 @@ function toggleHideCompletedConversations() {
   // 隐藏状态变了 → 可见卡集合变了 → 实时预览订阅要按新集合重新对账。不调这一步，
   // 刚被取消隐藏的会话不会自动开始订阅实时流（它的预览文案会一直空着）。
   scheduleLivePreviewReconcile()
+}
+
+/**
+ * 顶栏右侧搜索按钮：展开/收起搜索条。
+ *
+ * 收起时顺手清掉关键词 —— 不然「关掉搜索但列表还被过滤着」会让用户找不到自己的会话，
+ * 而搜索框已经不在屏幕上，没有任何线索说明为什么少了东西。
+ */
+function toggleSearchBar() {
+  const next = !searchVisible.value
+  searchVisible.value = next
+  if (!next) {
+    searchKeyword.value = ""
+  }
+}
+
+/**
+ * 左上角「视图」按钮：一个面板管三件事 —— 列表展示形态、是否隐藏已完成、是否进入选择。
+ *
+ * 合并成一张面板而不是三个入口，是因为它们都是「你看到的列表长什么样」这一层的开关；
+ * 拆开会让顶栏需要三个按钮，与设计稿「左上角一个筛选」直接冲突。
+ */
+function openViewFilterSheet() {
+  const styleActions = buildConversationListStyleActions(listStyle.value)
+  const actions: { label: string; run: () => void }[] = styleActions.map((item) => ({
+    label: item.label,
+    run: () => applyListStyle(item.id),
+  }))
+
+  actions.push({
+    label: hideCompletedConversations.value ? "显示已完成会话" : "隐藏已完成会话",
+    run: toggleHideCompletedConversations,
+  })
+
+  // 已经在选择模式里就无条件保留退出项，否则筛选把卡全藏掉后没有出口。
+  if (showSelectionEntry.value || selectionMode.value) {
+    actions.push({
+      label: selectionMode.value ? "退出选择" : "选择会话",
+      run: toggleSelectionMode,
+    })
+  }
+
+  uni.showActionSheet({
+    itemList: actions.map((item) => item.label),
+    success: (result) => {
+      actions[result.tapIndex]?.run()
+    },
+  })
+}
+
+function applyListStyle(style: ConversationListStyleId) {
+  listStyle.value = style
+  try {
+    uni.setStorageSync(CONVERSATION_LIST_STYLE_STORAGE_KEY, JSON.stringify({ style }))
+  } catch (error) {
+    console.warn("persist conversation list style skipped", error)
+  }
+  uni.showToast({
+    title: `列表：${resolveConversationListStyleLabel(style)}`,
+    icon: "none",
+  })
+}
+
+function restoreListStylePreference() {
+  try {
+    listStyle.value = normalizeConversationListStyle(
+      uni.getStorageSync(CONVERSATION_LIST_STYLE_STORAGE_KEY)
+    )
+  } catch (error) {
+    console.warn("restore conversation list style skipped", error)
+    listStyle.value = "logo-prefix"
+  }
+}
+
+/**
+ * 中间连接胶囊：切当前查看的连接。
+ *
+ * 只有一条连接时不开面板，直接提示 —— 弹一个只有一项的面板比什么都不做更让人困惑。
+ */
+function openConnectionPicker() {
+  const groups = connectionGroups.value
+  if (groups.length === 0) {
+    uni.showToast({ title: "还没有可用的连接", icon: "none" })
+    return
+  }
+  if (groups.length === 1) {
+    uni.showToast({ title: `当前连接：${groups[0].name}`, icon: "none" })
+    return
+  }
+
+  uni.showActionSheet({
+    itemList: groups.map((group) =>
+      group.key === activeConnectionGroup.value?.key ? `${group.name} · 当前` : group.name
+    ),
+    success: (result) => {
+      const target = groups[result.tapIndex]
+      if (!target || target.key === activeConnectionGroup.value?.key) return
+      activeConnectionKey.value = target.key
+      // 换连接 = 换一整份会话集合，选择集必须清掉：会话号在不同连接上会重复，
+      // 留着旧选择会出现「勾着的会话根本不在当前列表里」。
+      clearConversationSelection()
+    },
+  })
+}
+
+function showActiveConnectionError() {
+  const group = activeConnectionGroup.value
+  if (group) showGroupError(group as ConnectionGroup)
+}
+
+/** 行点击/勾选：连接上下文由分组带下来，行组件不必知道连接。 */
+function handleFolderCardOpen(folder: { connectionKey: string }, card: LiveSessionCard) {
+  handleLiveCardClick(card, folder.connectionKey)
+}
+
+function handleFolderCardToggleSelect(folder: { connectionKey: string }, card: LiveSessionCard) {
+  toggleConversationSelection(card, folder.connectionKey)
 }
 
 function scheduleLivePreviewReconcile() {
@@ -2164,64 +2246,16 @@ function formatTime(time?: string): string {
 
 .conversations-page {
   position: relative;
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--up-primary, #2f7cf6) 7%, var(--up-page-bg-color, #f0f2f5) 93%) 0%,
-      var(--up-page-bg-color, #f0f2f5) 48%,
-      var(--up-page-bg-color, #f0f2f5) 100%
-    );
+  /*
+   * 纯色纸面。
+   *
+   * 旧版是从主色拉一层 7% 的竖向渐变 + 三团 blur(80rpx) 的光斑。M08 的画板是
+   * **平底色**（浅 #FAFAFC / 深 #08080A），列表与玻璃按钮都靠留白和分隔线建立层级，
+   * 底色不该再自带一层方向性 —— 那会与「行分隔线」的细线打架。
+   */
+  background: var(--up-page-bg-color, #fafafc);
 }
 
-/* ===== 液态玻璃背景 ===== */
-/*
- * 三个光斑是**静态**的，别再给它们加 animation。
- *
- * 原先各带一条 `liquidFloat ... infinite`，关键帧里是 `translate(...) scale(1.2)`。
- * `scale` 一个 `blur(80rpx)` 的层每帧都要重新栅格化（不是纯合成器 transform），
- * 于是三个 460/540/380rpx 的大模糊层永远在动、合成器永不空闲 —— 而本页是 tabBar 页，
- * 永不卸载，`onHide` 也没有把它们关掉。零交互下显示管线就被顶在 60fps。
- *
- * 视觉上静态渐变与缓慢漂移几乎无差别，这是本页最便宜的一刀。
- */
-.liquid-bg {
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  overflow: hidden;
-}
-
-.liquid-blob {
-  position: absolute;
-  border-radius: 50%;
-  filter: blur(80rpx);
-  opacity: 0.5;
-}
-
-.liquid-blob--one {
-  width: 460rpx;
-  height: 460rpx;
-  top: -80rpx;
-  right: -90rpx;
-  background: color-mix(in srgb, var(--up-primary, #2f7cf6) 32%, transparent);
-}
-
-.liquid-blob--two {
-  width: 540rpx;
-  height: 540rpx;
-  bottom: 120rpx;
-  left: -160rpx;
-  background: rgba(167, 139, 250, 0.22);
-}
-
-.liquid-blob--three {
-  width: 380rpx;
-  height: 380rpx;
-  top: 42%;
-  right: 40rpx;
-  background: rgba(96, 165, 250, 0.2);
-}
 
 .conversations-shell {
   position: relative;
@@ -2255,7 +2289,7 @@ function formatTime(time?: string): string {
    导致整页多滚 50px）。 */
 .conversations-shell--history {
   position: fixed;
-  top: calc(var(--window-top, 0px) + 44px);
+  top: calc(var(--window-top, 0px) + 46px);
   bottom: 0;
   left: 0;
   right: 0;
@@ -2276,462 +2310,86 @@ function formatTime(time?: string): string {
   flex-direction: column;
   overflow: hidden;
 }
-.group-panel {
-  display: block;
-  min-height: 0;
-}
 
-.group-list {
-  padding: 0 0 calc(36rpx + env(safe-area-inset-bottom));
-  display: flex;
-  flex-direction: column;
-  gap: 28rpx;
-}
-
-.group-section__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12rpx;
-  margin-bottom: 12rpx;
-  padding: 0 8rpx;
-}
-
-.group-section__title-row {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 8rpx;
-}
-
-.group-section__title {
-  display: block;
-  font-size: 24rpx;
-  font-weight: 600;
-  color: color-mix(in srgb, var(--up-tips-color, #909193) 60%, transparent);
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  flex: 0 1 auto;
-}
-
-.group-section__error {
-  width: 32rpx;
-  height: 32rpx;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 999rpx;
-  background: color-mix(in srgb, var(--up-error, #fa3534) 10%, var(--up-card-bg-color, #ffffff) 90%);
-}
-
-.group-section__add {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: 6rpx;
-  padding: 8rpx 12rpx;
-  border-radius: 999rpx;
-  background: color-mix(in srgb, var(--up-primary, #2979ff) 9%, var(--up-card-bg-color, #ffffff) 91%);
-}
-
-.group-section__add-text {
-  font-size: 22rpx;
-  font-weight: 700;
-  color: var(--up-primary, #2979ff);
-}
-
-.group-section__cards {
-  display: flex;
-  flex-direction: column;
-  gap: 14rpx;
-}
-
-.group-empty {
-  padding: 8rpx 10rpx 6rpx;
-}
-
-.group-empty__text {
-  font-size: 22rpx;
-  color: var(--up-tips-color, #909193);
-}
-
-.group-add-empty {
-  display: flex;
-  align-items: center;
-  gap: 18rpx;
-  padding: 24rpx 22rpx;
-  border-radius: 32rpx;
-  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 45%, transparent) !important;
-  border: 1rpx solid rgba(255, 255, 255, 0.6);
-  backdrop-filter: blur(30rpx);
-  -webkit-backdrop-filter: blur(30rpx);
-}
-
-.group-add-empty__icon {
-  width: 62rpx;
-  height: 62rpx;
-  border-radius: 20rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: color-mix(in srgb, var(--up-primary, #2979ff) 10%, var(--up-card-bg-color, #ffffff) 90%);
-}
-
-.group-add-empty__copy {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6rpx;
-}
-
-.group-add-empty__title {
-  font-size: 28rpx;
-  font-weight: 700;
-  color: var(--up-main-color, #303133);
-}
-
-.group-add-empty__text {
-  font-size: 23rpx;
-  line-height: 1.4;
-  color: var(--up-content-color, #606266);
-}
-
-.live-card {
-  display: flex;
-  flex-direction: column;
-  gap: 14rpx;
-  padding: 24rpx 22rpx;
-  border-radius: 32rpx;
-  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 45%, transparent) !important;
-  backdrop-filter: blur(30rpx);
-  -webkit-backdrop-filter: blur(30rpx);
-  border: 1rpx solid rgba(255, 255, 255, 0.6);
-  box-shadow: 0 8rpx 32rpx rgba(31, 38, 135, 0.07) !important;
-  overflow: hidden;
-  transition: transform 0.15s ease;
-}
-
-.live-card__main {
-  display: flex;
-  align-items: flex-start;
-  gap: 18rpx;
-  width: 100%;
-}
-
-.live-card--history {
-  flex-direction: row;
-  align-items: flex-start;
-  gap: 18rpx;
-}
-
-.live-card:active {
-  transform: scale(0.98);
-}
-
-.live-card--selecting {
-  padding-left: 86rpx;
-}
-
-.live-card--selected {
-  border-color: color-mix(in srgb, var(--up-primary, #2979ff) 58%, var(--up-border-color, #dadbde) 42%);
-  box-shadow: 0 10rpx 36rpx color-mix(in srgb, var(--up-primary, #2979ff) 16%, transparent) !important;
-}
-
-.bulk-select-check {
-  position: absolute;
-  left: 24rpx;
-  top: 50%;
-  width: 42rpx;
-  height: 42rpx;
-  border-radius: 999rpx;
-  transform: translateY(-50%);
-  border: 2rpx solid var(--up-border-color, #dadbde);
-  background: var(--up-card-bg-color, #ffffff);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 2;
-}
-
-.bulk-select-check--active {
-  border-color: var(--up-primary, #2979ff);
-  background: var(--up-primary, #2979ff);
-}
-
-.agent-logo {
-  width: 96rpx;
-  height: 96rpx;
-  border-radius: 28rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  background: color-mix(in srgb, var(--up-primary, #2f7cf6) 10%, transparent);
-  border: 1rpx solid color-mix(in srgb, var(--up-primary, #2f7cf6) 8%, transparent);
-}
-
-.agent-logo__text {
-  font-size: 18rpx;
-  font-weight: 700;
-  color: var(--up-primary, #2979ff);
-}
-
-.agent-logo__img {
-  width: 56rpx;
-  height: 56rpx;
-  display: block;
-}
-
-.agent-logo--history {
-  background: color-mix(in srgb, var(--up-primary, #2979ff) 12%, var(--up-card-bg-color, #ffffff) 88%);
-}
-
-.live-card__body {
-  flex: 1;
-  min-width: 0;
-}
-
-.live-card__project-title {
-  display: block;
-  font-size: 30rpx;
-  font-weight: 700;
-  color: var(--up-main-color, #303133);
-  line-height: 1.25;
-}
-
-.live-card__session-name {
-  display: block;
-  margin-top: 8rpx;
-  font-size: 25rpx;
-  color: color-mix(in srgb, var(--up-content-color, #606266) 80%, transparent);
-  line-height: 1.3;
-}
-
-.live-card__preview-row {
-  display: flex;
-  align-items: center;
-  gap: 10rpx;
-  width: 100%;
-  box-sizing: border-box;
-  padding: 10rpx 16rpx;
-  border-radius: 16rpx;
-  background: color-mix(in srgb, var(--up-primary, #2f7cf6) 8%, transparent);
-}
-
-.live-card__preview {
-  flex: 1;
-  min-width: 0;
-  font-size: 20rpx;
-  font-weight: 600;
-  line-height: 1.35;
-  color: var(--up-primary, #2f7cf6);
-}
-
-.live-card__dots {
-  display: flex;
-  align-items: center;
-  gap: 6rpx;
-  flex-shrink: 0;
-}
-
-.live-card__dot {
-  width: 8rpx;
-  height: 8rpx;
-  border-radius: 999rpx;
-  background: var(--up-primary, #2f7cf6);
-  opacity: 0.35;
-  animation: livePreviewDot 1.2s ease-in-out infinite;
-}
-
-.live-card__dot:nth-child(2) {
-  animation-delay: 0.2s;
-}
-
-.live-card__dot:nth-child(3) {
-  animation-delay: 0.4s;
-}
-
-@keyframes livePreviewDot {
-  0%,
-  60%,
-  100% {
-    opacity: 0.35;
-    transform: scale(1);
-  }
-  30% {
-    opacity: 1;
-    transform: scale(1.35);
-  }
-}
-
-.live-card__side {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  justify-content: flex-start;
-  gap: 10rpx;
-  flex-shrink: 0;
-  padding-left: 8rpx;
-}
-
-.live-card__side--history {
-  gap: 12rpx;
-}
-
-.live-card__badges {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 8rpx;
-}
-
-.live-card__tab-flag {
-  flex-shrink: 0;
-  padding: 4rpx 10rpx;
-  border-radius: 999rpx;
-  font-size: 18rpx;
-  line-height: 1.2;
-  color: var(--up-primary, #2979ff);
-  background-color: color-mix(in srgb, var(--up-primary, #2979ff) 12%, transparent);
-}
-
-.live-card__stamp {
-  font-size: 20rpx;
-  color: var(--up-tips-color, #909193);
-  line-height: 1.2;
-}
-
-.status-chip {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 34rpx;
-  padding: 6rpx 14rpx;
-  border-radius: 999rpx;
-  background-color: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
-  overflow: visible;
-}
-
-.status-chip__text {
-  position: relative;
-  z-index: 1;
-  display: block;
-  font-size: 18rpx;
-  line-height: 1;
-  font-weight: 600;
-  text-align: center;
-  color: var(--up-tips-color, #909193);
-}
-
-.status-chip--running {
-  background-color: rgba(52, 199, 89, 0.16);
-}
-
-.status-chip--running::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: rgba(52, 199, 89, 0.18);
-  animation: runningPulse 1.5s ease-out infinite;
-}
-
-.status-chip--running .status-chip__text {
-  color: #21a453;
-}
-
-.status-chip--completed {
-  background-color: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
-}
-
-.status-chip--completed .status-chip__text {
-  color: var(--up-content-color, #606266);
-}
-
-.status-chip--stopped {
-  background-color: rgba(255, 95, 86, 0.14);
-}
-
-.status-chip--stopped .status-chip__text {
-  color: #ff5f56;
-}
-
-.status-chip--error {
-  background-color: rgba(255, 95, 86, 0.14);
-}
-
-.status-chip--error .status-chip__text {
-  color: #ff5f56;
-}
-
-/*
- * 「待回复 / 待授权 / 待审批」共用这一种 chip。
+/* ── 会话总览（M08）─────────────────────────────────────────────────────
  *
- * 用琥珀色而不是绿色（运行中）：绿色读作「一切正常，它在自己跑」，而这个状态恰恰相反 ——
- * 它在等人，不动手就永远不动。也不用红色，那是异常，会让人以为出错了。
- *
- * 呼吸动画比 `--running` 慢（2.4s vs 1.5s）：运行中的快脉冲表达「正在推进」，
- * 待回复要表达「停在这儿等你」，慢一点才不像在跑。
+ * 设计稿的结构：内容容器 `padding: 4px 16px 0`、分组之间 `gap: 22px`；
+ * 每个文件夹分组内部「头 → 列表」之间 `gap: 8px`；列表整体再左缩进 12px。
+ * 这三层内距是**不同层级**的，不能合并 —— 合并后分组之间的呼吸感会一起消失。
  */
-.status-chip--waiting {
-  background-color: rgba(255, 159, 10, 0.18);
+.conv-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
-.status-chip--waiting::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: rgba(255, 159, 10, 0.2);
-  animation: waitingPulse 2.4s ease-out infinite;
+.conv-scroll {
+  width: 100%;
 }
 
-.status-chip--waiting .status-chip__text {
-  color: #c77700;
+.conv-content {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  /* 左右 16px 由 `.conversations-shell` 的 `padding: 0 32rpx` 提供（32rpx ≈ 16px @393），
+     这里只补上内距 —— 两层都加就会变成 32px。 */
+  padding: 4px 0 0;
+  box-sizing: border-box;
 }
 
-.status-chip--history {
-  background-color: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
+/* 连接加载失败横幅。原先是分组头右侧的小感叹号，分组改成文件夹后它没有归属了。 */
+.conv-error-banner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--up-error, #fa3534) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--up-error, #fa3534) 18%, transparent);
 }
 
-.status-chip--history .status-chip__text {
-  color: var(--up-content-color, #606266);
+.conv-error-banner__text {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--up-error, #fa3534);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-@keyframes runningPulse {
-  0% {
-    transform: scale(1);
-    opacity: 0.75;
-  }
-  70% {
-    transform: scale(1.42);
-    opacity: 0;
-  }
-  100% {
-    transform: scale(1.42);
-    opacity: 0;
-  }
+/* 历史会话入口：与列表同族的窄行，压在最后。 */
+.conv-history-entry {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 0 10px 12px;
 }
 
-@keyframes waitingPulse {
-  0% {
-    transform: scale(1);
-    opacity: 0.7;
-  }
-  70% {
-    transform: scale(1.28);
-    opacity: 0;
-  }
-  100% {
-    transform: scale(1.28);
-    opacity: 0;
-  }
+.conv-history-entry:active {
+  opacity: 0.6;
 }
 
-.live-card--history {
-  background: var(--up-card-bg-color, #ffffff) !important;
+.conv-history-entry__icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.conv-history-entry__text {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--up-tips-color, #8a8a8e);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .inline-loading {

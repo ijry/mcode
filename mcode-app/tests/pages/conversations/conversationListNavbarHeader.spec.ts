@@ -9,9 +9,14 @@ const PAGE = "../../../src/pages/conversations/index.vue"
 const NAVBAR = "../../../src/pages/conversations/components/ConversationsNavbar.vue"
 const SEARCHBAR = "../../../src/pages/conversations/components/ConversationsSearchBar.vue"
 
+/**
+ * 顶栏契约（M08 重构后）。
+ *
+ * 顶栏抽成 `ConversationsNavbar.vue`，形制断言读子组件，页面侧只断言「接线」
+ * （传对 prop、接对事件）。M08 把顶栏定成三件套：左视图 / 中连接 / 右搜索，
+ * 三个都是一次点击一个面板，所以顶栏本身零状态、零业务。
+ */
 describe("conversation list navbar header contract", () => {
-  // 顶栏已抽成 ConversationsNavbar.vue。navbar 本身的形制断言读子组件，页面侧只断言
-  // 「接线」（传对 prop、接对事件）。旧的三层顶部必须在两个文件里都不存在。
   it("renders the top bar through up-navbar instead of a sticky big title", () => {
     const source = read(NAVBAR)
 
@@ -20,23 +25,25 @@ describe("conversation list navbar header contract", () => {
     expect(source).toContain(':placeholder="true"')
     // tab 页没有返回目标；一旦误开 autoBack 会 navigateBack 到上一个 tab。
     expect(source).toContain(':autoBack="false"')
-    expect(source).toContain('height="44px"')
+    // M08 导航栏高度 46（设计稿节点 9:1661）。
+    expect(source).toContain('height="46px"')
     // 返回动作作为事件上抛，页面接住后再决定是否关历史面板。
     expect(source).toContain('@leftClick="emit(\'back\')"')
   })
 
-  it("wires the navbar to the page's history/selection state and handlers", () => {
+  it("wires the navbar to the page's connection / view / search state", () => {
     const source = read(PAGE)
 
     expect(source).toContain("<ConversationsNavbar")
     expect(source).toContain(':history-mode="showHistoryPanel"')
     expect(source).toContain(':title="historyGroupTitle"')
-    expect(source).toContain(':hide-completed="hideCompletedConversations"')
-    expect(source).toContain(':show-selection-entry="showSelectionEntry"')
-    expect(source).toContain(':selection-mode="selectionMode"')
+    expect(source).toContain(':connection-name="activeConnectionName"')
+    expect(source).toContain(':search-active="searchVisible"')
     expect(source).toContain('@back="handleNavbarLeftClick"')
-    expect(source).toContain('@toggle-hide-completed="toggleHideCompletedConversations"')
-    expect(source).toContain('@toggle-selection="toggleSelectionMode"')
+    // 视图面板（列表形态 / 隐藏已完成 / 选择）由页面开，顶栏只抛事件。
+    expect(source).toContain('@filter="openViewFilterSheet"')
+    expect(source).toContain('@connection="openConnectionPicker"')
+    expect(source).toContain('@search="toggleSearchBar"')
   })
 
   // 旧的三层顶部必须真的消失，否则「省高度」等于没做。两个文件都不能有。
@@ -69,50 +76,62 @@ describe("conversation list navbar header contract", () => {
     expect(block).toContain("closeHistoryPanel()")
   })
 
-  // 「已完成筛选」与「选择」收进左侧 up-select 下拉，顶栏因此没有 right 槽；新建的 ＋
-  // 搬到搜索行。这一组钉住那个归属，防止有人把按钮又摆回顶栏右侧。
-  it("puts the filter and selection actions inside a left up-select menu", () => {
+  /**
+   * M08 顶栏三件套：左视图 / 中连接 / 右搜索，都是 32px 高的圆角玻璃块
+   * （设计稿节点 9:1666 / 9:1667 / 9:1668）。
+   *
+   * 「隐藏已完成」「选择会话」这两个开关移进了页面侧的视图面板 —— 顶栏只留一个入口，
+   * 这也是设计稿「左上角筛选视图」这句话的字面实现。
+   */
+  it("lays out the three glass controls of the M08 top bar", () => {
     const source = read(NAVBAR)
 
     expect(source).toContain("<template #left>")
-    expect(source).toContain("<up-select")
-    expect(source).toContain('class="conversations-navbar__menu"')
-    // 触发区是纯图标：#text 槽放图标顶掉默认 label，#icon 槽塞占位节点顶掉默认 arrow-down。
-    expect(source).toContain("<template #text>")
-    expect(source).toContain('class="conversations-navbar__menu-icon"')
-    expect(source).toContain('name="more-dot-fill"')
-    expect(source).toContain("<template #icon>")
-    expect(source).toContain('class="conversations-navbar__menu-icon-slot"')
-    // 文案版触发区不许回来（标题的位置在 center 槽）。
-    expect(source).not.toContain("conversations-navbar__menu-label")
-    expect(source).toContain('@select="handleMenuSelect"')
+    expect(source).toContain("<template #center>")
+    expect(source).toContain("<template #right>")
 
-    // 两个动作只通过菜单项上抛，顶栏不再自己摆按钮。
-    expect(source).toContain('emit("toggle-hide-completed")')
-    expect(source).toContain('emit("toggle-selection")')
-    expect(source).not.toContain("<template #right>")
-    expect(source).not.toContain("@rightClick")
-    expect(source).not.toContain("conversations-navbar__action")
+    // 左：视图切换；右：搜索。32px 方块、圆角 16、72% 卡片色 + 6% 前景描边。
+    expect(source).toContain('class="conv-nav__btn"')
+    expect(source).toContain('name="list-dot"')
+    expect(source).toContain('name="search"')
+    expect(source).toContain("width: 32px;")
+    expect(source).toContain("border-radius: 16px;")
+
+    // 中：连接胶囊（名字 14 SemiBold + 11 的箭头）。
+    expect(source).toContain('class="conv-nav__conn"')
+    expect(source).toContain('class="conv-nav__conn-name"')
+    expect(source).toContain('name="arrow-down"')
+    expect(source).toContain("font-size: 14px;")
+
+    // 三个动作全部上抛，顶栏自己不打开任何面板。
+    expect(source).toContain("emit('filter')")
+    expect(source).toContain("emit('connection')")
+    expect(source).toContain("emit('search')")
+    expect(source).not.toContain("<up-select")
   })
 
-  // up-select 不绑 current，菜单没有勾选态可显示，所以文案必须说「点下去会发生什么」。
-  // 写成当前状态（「已隐藏已完成」）的话，用户读不出这是开关还是标签。
-  it("labels menu items by the action they perform", () => {
-    const source = read(NAVBAR)
+  // 视图面板里每一项都写「点下去会发生什么」，不写当前状态。
+  it("labels the view-sheet items by the action they perform", () => {
+    const source = read(PAGE)
 
-    expect(source).toContain('props.hideCompleted ? "显示已完成会话" : "隐藏已完成会话"')
-    expect(source).toContain('props.selectionMode ? "退出选择" : "选择会话"')
-    // 没有可选中卡片时不出「选择会话」；但已在选择模式里必须保留，否则筛选把卡片全藏掉后
+    expect(source).toContain('hideCompletedConversations.value ? "显示已完成会话" : "隐藏已完成会话"')
+    expect(source).toContain('selectionMode.value ? "退出选择" : "选择会话"')
+    // 没有可选中卡片时不出「选择会话」；但已在选择模式里必须保留，否则筛选把卡全藏掉后
     // 用户没有退出选择的入口。
-    expect(source).toContain("if (props.showSelectionEntry || props.selectionMode) {")
+    expect(source).toContain("if (showSelectionEntry.value || selectionMode.value) {")
+    // 列表形态由同一张面板切换，文案来自共享选项构造器。
+    expect(source).toContain("buildConversationListStyleActions(listStyle.value)")
   })
 
-  // 左侧触发区改成图标后，「会话」这个页面标题必须落在 center 槽，否则概览模式没有标题。
-  it("keeps the overview title in the navbar center slot", () => {
+  // 中间槽在概览模式是连接胶囊，历史模式才换成标题。
+  it("shows the connection pill in the centre slot", () => {
     const source = read(NAVBAR)
 
     expect(source).toContain("<template #center>")
-    expect(source).toContain('{{ historyMode ? title : "会话" }}')
+    expect(source).toContain('class="conv-nav__conn"')
+    expect(source).toContain('{{ connectionName || "未连接" }}')
+    expect(source).toContain('v-if="historyMode"')
+    expect(source).toContain('class="conv-nav__title"')
   })
 
   it("moves the create-conversation plus into the search row", () => {
@@ -148,6 +167,20 @@ describe("conversation list navbar header contract", () => {
     expect(buttonBlock).toContain("height: 64rpx;")
   })
 
+  // 搜索条默认收起：M08 把它收成顶栏右侧一枚图标，常驻输入框会让列表变成次要内容。
+  it("keeps the search bar collapsed until the navbar icon is tapped", () => {
+    const page = read(PAGE)
+
+    expect(page).toContain('v-if="searchVisible"')
+    expect(page).toContain("const searchVisible = ref(false)")
+    // 收起时顺手清关键词，否则「关了搜索但列表还被过滤着」——没有任何线索说明为什么少了会话。
+    const block = page.slice(
+      page.indexOf("function toggleSearchBar() {"),
+      page.indexOf("}", page.indexOf("function toggleSearchBar() {")) + 1
+    )
+    expect(block).toContain('searchKeyword.value = ""')
+  })
+
   // 「已完成」筛选胶囊已从搜索行移走，别留下副本 —— 两个入口切同一个偏好会让用户
   // 以为是两个开关。
   it("drops the completed-filter chip from the search row", () => {
@@ -171,15 +204,12 @@ describe("conversation list navbar header contract", () => {
   })
 
   it("hides the title field from the create sheet", () => {
-    // 弹层已抽成 CreateConversationSheet.vue，所以读子组件而不是页面。原来靠
-    // 「创建会话底部弹层」/「批量发送弹层」两条注释切块 —— 前者随抽取消失了。现在整个
-    // 文件就是那个弹层，不需要切块，断言范围反而更严（连配置弹层和进度弹层也覆盖）。
     const source = read(
       "../../../src/pages/conversations/components/CreateConversationSheet.vue"
     )
 
     expect(source).not.toContain("标题（可选）")
-    expect(source).not.toContain("placeholder=\"输入会话标题\"")
+    expect(source).not.toContain('placeholder="输入会话标题"')
     // 状态也不许留：留着一个永远是空串的 ref，下一个人会以为标题功能还在，
     // 把它接回 `create_conversation` 的入参。
     expect(source).not.toContain("newConversationTitle")
@@ -188,11 +218,11 @@ describe("conversation list navbar header contract", () => {
   it("switches the navbar into history mode without new reactive state", () => {
     const source = read(NAVBAR)
 
-    // 标题与菜单项都只读传入的 prop，子组件不引入新的 ref（menuOptions 是 computed）。
     expect(source).toContain('name="arrow-left"')
-    expect(source).toContain('class="conversations-navbar__title u-line-1"')
     expect(source).toContain('v-if="historyMode"')
+    // 顶栏零状态：没有 ref / watch，只有 props + emit。
     expect(source).not.toContain("ref(")
+    expect(source).not.toContain("watch(")
   })
 
   // .u-navbar__content 自带 background-color: $u-bg-color，光靠 bgColor="transparent"
@@ -206,7 +236,6 @@ describe("conversation list navbar header contract", () => {
     expect(source).toContain("-webkit-backdrop-filter: blur(30rpx)")
     expect(source).toContain('bgColor="transparent"')
     // 状态栏必须和 navbar 同色，否则真机上顶部有一条色差接缝。
-    // H5 下 statusBarHeight=0、该条不可见，所以这个问题只有真机能暴露。
     expect(source).toContain(':statusBarBgColor="NAVBAR_GLASS_BG_COLOR"')
     // 必须是 CSS var() 字面量，不能在 script 里调 upThemeVar ——
     // 它是 uview 用 Options API mixin 注入的方法，只有模板作用域能调，
@@ -232,7 +261,6 @@ describe("conversation list navbar header contract", () => {
   })
 
   it("keeps visual spacing between the navbar and search bar", () => {
-    // 搜索行已抽成 ConversationsSearchBar.vue，间距样式跟着搬过去了。
     const source = read(
       "../../../src/pages/conversations/components/ConversationsSearchBar.vue"
     )
@@ -250,16 +278,14 @@ describe("conversation list navbar header contract", () => {
     const navbarStyles = source.slice(source.indexOf(".conversations-navbar-shell"))
 
     expect(navbarStyles).toContain("var(--up-card-bg-color, #ffffff)")
-    expect(source).toContain(".conversations-navbar__title")
-    expect(source).toContain("color: var(--up-main-color, #191c1e);")
+    expect(source).toContain(".conv-nav__conn-name")
+    expect(source).toContain("color: var(--up-main-color, #3c3c43);")
   })
 
-  // 390rpx 是按旧的三层顶部估的预算。navbar 改造后再写死它，历史列表底部会空出约 190rpx。
-  // 高度改由 flex 链决定（.conversations-shell → .main-wrap--history → .history-list）。
+  // 高度由 flex 链决定（.conversations-shell → .main-wrap--history → .history-list）。
   it("lets the history scroll area size itself through flex", () => {
     const source = read(PAGE)
 
-    // 写死的 calc() 规则必须消失（允许出现在注释里，但不能是活跃 CSS 值）。
     expect(source).not.toContain("height: calc(100vh - 390rpx")
     const block = source.slice(
       source.indexOf(".history-scroll {"),
@@ -267,5 +293,12 @@ describe("conversation list navbar header contract", () => {
     )
     expect(block).toContain("flex: 1")
     expect(block).toContain("min-height: 0")
+  })
+
+  // 历史面板是 fixed 定位，顶到 navbar 下沿；navbar 高度从 44 改成 46 后这里必须同步，
+  // 否则顶部漏出 2px 的页面底色（会在浅色主题下看到一条白边）。
+  it("pins the history panel right under the 46px navbar", () => {
+    const source = read(PAGE)
+    expect(source).toContain("top: calc(var(--window-top, 0px) + 46px);")
   })
 })
