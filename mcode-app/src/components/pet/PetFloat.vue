@@ -99,6 +99,7 @@ import {
   shouldTreatAsDoubleTap,
 } from '@/services/petTapGesture'
 import { stopPetSpeech } from '@/services/petVoice'
+import { onPetSetupRequest } from '@/services/petSetupSignal'
 import type { SpeciesId } from '@/types/pet'
 import PetSprite from './PetSprite.vue'
 import PetBubble from './PetBubble.vue'
@@ -135,16 +136,21 @@ watch(
 const showSetup = ref(false)
 const setupSpecies = ref<SpeciesId>('fox')
 const setupName = ref('')
+let offPetSetupRequest: (() => void) | null = null
 
 onMounted(() => {
-  if (!petStore.initialized) {
+  // 默认不再自动弹选宠弹窗：宠物默认关闭，用户没表达意愿时不该被一个居中的
+  // 选宠弹窗挡住首屏。入口在「我的 → 宠物管理」，那边会 `requestPetSetup()`。
+  offPetSetupRequest = onPetSetupRequest(() => {
     showSetup.value = true
-  }
+  })
 })
 
 function confirmSetup() {
   if (!setupName.value.trim()) return
   petStore.initPet(setupSpecies.value, setupName.value.trim())
+  // 用户刚刚主动选了宠物，顺手把它显示出来（默认是隐藏的）。
+  petStore.setHidden(false)
   showSetup.value = false
 }
 
@@ -324,6 +330,8 @@ function onActionSelect(action: { name: string }) {
 }
 
 onUnmounted(() => {
+  offPetSetupRequest?.()
+  offPetSetupRequest = null
   if (longPressTimer) clearTimeout(longPressTimer)
   if (singleTapTimer) clearTimeout(singleTapTimer)
   if (interactionTimer) clearTimeout(interactionTimer)

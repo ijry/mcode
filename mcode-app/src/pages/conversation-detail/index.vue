@@ -41,7 +41,7 @@
         :placeholder="true"
         :border="false"
         left-icon="arrow-left"
-        height="45px"
+        height="48px"
         :bgColor="navbarBgColor"
         :statusBarBgColor="navbarStatusBarBgColor"
         :leftIconColor="navbarIconColor"
@@ -50,18 +50,22 @@
         <template #center>
           <view class="detail-navbar">
             <view class="detail-navbar__title-row">
-              <image
-                v-if="agentLogoPath"
-                class="detail-navbar__logo"
-                :src="agentLogoPath"
-                mode="aspectFit"
-              />
-              <view v-else class="detail-navbar__logo detail-navbar__logo--fallback">
-                <text class="detail-navbar__logo-fallback">{{ conversationTitle.slice(0, 1) }}</text>
-              </view>
               <view class="detail-navbar__title-copy">
-                <text class="detail-navbar__title u-line-1">{{ conversationTitle }}</text>
-                <text class="detail-navbar__subtitle u-line-1">{{ detailProjectPath || currentAgentLabel }}</text>
+                <text class="detail-navbar__title">{{ conversationTitle }}</text>
+                <!--
+                  运行状态胶囊。设计稿（M09 新配色）把它从输入区上方搬到了标题下方：
+                  标题回答「这是哪个会话」，胶囊回答「它现在在干什么」，两者是同一层信息。
+                  输入区上方只保留传输横幅 / 计划 / 后台任务这类「需要操作」的附加条。
+                -->
+                <view
+                  :class="[
+                    'detail-navbar__status',
+                    `detail-navbar__status--${runtimeStatusClass}`,
+                  ]"
+                >
+                  <view class="detail-navbar__status-dot"></view>
+                  <text class="detail-navbar__status-text">{{ runtimeStatusLabel || '空闲' }}</text>
+                </view>
               </view>
             </view>
           </view>
@@ -208,7 +212,8 @@
               :active="isActiveDetailTabPage(index)"
               :message-list-page-style="messageListPageStyle"
               :message-list-content-style="messageListContentStyle"
-              :input-wrap-style="detailTheme === 'default' ? upThemeCardStyle : undefined"
+              :bare-composer="detailTheme === 'default'"
+              :show-input-status-pill="showInputStatusPill"
               :translucent-message-list="hasDetailBackgroundImage"
               :slash-commands="slashCommands"
               :upload-target="detailUploadTarget"
@@ -427,9 +432,12 @@ import {
 } from "./detailMessagePresentation"
 import {
   DETAIL_CYBER_MODE_STORAGE_KEY,
+  DETAIL_INPUT_STATUS_STORAGE_KEY,
   DETAIL_THEME_STORAGE_KEY,
+  buildDetailInputStatusMenuAction,
   buildDetailThemeMenuActions,
   deriveCyberEffectPhase,
+  normalizeDetailInputStatusVisibility,
   normalizeDetailThemeStorage,
   shouldShowDetailBackgroundImage,
   type DetailThemeId,
@@ -640,6 +648,8 @@ const updatingSharedQueuePriorityItemIds = ref<Set<string>>(new Set())
 const clearingSharedPromptQueue = ref(false)
 const showPlanDrawer = ref(false)
 const showDetailMoreMenu = ref(false)
+// 输入框上方那条运行状态胶囊是否显示（默认显示，见 detailCyberMode 里的说明）。
+const showInputStatusPill = ref(true)
 const composerPanelMode = ref<ComposerPanelMode>("")
 const toolRowExpanded = ref(false)
 const longWaitTick = ref(0)
@@ -958,6 +968,7 @@ const detailMoreActions = computed(() => [
   { name: "文件夹管理", color: "#2979ff" },
   { name: "详情页主题", color: "#ec4899" },
   { name: "背景图自定义", color: "#8b5cf6" },
+  buildDetailInputStatusMenuAction(showInputStatusPill.value),
   { name: "重命名", color: "#2979ff" },
   { name: "更改状态", color: "#2979ff" },
   { name: "删除", color: "#fa3534" },
@@ -1110,7 +1121,10 @@ function getNavbarHeight() {
     const verticalGap = Math.max(0, menuButtonRect.top - statusBarHeight)
     return statusBarHeight + verticalGap * 2 + menuButtonRect.height
   }
-  return statusBarHeight + 44
+  // 与 `<up-navbar height="48px">` 保持一致。之前这里返回 44（uview 的 CSS 默认值），
+  // 但导航栏实际用 height=45 的内联高度，两处相差 1px —— 消息区的 marginTop 与
+  // 导航栏占位永远对不齐。设计稿 M09 导航栏是 48，两边统一到 48。
+  return statusBarHeight + 48
 }
 
 const isViewerMode = computed(() => managedConversation.value?.role === "viewer")
@@ -1299,16 +1313,10 @@ const composerPanelTitle = computed(() => {
   return "快捷发送"
 })
 
-const agentLogoPath = computed(() => {
-  const key = normalizeAgentType(currentAgentType.value)
-  if (key === "claude_code") return "/static/agent-logos/claude-code.svg"
-  if (key === "codex") return "/static/agent-logos/codex.svg"
-  if (key === "gemini") return "/static/agent-logos/gemini.svg"
-  if (key === "cline") return "/static/agent-logos/cline.svg"
-  if (key === "open_code") return "/static/agent-logos/open-code.svg"
-  if (key === "open_claw") return "/static/agent-logos/open-claw.svg"
-  return ""
-})
+/*
+ * 导航栏不再显示 agent logo：设计稿 M09「新配色」的标题行只有标题 + 状态胶囊。
+ * 原来这里是 `agentLogoPath` 计算属性，随模板移除后已无引用。
+ */
 
 const currentAgentLabel = computed(() => {
   const key = normalizeAgentType(currentAgentType.value)
@@ -1368,15 +1376,24 @@ const showDetailShellFallback = computed(() => {
   return !snapshot.currentConversationInShell || !snapshot.currentConversationMounted
 })
 
-const navbarStatusBarBgColor = computed(() =>
-  detailTheme.value === "matrix"
-    ? "#000000"
-    : detailTheme.value === "sweet"
-      ? "#fff1f8"
-      : detailTheme.value === "summer"
-        ? "#e8faff"
-      : upThemeVar("--up-card-bg-color", "#ffffff")
-)
+/**
+ * 默认主题下的纸面底色。
+ *
+ * 设计稿 M09（浅色 #f2f2f7 / 深色 #000000）里，导航栏、状态栏、消息区是**同一个色**，
+ * 中间没有分界线。而 uview 的 `--up-card-bg-color` 是给「卡片」用的
+ * （深色 #1c1c1e），拿它当导航栏底色会在页面顶部留一条明显更亮的横带。
+ *
+ * 所以这里只对齐这一个值：深色读 `upThemeIsDark`（computed，靠主题版本号触发重算，
+ * 不能用 `isDarkThemeMode()` 一次性读值，否则切换主题后导航栏不会跟着变）。
+ */
+const detailPaperBgColor = computed(() => {
+  if (detailTheme.value === "matrix") return "#000000"
+  if (detailTheme.value === "sweet") return "#fff1f8"
+  if (detailTheme.value === "summer") return "#e8faff"
+  return Boolean(currentInstance?.proxy?.upThemeIsDark) ? "#000000" : "#f2f2f7"
+})
+
+const navbarStatusBarBgColor = computed(() => detailPaperBgColor.value)
 const navbarBgColor = computed(() => navbarStatusBarBgColor.value)
 const navbarIconColor = computed(() =>
   detailTheme.value === "matrix"
@@ -2285,6 +2302,7 @@ onLoad((options: any) => {
   folderId.value = Number(options.folderId || 0)
   needsResumeRefresh.value = false
   restoreCyberModePreference()
+  restoreInputStatusPreference()
   const connectionId = typeof options.connectionId === "string"
     ? decodeURIComponent(options.connectionId)
     : ""
@@ -2306,6 +2324,7 @@ onLoad((options: any) => {
 
 onShow(() => {
   restoreCyberModePreference()
+  restoreInputStatusPreference()
   const tabModeChanged = syncDetailTabMultitaskMode()
   if (tabModeChanged && conversationId.value) {
     void initializeDetailTabsShell()
@@ -2383,6 +2402,8 @@ function handleDetailMoreMenuClick(action: string) {
     openDetailThemePicker()
   } else if (action === "背景图自定义") {
     openDetailBackgroundPicker()
+  } else if (action === "隐藏输入框状态" || action === "显示输入框状态") {
+    toggleInputStatusPill()
   } else if (action === "重命名") {
     renameCurrentDetailConversation()
   } else if (action === "更改状态") {
@@ -2728,15 +2749,34 @@ async function reconnectDetailAgent() {
   if (reconnectingDetailAgent.value) return
 
   reconnectingDetailAgent.value = true
+  const instanceKey = resolveDetailInstanceKey()
   try {
+    // resume id 只挂在 `connectionSessionManager` 的那条记录上（`externalId` /
+    // `connection.sessionId`），而下面 `invalidateConnection` 会连记录一起清掉
+    // （`clearConversation`）。所以必须在失效**之前**取走 —— 否则重连永远拿不到原会话，
+    // 只会拉起一个空会话，历史看着像丢了。
+    const managed = connectionSessionManager.getByConversationId(targetConversationId)
+    let resumeSessionId =
+      firstString(managed?.externalId, managed?.connection.sessionId) || undefined
+
     runtime.invalidateConnection(targetConversationId)
+
+    // 没有热连接时（冷启动、进程被杀之后）上面取不到，退到持久化的会话摘要 ——
+    // 与首次加载走 `hydrateRemoteConversationMetadata` 是同一条来源。
+    if (!resumeSessionId && instanceKey) {
+      const summary = await getConversationSummaryById(instanceKey, targetConversationId).catch(
+        () => null
+      )
+      resumeSessionId = firstString(summary?.externalId) || undefined
+    }
+
     await runtime.connect(
       targetConversationId,
       normalizeAgentType(currentAgentType.value),
       undefined,
-      firstString(session.value?.resumeSessionId) || undefined,
+      resumeSessionId,
       undefined,
-      resolveDetailInstanceKey()
+      instanceKey
     )
     // 重连后立刻取一次快照：状态、pending 卡片、AIR 失败表都要重新对齐 ——
     // 新连接不会重播断连前的事件。
@@ -3730,6 +3770,35 @@ function persistDetailThemePreference(theme: DetailThemeId) {
   } catch (error) {
     console.warn("persist cyber mode preference skipped", error)
   }
+}
+
+function restoreInputStatusPreference() {
+  try {
+    showInputStatusPill.value = normalizeDetailInputStatusVisibility(
+      uni.getStorageSync(DETAIL_INPUT_STATUS_STORAGE_KEY)
+    )
+  } catch (error) {
+    console.warn("restore input status preference skipped", error)
+    showInputStatusPill.value = true
+  }
+}
+
+function persistInputStatusPreference(visible: boolean) {
+  showInputStatusPill.value = visible
+  try {
+    uni.setStorageSync(DETAIL_INPUT_STATUS_STORAGE_KEY, JSON.stringify({ visible }))
+  } catch (error) {
+    console.warn("persist input status preference skipped", error)
+  }
+}
+
+function toggleInputStatusPill() {
+  const next = !showInputStatusPill.value
+  persistInputStatusPreference(next)
+  uni.showToast({
+    title: next ? "已显示输入框状态" : "已隐藏输入框状态",
+    icon: "none",
+  })
 }
 
 function buildDetailBackgroundStorageKey() {

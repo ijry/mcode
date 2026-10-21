@@ -19,3 +19,26 @@ describe('pet store voice settings', () => {
     expect(store.voiceEnabled).toBe(true)
   })
 })
+
+describe('pet defaults to hidden', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  it('starts hidden so it does not occupy a floating slot before opt-in', () => {
+    const store = usePetStore()
+    expect(store.hidden).toBe(true)
+    expect(store.initialized).toBe(false)
+  })
+
+  it('can be turned on explicitly once the user picks a pet', () => {
+    const store = usePetStore()
+    store.initPet('fox', '小狐狸')
+    store.setHidden(false)
+    expect(store.initialized).toBe(true)
+    expect(store.hidden).toBe(false)
+
+    store.setHidden(true)
+    expect(store.hidden).toBe(true)
+  })
+})

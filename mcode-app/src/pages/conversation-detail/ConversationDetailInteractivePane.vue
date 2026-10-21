@@ -18,7 +18,8 @@
     <ConversationDetailBody
       :message-list-page-style="messageListPageStyle"
       :message-list-content-style="messageListContentStyle"
-      :input-wrap-style="inputWrapStyle"
+      :bare-composer="bareComposer"
+      :status-area-visible="inputStatusVisible || Boolean(transportBanner)"
       :translucent-message-list="translucentMessageList"
       :message-scroll-top="messageScrollTop"
       :message-scroll-into-view="messageScrollIntoView"
@@ -263,6 +264,7 @@
         </view>
 
         <view
+          v-if="inputStatusVisible"
           class="input-status-row"
           :class="[
             `input-status-row--${runtimeStatusClass}`,
@@ -1118,7 +1120,7 @@
               :color="
                 showInputToolRow
                   ? upThemeVar('--up-primary', '#2979ff')
-                  : upThemeVar('--up-content-color', '#606266')
+                  : composerIconColor
               "
             ></up-icon>
           </view>
@@ -1139,6 +1141,10 @@
               :maxlength="10000"
               border="none"
               height="34rpx"
+              :placeholder-style="
+                'font-size: 14px; color: ' +
+                upThemeVar('--up-tips-color', '#909193')
+              "
               :customStyle="{
                 backgroundColor: 'transparent',
                 background: 'transparent',
@@ -1164,9 +1170,9 @@
             <up-loading-icon
               v-if="sending || steeringIntoTurn"
               color="#ffffff"
-              size="20"
+              size="18"
             ></up-loading-icon>
-            <up-icon v-else name="arrow-up" size="22" color="#ffffff"></up-icon>
+            <up-icon v-else name="arrow-up" size="18" color="#ffffff"></up-icon>
           </view>
         </view>
 
@@ -1575,6 +1581,19 @@ const props = defineProps<{
   messageListPageStyle?: StyleValue;
   messageListContentStyle?: StyleValue;
   inputWrapStyle?: StyleValue;
+  /**
+   * 输入区是否去掉外层卡片外壳（默认主题按设计稿取 true）。
+   * 三套实验主题保留原形制，所以由外壳显式传入。
+   */
+  bareComposer?: boolean;
+  /**
+   * 输入框上方那条运行状态胶囊是否显示。
+   *
+   * 新配色把「在做什么」搬进了导航栏标题下方，这里就重复了 —— 但计划进度、
+   * 后台任务入口和传输层横幅仍挂在这条上，所以做成用户可关的开关
+   * （详情页右上角菜单），关掉时只收起状态行，横幅照旧。
+   */
+  showInputStatusPill?: boolean;
   translucentMessageList?: boolean;
   slashCommands?: SlashCommandItem[];
   uploadTarget?: { url: string; header: Record<string, string> } | null;
@@ -1629,6 +1648,28 @@ const cyberPanelStyle = computed(() =>
       }
     : upThemeCardStyle.value,
 );
+
+// 缺省 true：只有外壳显式关掉才收起状态行。
+const inputStatusVisible = computed(() => props.showInputStatusPill !== false);
+
+/**
+ * 加号图标颜色。
+ *
+ * **不能用 `upThemeVar('--tool-toggle-icon')`**：`upThemeVar` 只查 uview 自己的
+ * `theme.vars` 与 `config.color`，我们挂在 `.page` 上的 CSS 变量它读不到，会直接
+ * 返回 fallback —— 深色模式下就恒为浅色值，图标在黑底上消失。
+ *
+ * 所以这里自己按深色判据取值，并且必须用 `upThemeIsDark`（uview mixin 的 computed，
+ * 靠 `upThemeVersion` 触发重算），不能用系统 `prefers-color-scheme`：用户在 app 内
+ * 手动切主题时系统偏好并不变。
+ */
+const composerIconColor = computed(() => {
+  if (props.detailTheme && props.detailTheme !== "default") {
+    // 三套实验主题沿用 uview 的正文色，保持它们原来的观感。
+    return upThemeVar("--up-content-color", "#606266");
+  }
+  return Boolean(currentInstance?.proxy?.upThemeIsDark) ? "#e5e5ea" : "#48484a";
+});
 
 const PROMPT_START_TIMEOUT_MS = 4000;
 // scroll-view 的 refresher-threshold 单位是 **px**（不是 rpx）—— uni 内部直接拿它和

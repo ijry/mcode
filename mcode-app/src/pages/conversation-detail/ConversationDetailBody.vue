@@ -37,6 +37,7 @@
     <view class="composer-safe-area"></view>
     <view class="composer-stack">
       <view
+        v-if="statusAreaRendered"
         :class="[
           'input-status-wrap',
           translucentMessageList && 'input-status-wrap--translucent',
@@ -49,8 +50,11 @@
         </view>
       </view>
       <view
-        :class="['input-wrap', translucentMessageList && 'input-wrap--translucent']"
-        :style="resolvedInputWrapStyle"
+        :class="[
+          'input-wrap',
+          translucentMessageList && 'input-wrap--translucent',
+          bareComposer && 'input-wrap--bare',
+        ]"
       >
         <slot name="composer"></slot>
       </view>
@@ -65,7 +69,26 @@ import type { CyberEffectPhase, DetailThemeId } from "./detailCyberMode"
 const props = defineProps<{
   messageListPageStyle?: StyleValue
   messageListContentStyle?: StyleValue
-  inputWrapStyle?: StyleValue
+  /**
+   * 输入区是否**不带卡片外壳**。
+   *
+   * 设计稿 M09 / M10 的输入区三件套是直接铺在纸面上的：加号是独立的白色圆形、
+   * 输入框是浅灰圆角条、发送键是深色方块，三者之间没有共同的容器 —— 也没有
+   * 容器底色、描边、圆角和阴影。旧实现把它们包在一张 76% 白卡片里，视觉上多出
+   * 一圈「输入区卡片」，左右还叠了 16rpx + 12px 两层内距，整体比设计稿窄且更重。
+   *
+   * 默认主题取 true；cyber / sweet / summer 三套实验主题保留原来的卡片形制，
+   * 所以这里做成开关而不是直接改基础样式。
+   */
+  bareComposer?: boolean
+  /**
+   * 输入区上方那块状态区（状态胶囊 / 传输横幅）是否整体渲染。
+   *
+   * 只关状态胶囊时这里仍可能为 true（还有传输横幅要显示），所以它表示的是
+   * 「这块区域还有没有内容」，而不是「胶囊开关」本身 —— 否则关掉胶囊会留下一枚
+   * 空的胶囊壳（`min-height` + 内距 + 边框都还在）。
+   */
+  statusAreaVisible?: boolean
   translucentMessageList?: boolean
   messageScrollTop?: number
   messageScrollIntoView?: string
@@ -90,10 +113,9 @@ const resolvedRuntimeStatusClass = computed(() =>
 const resolvedRuntimeStatus = computed(() =>
   String(props.runtimeStatus || 'idle').replace(/_/g, '-')
 )
-
-const resolvedInputWrapStyle = computed(() =>
-  props.translucentMessageList ? undefined : props.inputWrapStyle
-)
+// 缺省 true：只有调用方显式传 false 才收起整块状态区。
+// 用另一个名字承载，避免和同名 prop 在模板里互相遮蔽。
+const statusAreaRendered = computed(() => props.statusAreaVisible !== false)
 
 const emit = defineEmits<{
   (event: "message-scroll", payload: unknown): void
@@ -129,13 +151,21 @@ const emit = defineEmits<{
   flex-direction: column;
   align-items: stretch;
   justify-content: flex-start;
+  /*
+   * 保持 `content-box`：`min-height: 100%` 的语义是「内容区至少一屏」，
+   * 底部给输入区留的那段 `paddingBottom`（行内样式注入）要在内容之外另加，
+   * 改成 `border-box` 会让最后一条消息被输入区压住。
+   */
   box-sizing: content-box;
+  /* 设计稿消息区内距（节点 9:152）：左右 16px、上 12px */
+  padding: 12px 16px 0;
 }
 
 .composer-stack {
   position: absolute;
   left: 50%;
-  width: calc(100% - 40rpx);
+  /* 设计稿输入区左右各留 12px（`input-main-row` 的 padding），这里不再额外加宽 */
+  width: 100%;
   bottom: calc(env(safe-area-inset-bottom) + 10rpx);
   z-index: 30;
   max-width: 920rpx;
@@ -483,9 +513,36 @@ const emit = defineEmits<{
   box-sizing: border-box;
 }
 
+/*
+ * 设计稿（M09 / M10）形制：输入区**没有外壳**。
+ *
+ * 三件套自己就是完整的形状 —— 白色圆形加号、浅灰圆角输入框、深色圆角发送键，
+ * 直接铺在纸面上。外壳（底色 + 描边 + 30rpx 圆角 + 阴影 + 内距）会把它们又包成
+ * 一张「输入卡片」，是设计稿里不存在的一层；同时外层 16rpx 内距叠上内层
+ * `input-main-row` 的 12px 内距，输入框会被压窄两倍。
+ *
+ * 内距归零而不是设成别的值：整行的 12/12/8/8 由 `input-main-row` 单独负责，
+ * 两处都写会让「设计稿数值 vs 实际留白」对不上。
+ */
+.input-wrap--bare {
+  background: none;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
 .input-wrap--translucent {
   background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 38%, transparent 62%);
   border: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 34%, transparent 66%);
   backdrop-filter: blur(12rpx);
+}
+
+/* 自定义背景图时仍然要半透明层次，但不要那层外壳描边。 */
+.input-wrap--translucent.input-wrap--bare {
+  background: none;
+  border: 0;
+  backdrop-filter: none;
 }
 </style>

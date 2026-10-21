@@ -156,6 +156,7 @@
 import { computed, ref, onMounted, watch } from "vue"
 import { applyThemePreference, getCurrentThemePreference, type ThemePreference } from "@/services/theme"
 import { usePetStore } from "@/stores/pet"
+import { requestPetSetup } from "@/services/petSetupSignal"
 import { usePetEngine } from "@/services/petEngine"
 import PetPanel from "@/components/pet/PetPanel.vue"
 import { useAccountStore } from "@/stores/account"
@@ -331,10 +332,8 @@ function goAuthEntry() {
 
 function openPetManager() {
   if (!petStore.initialized) {
-    uni.showToast({
-      title: "请先选择宠物伙伴",
-      icon: "none",
-    })
+    // 宠物默认关闭，选宠弹窗也不再自动弹 —— 这里就是那个唯一的入口。
+    requestPetSetup()
     return
   }
 

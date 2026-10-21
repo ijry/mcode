@@ -1,3 +1,25 @@
+/**
+ * 消息列表首次进入时的滚动落点。
+ *
+ * - `bottom`：贴底（近底缓存 / 无缓存 / 无锚点时的兜底）
+ * - `scrollTop`：按上次记录的像素偏移还原
+ * - `anchor`：按消息锚点还原，适用于高度尚未测量完的场景
+ */
+export type ScrollRestoreAction =
+  | { type: "bottom" }
+  | { type: "scrollTop"; scrollTop: number }
+  | { type: "anchor"; anchorMessageId: string }
+
+/**
+ * 视口跟随的下一步动作。比 `ScrollRestoreAction` 多一个 `none` ——
+ * 正在还原滚动、或不允许按偏移还原时，就应该什么都不做，
+ * 而不是退回贴底（那会在用户向上翻看历史时把他拽回底部）。
+ */
+export type ViewportSyncAction =
+  | { type: "none" }
+  | { type: "bottom" }
+  | { type: "scrollTop"; scrollTop: number }
+
 function normalizeAnchorPart(value?: string | number | null) {
   const normalized = String(value ?? "").replace(/[^a-zA-Z0-9_-]/g, "_")
   return normalized.replace(/^_+|_+$/g, "")

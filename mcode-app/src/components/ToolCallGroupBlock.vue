@@ -132,12 +132,16 @@ function matchesFileChangeInputText(input: Record<string, unknown>): boolean {
   gap: 10rpx;
 }
 
+/*
+ * 分组摘要。设计稿里工具调用是一行「彩点 + 小字」的裸文本，没有胶囊底。
+ * 这里的可点区域保留（否则用户不知道能展开），但把底色收成透明，
+ * 只在按下时给一点点反馈 —— 让整条时间线保持同一张纸面。
+ */
 .tool-group__summary {
-  min-height: 48rpx;
-  padding: 10rpx 18rpx;
-  border-radius: 999rpx;
-  /* P48: match codeg-main bg-muted/60 while staying on uview --up-* tokens. */
-  background: color-mix(in srgb, var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6)) 60%, var(--up-card-bg-color, #ffffff) 40%);
+  min-height: 32rpx;
+  padding: 2rpx 0;
+  border-radius: 8rpx;
+  background: transparent;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -145,10 +149,14 @@ function matchesFileChangeInputText(input: Record<string, unknown>): boolean {
   max-width: 100%;
   gap: 12rpx;
   box-sizing: border-box;
+
+  &:active {
+    opacity: 0.6;
+  }
 }
 
 .tool-group__summary--translucent {
-  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 36%, transparent 64%);
+  background: transparent;
 }
 
 .tool-group__left {

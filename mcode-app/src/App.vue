@@ -53,6 +53,27 @@ onHide(() => {
 <style lang="scss">
 @import "uview-plus/index.scss";
 
+/*
+ * 单行截断工具类。
+ *
+ * 全项目有 18 处模板写着 `u-line-1`（会话列表标题、历史分组、导航栏标题、
+ * 远程目录行……），但这个类**在 uview-plus 里根本不存在** ——
+ * `libs/css/*.scss` 里搜不到任何 `line-1` 定义。也就是说那 18 处一直在空转，
+ * 长标题不截断而是溢出容器，表现为挤压相邻元素甚至盖住状态栏。
+ *
+ * 这里补上定义，让所有既有引用一次性恢复生效。放全局而不是逐个组件补：
+ * 那些组件本来就按「有这个工具类」写的，逐处补会留下十几份重复规则。
+ *
+ * 注意 `display: block` 是必须的：`text-overflow` 只在块级 / 单元格盒上生效，
+ * 而 uni 的 `<text>` 在 H5 下默认是 inline。
+ */
+.u-line-1 {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 page {
   background-color: var(--up-page-bg-color, var(--up-bg-color, #f3f4f6));
   color: var(--up-main-color, #303133);

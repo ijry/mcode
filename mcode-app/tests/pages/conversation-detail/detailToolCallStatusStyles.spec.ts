@@ -9,7 +9,12 @@ function readComponent(name: string) {
 }
 
 describe("P48 conversation detail tool call status styles", () => {
-  it("renders grouped tool call summaries as neutral compact pills", () => {
+  /**
+   * 分组摘要。设计稿 M09「新配色」把整条时间线收成一张纸面 —— 工具调用不再套胶囊，
+   * 而是「一行小字 + 可点展开」。这里断言的是**容器确实是透明的、且仍可点**，
+   * 不再是某个具体的胶囊底色。
+   */
+  it("renders grouped tool call summaries as bare rows on the page surface", () => {
     const source = readComponent("ToolCallGroupBlock.vue")
 
     expect(source).toContain('class="tool-group__summary"')
@@ -18,25 +23,42 @@ describe("P48 conversation detail tool call status styles", () => {
     expect(source).not.toContain("tool-group__dot")
     expect(source).toMatch(/\.tool-group\s*\{[\s\S]*align-items: flex-start;/)
     expect(source).toMatch(/\.tool-group__summary\s*\{[\s\S]*align-self: flex-start;[\s\S]*max-width: 100%;/)
-    expect(source).toMatch(/\.tool-group__summary\s*\{[\s\S]*background: color-mix\(in srgb, var\(--up-hover-bg-color, var\(--up-bg-color, #f3f4f6\)\) 60%, var\(--up-card-bg-color, #ffffff\) 40%\);/)
+    // 透明确认：不再有 hover 底色混色，也不再有药丸圆角
+    // （只在该规则块内部断言 —— 用 `[\s\S]*` 会一直吃到文件末尾，命中别的规则）
+    const summaryRule = source.match(/\n\.tool-group__summary\s*\{[\s\S]*?\n\}/)?.[0] || ""
+    expect(summaryRule).toContain("background: transparent;")
+    expect(summaryRule).not.toContain("background: color-mix(")
+    expect(summaryRule).not.toContain("border-radius: 999rpx;")
+    expect(summaryRule).not.toContain("border:")
     expect(source).toMatch(/\.tool-group__body\s*\{[\s\S]*width: 100%;/)
-    expect(source).not.toMatch(/\.tool-group__summary\s*\{[\s\S]*border:/)
+    // 半透明变体同样不引入边框/底色 —— 否则时间线会重新出现一条胶囊。
     const translucentSummaryRule = source.match(/\.tool-group__summary--translucent\s*\{[\s\S]*?\n\}/)?.[0] || ""
-    expect(translucentSummaryRule).toContain("background:")
+    expect(translucentSummaryRule).toContain("background: transparent;")
     expect(translucentSummaryRule).not.toContain("border:")
     expect(source).not.toMatch(/\.tool-group__summary\s*\{[\s\S]*\.tool-group__label[\s\S]*var\(--up-primary/)
     expect(source).not.toContain("&--completed { background: #8f9bb3; }")
   })
 
-  it("keeps assistant bubbles borderless", () => {
+  /**
+   * AI 气泡。新配色里它是**透明容器**（正文直接铺在纸面上），
+   * 与用户气泡的中性灰形成左右对比，不再靠白卡片区分角色。
+   */
+  it("keeps assistant bubbles free of any background", () => {
     const source = readComponent("MessageBubble.vue")
     const assistantBubbleRule = source.match(/&--assistant\s*\{[\s\S]*?\n  \}/)?.[0] || ""
 
-    expect(assistantBubbleRule).toContain("background-color: var(--up-card-bg-color, #ffffff);")
+    expect(assistantBubbleRule).toContain("background-color: transparent;")
+    expect(assistantBubbleRule).toContain("padding: 0;")
     expect(assistantBubbleRule).not.toContain("border:")
+
+    // 用户气泡改中性灰（不再是主色蓝）。注意 `.bubble-wrap--user` 里也有个
+    // `&--user { flex-direction: row-reverse }`，要锚到 `.bubble {` 之后那段。
+    const userBubbleRule = source.match(/\n\.bubble \{[\s\S]*?&--user\s*\{[\s\S]*?\n  \}/)?.[0] || ""
+    expect(userBubbleRule).toContain("var(--bubble-user-bg, #e9e9ee)")
+    expect(userBubbleRule).not.toContain("var(--up-primary")
   })
 
-  it("renders thinking as a compact pill with the shorter label", () => {
+  it("renders thinking as a bare text row with no surface", () => {
     const source = readComponent("MessageBubble.vue")
     const thinkingRule = source.match(/\n\.part-thinking\s*\{[\s\S]*?\n\}/)?.[0] || ""
 
@@ -44,36 +66,47 @@ describe("P48 conversation detail tool call status styles", () => {
     expect(source).not.toContain("深度思考")
     expect(thinkingRule).toContain("align-self: flex-start;")
     expect(thinkingRule).toContain("width: fit-content;")
-    expect(thinkingRule).toContain("border-radius: 999rpx;")
     expect(thinkingRule).not.toContain("border-left: 4rpx solid")
+
+    // 思考块不再是卡片/药丸：无底色、无边框、无内距。
+    // 有内距会把文字左沿推到正文右侧，同一条消息里几段内容左边界参差。
+    expect(thinkingRule).toContain("padding: 0;")
+    expect(thinkingRule).toContain("background: none;")
+    expect(thinkingRule).toContain("border: none;")
+    expect(thinkingRule).not.toContain("color-mix(")
+    expect(thinkingRule).not.toContain("999rpx")
+    expect(thinkingRule).not.toContain("16rpx 20rpx")
 
     const expandedRule = source.match(/\.part-thinking--expanded\s*\{[\s\S]*?\n\}/)?.[0] || ""
     expect(source).toContain("part-thinking--expanded")
-    expect(expandedRule).toContain("border-radius: 12rpx;")
+    // 展开态也不切卡片，否则一展开间距就跳
+    expect(expandedRule).toContain("padding: 0;")
+    expect(expandedRule).not.toContain("12rpx")
     expect(expandedRule).not.toContain("999rpx")
   })
 
-  it("keeps the collapsed thinking pill on the shared summary pill metrics", () => {
-    // 折叠态的思考胶囊、工具组摘要、子智能体摘要、系统注记是同一类可展开的摘要控件，
-    // 高度度量必须一致，否则同一条消息里几枚胶囊会高低不齐。
+  it("keeps the thinking row aligned with the message text edge", () => {
+    // 思考行去底色后不再与 tool-group__summary / subagent__summary 共用「药丸度量」，
+    // 那条约束只在有底色时成立。现在它对齐的是正文左沿：零内距 + 内容高度，
+    // 否则会比同一条消息里的工具行更高、更空。
     const source = readComponent("MessageBubble.vue")
     const collapsedRule = source.match(/\.part-thinking--collapsed\s*\{[\s\S]*?\n\}/)?.[0] || ""
     const baseRule = source.match(/\n\.part-thinking\s*\{[\s\S]*?\n\}/)?.[0] || ""
 
-    expect(collapsedRule).toContain("min-height: 48rpx;")
-    expect(collapsedRule).toContain("padding: 10rpx 18rpx;")
-    expect(collapsedRule).toContain("border-radius: 999rpx;")
-    // 旧的 16rpx 上下内距是把展开态的内距套在了药丸上，收缩后偏高。
-    expect(collapsedRule).not.toContain("padding-bottom: 16rpx;")
-
-    // 没有 border-box，`min-height: 48rpx` 会被当成内容盒高度，再叠 20rpx 内距
-    // 与 2rpx 边框 —— 实测 72rpx，比同类药丸高 50%。
-    expect(baseRule).toContain("box-sizing: border-box;")
-    // 药丸态无边框，与 `tool-group__summary` / `subagent__summary` 的约定一致；
-    // 留着 1rpx 边框会让药丸比同类高出约 2rpx。
+    expect(collapsedRule).toContain("min-height: 0;")
+    expect(collapsedRule).toContain("padding: 0;")
     expect(collapsedRule).toContain("border: none;")
-    // 半透明变体排在折叠态之后且同为单类选择器，必须显式复位，否则边框回来。
+    // 48rpx 的药丸下限在无底色时会撑出一段空白
+    expect(collapsedRule).not.toContain("min-height: 48rpx;")
+    expect(collapsedRule).not.toContain("999rpx")
+
+    expect(baseRule).toContain("box-sizing: border-box;")
+    // 半透明变体排在折叠态之后且同为单类选择器，必须显式复位，否则背景/边框回来。
     expect(source).toContain(".part-thinking--collapsed.part-thinking--translucent")
+
+    // 展开正文左缩进对齐标题文字（图标 24rpx + gap 10rpx），否则去底色后层级消失
+    const bodyRule = source.match(/\.thinking-bd\s*\{[\s\S]*?\n\}/)?.[0] || ""
+    expect(bodyRule).toContain("padding-left: 34rpx;")
 
     const iconRule = source.match(/\.thinking-hd__icon\s*\{[\s\S]*?\n\}/)?.[0] || ""
     expect(iconRule).toContain("width: 24rpx;")
@@ -87,8 +120,15 @@ describe("P48 conversation detail tool call status styles", () => {
     const thinkingArrowBlock = source.match(/:name="isThinkingCollapsed\(index\)[\s\S]*?<\/up-icon>/)?.[0] || ""
     expect(thinkingArrowBlock).toContain('size="12"')
 
+    /*
+     * 同类摘要控件里**只剩**子智能体胶囊还是药丸形。
+     *
+     * 工具组摘要、思考行在新配色里都已退成裸文本行（见上面两个用例）。
+     * 子智能体胶囊仍然保留 48rpx 药丸度量 —— 它是唯一还带底色、需要
+     * 「看起来可以展开」的那一个。只保留真正同形的 peers，
+     * 否则这条断言会随每次视觉迭代误报。
+     */
     const pillPeers = [
-      readComponent("ToolCallGroupBlock.vue").match(/\.tool-group__summary\s*\{[\s\S]*?\n\}/)?.[0] || "",
       readComponent("SubagentCapsuleBlock.vue").match(/\.subagent__summary\s*\{[\s\S]*?\n\}/)?.[0] || "",
     ]
     for (const peer of pillPeers) {
@@ -180,17 +220,36 @@ describe("P48 conversation detail tool call status styles", () => {
     }
   })
 
-  it("colors individual tool calls with uview runtime theme variables", () => {
+  /**
+   * 单个工具调用的状态色。
+   *
+   * 新配色把「图标 + 工具名 + 状态标签」整块换成了「彩色状态点 + 一句摘要」，
+   * 所以这里断言的是状态点本身的语义色与四个状态，而不是旧的颜色映射表。
+   */
+  it("colors individual tool status dots by semantic state", () => {
     const source = readComponent("ToolCallBlock.vue")
 
     expect(source).toContain("tool-block--${toolCall.status || 'pending'}")
-    expect(source).toContain("running: \"var(--up-primary, #2979ff)\"")
-    expect(source).toContain("completed: \"var(--up-success, #19be6b)\"")
-    expect(source).toContain("error: \"var(--up-error, #fa3534)\"")
+    expect(source).toContain("tool-status-dot--${toolCall.status || 'pending'}")
+
+    // 运行中：绿点 + 呼吸动画（设计稿的「运行中」绿）
+    expect(source).toMatch(/&--running\s+\{ background-color: #34c759; animation: pulse/)
+    // 完成态刻意用中性灰，避免时间线里一路绿灯抢注意力
+    expect(source).toMatch(/&--completed \{ background-color: var\(--up-tips-color, #909193\);/)
+    expect(source).toMatch(/&--error\s+\{ background-color: var\(--up-error, #fa3534\);/)
+    expect(source).toMatch(/&--pending\s+\{ background-color: var\(--up-warning, #f9ae3d\);/)
+
+    // 展开态的成败标记仍然走 uview 运行时主题变量
     expect(source).toContain(":color=\"upThemeVar('--up-success', '#19be6b')\"")
     expect(source).toContain(":color=\"upThemeVar('--up-error', '#fa3534')\"")
-    expect(source).toMatch(/&--running\s+\{ background-color: var\(--up-primary, #2979ff\)/)
-    expect(source).toMatch(/&--completed \{ background-color: var\(--up-success, #19be6b\)/)
-    expect(source).toMatch(/&--error\s+\{ background-color: var\(--up-error, #fa3534\)/)
+
+    // 折叠态没有容器（否则时间线又会出现一圈圈的描边卡片）
+    const baseRule = source.match(/\.tool-block\s*\{[\s\S]*?\n  \}/)?.[0] || ""
+    expect(baseRule).not.toContain("border:")
+    expect(baseRule).not.toContain("background-color: var(--up-hover-bg-color")
+
+    // 摘要必须是「动词 + 目标」，而不是裸工具名
+    expect(source).toContain("编辑 ${target}")
+    expect(source).toContain("运行 ${firstLine")
   })
 })

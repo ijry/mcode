@@ -624,7 +624,8 @@ function renderCyberDecodeText(text: string, index: number) {
 /* ===== 主体 ===== */
 .bubble-body {
   flex: 1;
-  max-width: 620rpx;
+  /* 用户气泡最大宽度按设计稿：272/393 ≈ 69% 视口，且留出左对齐余量 */
+  max-width: 100%;
   display: flex;
   flex-direction: column;
   gap: 8rpx;
@@ -634,36 +635,55 @@ function renderCyberDecodeText(text: string, index: number) {
   }
 }
 
+/* 用户气泡自身限宽，AI 正文占满整行（设计稿里 AI 那几段文字顶到左右内距） */
+.bubble-wrap--user .bubble-body {
+  max-width: 78%;
+}
+
 /* ===== 气泡 ===== */
+/*
+ * 形制对齐设计稿 M09「新配色」：
+ * - 用户消息：中性灰气泡靠右，右下角收一个小圆角（18/18/4/18）
+ * - AI 消息：**没有气泡**，正文直接铺在页面上
+ *
+ * AI 侧去掉底色是有意的：连续多条 AI 回复堆叠时，一层层白卡片会把「同一轮对话」
+ * 切成一格格独立块，读起来像列表而不像对话。设计稿里 AI 正文与用户气泡靠「右对齐
+ * vs 左对齐」就足以区分角色，不需要额外容器。
+ *
+ * 主题（cyber / sweet / summer）仍各自覆盖 `.bubble` 的底色与边框，
+ * 它们的形制不走这套 —— 见下方 `.bubble-wrap--cyber` 等分组。
+ */
 .bubble {
-  padding: 4px 6px;
   border-radius: 20rpx;
   word-break: break-word;
 
   &--user {
-    background-color: var(--up-primary, #2979ff);
-    border-top-right-radius: 6rpx;
-    color: #ffffff;
+    padding: 10px 14px;
+    background-color: var(--bubble-user-bg, #e9e9ee);
+    border-radius: 18px 18px 4px 18px;
+    color: var(--bubble-user-text, #3c3c43);
   }
 
   &--user-translucent {
-    background-color: color-mix(in srgb, var(--up-primary, #2979ff) 54%, transparent 46%);
-    border: 1rpx solid color-mix(in srgb, var(--up-primary, #2979ff) 24%, transparent 76%);
+    background-color: color-mix(in srgb, var(--bubble-user-bg, #e9e9ee) 78%, transparent 22%);
+    border: 1rpx solid rgba(0, 0, 0, 0.05);
     backdrop-filter: blur(0.1rem);
-    box-shadow: 0 10rpx 24rpx rgba(41, 121, 255, 0.08);
+    box-shadow: 0 10rpx 24rpx rgba(15, 23, 42, 0.04);
   }
 
+  /* AI 气泡：透明容器。保留结构（padding 归零）以便主题覆盖时仍能落笔。 */
   &--assistant {
-    background-color: var(--up-card-bg-color, #ffffff);
-    border-top-left-radius: 6rpx;
+    padding: 0;
+    background-color: transparent;
+    border-radius: 0;
     box-shadow: none;
   }
 
   &--assistant-translucent {
-    background-color: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 30%, transparent 70%);
-    border: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 28%, transparent 72%);
-    backdrop-filter: blur(10rpx);
-    box-shadow: 0 10rpx 24rpx rgba(15, 23, 42, 0.045);
+    background-color: transparent;
+    border: 0;
+    box-shadow: none;
+    backdrop-filter: none;
   }
 }
 
@@ -765,39 +785,41 @@ function renderCyberDecodeText(text: string, index: number) {
 
 /* ===== 内容区块 ===== */
 .part-wrap {
-  &:not(:last-child) { margin-bottom: 16rpx; }
+  /* AI 气泡去容器后，多段内容（正文 / 工具行）之间的间距要自己给足 */
+  &:not(:last-child) { margin-bottom: 12rpx; }
 }
 
 .part-text {
   min-width: 0;
   max-width: 100%;
-  font-size: 13px;
-  line-height: 1.2;
+  font-size: 14px;
+  /* 设计稿正文 14px / 行高 20px */
+  line-height: 20px;
   color: var(--up-main-color, #303133);
 
   :deep(.up-markdown) {
-    padding: 1px 2px !important;
-    font-size: 13px !important;
-    line-height: 1.2 !important;
+    padding: 0 !important;
+    font-size: 14px !important;
+    line-height: 20px !important;
     color: inherit !important;
   }
 
   :deep(.up-markdown p) {
-    margin: 1px 0 !important;
-    line-height: 1.2 !important;
-    font-size: 13px !important;
+    margin: 0 !important;
+    line-height: 20px !important;
+    font-size: 14px !important;
   }
 
   :deep(.up-markdown text) {
-    line-height: 1.2 !important;
-    font-size: 13px !important;
+    line-height: 20px !important;
+    font-size: 14px !important;
     color: inherit !important;
   }
 
   :deep(.up-markdown rich-text) {
     color: inherit !important;
-    font-size: 13px !important;
-    line-height: 1.2 !important;
+    font-size: 14px !important;
+    line-height: 20px !important;
   }
 
   :deep(.up-markdown ._a) {
@@ -832,25 +854,38 @@ function renderCyberDecodeText(text: string, index: number) {
     overflow-wrap: anywhere;
   }
 
-  /* up-markdown 在 H5 使用真实 table，在 uni 的 up-parse 节点树中使用
-     `._table` / `._td` 这些 view 类；两套节点都要有同一组可读的基础表面。 */
+  /*
+   * 表格自己当滚动容器，宽度必须**受父级约束**。
+   *
+   * 上一版写的是 `width: max-content` + `min-width: 100%`：列宽确实可读了，但
+   * `max-content` 让表格元素本身撑到内容宽度（实测 401px / 容器 360px），它自己
+   * 没有可滚动溢出（`scrollWidth === clientWidth`），超出的部分被祖先
+   * `.up-markdown / ._root` 的 `overflow: hidden` 直接裁掉 —— 屏幕上就是
+   * 「右侧被遮挡、还划不动」。
+   *
+   * 改成 `width: 100%` + `overflow-x: auto`：
+   * - 内容窄 → 铺满整行，单元格靠 `min-width: 4em` 保住可读列宽，文字在格内换行；
+   * - 列多到 4em 下限加起来超出容器 → 匿名表盒变宽、超出部分由这层壳横向滚动
+   *   （7 列实测 scrollWidth 456 > clientWidth 360）；
+   * - 长哈希这类不可断词 → 由 `word-break: break-word` 换行，不再顶出屏幕。
+   *
+   * 不能用「把 thead/tbody 各自变成 `display: table` + `max-content`」那种写法换
+   * 滚动：实测表头与表体是两个独立表盒，列宽各算各的（表头全 72px、表体
+   * 65/114/65…），表头会和数据错位。
+   */
   :deep(table),
   :deep(._table) {
+    display: block;
     width: 100%;
-    min-width: 100%;
+    max-width: 100%;
     margin: 12rpx 0;
     border-collapse: collapse;
     background: var(--up-card-bg-color, #ffffff);
     color: var(--up-main-color, #303133);
     overflow-x: auto;
-  }
-
-  /* `._root` 不再滚动之后，真实 table 需要自己成为滚动容器才不会被裁掉。
-     `display: block` 让 overflow 生效，内部行仍由匿名 table 盒排版。
-     `._table` 本身就是 block view，`overflow-x: auto` 已直接生效，不用改。 */
-  :deep(table) {
-    display: block;
     overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    box-sizing: border-box;
   }
 
   :deep(thead),
@@ -872,18 +907,103 @@ function renderCyberDecodeText(text: string, index: number) {
   :deep(td),
   :deep(._th),
   :deep(._td) {
-    padding: 10rpx 14rpx;
+    padding: 8rpx 12rpx;
     border: 1rpx solid var(--up-border-color, #dadbde);
     color: inherit;
     text-align: left;
     vertical-align: top;
+    /*
+     * 单元格用 `break-word` 而不是 `break-all`：前者只在「整词放不下」时才断，
+     * 后者允许在任意字符间断行 —— 中文短表头（子模块 / 记录 / 卡点）被挤时
+     * 就会变成一列一个字。`break-word` 配合上面的 max-content 列宽，
+     * 既能让长哈希换行，又不会把短词拆碎。
+     */
     word-break: break-word;
+    /* 表格比正文降一档：13px / 行高 19px。表格里的内容本来就是「索引式」的
+       短词（哈希、路径、状态），跟正文同字号会显得拥挤。 */
+    font-size: 13px;
+    line-height: 19px;
+    /* 单元格给一个温和的下限，避免只有一两个字的表头把列压成细条。
+       取 4em 而不是更大：列数多时（5 列以上）过大的下限会把整张表推出屏幕，
+       而那些场景本来靠 max-content + 横向滚动就够了。 */
+    min-width: 4em;
+  }
+
+  /* 列表 / 引用同样吃浏览器的默认外边距（ul 上下各 1em ≈ 16px、缩进 40px），
+     在窄屏消息流里比正文段落（margin 0）松得多，读起来一段紧一段散。
+     统一收到与行高同量级，缩进也按移动端收窄。 */
+  :deep(ul), :deep(ol),
+  :deep(._ul), :deep(._ol) {
+    margin: 6rpx 0 !important;
+    padding-left: 36rpx !important;
+  }
+
+  :deep(li), :deep(._li) {
+    margin: 4rpx 0;
+    /* 列表项内可能换行，行高给足 21px（14px 字的 1.5）避免折行上下贴住 */
+    line-height: 21px !important;
+  }
+
+  :deep(blockquote), :deep(._blockquote) {
+    margin: 10rpx 0 !important;
+    padding: 6rpx 0 6rpx 16rpx;
+    border-left: 3rpx solid var(--up-border-color, #dadbde);
+    color: var(--up-content-color, #606266);
+    line-height: 21px;
   }
 
   :deep(th),
   :deep(._th) {
     font-weight: 600;
     color: var(--up-main-color, #303133);
+  }
+
+  /*
+   * 标题必须显式给定字号与行高。
+   *
+   * 这里原先**一条标题规则都没有**，于是 markdown 的 `##` 落到浏览器默认值：
+   * h2 = 1.5em ≈ 21px。而外层 `.up-markdown` 带 `line-height: 20px !important`，
+   * 行高会继承下去 —— 21px 的字挤在 20px 的行高里，上下两行直接咬在一起。
+   *
+   * 现在按正文 14px 的 1.2~1.4 倍重新标定：h1 17px / h2 16px / h3 15px，
+   * 行高各自给足（h2 用 22px > 16px 字号）。行高必须带 `!important`，
+   * 否则会被父级那条 20px 的继承规则盖掉。
+   *
+   * 段前间距也一起收：浏览器默认 h2 上下各 0.83em ≈ 17px，在窄屏消息流里
+   * 会凭空多出一大块空白，比正文段落间距（0）突兀得多。
+   */
+  :deep(h1), :deep(h2), :deep(h3), :deep(h4), :deep(h5), :deep(h6),
+  :deep(._h1), :deep(._h2), :deep(._h3), :deep(._h4), :deep(._h5), :deep(._h6) {
+    margin: 14rpx 0 8rpx !important;
+    font-weight: 600;
+    color: var(--up-main-color, #303133);
+  }
+
+  :deep(h1), :deep(._h1) {
+    font-size: 17px !important;
+    line-height: 24px !important;
+  }
+
+  :deep(h2), :deep(._h2) {
+    font-size: 16px !important;
+    line-height: 22px !important;
+  }
+
+  :deep(h3), :deep(._h3) {
+    font-size: 15px !important;
+    line-height: 21px !important;
+  }
+
+  :deep(h4), :deep(h5), :deep(h6),
+  :deep(._h4), :deep(._h5), :deep(._h6) {
+    font-size: 14px !important;
+    line-height: 20px !important;
+  }
+
+  /* 首尾标题不该在气泡上下各撑出一段空白 */
+  :deep(h1):first-child, :deep(h2):first-child, :deep(h3):first-child,
+  :deep(._h1):first-child, :deep(._h2):first-child, :deep(._h3):first-child {
+    margin-top: 0 !important;
   }
 
   :deep(tbody tr:nth-child(even)),
@@ -906,10 +1026,10 @@ function renderCyberDecodeText(text: string, index: number) {
     box-sizing: border-box;
   }
 
-  // 用户消息文本颜色（up-markdown 在 user 气泡内需白色）
+  // 用户消息文本颜色（中性灰气泡内用深色正文）
   .bubble--user & {
-    color: #ffffff;
-    :deep(*) { color: #ffffff !important; }
+    color: var(--bubble-user-text, #3c3c43);
+    :deep(*) { color: var(--bubble-user-text, #3c3c43) !important; }
   }
 }
 
@@ -1394,6 +1514,18 @@ function renderCyberDecodeText(text: string, index: number) {
 }
 
 /* ===== 思考块 ===== */
+/*
+ * 思考块**没有背景、没有边框、没有内距**。
+ *
+ * 它和工具行、系统消息同属「时间线上的弱提示」，不是正文卡片。加了底色和
+ * 16rpx/20rpx 内距之后有两处坏处：
+ * 1. 文字左沿比正文（padding 0）右移了 10px，同一条消息里几段内容左边界参差；
+ * 2. 额外的上下内距让折叠态那一行在消息流里显得又高又松，和工具行不成节奏。
+ *
+ * 所以内距归零、底色透明，只用 22rpx 的弱色文字 + 图标表达「这是思考」。
+ * 展开态也**不再切卡片**（原先切 12rpx 圆角 + 16rpx 内距），只靠下方正文的
+ * 左缩进区分层级 —— 否则一展开就跳一下间距。
+ */
 .part-thinking {
   display: flex;
   flex-direction: column;
@@ -1401,28 +1533,25 @@ function renderCyberDecodeText(text: string, index: number) {
   width: fit-content;
   max-width: 100%;
   box-sizing: border-box;
-  padding: 16rpx 20rpx;
-  background-color: color-mix(in srgb, var(--up-warning, #f9ae3d) 12%, var(--up-card-bg-color, #ffffff) 88%);
-  border-radius: 999rpx;
-  border: 1rpx solid color-mix(in srgb, var(--up-warning, #f9ae3d) 20%, transparent 80%);
-  transition: all 0.2s ease;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 0;
+  transition: none;
 }
 
 /*
-  折叠态与 `tool-group__summary` / `subagent__summary` / `system-note__summary`
-  共用一套药丸度量（min-height 48rpx + 10rpx/18rpx 内距），否则同一条消息里
-  几枚摘要胶囊会高低不齐 —— 基础 `.part-thinking` 的 16rpx 内距是给展开态卡片用的。
-
-  另外两点必须一起给，否则 48rpx 形同虚设（实测 375px 视口：72rpx → 50rpx → 48rpx）：
-  - `box-sizing: border-box`（在基础规则上），不然 min-height 只约束内容盒，
-    上下内距和边框会额外累加上去；
-  - `border: none`，同类摘要药丸都无边框，留着 1rpx 会高出约 2rpx。
-*/
+ * 折叠态 / 展开态都不再是药丸或卡片，只是普通的一行 + 可选正文。
+ *
+ * 原先折叠态要对齐 `tool-group__summary` 的药丸度量（min-height 48rpx + 10/18 内距），
+ * 那是在有底色时的约束；现在没有底色，48rpx 的 min-height 反而会让这一行
+ * 比工具行更高、更空。所以两个状态都退回内容高度。
+ */
 .part-thinking--collapsed {
-  min-height: 48rpx;
-  padding: 10rpx 18rpx;
+  min-height: 0;
+  padding: 0;
   width: fit-content;
-  border-radius: 999rpx;
+  border-radius: 0;
   border: none;
   justify-content: center;
 }
@@ -1430,13 +1559,13 @@ function renderCyberDecodeText(text: string, index: number) {
 .part-thinking--expanded {
   width: 100%;
   box-sizing: border-box;
-  border-radius: 12rpx;
-  padding: 16rpx 20rpx;
+  border-radius: 0;
+  padding: 0;
 }
 
 .part-thinking--translucent {
-  background: color-mix(in srgb, var(--up-warning, #f9ae3d) 10%, transparent 90%);
-  border: 1rpx solid color-mix(in srgb, var(--up-warning, #f9ae3d) 20%, transparent 80%);
+  background: none;
+  border: none;
 }
 
 /* `--translucent` 排在 `--collapsed` 之后且同为单类选择器，会把边框重新加回来。 */
@@ -1503,7 +1632,10 @@ function renderCyberDecodeText(text: string, index: number) {
 
 .thinking-bd {
   overflow: hidden;
-  margin-top: 10rpx;
+  /* 无底色后 10rpx 的间距看起来比有卡片时更空，收到 6rpx 与标题行贴紧 */
+  margin-top: 6rpx;
+  /* 正文左缩进对齐标题文字的起始位置（图标 24rpx + gap 10rpx），形成层级 */
+  padding-left: 34rpx;
   transition: max-height 0.25s ease;
 }
 

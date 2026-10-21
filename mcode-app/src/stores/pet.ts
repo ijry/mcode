@@ -44,7 +44,17 @@ function defaultState(): PetState {
     position: { x: -1, y: -1 },
     bubbleMuted: false,
     voiceEnabled: true,
-    hidden: false,
+    /**
+     * 默认**隐藏**。
+     *
+     * 宠物是装饰性玩法，不该在用户没主动开启前就占着主界面的一个悬浮位（还会
+     * 在会话页挡住右下角输入区）。入口在「我的 → 宠物管理」：选完宠物后会把它
+     * 显式打开（见 `initPet` 之后的 `setHidden(false)`）。
+     *
+     * 注意这里只影响**新装**（没有落盘过的）状态；老用户持久化里的 `hidden`
+     * 会被 pinia-persist 还原，不会因为他们升级了就突然消失。
+     */
+    hidden: true,
     stats: {
       totalConversations: 0,
       totalTurns: 0,
@@ -293,6 +303,11 @@ export const usePetStore = defineStore('pet', {
     /** Toggle pet visibility */
     toggleHidden() {
       this.hidden = !this.hidden
+    },
+
+    /** Set pet visibility explicitly */
+    setHidden(hidden: boolean) {
+      this.hidden = hidden === true
     },
   },
 

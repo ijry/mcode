@@ -429,6 +429,11 @@ describe("ConversationDetailBody", () => {
     expect(source).toContain("page--sweet");
   });
 
+  /**
+   * 半透明表面。设计稿 M09「新配色」把用户气泡从主色蓝改成了中性灰，
+   * 所以这里断言的是**仍然有半透明层次**，而不是某个具体混色比例 ——
+   * 比例属于视觉迭代，写死会在每次调色时误报。
+   */
   it("uses lighter translucent content surfaces over custom backgrounds", () => {
     const detailStyles = fs.readFileSync(
       path.resolve(
@@ -449,28 +454,18 @@ describe("ConversationDetailBody", () => {
       "utf8",
     );
 
-    expect(bodySource).toContain(
-      "var(--up-card-bg-color, #ffffff) 38%, transparent 62%",
-    );
-    expect(bodySource).toContain("backdrop-filter: blur(12rpx)");
-    expect(bubbleSource).toContain(
-      "var(--up-primary, #2979ff) 54%, transparent 46%",
-    );
+    // 输入框 / 加号按钮的毛玻璃层仍在
+    expect(detailStyles).toContain("input-box--translucent");
+    expect(detailStyles).toContain("tool-toggle-btn--translucent");
+    expect(detailStyles).toContain("backdrop-filter: blur(6rpx)");
+    expect(bubbleSource).toContain("bubble--user-translucent");
     expect(bubbleSource).toContain("backdrop-filter: blur(0.1rem)");
-    expect(bubbleSource).toContain(
-      "var(--up-card-bg-color, #ffffff) 30%, transparent 70%",
-    );
-    expect(detailStyles).toContain("backdrop-filter: blur(10rpx)");
-    expect(detailStyles).toContain(
-      "var(--up-card-bg-color, #ffffff) 32%, transparent 68%",
-    );
-    expect(detailStyles).toContain(
-      "var(--up-card-bg-color, #ffffff) 22%, transparent 78%",
-    );
+
+    // AI 气泡在新配色里是透明的，没有半透明卡片层
+    expect(bubbleSource).toContain("&--assistant-translucent");
+    expect(bubbleSource).toContain("background-color: transparent");
+
     expect(detailStyles).toContain("send-btn--translucent");
-    expect(detailStyles).toContain(
-      "var(--up-primary, #2979ff) 48%, transparent 52%",
-    );
     expect(detailStyles).not.toContain("backdrop-filter: blur(22rpx)");
     expect(bubbleSource).not.toContain("backdrop-filter: blur(0.1625rem)");
   });

@@ -10,18 +10,67 @@
  * 所以调这个值时**不要随手取整**：先确认它不是行高的整数倍。改这一处即可同时调整两个面板。 */
 $composer-panel-max-height: 590rpx;
 
+/*
+ * 页面底色。
+ *
+ * 设计稿 M09 是一张纯中性灰纸面（#f2f2f7 / 深色 #000000），上面没有任何光晕。
+ * 原先那两层 primary 色径向渐变在深色模式下尤其明显 —— 整个屏幕泛蓝，
+ * 而设计稿的强调色只落在返回箭头和「更多」上。
+ *
+ * 这里保留一层极淡的中性渐变（不影响纸张感，但避免纯色显得死板），
+ * 并把主题变量作为输入框/发送键的取值来源。
+ */
 .page {
   height: 100%;
   min-height: 100%;
   padding: 0 !important;
   display: flex;
   flex-direction: column;
-  background:
-    radial-gradient(circle at top right, color-mix(in srgb, var(--up-primary, #2979ff) 16%, transparent 84%) 0, transparent 34%),
-    radial-gradient(circle at bottom left, color-mix(in srgb, var(--up-primary, #2979ff) 10%, transparent 90%) 0, transparent 38%),
-    var(--up-page-bg-color, var(--up-bg-color, #f3f4f6));
+  background: var(--detail-paper-bg);
   overflow: hidden;
   overscroll-behavior: none;
+
+  /*
+   * 输入区三件套与用户气泡的中性色取值。
+   *
+   * **判据是 `[data-up-theme='dark']`，不是 `prefers-color-scheme`。**
+   * 项目的深色由 uview 按用户偏好（system / light / dark）写到 `<html data-up-theme>`，
+   * 与系统设置不是同一来源：用户在 app 内手动选深色时 `prefers-color-scheme` 仍是
+   * light，页面会原地不动；反过来系统深色、用户选浅色时，页面又会莫名变深。
+   *
+   * 变量挂在 `.page` 上而不是 `:root`：这是 scoped 样式，`:root` 会被编译成
+   * `:root[data-v-xxx]` 从而永不命中。而 `.page` 是 `MessageBubble` 的祖先，
+   * CSS 变量照常继承下去 —— 共享组件读得到。
+   */
+  --input-box-bg: #e5e5ea;
+  /*
+   * 设计稿里发送键**只有一个状态**：#48484a 深灰 + 白色 18px 箭头。
+   * 六张画板（M09/M10 的浅色与深色）取的都是这个值，连输入框里只有占位文字时也是，
+   * 说明它不随「有没有内容」变色 —— 可点性由点击后的行为反馈，不靠颜色。
+   */
+  --send-btn-bg: #48484a;
+  --send-btn-active-bg: #48484a;
+  --tool-toggle-bg: #ffffff;
+  --tool-toggle-border: rgba(0, 0, 0, 0.06);
+  --bubble-user-bg: #e9e9ee;
+  --bubble-user-text: #3c3c43;
+  /* 设计稿 M09 的纸面与导航栏是同一个色（淡紫灰 #f2f2f7），中间没有分界线。 */
+  --detail-paper-bg: #f2f2f7;
+}
+
+/* 深色：设计稿深色版是近黑纸面 + 略亮的灰气泡 */
+[data-up-theme='dark'] .page {
+  --input-box-bg: #2c2c2e;
+  /* 深色版发送键同样是 #48484a —— 它比输入框亮一档，在白箭头衬托下才是「可按」。 */
+  --send-btn-bg: #48484a;
+  --send-btn-active-bg: #48484a;
+  /* 设计稿深色加号是 #2c2c2e + 8% 白描边，不是白底。 */
+  --tool-toggle-bg: #2c2c2e;
+  --tool-toggle-border: rgba(255, 255, 255, 0.08);
+  --bubble-user-bg: #2c2c2e;
+  --bubble-user-text: #ffffff;
+  /* 深色版整屏是纯黑（设计稿 9:67 的底色），不是 uview 默认的 #1f1f1f。 */
+  --detail-paper-bg: #000000;
 }
 
 .page--cyber {
@@ -710,13 +759,13 @@ $composer-panel-max-height: 590rpx;
 :deep(.detail-navbar-shell .u-navbar__placeholder),
 :deep(.detail-navbar-shell .u-navbar--fixed),
 :deep(.detail-navbar-shell .u-navbar__content) {
-  background: var(--detail-navbar-bg-color, var(--up-card-bg-color, #ffffff)) !important;
-  background-color: var(--detail-navbar-bg-color, var(--up-card-bg-color, #ffffff)) !important;
+  background: var(--detail-navbar-bg-color, var(--detail-paper-bg)) !important;
+  background-color: var(--detail-navbar-bg-color, var(--detail-paper-bg)) !important;
 }
 
 :deep(.detail-navbar-shell .u-status-bar) {
-  background: var(--detail-navbar-status-bg-color, var(--detail-navbar-bg-color, var(--up-card-bg-color, #ffffff))) !important;
-  background-color: var(--detail-navbar-status-bg-color, var(--detail-navbar-bg-color, var(--up-card-bg-color, #ffffff))) !important;
+  background: var(--detail-navbar-status-bg-color, var(--detail-navbar-bg-color, var(--detail-paper-bg))) !important;
+  background-color: var(--detail-navbar-status-bg-color, var(--detail-navbar-bg-color, var(--detail-paper-bg))) !important;
 }
 
 :deep(.detail-navbar-shell .u-navbar--fixed) {
@@ -727,8 +776,15 @@ $composer-panel-max-height: 590rpx;
   width: 100%;
   max-width: calc(100vw - 220rpx);
   flex-shrink: 0;
+  /*
+   * 标题 + 状态胶囊是**两行**内容（16px 标题 + 1px gap + 19px 胶囊 ≈ 40px），
+   * 而导航栏高度固定 48px。原先这里是 `align-items: flex-start`，两行内容被顶到
+   * 上沿，胶囊底边几乎压着导航栏下边框（截图里就是「思考中贴着导航底」）。
+   * 改成垂直居中，上下各留 ~4px，与设计稿（导航栏 48、标题组 hug 居中）一致。
+   */
+  height: 100%;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: center;
   box-sizing: border-box;
 }
@@ -761,13 +817,29 @@ $composer-panel-max-height: 590rpx;
   color: var(--up-primary, #2979ff);
 }
 
+/*
+ * 标题必须自己实现单行截断，**不能依赖 `u-line-1`**。
+ *
+ * 仓库里 `u-line-1` 只被引用、从未定义（uview-plus 的 `libs/css/*.scss` 里搜不到
+ * 这条规则），所以模板上的那个 class 一直是空转 —— 长标题会溢出导航栏，
+ * 把右侧「更多」按钮挤出去，甚至在截图里压到状态栏。
+ *
+ * 现在把截断写进 `.detail-navbar__title` 本身：`block` + `ellipsis` 三件套。
+ * 注意这里**不能**用 `display: -webkit-box` 做多行截断：导航栏高度是固定的 45px，
+ * 两行标题会把下方的状态胶囊顶出可视区。
+ */
 .detail-navbar__title {
   min-width: 0;
   display: block;
-  font-size: 28rpx;
+  width: 100%;
+  /* 16px @393 视口 —— 设计稿 M09 导航栏标题实测 */
+  font-size: 32rpx;
   line-height: 1.25;
   font-weight: 600;
   color: var(--up-main-color, #303133);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .detail-navbar__title-copy {
@@ -775,7 +847,92 @@ $composer-panel-max-height: 590rpx;
   flex: 1;
   min-width: 0;
   flex-direction: column;
-  gap: 4rpx;
+  /* 标题与状态胶囊间距 1px（设计稿「标题组」gap: 1） */
+  gap: 2rpx;
+  align-items: flex-start;
+}
+
+/*
+ * 导航栏运行状态胶囊。
+ *
+ * 视觉规格直接取自设计稿 M09：圆角 10、内距 3/8、状态点 6px 圆角 3、文字 11px Medium。
+ * 底色与文字同色系（各自 alpha 化），避免浅色/深色各写一套死值 —— 状态色本身由
+ * `--up-success` / `--up-primary` / `--up-warning` / `--up-error` 承载，
+ * 深浅色跟随 uview 主题自动切换。
+ */
+.detail-navbar__status {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 10px;
+  max-width: 100%;
+  box-sizing: border-box;
+  /* 默认（idle / online）：中性灰胶囊 */
+  background: color-mix(in srgb, var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6)) 62%, transparent 38%);
+}
+
+.detail-navbar__status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  background: var(--up-tips-color, #909193);
+}
+
+.detail-navbar__status-text {
+  font-size: 22rpx;
+  line-height: 1.2;
+  font-weight: 500;
+  color: var(--up-content-color, #606266);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+/* 运行中 / 等待中：绿色系（设计稿「运行中」用 #30d158 点 + 同色文字） */
+.detail-navbar__status--running,
+.detail-navbar__status--online {
+  background: color-mix(in srgb, var(--up-success, #19be6b) 12%, transparent 88%);
+}
+
+.detail-navbar__status--running .detail-navbar__status-dot,
+.detail-navbar__status--online .detail-navbar__status-dot {
+  background: var(--up-success, #19be6b);
+}
+
+.detail-navbar__status--running .detail-navbar__status-text,
+.detail-navbar__status--online .detail-navbar__status-text {
+  color: var(--up-success, #19be6b);
+}
+
+.detail-navbar__status--running .detail-navbar__status-dot {
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+.detail-navbar__status--pending {
+  background: color-mix(in srgb, var(--up-warning, #f9ae3d) 14%, transparent 86%);
+}
+
+.detail-navbar__status--pending .detail-navbar__status-dot {
+  background: var(--up-warning, #f9ae3d);
+}
+
+.detail-navbar__status--pending .detail-navbar__status-text {
+  color: color-mix(in srgb, var(--up-warning, #f9ae3d) 78%, var(--up-main-color, #303133) 22%);
+}
+
+.detail-navbar__status--error {
+  background: color-mix(in srgb, var(--up-error, #fa3534) 12%, transparent 88%);
+}
+
+.detail-navbar__status--error .detail-navbar__status-dot {
+  background: var(--up-error, #fa3534);
+}
+
+.detail-navbar__status--error .detail-navbar__status-text {
+  color: var(--up-error, #fa3534);
 }
 
 .detail-navbar__menu {
@@ -1184,8 +1341,17 @@ $composer-panel-max-height: 590rpx;
 }
 
 .message-item {
-  margin-top: 5px;
-  margin-bottom: 5px;
+  /* 设计稿消息区：行间距 12px，见「消息区」frame 的 gap */
+  margin-top: 6px;
+  margin-bottom: 6px;
+}
+
+.message-item:first-child {
+  margin-top: 0;
+}
+
+.message-item:last-child {
+  margin-bottom: 0;
 }
 
 .empty-messages {
@@ -2879,24 +3045,32 @@ $composer-panel-max-height: 590rpx;
 .input-main-row {
   display: flex;
   align-items: flex-end;
-  gap: 12rpx;
+  /* 设计稿输入区三件套间距 10px、外内距 8/12 */
+  gap: 10px;
+  padding: 8px 12px;
 }
 
+/*
+ * 加号按钮：白底圆形 + 极淡描边（设计稿 cornerRadius 22 于 44×44 = 正圆）。
+ * 原先是 20rpx 圆角方块，改成圆形后与发送键的方形圆角形成「轻—重」对比，
+ * 主操作（发送）在视觉上更重，符合设计稿的层级。
+ */
 .tool-toggle-btn {
-  width: 64rpx;
-  height: 64rpx;
+  width: 44px;
+  height: 44px;
   flex-shrink: 0;
-  border-radius: 20rpx;
+  border-radius: 999px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: color-mix(in srgb, var(--up-page-bg-color, var(--up-bg-color, #f5f6f8)) 72%, var(--up-card-bg-color, #ffffff) 28%);
+  background: var(--tool-toggle-bg, #ffffff);
+  border: 1rpx solid var(--tool-toggle-border, rgba(0, 0, 0, 0.06));
   transition: background-color 0.2s ease, transform 0.2s ease;
   box-sizing: border-box;
 }
 
 .tool-toggle-btn--translucent {
-  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 22%, transparent 78%);
+  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 42%, transparent 58%);
   border: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 24%, transparent 76%);
   backdrop-filter: blur(6rpx);
 }
@@ -3072,19 +3246,23 @@ $composer-panel-max-height: 590rpx;
   text-overflow: ellipsis;
 }
 
+/*
+ * 输入框：浅灰底、14px 圆角、高 44px（设计稿 cornerRadius 14 / height 44 / 内距 14）。
+ * 与加号按钮的圆形、发送键的 14px 圆角方形共同构成设计稿的三段式输入区。
+ */
 .input-box {
   flex: 1;
-  background-color: color-mix(in srgb, var(--up-page-bg-color, var(--up-bg-color, #f5f6f8)) 72%, var(--up-card-bg-color, #ffffff) 28%);
-  border-radius: 24rpx;
-  padding: 14rpx 20rpx;
-  min-height: 72rpx;
+  background-color: var(--input-box-bg, #e5e5ea);
+  border-radius: 14px;
+  padding: 0 14px;
+  min-height: 44px;
   display: flex;
   align-items: center;
   box-sizing: border-box;
 }
 
 .input-box--translucent {
-  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 22%, transparent 78%);
+  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 38%, transparent 62%);
   border: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 24%, transparent 76%);
   backdrop-filter: blur(6rpx);
 }
@@ -3106,10 +3284,10 @@ $composer-panel-max-height: 590rpx;
   :deep(.u-textarea__field),
   :deep(.uni-textarea-textarea),
   :deep(textarea) {
-    min-height: 34rpx;
+    min-height: 20px;
     max-height: 220rpx;
-    line-height: 36rpx;
-    font-size: 27rpx;
+    line-height: 20px;
+    font-size: 14px;
     background: transparent !important;
     overflow-y: auto;
   }
@@ -3119,35 +3297,43 @@ $composer-panel-max-height: 590rpx;
   }
 }
 
+/*
+ * 发送键：深色圆角方形（设计稿 cornerRadius 14 / 44×44，底色 #48484a）。
+ *
+ * **只有一个状态**：`--send-btn-bg` 与 `--send-btn-active-bg` 在设计稿里同值，
+ * 兜底值也必须同值 —— 留一个更浅的兜底（曾为 #c7c7cc）会让变量缺失的场景
+ * （自定义主题、独立复用）又退回「两档色」，而这正是本轮要修掉的东西。
+ * 强调色只留给返回箭头与「更多」，输入区整体是中性色域。
+ */
 .send-btn {
-  width: 68rpx;
-  height: 68rpx;
-  border-radius: 50%;
-  background-color: var(--up-border-color, #dadbde);
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  background-color: var(--send-btn-bg, #48484a);
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
 
   &--active {
-    background-color: #2979ff;
+    background-color: var(--send-btn-active-bg, #48484a);
   }
 
   &--loading {
-    background-color: #2979ff;
+    background-color: var(--send-btn-active-bg, #48484a);
   }
 }
 
 .send-btn--translucent {
-  background-color: color-mix(in srgb, var(--up-main-color, #303133) 24%, transparent 76%);
+  background-color: color-mix(in srgb, var(--up-main-color, #303133) 26%, transparent 74%);
   border: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 24%, transparent 76%);
   backdrop-filter: blur(6rpx);
 }
 
 .send-btn--translucent.send-btn--active,
 .send-btn--translucent.send-btn--loading {
-  background-color: color-mix(in srgb, var(--up-primary, #2979ff) 48%, transparent 52%);
-  border-color: color-mix(in srgb, var(--up-primary, #2979ff) 28%, transparent 72%);
+  background-color: #48484a;
+  border-color: transparent;
 }
 
 .input-tool-menu {
