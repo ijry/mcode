@@ -1,5 +1,5 @@
 <template>
-  <view class="page" :style="[upThemeVars, upThemePageStyle]">
+  <view class="page page--with-tabbar" :style="[upThemeVars, upThemePageStyle]">
     <!-- 用户信息卡片 -->
     <view class="user-card" :style="upThemeCardStyle" @click="goAuthEntry">
       <view class="user-info">
@@ -150,6 +150,8 @@
       :emotion="currentEmotion"
     />
   </view>
+
+    <McodeTabBar current="profile" />
 </template>
 
 <script setup lang="ts">
@@ -433,6 +435,18 @@ function logout() {
 </script>
 
 <style scoped lang="scss">
+
+/*
+ * 悬浮胶囊底栏（`McodeTabBar`）是 `position: fixed`，原生 tabBar 已被隐藏 ——
+ * 所以页面必须自己留出「12 + 62 + 21」再加安全区，否则最后一段内容被胶囊压住。
+ *
+ * 用显式 class 而不是 `.page:has(.mc-tabbar)`：`:has()` 要 iOS 15.4+，
+ * 而这个 app 的 iOS 最低版本比它低，老机器上会整条规则失效（不是降级，是完全没有留白）。
+ */
+.page.page--with-tabbar {
+  padding-bottom: calc(95px + env(safe-area-inset-bottom)) !important;
+}
+
 .page {
   min-height: 100vh;
   background-color: var(--up-page-bg-color, var(--up-bg-color, #f3f4f6));

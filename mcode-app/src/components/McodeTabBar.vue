@@ -1,0 +1,254 @@
+<template>
+  <!--
+    全局悬浮胶囊底栏（设计稿 MCode 首页·连接 的「底部导航」）。
+
+    **为什么不做成「根组件挂一次」**：uni-app 的 `App.vue` 没有 `template`，本项目的根节点
+    由 `App.up.vue` 提供（见 `vite.config.js` 的 `UniUpRoot`），但它只包 `UpRootView` 与 pet
+    浮层 —— 页面是各自独立的 webview，不会被根组件包裹。所以只能每个 tab 页各挂一份。
+
+    **为什么原生 `tabBar` 配置要留着**：`uni.switchTab` 与 `uni.setTabBarBadge`
+    （`conversationTabBadgeService` 依赖）都以 `pages.json` 的 `tabBar.list` 为准。删掉它
+    就同时失去页面缓存与角标能力。因此这里的做法是「保留配置 + 本组件内 `onShow` 调
+    `uni.hideTabBar()` 隐藏原生栏 + 页面内渲染本组件」。
+  -->
+  <view class="mc-tabbar" :class="{ 'mc-tabbar--hidden': hidden }">
+    <view class="mc-tabbar__bar">
+      <view
+        v-for="item in tabs"
+        :key="item.name"
+        class="mc-tabbar__item"
+        :class="{ 'mc-tabbar__item--active': item.name === current }"
+        @click="handleSwitch(item)"
+      >
+        <view class="mc-tabbar__icon">
+          <u-icon
+            :name="item.icon"
+            :size="21"
+            :color="item.name === current ? '#FFFFFF' : resolvedInactiveColor"
+          ></u-icon>
+          <view v-if="item.name === 'conversations' && badgeText" class="mc-tabbar__badge">
+            <text class="mc-tabbar__badge-text">{{ badgeText }}</text>
+          </view>
+        </view>
+        <text class="mc-tabbar__text">{{ item.text }}</text>
+      </view>
+    </view>
+  </view>
+</template>
+
+<script setup lang="ts">
+import { computed, onMounted, onUnmounted, ref } from "vue"
+import { onShow } from "@dcloudio/uni-app"
+import { subscribeConversationTabBadge } from "@/services/conversation/conversationTabBadgeService"
+import { isDarkThemeMode } from "@/services/theme"
+
+type TabName = "connections" | "conversations" | "tasks" | "circles" | "profile"
+
+interface TabItem {
+  name: TabName
+  text: string
+  icon: string
+  path: string
+}
+
+const props = withDefaults(
+  defineProps<{
+    current: TabName
+    /** 未激活项的文字与图标色。设计稿浅色 #8E8E93 / 深色 #8C8C94。 */
+    inactiveColor?: string
+    hidden?: boolean
+  }>(),
+  {
+    inactiveColor: "#8E8E93",
+    hidden: false,
+  }
+)
+
+/**
+ * 顺序与 `pages.json` 的 `tabBar.list` **必须**一致 —— 角标接口按索引定位，
+ * 一旦这里的顺序和配置错位，未读数就会长到别的 tab 上。
+ */
+const tabs: TabItem[] = [
+  { name: "connections", text: "连接", icon: "grid-fill", path: "/pages/connections/index" },
+  { name: "conversations", text: "会话", icon: "chat", path: "/pages/conversations/index" },
+  { name: "tasks", text: "任务", icon: "list-dot", path: "/pages/tasks/index" },
+  { name: "circles", text: "圈子", icon: "account", path: "/pages/circles/index" },
+  { name: "profile", text: "我的", icon: "account-fill", path: "/pages/profile/index" },
+]
+
+/**
+ * 角标由组件**自己**订阅，不从页面 props 传。
+ *
+ * 计数器的权威副本活在 `conversationTabBadgeService` 里（它由 `App.vue` 的
+ * `onLaunch` 驱动、与任何页面无关）。如果改成页面传 props，5 个页面就都要各自 import
+ * 并转发一次，等于把同一份订阅抄 5 遍，还多一处可能忘记加的地方。
+ */
+const badgeCount = ref(0)
+let disposeBadge: (() => void) | null = null
+
+/**
+ * 压掉原生 tabBar。
+ *
+ * 为什么放在组件里而不是各页 `onShow`：uni-app 的 `onShow` 在**组件内**同样生效（走的是
+ * 页面实例的事件总线），所以挂一次就等于 5 个 tab 页各自都有 —— 比在 5 个页面各抄一遍
+ * `uni.hideTabBar()` 更不容易漏。`switchTab` 会把原生栏重新显示出来，因此每次都得压。
+ *
+ * `animation: false` 是关键：默认的滑落动画会在切 tab 时露出一条白边闪一下。
+ */
+function hideNativeTabBar() {
+  uni.hideTabBar?.({ animation: false, fail: () => {} })
+}
+
+/** 未激活项配色：设计稿浅色 #8E8E93 / 深色 #8C8C94。 */
+const resolvedInactiveColor = ref(props.inactiveColor)
+
+function refreshThemeColor() {
+  resolvedInactiveColor.value = isDarkThemeMode() ? "#8C8C94" : props.inactiveColor
+}
+
+onMounted(() => {
+  disposeBadge = subscribeConversationTabBadge((count: number) => {
+    badgeCount.value = count
+  })
+  hideNativeTabBar()
+  refreshThemeColor()
+})
+
+onShow(() => {
+  hideNativeTabBar()
+  refreshThemeColor()
+})
+
+onUnmounted(() => {
+  disposeBadge?.()
+  disposeBadge = null
+})
+
+const badgeText = computed(() => {
+  const count = Math.floor(Number(badgeCount.value) || 0)
+  if (count <= 0) return ""
+  return count > 99 ? "99+" : String(count)
+})
+
+function handleSwitch(item: TabItem) {
+  if (item.name === props.current) return
+  uni.switchTab({ url: item.path })
+}
+</script>
+
+<style scoped lang="scss">
+/*
+ * 几何全部来自设计稿「底部导航」节点（393 宽基准）：
+ *   外层 padding 0 21 / 12 / 21，导航条 radius 36 + 1px rgba(0,0,0,.06) 描边 + padding 4，
+ *   单 item 高 54（= 62 - 4*2），激活项 radius 30。
+ * 单位用 px 而不是 rpx：底栏在所有机型上都应保持同样的物理尺寸密度，rpx 会在窄屏上把
+ * 10px 的文字压到不可读。
+ */
+.mc-tabbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  padding: 12px 21px calc(21px + env(safe-area-inset-bottom));
+  pointer-events: none;
+
+  &--hidden {
+    display: none;
+  }
+
+  &__bar {
+    display: flex;
+    align-items: stretch;
+    height: 62px;
+    padding: 4px;
+    border-radius: 36px;
+    background: #ffffff;
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    box-sizing: border-box;
+    pointer-events: auto;
+  }
+
+  &__item {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    border-radius: 30px;
+    transition: background-color 0.18s ease;
+  }
+
+  &__item--active {
+    background: #1c1c1f;
+  }
+
+  &__icon {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+  }
+
+  &__badge {
+    position: absolute;
+    top: -5px;
+    right: -9px;
+    min-width: 14px;
+    height: 14px;
+    padding: 0 3px;
+    border-radius: 7px;
+    background: #ff3b30;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+  }
+
+  &__badge-text {
+    font-size: 9px;
+    line-height: 1;
+    font-weight: 500;
+    color: #ffffff;
+  }
+
+  &__text {
+    font-size: 10px;
+    line-height: 1;
+    font-weight: 400;
+    color: v-bind(resolvedInactiveColor);
+  }
+
+  &__item--active &__text {
+    font-weight: 500;
+    color: #ffffff;
+  }
+}
+
+/*
+ * 深色取设计稿深色板：导航条 #1C1C1E、激活项 #3A3A3C、未激活 #8C8C94。
+ * 判据是 `[data-up-theme='dark']`，不是 `prefers-color-scheme` —— 项目的深色由 uview 按
+ * 用户在 app 里的偏好写到 `<html data-up-theme>`，与系统设置不是同一来源。
+ */
+[data-up-theme='dark'] {
+  .mc-tabbar__bar {
+    background: #1c1c1e;
+    border-color: rgba(255, 255, 255, 0.08);
+  }
+
+  .mc-tabbar__item--active {
+    background: #3a3a3c;
+  }
+
+  .mc-tabbar__text {
+    color: #8c8c94;
+  }
+
+  .mc-tabbar__item--active .mc-tabbar__text {
+    color: #ffffff;
+  }
+}
+</style>

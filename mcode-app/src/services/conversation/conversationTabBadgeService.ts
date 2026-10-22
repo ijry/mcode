@@ -34,6 +34,8 @@ import { ingestPetSessionsPayload } from "@/services/conversation/awaitingReplyS
 const countByInstance = new Map<string, number>()
 const disposeByInstance = new Map<string, () => void>()
 const lastBridgeStateByInstance = new Map<string, string>()
+/** 当前总未读数，供自定义底栏读取（原生 tabBar 已隐藏时它才是唯一出口）。 */
+const badgeListeners = new Set<(count: number) => void>()
 
 let refreshPromise: Promise<void> | null = null
 let started = false
@@ -46,8 +48,40 @@ function sumCounts() {
   return total
 }
 
+/**
+ * 订阅总未读数。返回退订函数。
+ *
+ * 为什么需要这一层：连接页改成自绘底栏后 `uni.setTabBarBadge` 写到的是**原生** tabBar，
+ * 而它已经被 `uni.hideTabBar()` 藏起来了 —— 角标数字再也看不到。自定义底栏跑在页面里，
+ * 拿不到这个模块内部的 `countByInstance`，只能靠推送。
+ *
+ * 订阅者数量是有界的（`McodeTabBar` 在每个 tab 页各一份，最多 5 个），且 tab 页不会被
+ * `switchTab` 卸载，所以不需要做引用计数这类额外管理；退订函数仍返回，供 reLaunch 兜底。
+ */
+export function subscribeConversationTabBadge(listener: (count: number) => void) {
+  badgeListeners.add(listener)
+  listener(sumCounts())
+  return () => {
+    badgeListeners.delete(listener)
+  }
+}
+
+export function getConversationTabBadgeCount() {
+  return sumCounts()
+}
+
 async function pushBadge() {
-  await applyConversationTabBarBadge(sumCounts())
+  const total = sumCounts()
+  // 两条路都走：原生那条在自定义底栏生效期间是「看不见但仍在维护」的备份，
+  // 将来若某平台回退到原生 tabBar（或需要 App 图标角标）时它已经是对的。
+  await applyConversationTabBarBadge(total)
+  badgeListeners.forEach((listener) => {
+    try {
+      listener(total)
+    } catch (error) {
+      console.warn("[tabbar-badge] listener failed", error)
+    }
+  })
 }
 
 /**

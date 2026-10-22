@@ -1,179 +1,102 @@
 <template>
   <view class="page connections-page" :style="[upThemeVars, upThemePageStyle]">
     <view class="connections-shell">
-      <view class="connections-topbar">
+      <!-- 状态栏占位：页面用 navigationStyle: custom，系统导航栏已交给本页自绘 -->
+      <view class="connections-statusbar" :style="{ height: statusBarHeight + 'px' }"></view>
+
+      <view class="connections-body">
+        <!-- 品牌区 -->
         <view class="connections-brand">
-          <text class="connections-brand__mark">MCode</text>
-          <text class="connections-brand__title">随时随地控 AI</text>
-          <text class="connections-brand__subtitle">手机远程接入电脑端的 Claude/Codex/Gemini 等AI</text>
-        </view>
+          <view class="connections-brand__copy">
+            <text class="connections-brand__mark">MCode</text>
+            <text class="connections-brand__slogan">随时随地控 AI</text>
+          </view>
 
-        <view class="connections-topbar__action" @click="openAddPopup()">
-          <u-icon name="plus" size="16" color="#ffffff"></u-icon>
-          <text class="connections-topbar__action-text">新增连接</text>
-        </view>
-      </view>
-
-      <view class="connections-hero" :style="upThemeCardStyle">
-        <view class="connections-hero__copy">
-          <text class="connections-hero__eyebrow">REMOTE CONTROL</text>
-          <text class="connections-hero__title">远程Vibe，回桌位无缝接续</text>
-          <text class="connections-hero__desc">手机与电脑双向同步，随时接管你的电脑 AI。</text>
-
-          <view class="connections-hero__chips">
-            <text class="connections-hero__chip">远程控制</text>
-            <text class="connections-hero__chip connections-hero__chip--ghost">双向同步</text>
-            <text class="connections-hero__chip connections-hero__chip--ghost">无缝切换</text>
+          <view class="connections-brand__action" @click="openAddPopup()">
+            <text class="connections-brand__action-plus">+</text>
+            <text class="connections-brand__action-text">新增连接</text>
           </view>
         </view>
 
-        <image
-          class="connections-hero__art"
-          src="/static/illustrations/connection-ai-coding-hero.svg"
-          mode="widthFix"
-        />
-      </view>
+        <!-- 我的连接 -->
+        <text class="connections-group-title">我的连接 · {{ connections.length }}</text>
 
-      <view v-if="connections.length === 0" class="connections-empty" :style="upThemeCardStyle">
-        <view class="connections-empty__icon">
-          <u-icon name="plus" size="28" color="#007aff"></u-icon>
-        </view>
-
-        <text class="connections-empty__title">先连接电脑</text>
-        <text class="connections-empty__desc">连接后即可随时接管电脑 AI，回工位也能继续。</text>
-
-        <view class="connections-empty__actions">
-          <view class="connections-empty__primary" @click="openAddPopup()">
-            <text>立即添加</text>
-          </view>
-          <view class="connections-empty__secondary" @click="openTutorialPopup">
-            <text>查看教程</text>
-          </view>
-        </view>
-      </view>
-
-      <view v-else class="connections-stack">
-        <view
-          v-for="(conn, index) in connections"
-          :key="index"
-          class="connection-card"
-          :class="getConnectionCardClass(conn)"
-          :style="upThemeCardStyle"
-          @click="openConnectionDetail(conn)"
-        >
-          <view class="connection-card__host-visual">
-            <image
-              :key="getConnectionHostImageKey(conn)"
-              class="connection-card__host-image"
-              :src="getConnectionHostImage(conn)"
-              mode="aspectFit"
-              @error="handleConnectionHostImageError(conn)"
-            />
-            <view class="connection-card__host-tag">
-              <text>{{ getConnectionHost(conn).kindLabel }}</text>
+        <view v-if="connections.length === 0" class="connections-empty">
+          <text class="connections-empty__title">还没有连接</text>
+          <text class="connections-empty__desc">添加电脑后即可远程接管 AI，回工位也能继续。</text>
+          <view class="connections-empty__actions">
+            <view class="connections-empty__primary" @click="openAddPopup()">
+              <text>立即添加</text>
+            </view>
+            <view class="connections-empty__secondary" @click="openTutorialPopup">
+              <text>查看教程</text>
             </view>
           </view>
+        </view>
 
-          <view class="connection-card__body">
-            <view class="connection-card__head">
-              <view class="connection-card__identity">
-                <view class="connection-card__host-row">
-                  <image
-                    v-if="getConnectionHost(conn).logo"
-                    class="connection-card__host-logo"
-                    :src="getConnectionHost(conn).logo"
-                    mode="aspectFit"
-                  />
-                  <text class="connection-card__host-name">{{ getConnectionHost(conn).displayName }}</text>
-                </view>
-                <text class="connection-card__name">{{ conn.name }}</text>
-              </view>
-              <view
-                class="connection-card__status"
-                :class="getConnectionStatusClass(conn)"
-              >
-                <text class="connection-card__status-text">
-                  {{ getConnectionBadgeText(conn) }}
-                </text>
-              </view>
-              <view class="connection-card__menu" @click.stop="showConnectionMenu(conn, index)">
-                <u-icon name="more-dot-fill" size="18" color="#c7c7cc"></u-icon>
-              </view>
-            </view>
-
-            <text class="connection-card__meta">
-              {{ getConnectionSubtitle(conn) }}
-            </text>
-
-            <view v-if="getConnectionCapabilityChips(conn).length" class="connection-card__chips">
-              <text
-                v-for="chip in getConnectionCapabilityChips(conn)"
-                :key="chip"
-                class="connection-card__chip"
-              >
-                {{ chip }}
-              </text>
-            </view>
-
-            <text
-              v-if="getConnectionHealthDetail(conn)"
-              class="connection-card__health-detail"
+        <view v-else class="connections-list">
+          <block v-for="(conn, index) in connections" :key="index">
+            <view
+              class="connections-row"
+              :class="getConnectionCardClass(conn)"
+              @click="openConnectionDetail(conn)"
             >
-              {{ getConnectionHealthDetail(conn) }}
-            </text>
-
-            <view class="connection-card__footer">
-              <view class="connection-card__footer-main" @click.stop="activateConnection(conn)">
-                <text class="connection-card__footer-link">{{ getConnectionPrimaryActionText(conn) }}</text>
-                <u-icon name="arrow-right" size="14" color="#007aff"></u-icon>
+              <view class="connections-row__host" :class="getConnectionHostAccentClass(conn)">
+                <text class="connections-row__host-text">{{ getConnectionHostShortLabel(conn) }}</text>
               </view>
 
-              <view
-                v-if="shouldShowConnectionRetry(conn)"
-                class="connection-card__quick-action"
-                @click.stop="retryConnection(conn)"
-              >
-                <text>立即重试</text>
+              <view class="connections-row__copy">
+                <text class="connections-row__title">{{ conn.name || getConnectionHost(conn).displayName }}</text>
+                <text
+                  class="connections-row__subtitle"
+                  :class="{ 'connections-row__subtitle--warn': isConnectionWarn(conn) }"
+                >{{ getConnectionRowSubtitle(conn) }}</text>
               </view>
 
-              <view
-                v-if="shouldShowConnectionHelp(conn)"
-                class="connection-card__quick-action connection-card__quick-action--ghost"
-                @click.stop="showConnectionTroubleshooting(conn)"
-              >
-                <text>排查建议</text>
+              <view class="connections-row__trailing">
+                <view class="connections-row__dot" :class="getConnectionDotClass(conn)"></view>
+                <view class="connections-row__more" @click.stop="showConnectionMenu(conn, index)">
+                  <u-icon name="more-dot-fill" size="16" color="#C7C7CC"></u-icon>
+                </view>
               </view>
             </view>
-          </view>
+
+            <view v-if="index < connections.length - 1" class="connections-divider"></view>
+          </block>
         </view>
 
-        <view class="connections-add-card" :style="upThemeCardStyle" @click="openAddPopup()">
-          <view class="connections-add-card__icon">
-            <u-icon name="plus" size="24" color="#007aff"></u-icon>
+        <!-- 其他 -->
+        <text class="connections-group-title">其他</text>
+
+        <view class="connections-list">
+          <view class="connections-entry" @click="openAddPopup()">
+            <view class="connections-entry__icon connections-entry__icon--primary">
+              <text class="connections-entry__icon-text connections-entry__icon-text--primary">+</text>
+            </view>
+            <view class="connections-entry__copy">
+              <text class="connections-entry__title">添加新设备</text>
+              <text class="connections-entry__desc">手机实时接入电脑 AI</text>
+            </view>
+            <u-icon name="arrow-right" size="14" color="#C7C7CC"></u-icon>
           </view>
 
-          <view class="connections-add-card__body">
-            <text class="connections-add-card__title">添加新设备</text>
-            <text class="connections-add-card__desc">手机实时接入电脑 AI</text>
-          </view>
+          <view class="connections-divider"></view>
 
-          <u-icon name="arrow-right" size="14" color="#c7c7cc"></u-icon>
-        </view>
-
-        <view class="connections-guide-card" :style="upThemeCardStyle" @click="openTutorialPopup">
-          <view class="connections-guide-card__copy">
-            <text class="connections-guide-card__eyebrow">SETUP GUIDE</text>
-            <text class="connections-guide-card__title">先完成部署</text>
-            <text class="connections-guide-card__desc">完成电脑端配置后即可双向同步。</text>
-          </view>
-
-          <view class="connections-guide-card__action">
-            <text>查看教程</text>
-            <u-icon name="arrow-right" size="14" color="#ffffff"></u-icon>
+          <view class="connections-entry" @click="openTutorialPopup">
+            <view class="connections-entry__icon">
+              <text class="connections-entry__icon-text">?</text>
+            </view>
+            <view class="connections-entry__copy">
+              <text class="connections-entry__title">先完成部署</text>
+              <text class="connections-entry__desc">查看部署教程</text>
+            </view>
+            <u-icon name="arrow-right" size="14" color="#C7C7CC"></u-icon>
           </view>
         </view>
       </view>
     </view>
+
+    <McodeTabBar current="connections" />
 
     <!-- 连接操作菜单 -->
     <u-action-sheet
@@ -454,6 +377,7 @@ import {
 import {
   getConnectionCapabilityChips,
   getConnectionHostPresentation,
+  getConnectionHostShortLabel,
   getConnectionSubtitle,
 } from "./connectionPresentation"
 import {
@@ -519,6 +443,20 @@ const CONNECTION_RETRY_DELAY_MS = 3000
 const CONNECTION_PROBE_TIMEOUT_MS = 8000
 
 type ConnectionItem = ConnectionContext
+
+/**
+ * 状态栏高度。页面改成 `navigationStyle: custom` 后系统不再给导航栏留位，
+ * 品牌区会顶上刘海 —— 必须自己撑出这 44~62px。
+ */
+const statusBarHeight = (() => {
+  try {
+    const info = uni.getWindowInfo?.() || uni.getSystemInfoSync?.()
+    const value = Number(info?.statusBarHeight)
+    return Number.isFinite(value) && value > 0 ? value : 44
+  } catch {
+    return 44
+  }
+})()
 
 const form = ref({
   name: "",
@@ -652,6 +590,58 @@ function getConnectionStatusClass(conn: ConnectionItem) {
     "connection-card__status--reconnecting": health.state === "reconnecting",
     "connection-card__status--error": health.state === "error",
   }
+}
+
+/**
+ * 设计稿的 38×38 主机徽标底色按「机器类型」分色，而不是按连接状态分色：
+ * 同一台电脑在线/离线会变，但「这是一台笔记本还是云服务器」不会 —— 颜色用来帮人
+ * 在列表里**定位**，状态交给右侧 8px 的状态点。
+ *
+ * 这三档取的是设计稿里出现的三台示例机（MacBook Air / ECS / XPS）的实际色值。
+ */
+function getConnectionHostAccentClass(conn: ConnectionItem) {
+  const kind = getConnectionHost(conn).kind
+  if (kind === "cloud-server") return "connections-row__host--cloud"
+  if (kind === "laptop" || kind === "desktop" || kind === "mini-pc") {
+    return "connections-row__host--device"
+  }
+  return "connections-row__host--other"
+}
+
+/** 8px 状态点：在线绿、重连中橙、异常红、未连接灰。 */
+function getConnectionDotClass(conn: ConnectionItem) {
+  const state = getConnectionHealth(conn).state
+  return {
+    "connections-row__dot--online": state === "online",
+    "connections-row__dot--reconnecting": state === "reconnecting",
+    "connections-row__dot--error": state === "error",
+  }
+}
+
+/** 副标题要在异常时变色（设计稿重连中是 #CC6B00 橙）。 */
+function isConnectionWarn(conn: ConnectionItem) {
+  const state = getConnectionHealth(conn).state
+  return state === "reconnecting" || state === "error"
+}
+
+/**
+ * 行副标题 = 主机类型 · 地址。
+ *
+ * 设计稿示例是「我的 MacBook · relay.mcode.app」，但存储里没有「我的 MacBook」这个自由文本
+ * 字段（连接名在上一行已经显示了）。这里用「主机类型 · 端点」—— 端点才是用户在列表里真正
+ * 靠它区分两台同类机器的信息。异常时整行替换为原因，因为那时「连不上」比「连的是谁」更急。
+ */
+function getConnectionRowSubtitle(conn: ConnectionItem) {
+  const health = getConnectionHealth(conn)
+  if (health.state === "reconnecting") {
+    return health.message ? `网络波动，正在重连…` : "正在重连…"
+  }
+  if (health.state === "error") {
+    return health.message || "连接异常"
+  }
+  const hostLabel = getConnectionHost(conn).kindLabel
+  const endpoint = connectionBaseUrl(conn)
+  return [hostLabel, endpoint].filter(Boolean).join(" · ")
 }
 
 onMounted(() => {
@@ -1772,76 +1762,436 @@ function persistConnectedMap() {
   min-height: 100vh;
 }
 
+/*
+ * 页面底色。设计稿浅色是 #F2F2F7 的中性纸面，深色是纯黑 —— 不用 uview 的
+ * `--up-page-bg-color`（`#f3f4f6` / `#1f1f1f`），因为设计稿的深色比它更黑一档，
+ * 卡片（#1C1C1E）才能从背景里「浮起来」。浅色两值几乎一致，这里统一取设计稿值。
+ */
 .connections-page {
   padding: 0;
-  background: var(--up-page-bg-color, var(--up-bg-color, #f3f4f6));
+  background: #f2f2f7;
+}
+
+[data-up-theme='dark'] .connections-page {
+  background: #000000;
 }
 
 .connections-shell {
-  padding: 24rpx 24rpx 40rpx;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  /* 底栏是 fixed 的：内容区底部要留出「12 + 62 + 21」再加安全区，
+     否则最后一行「先完成部署」会被胶囊压住。 */
+  padding-bottom: calc(95px + env(safe-area-inset-bottom));
 }
 
-.connections-topbar {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 24rpx;
-  padding: 18rpx 10rpx 20rpx;
+.connections-statusbar {
+  flex-shrink: 0;
 }
+
+/*
+ * 内容区几何（设计稿「内容区」节点）：左右 16、上 8、下 16，块间距 12。
+ * 用 px 而非 rpx：设计稿是 393 宽基准，px 才能保证在 320~430 各档机型上
+ * 圆角、行高、图标尺寸的视觉比例一致（rpx 会整体缩放，小屏上会把 12px 压到 10px 以下）。
+ */
+.connections-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 8px 16px 16px;
+}
+
+/* ---------- 品牌区 ---------- */
 
 .connections-brand {
   display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.connections-brand__copy {
+  display: flex;
   flex-direction: column;
-  gap: 10rpx;
+  gap: 4px;
+  min-width: 0;
 }
 
 .connections-brand__mark {
-  font-size: 22rpx;
+  font-size: 24px;
+  line-height: 1.15;
   font-weight: 700;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--up-primary, #2979ff);
+  color: #3c3c43;
 }
 
-.connections-brand__title {
-  font-size: 42rpx;
-  line-height: 1.2;
-  font-weight: 700;
-  color: var(--up-main-color, #303133);
+.connections-brand__slogan {
+  font-size: 12px;
+  line-height: 1.3;
+  color: #8e8e93;
 }
 
-.connections-brand__subtitle {
-  font-size: 26rpx;
+/* 新增连接胶囊：radius 20、padding 8/12、gap 4 */
+.connections-brand__action {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 8px 12px;
+  border-radius: 20px;
+  background: #007aff;
+}
+
+.connections-brand__action-plus {
+  font-size: 16px;
+  line-height: 1;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.connections-brand__action-text {
+  font-size: 13px;
+  line-height: 1;
+  font-weight: 500;
+  color: #ffffff;
+}
+
+/* ---------- 分组标题 ---------- */
+
+.connections-group-title {
+  font-size: 13px;
+  line-height: 1.3;
+  color: #8e8e93;
+}
+
+/* ---------- 分组卡片 ---------- */
+
+.connections-list {
+  display: flex;
+  flex-direction: column;
+  border-radius: 16px;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  overflow: hidden;
+}
+
+.connections-divider {
+  height: 1px;
+  background: #e5e5ea;
+}
+
+/*
+ * 连接行：padding 12/14、gap 12。行内三块依次是 38 徽标 / 文字组 / 状态点+更多。
+ * 高度由内容撑开（12 + 38 + 12 = 62），不要写死 —— 主机名换行时行高要跟着长。
+ */
+.connections-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+}
+
+.connections-row:active,
+.connections-entry:active {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+.connections-row__host {
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+}
+
+/*
+ * 徽标分色按机器类型（详见 `getConnectionHostAccentClass` 的注释）：
+ * 云服务器靛紫、本机设备蓝、其他灰 —— 与设计稿三台示例机一致。
+ */
+.connections-row__host--device {
+  background: #007aff;
+}
+
+.connections-row__host--cloud {
+  background: #5856d6;
+}
+
+.connections-row__host--other {
+  background: #8e8e93;
+}
+
+.connections-row__host-text {
+  font-size: 14px;
+  line-height: 1;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.connections-row__copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.connections-row__title {
+  font-size: 15px;
+  line-height: 1.25;
+  font-weight: 600;
+  color: #3c3c43;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.connections-row__subtitle {
+  font-size: 12px;
+  line-height: 1.3;
+  color: #8e8e93;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 重连中/异常时副标题转橙，这是设计稿里唯一的「行内告警」表达。 */
+.connections-row__subtitle--warn {
+  color: #cc6b00;
+}
+
+.connections-row__trailing {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.connections-row__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #8e8e93;
+}
+
+.connections-row__dot--online {
+  background: #34c759;
+}
+
+.connections-row__dot--reconnecting {
+  background: #ff9500;
+}
+
+.connections-row__dot--error {
+  background: #ff3b30;
+}
+
+/*
+ * 设计稿把整行的操作入口收成了「只有一行字」，但现有功能（断开/编辑/删除/配置码…）
+ * 不能丢，所以压成一枚 3 点按钮放在状态点右边 —— 比长按更显性，代价是多一个元素。
+ * 点击区做成 24×24 但视觉只有 16，避免 12px 的行间距里点到隔壁。
+ */
+.connections-row__more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-right: -4px;
+}
+
+/* ---------- 其他入口 ---------- */
+
+.connections-entry {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+}
+
+.connections-entry__icon {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.connections-entry__icon--primary {
+  background: rgba(0, 122, 255, 0.12);
+}
+
+.connections-entry__icon-text {
+  font-size: 17px;
+  line-height: 1;
+  font-weight: 700;
+  color: #8e8e93;
+}
+
+.connections-entry__icon-text--primary {
+  color: #007aff;
+}
+
+.connections-entry__copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.connections-entry__title {
+  font-size: 15px;
+  line-height: 1.25;
+  font-weight: 600;
+  color: #3c3c43;
+}
+
+.connections-entry__desc {
+  font-size: 12px;
+  line-height: 1.3;
+  color: #8e8e93;
+}
+
+/* ---------- 空态 ---------- */
+
+.connections-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 40px 24px;
+  border-radius: 16px;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  text-align: center;
+}
+
+.connections-empty__title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #3c3c43;
+}
+
+.connections-empty__desc {
+  font-size: 12px;
   line-height: 1.5;
-  color: var(--up-tips-color, #909193);
+  color: #8e8e93;
 }
 
-.connections-topbar__action {
+.connections-empty__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.connections-empty__primary,
+.connections-empty__secondary {
   display: inline-flex;
   align-items: center;
-  gap: 10rpx;
-  margin-top: 20px !important;
-  padding: 18rpx 24rpx;
-  border-radius: 999rpx;
-  background: linear-gradient(135deg, #0a84ff, #0066cc);
-  box-shadow: 0 20rpx 40rpx rgba(0, 122, 255, 0.22);
-  flex-shrink: 0;
-  white-space: nowrap;
+  justify-content: center;
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 500;
 }
 
-.connections-topbar__action-text {
-  font-size: 24rpx;
-  font-weight: 600;
+.connections-empty__primary {
+  background: #007aff;
   color: #ffffff;
-  white-space: nowrap;
-  flex-shrink: 0;
 }
 
-.connections-hero,
-.connections-empty,
-.connection-card,
-.connections-add-card,
-.connections-guide-card,
+.connections-empty__secondary {
+  background: rgba(0, 122, 255, 0.12);
+  color: #007aff;
+}
+
+/* ---------- 深色 ---------- */
+
+/*
+ * 深色值全部取设计稿深色板：卡片 #1C1C1E、主文字白、副文字 #9999A1、
+ * 分隔线 8% 白、描边同样 8% 白。判据是 `[data-up-theme='dark']`（uview 写入），
+ * 不是 `prefers-color-scheme` —— 用户在 app 内手动选深色时系统偏好仍是 light。
+ */
+[data-up-theme='dark'] {
+  .connections-brand__mark,
+  .connections-row__title,
+  .connections-entry__title,
+  .connections-empty__title {
+    color: #ffffff;
+  }
+
+  .connections-brand__slogan,
+  .connections-group-title,
+  .connections-row__subtitle,
+  .connections-entry__desc,
+  .connections-empty__desc {
+    color: #9999a1;
+  }
+
+  .connections-brand__action,
+  .connections-empty__primary {
+    background: #0a84ff;
+  }
+
+  .connections-row__host--device {
+    background: #0a84ff;
+  }
+
+  .connections-row__host--cloud {
+    background: #7d7af2;
+  }
+
+  .connections-row__host--other {
+    background: #8c8c94;
+  }
+
+  .connections-list,
+  .connections-empty {
+    background: #1c1c1e;
+    border-color: rgba(255, 255, 255, 0.08);
+  }
+
+  .connections-divider {
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  .connections-row:active,
+  .connections-entry:active {
+    background: rgba(255, 255, 255, 0.05);
+  }
+
+  .connections-row__subtitle--warn {
+    color: #ff9e0a;
+  }
+
+  .connections-entry__icon {
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  .connections-entry__icon--primary {
+    background: rgba(10, 132, 255, 0.22);
+  }
+
+  .connections-entry__icon-text {
+    color: #9999a1;
+  }
+
+  .connections-entry__icon-text--primary {
+    color: #0a84ff;
+  }
+
+  .connections-empty__secondary {
+    background: rgba(10, 132, 255, 0.18);
+    color: #0a84ff;
+  }
+}
+
+/* ---------- 弹层（添加/编辑、教程、配置码）：样式沿用改造前的版本 ---------- */
+
 .connections-config-code,
 .connections-sheet,
 .connections-tutorial {
@@ -1849,49 +2199,10 @@ function persistConnectedMap() {
   box-shadow: 0 10rpx 26rpx rgba(15, 23, 42, 0.08);
 }
 
-.connections-hero {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20rpx;
-  padding: 30rpx;
-  margin-bottom: 24rpx;
-  overflow: hidden;
-  background:
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--up-primary, #2979ff) 14%, var(--up-card-bg-color, #ffffff) 86%),
-      var(--up-card-bg-color, #ffffff)
-    );
-  border: 1rpx solid var(--up-border-color, #dadbde);
-}
 
-.connections-hero__copy {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 14rpx;
-}
 
-.connections-hero__eyebrow,
-.connections-guide-card__eyebrow {
-  font-size: 20rpx;
-  font-weight: 700;
-  letter-spacing: 0.2em;
-  color: var(--up-primary, #2979ff);
-}
 
-.connections-hero__title {
-  font-size: 36rpx;
-  line-height: 1.25;
-  font-weight: 700;
-  color: var(--up-main-color, #303133);
-}
 
-.connections-hero__desc,
-.connections-empty__desc,
-.connections-guide-card__desc,
-.connections-add-card__desc,
 .connections-sheet__subtitle,
 .connections-sheet__tutorial-desc,
 .connections-tutorial__subtitle,
@@ -1901,362 +2212,59 @@ function persistConnectedMap() {
   color: var(--up-content-color, #606266);
 }
 
-.connections-hero__chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12rpx;
-}
 
-.connections-hero__chip,
-.connections-hero__chip--ghost {
-  padding: 10rpx 18rpx;
-  border-radius: 999rpx;
-  font-size: 22rpx;
-  font-weight: 600;
-}
 
-.connections-hero__chip {
-  background: color-mix(in srgb, var(--up-primary, #2979ff) 12%, var(--up-card-bg-color, #ffffff) 88%);
-  color: var(--up-primary, #2979ff);
-}
 
-.connections-hero__chip--ghost {
-  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
-  color: var(--up-main-color, #303133);
-}
 
-.connections-hero__art {
-  width: 220rpx;
-  flex-shrink: 0;
-  opacity: 0.95;
-}
 
-.connections-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 16rpx;
-  min-height: 520rpx;
-  padding: 48rpx 32rpx;
-  text-align: center;
-  background: var(--up-card-bg-color, #ffffff);
-  border: 1rpx solid var(--up-border-color, #dadbde);
-}
 
-.connections-empty__icon {
-  width: 104rpx;
-  height: 104rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--up-primary, #2979ff) 12%, var(--up-card-bg-color, #ffffff) 88%);
-}
 
-.connections-empty__title,
 .connections-sheet__title,
-.connections-guide-card__title,
 .connections-tutorial__title {
   font-size: 34rpx;
   font-weight: 700;
   color: var(--up-main-color, #303133);
 }
 
-.connections-empty__actions {
-  display: flex;
-  gap: 16rpx;
-  flex-wrap: wrap;
-  justify-content: center;
-  margin-top: 8rpx;
-}
 
-.connections-empty__primary,
-.connections-empty__secondary,
-.connections-guide-card__action {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10rpx;
-  padding: 18rpx 28rpx;
-  border-radius: 999rpx;
-  font-size: 24rpx;
-  font-weight: 600;
-}
 
-.connections-empty__primary {
-  background: var(--up-primary, #2979ff);
-  color: #ffffff;
-}
 
-.connections-empty__secondary {
-  background: color-mix(in srgb, var(--up-primary, #2979ff) 12%, var(--up-card-bg-color, #ffffff) 88%);
-  color: var(--up-primary, #2979ff);
-}
 
-.connections-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 18rpx;
-}
 
-.connection-card {
-  display: flex;
-  align-items: flex-start;
-  gap: 20rpx;
-  padding: 24rpx;
-  background: var(--up-card-bg-color, #ffffff);
-  border: 1rpx solid var(--up-border-color, #dadbde);
-}
 
-.connection-card--online {
-  box-shadow: 0 22rpx 50rpx rgba(0, 122, 255, 0.1);
-}
 
-.connection-card--reconnecting {
-  border-color: color-mix(in srgb, var(--up-warning, #f9ae3d) 38%, var(--up-border-color, #dadbde) 62%);
-}
 
-.connection-card--error {
-  border-color: color-mix(in srgb, var(--up-error, #fa3534) 34%, var(--up-border-color, #dadbde) 66%);
-  box-shadow: 0 18rpx 42rpx rgba(250, 53, 52, 0.08);
-}
 
-.connection-card__host-visual {
-  position: relative;
-  width: 132rpx;
-  height: 132rpx;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-  border-radius: 30rpx;
-  border: 1rpx solid color-mix(in srgb, var(--up-border-color, #dadbde) 74%, var(--up-primary, #2979ff) 26%);
-  background:
-    radial-gradient(circle at 28% 22%, rgba(255, 255, 255, 0.92), transparent 36%),
-    linear-gradient(145deg, var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6)), var(--up-card-bg-color, #ffffff));
-}
 
-.connection-card__host-image {
-  width: 108rpx;
-  height: 88rpx;
-}
 
-.connection-card__host-tag {
-  position: absolute;
-  left: 12rpx;
-  right: 12rpx;
-  bottom: 10rpx;
-  display: flex;
-  justify-content: center;
-  padding: 4rpx 8rpx;
-  border-radius: 999rpx;
-  background: color-mix(in srgb, var(--up-card-bg-color, #ffffff) 88%, var(--up-primary, #2979ff) 12%);
-  color: var(--up-content-color, #606266);
-  font-size: 18rpx;
-  font-weight: 700;
-  line-height: 1.2;
-}
 
-.connection-card__body {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 12rpx;
-  min-width: 0;
-}
 
-.connection-card__head {
-  display: flex;
-  align-items: flex-start;
-  gap: 12rpx;
-  min-width: 0;
-}
 
-.connection-card__identity {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6rpx;
-}
 
-.connection-card__host-row {
-  display: flex;
-  align-items: center;
-  gap: 8rpx;
-  min-width: 0;
-}
 
-.connection-card__host-logo {
-  width: 30rpx;
-  height: 30rpx;
-  flex-shrink: 0;
-  border-radius: 8rpx;
-}
 
-.connection-card__host-name {
-  flex: 1;
-  min-width: 0;
-  font-size: 30rpx;
-  font-weight: 800;
-  color: var(--up-main-color, #303133);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
-.connection-card__name {
-  font-size: 22rpx;
-  font-weight: 600;
-  color: var(--up-tips-color, #909193);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
-.connection-card__status {
-  display: inline-flex;
-  align-items: center;
-  padding: 8rpx 14rpx;
-  border-radius: 999rpx;
-  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
-}
 
-.connection-card__status--online {
-  background: rgba(52, 199, 89, 0.14);
-}
 
-.connection-card__status--reconnecting {
-  background: color-mix(in srgb, var(--up-warning, #f9ae3d) 18%, var(--up-card-bg-color, #ffffff) 82%);
-}
 
-.connection-card__status--error {
-  background: color-mix(in srgb, var(--up-error, #fa3534) 14%, var(--up-card-bg-color, #ffffff) 86%);
-}
 
-.connection-card__status-text {
-  font-size: 20rpx;
-  font-weight: 700;
-  color: var(--up-tips-color, #909193);
-}
 
-.connection-card__status--online .connection-card__status-text {
-  color: #34c759;
-}
 
-.connection-card__status--reconnecting .connection-card__status-text {
-  color: var(--up-warning, #f9ae3d);
-}
 
-.connection-card__status--error .connection-card__status-text {
-  color: var(--up-error, #fa3534);
-}
 
-.connection-card__menu {
-  width: 48rpx;
-  height: 48rpx;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
-}
 
-.connection-card__meta {
-  font-size: 24rpx;
-  line-height: 1.5;
-  color: var(--up-content-color, #606266);
-  word-break: break-all;
-}
 
-.connection-card__chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10rpx;
-}
 
-.connection-card__chip {
-  padding: 8rpx 14rpx;
-  border-radius: 999rpx;
-  border: 1rpx solid color-mix(in srgb, var(--up-primary, #2979ff) 24%, var(--up-border-color, #dadbde) 76%);
-  background: color-mix(in srgb, var(--up-primary, #2979ff) 10%, var(--up-card-bg-color, #ffffff) 90%);
-  color: var(--up-primary, #2979ff);
-  font-size: 20rpx;
-  font-weight: 600;
-}
 
-.connection-card__health-detail {
-  padding: 16rpx 18rpx;
-  border-radius: 20rpx;
-  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
-  color: var(--up-content-color, #606266);
-  font-size: 22rpx;
-  line-height: 1.5;
-}
 
-.connection-card__footer {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 12rpx;
-  margin-top: 4rpx;
-}
 
-.connection-card__footer-main,
-.connection-card__quick-action {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8rpx;
-}
 
-.connection-card__footer-link {
-  font-size: 22rpx;
-  font-weight: 600;
-  color: var(--up-primary, #2979ff);
-}
 
-.connection-card__quick-action {
-  padding: 10rpx 18rpx;
-  border-radius: 999rpx;
-  background: color-mix(in srgb, var(--up-primary, #2979ff) 12%, var(--up-card-bg-color, #ffffff) 88%);
-  color: var(--up-primary, #2979ff);
-  font-size: 22rpx;
-  font-weight: 600;
-}
 
-.connection-card__quick-action--ghost {
-  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
-  color: var(--up-content-color, #606266);
-}
 
-.connections-add-card,
-.connections-guide-card {
-  display: flex;
-  align-items: center;
-  gap: 18rpx;
-  margin-top: 18rpx;
-  padding: 24rpx;
-  background: var(--up-card-bg-color, #ffffff);
-  border: 1rpx solid var(--up-border-color, #dadbde);
-}
 
-.connections-add-card__icon {
-  width: 72rpx;
-  height: 72rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 22rpx;
-  background: color-mix(in srgb, var(--up-primary, #2979ff) 12%, var(--up-card-bg-color, #ffffff) 88%);
-  flex-shrink: 0;
-}
 
-.connections-add-card__body,
-.connections-guide-card__copy,
 .connections-sheet__heading,
 .connections-tutorial__heading {
   display: flex;
@@ -2265,34 +2273,10 @@ function persistConnectedMap() {
   min-width: 0;
 }
 
-.connections-add-card__title {
-  font-size: 28rpx;
-  font-weight: 700;
-  color: var(--up-main-color, #303133);
-}
 
-.connections-guide-card {
-  align-items: flex-start;
-  justify-content: space-between;
-  background: linear-gradient(135deg, #0a84ff, #0066cc);
-  border: none;
-}
 
-.connections-guide-card__eyebrow,
-.connections-guide-card__title,
-.connections-guide-card__desc {
-  color: #ffffff;
-}
 
-.connections-guide-card__desc {
-  opacity: 0.88;
-}
 
-.connections-guide-card__action {
-  flex-shrink: 0;
-  background: rgba(255, 255, 255, 0.16);
-  color: #ffffff;
-}
 
 .connections-config-code {
   width: 660rpx;

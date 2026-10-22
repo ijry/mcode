@@ -11,6 +11,7 @@
       "path": "pages/connections/index",
       "style": {
         "navigationBarTitleText": "MCode",
+        "navigationStyle": "custom",
         "enablePullDownRefresh": false
       }
     },
