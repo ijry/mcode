@@ -14,7 +14,11 @@
       <view class="conv-group__action" @click="toggleCollapsed">
         <up-icon :name="collapsed ? 'arrow-down' : 'arrow-up'" size="12" :color="folderIconColor"></up-icon>
       </view>
-      <view class="conv-group__action" @click.stop="emit('create')">
+      <!--
+        选择模式下藏掉「新建」：那时点它会直接跳出选择流程（打开目录浏览器），
+        而且批量操作条已经在底部占着动作区，多一个无关入口只会误触。
+      -->
+      <view v-if="!selectionMode" class="conv-group__action" @click.stop="emit('create')">
         <up-icon name="plus" size="16" :color="folderIconColor"></up-icon>
       </view>
     </view>
@@ -31,7 +35,7 @@
           首行之前不画 —— 文件夹头自己就是分界。
         -->
         <view v-if="index > 0" class="conv-group__divider">
-          <view v-if="layout.indentSeparator" class="conv-group__divider-indent"></view>
+          <view v-if="dividerIndent > 0" class="conv-group__divider-indent" :style="{ width: `${dividerIndent}px` }"></view>
           <view class="conv-group__divider-line"></view>
         </view>
 
@@ -114,6 +118,16 @@ const collapsed = ref(props.collapsed === true)
 const visibleCount = ref(CONVERSATION_GROUP_INITIAL_ROWS)
 
 const layout = computed(() => resolveConversationListRowLayout(props.listStyle))
+/**
+ * 分隔线左侧让出多少。
+ *
+ * = 行内的 Logo 缩进（名称前缀版 32）+ 选择模式的勾选位 30。不把勾选位算进去的话，选中
+ * 任意一条后整列的标题都右移了 30px，而分隔线留在原地 —— 视觉上就是「布局乱了」。
+ */
+const dividerIndent = computed(() => {
+  const logoIndent = layout.value.indentSeparator ? 32 : 0
+  return logoIndent + (props.selectionMode ? 30 : 0)
+})
 const visibleCards = computed(() => resolveGroupVisibleCards(props.cards || [], visibleCount.value))
 const hiddenCount = computed(() => resolveGroupHiddenCount((props.cards || []).length, visibleCount.value))
 const moreLabel = computed(() => buildGroupMoreLabel(hiddenCount.value))
@@ -219,9 +233,8 @@ function cardKey(card: any, index: number) {
   height: 1px;
 }
 
-/* 名称前缀 Logo 版：分隔线左侧让出 32px（Logo 14 + gap 6 + 一点余量） */
+/* 名称前缀 Logo 版：分隔线左侧让出 Logo 与勾选位（宽度由 `dividerIndent` 现算） */
 .conv-group__divider-indent {
-  width: 32px;
   flex-shrink: 0;
   height: 1px;
 }

@@ -1,5 +1,5 @@
 <template>
-  <view class="page conversations-page" :style="[upThemeVars, upThemePageStyle]">
+  <view class="page page--with-tabbar conversations-page" :style="[upThemeVars, upThemePageStyle]">
     <view class="conversations-shell">
       <ConversationsNavbar
         :connection-name="activeConnectionName"
@@ -44,7 +44,7 @@
           </view>
 
           <view v-else class="conv-scroll">
-            <view class="conv-content">
+            <view class="conv-content" :class="{ 'conv-content--selecting': selectionMode }">
               <!--
                 连接加载失败时的提示。原先每条连接的分组头右侧挂一枚感叹号图标，
                 现在分组是文件夹、不再对应连接，所以改成内容区顶部的一条横幅 ——
@@ -92,6 +92,7 @@
         size="small"
         shape="circle"
         :disabled="selectedBulkCount === 0"
+        customStyle="flex:0 0 auto;width:auto;min-width:88px;padding:0 18px"
         @click="openBulkSendDialog"
       >批量发送</up-button>
     </view>
@@ -180,6 +181,8 @@
     ></up-action-sheet>
 
   </view>
+
+    <McodeTabBar current="conversations" />
 </template>
 
 <script setup lang="ts">
@@ -2187,6 +2190,18 @@ function formatTime(time?: string): string {
 </script>
 
 <style scoped lang="scss">
+
+/*
+ * 悬浮胶囊底栏（`McodeTabBar`）是 `position: fixed`，原生 tabBar 已被隐藏 ——
+ * 所以页面必须自己留出「12 + 62 + 21」再加安全区，否则最后一段内容被胶囊压住。
+ *
+ * 用显式 class 而不是 `.page:has(.mc-tabbar)`：`:has()` 要 iOS 15.4+，
+ * 而这个 app 的 iOS 最低版本比它低，老机器上会整条规则失效（不是降级，是完全没有留白）。
+ */
+.page.page--with-tabbar {
+  padding-bottom: calc(95px + env(safe-area-inset-bottom)) !important;
+}
+
 /* 与子组件共用的规则（弹层外壳/头部、表单行、agent logo 修饰符、安全区占位）。
  * scoped 样式不跨组件边界，所以子组件也 `@import` 同一份 —— 详见该文件头部说明。 */
 @import "./index.scss";
@@ -2256,6 +2271,14 @@ function formatTime(time?: string): string {
   box-sizing: border-box;
 }
 
+/*
+ * 选择模式：批量条浮在底栏之上，最后几条会话会被它压住。
+ * 补一段与批量条等高的尾部余量，滚到底时最后一行仍能完整露出来。
+ */
+.conv-content--selecting {
+  padding-bottom: 84px;
+}
+
 /* 连接加载失败横幅。原先是分组头右侧的小感叹号，分组改成文件夹后它没有归属了。 */
 .conv-error-banner {
   display: flex;
@@ -2311,7 +2334,12 @@ function formatTime(time?: string): string {
   position: fixed;
   left: 24rpx;
   right: 24rpx;
-  bottom: calc(24rpx + env(safe-area-inset-bottom));
+  /*
+   * 悬浮胶囊底栏（`McodeTabBar`，高 62px + 上下内距 12/21）是 fixed 且 z-index 20。
+   * 批量条原先 `bottom: 24rpx` —— 正好骑在底栏上，两枚胶囊叠成一团，看起来就是「乱了」。
+   * 抬到胶囊之上（95px 与 `.page--with-tabbar` 的留白同一个数），选择时才两层都读得清。
+   */
+  bottom: calc(103px + env(safe-area-inset-bottom));
   z-index: 30;
   padding: 18rpx 18rpx;
   border-radius: 28rpx;
@@ -2325,7 +2353,7 @@ function formatTime(time?: string): string {
 }
 
 .bulk-action-bar__summary {
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -2336,11 +2364,18 @@ function formatTime(time?: string): string {
   font-size: 26rpx;
   font-weight: 700;
   color: var(--up-main-color, #303133);
+  /* 数字涨到三位数时也别把按钮挤成一条线 —— 摘要自己先截断。 */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .bulk-action-bar__hint {
   font-size: 22rpx;
   color: var(--up-tips-color, #909193);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .bulk-send-sheet {

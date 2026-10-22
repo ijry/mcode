@@ -3,7 +3,6 @@ import {
   mapConversationToSummaryRecord,
   resolveConversationPinned,
 } from "@/services/conversation/conversationOverviewSnapshot"
-
 const folder = {
   id: 7,
   name: "mcode",
@@ -56,19 +55,125 @@ describe("conversationOverviewSnapshot", () => {
     )
   })
 
-  it("filters out sessions that are older than the recent activity window", () => {
+  // ——— 24H 窗口 + 最少展示条数 ———
+  //
+  // 窗口现在是「软」的：窗口内的全部保留，不够 `MIN_RECENT_ACTIVE_CARDS` 条才按最近活跃
+  // 补齐。原因是硬的窗口会让「隔了一晚没碰电脑」的列表只剩一两条，看起来像数据丢了。
+  it("fills up to the minimum count when nothing happened in the last 24h", () => {
+    const now = Date.parse("2026-06-09T12:30:00+08:00")
     const snapshot = buildSnapshot({
-      now: Date.parse("2026-06-09T12:30:00+08:00"),
+      now,
       conversations: [
         conversation({
           id: 202,
+          title: "昨天中午",
           updated_at: "2026-06-08T11:59:00+08:00",
           last_message_at: "2026-06-08T11:59:00+08:00",
         }),
       ],
     })
 
+    expect(snapshot.recentActiveCards.map((card) => card.title)).toEqual(["昨天中午"])
+  })
+
+  it("keeps the newest sessions when the window is short of the minimum count", () => {
+    const now = Date.parse("2026-06-09T12:30:00+08:00")
+    const snapshot = buildSnapshot({
+      now,
+      conversations: [
+        conversation({
+          id: 203,
+          title: "五天前",
+          updated_at: "2026-06-04T12:00:00+08:00",
+          last_message_at: "2026-06-04T12:00:00+08:00",
+        }),
+        conversation({
+          id: 204,
+          title: "前天",
+          updated_at: "2026-06-07T12:00:00+08:00",
+          last_message_at: "2026-06-07T12:00:00+08:00",
+        }),
+        conversation({
+          id: 205,
+          title: "十天前",
+          updated_at: "2026-05-30T12:00:00+08:00",
+          last_message_at: "2026-05-30T12:00:00+08:00",
+        }),
+        conversation({
+          id: 206,
+          title: "昨天下午",
+          updated_at: "2026-06-08T15:00:00+08:00",
+          last_message_at: "2026-06-08T15:00:00+08:00",
+        }),
+        conversation({
+          id: 207,
+          title: "上个月",
+          updated_at: "2026-05-02T15:00:00+08:00",
+          last_message_at: "2026-05-02T15:00:00+08:00",
+        }),
+      ],
+    })
+
+    // 补足必须补「次新的那几条」，不是服务端给的顺序里最靠前的三条。
+    expect(snapshot.recentActiveCards.map((card) => card.title)).toEqual([
+      "昨天下午",
+      "前天",
+      "五天前",
+    ])
+  })
+
+  it("stops backfilling once the window itself already has enough sessions", () => {    const now = Date.parse("2026-06-09T12:30:00+08:00")
+    const withinWindow = [1, 2, 3, 4].map((index) =>
+      conversation({
+        id: 300 + index,
+        title: `窗口内-${index}`,
+        updated_at: "2026-06-09T10:00:00+08:00",
+        last_message_at: `2026-06-09T0${index}:00:00+08:00`,
+      })
+    )
+    const snapshot = buildSnapshot({
+      now,
+      conversations: [
+        ...withinWindow,
+        conversation({
+          id: 410,
+          title: "一个月前",
+          updated_at: "2026-05-09T12:00:00+08:00",
+          last_message_at: "2026-05-09T12:00:00+08:00",
+        }),
+      ],
+    })
+
+    expect(snapshot.recentActiveCards).toHaveLength(4)
+    expect(snapshot.recentActiveCards.map((card) => card.title)).not.toContain("一个月前")
+  })
+
+  it("counts open tabs towards the minimum so the list never grows past it", () => {
+    const now = Date.parse("2026-06-09T12:30:00+08:00")
+    const snapshot = buildSnapshot({
+      now,
+      tabs: [
+        { id: 1, folder_id: folder.id, conversation_id: 101, agent_type: "codex", is_active: true },
+        { id: 2, folder_id: folder.id, conversation_id: 102, agent_type: "codex" },
+        { id: 3, folder_id: folder.id, conversation_id: 103, agent_type: "codex" },
+      ],
+      conversations: [
+        conversation({ id: 101, title: "标签一" }),
+        conversation({ id: 102, title: "标签二" }),
+        conversation({ id: 103, title: "标签三" }),
+        conversation({
+          id: 510,
+          title: "很久以前",
+          updated_at: "2026-05-01T12:00:00+08:00",
+          last_message_at: "2026-05-01T12:00:00+08:00",
+        }),
+      ],
+    })
+
+    // 标签已经占满 3 条名额，一条历史都不该再补进来。
+    expect(snapshot.openTabCards).toHaveLength(3)
     expect(snapshot.recentActiveCards).toEqual([])
+    expect(snapshot.cards).toHaveLength(3)
   })
 
   it("still dedupes opened tab conversations from the recent section", () => {

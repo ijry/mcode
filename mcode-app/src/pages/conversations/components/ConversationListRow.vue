@@ -9,13 +9,21 @@
     @click="handleClick"
     @longpress="handleLongPress"
   >
-    <!-- 批量选择：只在选择模式且有可选中身份时出现，避免「点了个不能选的会话」。 -->
-    <view
-      v-if="selectionMode && selectable"
-      :class="['conv-row__check', selected && 'conv-row__check--active']"
-      @click.stop="emit('toggle-select')"
-    >
-      <up-icon v-if="selected" name="checkmark" size="13" color="#ffffff"></up-icon>
+    <!--
+      批量选择：勾选位在**选择模式下一律占位**，即使这张卡不可选。
+
+      只给可选卡渲染会让同一列表里的标题左沿参差不齐（可选的行右移 30px、不可选的
+      原地不动），选中几条之后整块看起来就是「错位」。所以不可选时留一个等宽的空位，
+      把「能不能勾」和「在哪一列勾」两件事分开。
+    -->
+    <view v-if="selectionMode" class="conv-row__check-slot">
+      <view
+        v-if="selectable"
+        :class="['conv-row__check', selected && 'conv-row__check--active']"
+        @click.stop="emit('toggle-select')"
+      >
+        <up-icon v-if="selected" name="checkmark" size="13" color="#ffffff"></up-icon>
+      </view>
     </view>
 
     <!--
@@ -199,11 +207,19 @@ const pinIconColor = "var(--up-primary, #2979ff)"
   background: color-mix(in srgb, var(--up-primary, #2979ff) 7%, transparent 93%);
 }
 
+/* 勾选位：固定占宽，确保可选 / 不可选的行标题左沿对齐。 */
+.conv-row__check-slot {
+  width: 30px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+}
+
 .conv-row__check {
   width: 20px;
   height: 20px;
   margin-top: 1px;
-  margin-right: 10px;
   flex-shrink: 0;
   border-radius: 999px;
   border: 1.5px solid var(--up-border-color, #dadbde);

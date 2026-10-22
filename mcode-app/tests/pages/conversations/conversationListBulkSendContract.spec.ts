@@ -29,7 +29,10 @@ describe("P67 conversation list bulk send contract", () => {
 
     // 「可选中」判据仍收口在 isSelectableOverviewCard，且只作用在会话行上。
     expect(section).toContain(":selectable=\"isSelectableOverviewCard(card)\"")
-    expect(row).toContain("v-if=\"selectionMode && selectable\"")
+    // 选择模式下勾选位**一律占位**，只有可选卡才渲染那枚圆。
+    // 只给可选卡渲染会让同列标题左沿参差不齐 —— 这正是「选了以后布局乱了」的成因。
+    expect(row).toContain("v-if=\"selectionMode\" class=\"conv-row__check-slot\"")
+    expect(row).toContain("v-if=\"selectable\"")
     expect(row).toContain("conv-row__check")
 
     // 点击仍经页面转译成「带连接上下文的会话」——行组件不知道连接。

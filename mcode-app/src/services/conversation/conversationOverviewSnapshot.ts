@@ -4,6 +4,19 @@ import { normalizeAgentType } from "@/services/conversation/agentType"
 
 const RECENT_ACTIVE_WINDOW_MS = 24 * 60 * 60 * 1000
 
+/**
+ * 「最近活跃」至少显示几条。
+ *
+ * 24 小时窗口本身没问题 —— 它让「这几天没动过的会话」不占着列表。问题在于窗口是**硬**
+ * 的：夜里有事没碰电脑、第二天早上打开 app，列表就只剩一两条，甚至完全空掉，看起来像
+ * 「数据丢了」或者「列表坏了」。
+ *
+ * 所以规则改成两段：窗口内的**全部**保留；不足 `MIN_RECENT_ACTIVE_CARDS` 条时，按最近
+ * 活跃顺序补齐到这么多条。窗口内够热闹时它与原来完全等价（一条老会话都不会多显示），
+ * 只有当列表快空了才兜底。
+ */
+export const MIN_RECENT_ACTIVE_CARDS = 3
+
 export interface ConversationOverviewConversation {
   id: number
   title?: string
@@ -173,29 +186,45 @@ export function buildConnectionConversationSnapshot(
   )
   const recentActiveThreshold = getRecentActiveThreshold(input.now ?? Date.now())
 
-  const recentActiveCards = conversations
-    .filter((conversation) => {
-      if (openedConversationIds.has(conversation.id)) return false
-      return getConversationActivityTimestamp(conversation) >= recentActiveThreshold
-    })
-    .map((conversation) => {
-      const project = folderMap.get(Number(conversation.folder_id || 0))
-      const activity = resolveConversationActivity(conversation)
-      return {
-        tabId: -conversation.id,
-        conversationId: conversation.id,
-        folderId: Number(conversation.folder_id || 0),
-        projectName: project?.name || project?.path || "未命名项目",
-        agentType: normalizeAgentType(conversation.agent_type),
-        title: conversation.title || `会话 #${conversation.id}`,
-        updatedAt: activity.label,
-        activityAt: activity.at,
-        status: normalizeConversationStatus(conversation.status),
-        isActive: false,
-        isPinned: resolveConversationPinned(conversation),
-        isOpenTab: false,
-      } satisfies ConversationOverviewCard
-    })
+  // 先按活跃降序排好再裁。
+  //
+  // 这一步是必需的：直接按服务端给的原始顺序 `slice(0, N)` 补齐，补进来的有可能是最早
+  // 建的那几条 —— 用户要的是「至少看到 3 条**最近的**会话」，不是「随便捞 3 条」。
+  const recentActiveCandidates = sortOverviewCardsByActivity(
+    conversations
+      .filter((conversation) => !openedConversationIds.has(conversation.id))
+      .map((conversation) => {
+        const project = folderMap.get(Number(conversation.folder_id || 0))
+        const activity = resolveConversationActivity(conversation)
+        return {
+          tabId: -conversation.id,
+          conversationId: conversation.id,
+          folderId: Number(conversation.folder_id || 0),
+          projectName: project?.name || project?.path || "未命名项目",
+          agentType: normalizeAgentType(conversation.agent_type),
+          title: conversation.title || `会话 #${conversation.id}`,
+          updatedAt: activity.label,
+          activityAt: activity.at,
+          status: normalizeConversationStatus(conversation.status),
+          isActive: false,
+          isPinned: resolveConversationPinned(conversation),
+          isOpenTab: false,
+        } satisfies ConversationOverviewCard
+      })
+  )
+
+  // 窗口内的一条都不漏；整份列表不足 `MIN_RECENT_ACTIVE_CARDS` 条时补到那么多。
+  //
+  // 缺口按**整份列表**算（标签也占名额）：只看「最近活跃」那一半的话，机器上开着 3 个标签
+  // 时还会再补 3 条老会话进来，列表反而变长 —— 保底规则的目的是「别空着」，不是「凑数量」。
+  const withinWindowCount = recentActiveCandidates.filter(
+    (card) => Number(card.activityAt || 0) >= recentActiveThreshold
+  ).length
+  const minimumRecentCards = Math.max(
+    withinWindowCount,
+    MIN_RECENT_ACTIVE_CARDS - openTabCards.length
+  )
+  const recentActiveCards = recentActiveCandidates.slice(0, minimumRecentCards)
 
   const projects = input.folders.map((folder) => ({
     ...folder,
@@ -329,21 +358,6 @@ export function resolveConversationActivity(
     return { at: parsed, label: value.trim() }
   }
   return { at: 0, label: undefined }
-}
-
-export function getConversationActivityTimestamp(
-  conversation: Pick<
-    ConversationOverviewConversation,
-    "updated_at" | "last_message_at" | "lastMessageAt"
-  >
-) {
-  return (
-    parseTimestamp(
-      conversation.last_message_at,
-      conversation.lastMessageAt,
-      conversation.updated_at
-    ) || 0
-  )
 }
 
 function getRecentActiveThreshold(now: number) {
