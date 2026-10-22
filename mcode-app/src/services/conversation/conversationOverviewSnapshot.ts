@@ -2,21 +2,6 @@ import type { ConversationSummaryRecord } from "@/services/db/repositories/conve
 import { normalizeConversationSummaryStatus } from "@/services/conversation/conversationSummaryStatus"
 import { normalizeAgentType } from "@/services/conversation/agentType"
 
-const RECENT_ACTIVE_WINDOW_MS = 24 * 60 * 60 * 1000
-
-/**
- * 「最近活跃」至少显示几条。
- *
- * 24 小时窗口本身没问题 —— 它让「这几天没动过的会话」不占着列表。问题在于窗口是**硬**
- * 的：夜里有事没碰电脑、第二天早上打开 app，列表就只剩一两条，甚至完全空掉，看起来像
- * 「数据丢了」或者「列表坏了」。
- *
- * 所以规则改成两段：窗口内的**全部**保留；不足 `MIN_RECENT_ACTIVE_CARDS` 条时，按最近
- * 活跃顺序补齐到这么多条。窗口内够热闹时它与原来完全等价（一条老会话都不会多显示），
- * 只有当列表快空了才兜底。
- */
-export const MIN_RECENT_ACTIVE_CARDS = 3
-
 export interface ConversationOverviewConversation {
   id: number
   title?: string
@@ -116,6 +101,13 @@ export interface ConnectionConversationSnapshot {
   baseUrl: string
   projects: ConversationOverviewProject[]
   openTabCards: ConversationOverviewCard[]
+  /**
+   * 非标签会话的**全量**卡（按活跃时间降序，未打开标签去重）。
+   *
+   * 命名里带着历史：它曾是「最近活跃」那一段、被截取过，现在是完整的。
+   * 窗口/保底那些「初始看到几行」的可见性规则由展示层（`ConversationFolderSection`）
+   * 施加 —— 快照裁掉数据，展示层就再也没有可展开的内容了。
+   */
   recentActiveCards: ConversationOverviewCard[]
   /**
    * 实际渲染的那一份：`openTabCards` + `recentActiveCards` 合并后**纯按活跃时间降序**。
@@ -136,7 +128,6 @@ interface BuildSnapshotInput {
   folders: ConversationOverviewProject[]
   tabs: ConversationOverviewOpenedTab[]
   conversations: ConversationOverviewConversation[]
-  now?: number
 }
 
 export function buildConnectionConversationSnapshot(
@@ -184,12 +175,12 @@ export function buildConnectionConversationSnapshot(
       .map((card) => Number(card.conversationId || 0))
       .filter((conversationId) => conversationId > 0)
   )
-  const recentActiveThreshold = getRecentActiveThreshold(input.now ?? Date.now())
 
-  // 先按活跃降序排好再裁。
+  // **快照携带全量会话**：窗口/保底裁剪是页面「初始看到几行」的规则，不是数据的边界。
+  // 这里曾经 `slice(0, minimumRecentCards)`，结果「查看更多」在你的电脑上就没内容可展开
+  // —— 分组里只有 3 条，入口根本不会渲染，用户以为历史丢了。
   //
-  // 这一步是必需的：直接按服务端给的原始顺序 `slice(0, N)` 补齐，补进来的有可能是最早
-  // 建的那几条 —— 用户要的是「至少看到 3 条**最近的**会话」，不是「随便捞 3 条」。
+  // 排序仍然先行：渲染层按这个顺序展示，裁剪也就是从前往后数，不会捞到最早的几条。
   const recentActiveCandidates = sortOverviewCardsByActivity(
     conversations
       .filter((conversation) => !openedConversationIds.has(conversation.id))
@@ -213,18 +204,7 @@ export function buildConnectionConversationSnapshot(
       })
   )
 
-  // 窗口内的一条都不漏；整份列表不足 `MIN_RECENT_ACTIVE_CARDS` 条时补到那么多。
-  //
-  // 缺口按**整份列表**算（标签也占名额）：只看「最近活跃」那一半的话，机器上开着 3 个标签
-  // 时还会再补 3 条老会话进来，列表反而变长 —— 保底规则的目的是「别空着」，不是「凑数量」。
-  const withinWindowCount = recentActiveCandidates.filter(
-    (card) => Number(card.activityAt || 0) >= recentActiveThreshold
-  ).length
-  const minimumRecentCards = Math.max(
-    withinWindowCount,
-    MIN_RECENT_ACTIVE_CARDS - openTabCards.length
-  )
-  const recentActiveCards = recentActiveCandidates.slice(0, minimumRecentCards)
+  const recentActiveCards = recentActiveCandidates
 
   const projects = input.folders.map((folder) => ({
     ...folder,
@@ -358,12 +338,6 @@ export function resolveConversationActivity(
     return { at: parsed, label: value.trim() }
   }
   return { at: 0, label: undefined }
-}
-
-function getRecentActiveThreshold(now: number) {
-  if (!Number.isFinite(now)) return 0
-  // Keep late-night activity visible after midnight instead of resetting at 00:00.
-  return Math.max(0, now - RECENT_ACTIVE_WINDOW_MS)
 }
 
 function normalizeConversationStatus(value?: string): string {

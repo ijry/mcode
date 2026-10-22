@@ -15,10 +15,10 @@
         <up-icon :name="collapsed ? 'arrow-down' : 'arrow-up'" size="12" :color="folderIconColor"></up-icon>
       </view>
       <!--
-        选择模式下藏掉「新建」：那时点它会直接跳出选择流程（打开目录浏览器），
+        选择模式下藏掉「新建」：那时点它会直接跳出选择流程（弹创建面板），
         而且批量操作条已经在底部占着动作区，多一个无关入口只会误触。
       -->
-      <view v-if="!selectionMode" class="conv-group__action" @click.stop="emit('create')">
+      <view v-if="!selectionMode" class="conv-group__action" @click.stop="emit('create', folderId)">
         <up-icon name="plus" size="16" :color="folderIconColor"></up-icon>
       </view>
     </view>
@@ -104,7 +104,8 @@ const emit = defineEmits<{
   (event: "toggle-select", card: any): void
   /** 长按某一行。卡片本身不带连接键（那归分组所有），由页面补齐上下文。 */
   (event: "menu", card: any): void
-  (event: "create"): void
+  /** 在这个文件夹里新建会话。带上 `folderId`，页面据此预选弹层的项目。 */
+  (event: "create", folderId: number): void
   (event: "toggle-collapse", collapsed: boolean): void
 }>()
 

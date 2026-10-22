@@ -22,7 +22,6 @@ const conversation = (overrides: Record<string, unknown> = {}) =>
   }) as any
 
 function buildSnapshot(input: {
-  now: number
   conversations?: any[]
   tabs?: any[]
 }) {
@@ -35,34 +34,38 @@ function buildSnapshot(input: {
     folders: [folder],
     tabs: input.tabs || [],
     conversations: input.conversations || [],
-    now: input.now,
   })
 }
 
 describe("conversationOverviewSnapshot", () => {
-  it("keeps late-night recent sessions visible after midnight", () => {
+  it("ranks a session active before midnight above one from yesterday noon", () => {
+    // 跨零点那条曾经被「当天窗口」在 00:00 整切掉，看起来像凭空消失。现在快照不带
+    // 任何窗口，这条锁的是**排序**：23:50 必须排在昨天 12:00 前面。
     const snapshot = buildSnapshot({
-      now: Date.parse("2026-06-09T00:10:00+08:00"),
-      conversations: [conversation()],
+      conversations: [
+        conversation({ id: 101, title: "昨晚 23:50" }),
+        conversation({
+          id: 208,
+          title: "昨天中午",
+          updated_at: "2026-06-08T12:00:00+08:00",
+          last_message_at: "2026-06-08T12:00:00+08:00",
+        }),
+      ],
     })
 
-    expect(snapshot.recentActiveCards).toHaveLength(1)
-    expect(snapshot.recentActiveCards[0]).toEqual(
-      expect.objectContaining({
-        conversationId: 101,
-        title: "跨零点回归测试",
-      })
-    )
+    expect(snapshot.recentActiveCards.map((card) => card.title)).toEqual([
+      "昨晚 23:50",
+      "昨天中午",
+    ])
   })
 
-  // ——— 24H 窗口 + 最少展示条数 ———
+  // ——— 快照携带全量会话 ———
   //
-  // 窗口现在是「软」的：窗口内的全部保留，不够 `MIN_RECENT_ACTIVE_CARDS` 条才按最近活跃
-  // 补齐。原因是硬的窗口会让「隔了一晚没碰电脑」的列表只剩一两条，看起来像数据丢了。
-  it("fills up to the minimum count when nothing happened in the last 24h", () => {
-    const now = Date.parse("2026-06-09T12:30:00+08:00")
+  // 窗口/保底是**展示层**「初始看到几行」的规则，不是数据的边界。这里曾经
+  // `slice(0, minimumRecentCards)`，结果「查看更多」没内容可展开 —— 分组里只有 3 条，
+  // 入口根本不会渲染，用户以为历史丢了。
+  it("carries all conversations even when they fall outside the 24h window", () => {
     const snapshot = buildSnapshot({
-      now,
       conversations: [
         conversation({
           id: 202,
@@ -70,16 +73,32 @@ describe("conversationOverviewSnapshot", () => {
           updated_at: "2026-06-08T11:59:00+08:00",
           last_message_at: "2026-06-08T11:59:00+08:00",
         }),
+        conversation({
+          id: 203,
+          title: "上个月",
+          updated_at: "2026-05-02T11:59:00+08:00",
+          last_message_at: "2026-05-02T11:59:00+08:00",
+        }),
+        conversation({
+          id: 204,
+          title: "三个月前",
+          updated_at: "2026-03-02T11:59:00+08:00",
+          last_message_at: "2026-03-02T11:59:00+08:00",
+        }),
       ],
     })
 
-    expect(snapshot.recentActiveCards.map((card) => card.title)).toEqual(["昨天中午"])
+    // 全部会话都在，窗口外的也不会被裁掉。
+    expect(snapshot.recentActiveCards.map((card) => card.title)).toEqual([
+      "昨天中午",
+      "上个月",
+      "三个月前",
+    ])
+    expect(snapshot.cards).toHaveLength(3)
   })
 
-  it("keeps the newest sessions when the window is short of the minimum count", () => {
-    const now = Date.parse("2026-06-09T12:30:00+08:00")
+  it("keeps every session, ordered by activity with the newest first", () => {
     const snapshot = buildSnapshot({
-      now,
       conversations: [
         conversation({
           id: 203,
@@ -114,15 +133,19 @@ describe("conversationOverviewSnapshot", () => {
       ],
     })
 
-    // 补足必须补「次新的那几条」，不是服务端给的顺序里最靠前的三条。
+    // 全量都在；「初始看到几行」由展示层决定，这里锁的是**排序** —
+    // 活跃降序，保全量时也一样成立。
+    expect(snapshot.recentActiveCards).toHaveLength(5)
     expect(snapshot.recentActiveCards.map((card) => card.title)).toEqual([
       "昨天下午",
       "前天",
       "五天前",
+      "十天前",
+      "上个月",
     ])
   })
 
-  it("stops backfilling once the window itself already has enough sessions", () => {    const now = Date.parse("2026-06-09T12:30:00+08:00")
+  it("never drops older sessions from the snapshot", () => {
     const withinWindow = [1, 2, 3, 4].map((index) =>
       conversation({
         id: 300 + index,
@@ -132,7 +155,6 @@ describe("conversationOverviewSnapshot", () => {
       })
     )
     const snapshot = buildSnapshot({
-      now,
       conversations: [
         ...withinWindow,
         conversation({
@@ -144,14 +166,13 @@ describe("conversationOverviewSnapshot", () => {
       ],
     })
 
-    expect(snapshot.recentActiveCards).toHaveLength(4)
-    expect(snapshot.recentActiveCards.map((card) => card.title)).not.toContain("一个月前")
+    // 老的会话不再被裁掉 —— 它排在末尾，由展示层折进「查看更多」，想看的能展开到。
+    expect(snapshot.recentActiveCards).toHaveLength(5)
+    expect(snapshot.recentActiveCards.map((card) => card.title)).toContain("一个月前")
   })
 
-  it("counts open tabs towards the minimum so the list never grows past it", () => {
-    const now = Date.parse("2026-06-09T12:30:00+08:00")
+  it("keeps every non-tab conversation beside the open tabs", () => {
     const snapshot = buildSnapshot({
-      now,
       tabs: [
         { id: 1, folder_id: folder.id, conversation_id: 101, agent_type: "codex", is_active: true },
         { id: 2, folder_id: folder.id, conversation_id: 102, agent_type: "codex" },
@@ -170,15 +191,18 @@ describe("conversationOverviewSnapshot", () => {
       ],
     })
 
-    // 标签已经占满 3 条名额，一条历史都不该再补进来。
+    // 快照不再谈「名额」—— 那是展示层「初始看到几行」的事。标签占 openTabCards，
+    // 其余会话一条不少地留在 recentActiveCards 里，折进「查看更多」由展示层决定。
     expect(snapshot.openTabCards).toHaveLength(3)
-    expect(snapshot.recentActiveCards).toEqual([])
-    expect(snapshot.cards).toHaveLength(3)
+    expect(snapshot.recentActiveCards).toHaveLength(1)
+    expect(snapshot.recentActiveCards[0]).toEqual(
+      expect.objectContaining({ title: "很久以前" })
+    )
+    expect(snapshot.cards).toHaveLength(4)
   })
 
   it("still dedupes opened tab conversations from the recent section", () => {
     const snapshot = buildSnapshot({
-      now: Date.parse("2026-06-09T00:10:00+08:00"),
       tabs: [
         {
           id: 1,
@@ -197,7 +221,6 @@ describe("conversationOverviewSnapshot", () => {
 
   it("keeps active tab metadata from normalized snapshots", () => {
     const snapshot = buildSnapshot({
-      now: Date.parse("2026-06-09T00:10:00+08:00"),
       tabs: [
         {
           id: 6,
@@ -229,9 +252,7 @@ describe("conversationOverviewSnapshot", () => {
     // isActive → tabId 排序、**完全不看时间**。于是一个几天前打开的标签被钉在最前面，
     // 整个列表读起来就是「没排序」。
     it("sorts an old open tab below a conversation from minutes ago", () => {
-      const now = Date.parse("2026-06-09T12:00:00+08:00")
       const snapshot = buildSnapshot({
-        now,
         tabs: [
           {
             id: 1,
@@ -261,11 +282,10 @@ describe("conversationOverviewSnapshot", () => {
     })
 
     // `openTabCards` / `recentActiveCards` 仍然表达「这张卡是哪来的」，只是不再表达顺序。
-    // 这条锁住「合并」而不是「换一组」—— 4 天前的标签不在 24H 窗口里，若只渲染
-    // `recentActiveCards` 它会整张消失。
-    it("still surfaces open tabs that fall outside the 24h window", () => {
+    // 这条锁住「合并」而不是「换一组」—— 标签那张卡只存在于 `openTabCards`，
+    // 若只渲染 `recentActiveCards` 它会整张消失。
+    it("keeps open tabs merged into the rendered card list", () => {
       const snapshot = buildSnapshot({
-        now: Date.parse("2026-06-09T12:00:00+08:00"),
         tabs: [
           {
             id: 1,
@@ -294,9 +314,7 @@ describe("conversationOverviewSnapshot", () => {
     // `updated_at → last_message_at` —— **第一优先级是反的**。于是一个只改了标题/状态的
     // 会话（`updated_at` 新、`last_message_at` 旧）显示成「刚刚」却排在几天前那批后面。
     it("sorts by the same field it displays", () => {
-      const now = Date.parse("2026-06-09T12:00:00+08:00")
       const snapshot = buildSnapshot({
-        now,
         conversations: [
           conversation({
             id: 401,
@@ -327,7 +345,6 @@ describe("conversationOverviewSnapshot", () => {
     it("sinks timestamp-less tabs to the bottom in a stable order", () => {
       const build = (tabs: any[]) =>
         buildSnapshot({
-          now: Date.parse("2026-06-09T12:00:00+08:00"),
           tabs,
           conversations: [
             conversation({
@@ -389,7 +406,6 @@ describe("conversationOverviewSnapshot", () => {
     // 端到端：远程那种只有 pinnedAt 的会话，进快照后卡上必须是置顶。
     it("carries a remote-only pinnedAt onto the card", () => {
       const snapshot = buildSnapshot({
-        now,
         conversations: [
           conversation({ id: 601, title: "服务端置顶的会话", pinnedAt: "2026-06-09T10:00:00+08:00" }),
           conversation({ id: 602, title: "未置顶的会话", pinnedAt: null }),

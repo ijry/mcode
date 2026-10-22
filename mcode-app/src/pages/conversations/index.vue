@@ -72,7 +72,7 @@
                 @open="handleFolderCardOpen(folder, $event)"
                 @toggle-select="handleFolderCardToggleSelect(folder, $event)"
                 @menu="handleRowMenu(folder, $event)"
-                @create="openAddProjectBrowser(folder.connectionKey)"
+                @create="createConversationInFolder(folder)"
               />
 
               <view class="safe-bottom"></view>
@@ -98,12 +98,14 @@
     </view>
 
     <!-- 新建会话弹层。自带智能体配置弹层、创建进度弹层、连接/项目两个 Picker ——
-         它们的唯一入口都在它内部，状态也完全同源。页面只给两样东西：连接分组（列表
-         数据源，页面拥有）与默认连接键，然后等 `@created` 拿回三个字段做刷新与跳转。 -->
+         它们的唯一入口都在它内部，状态也完全同源。页面只给三样东西：连接分组（列表
+         数据源，页面拥有）、默认连接键、默认文件夹（文件夹头的「＋」才给），
+         然后等 `@created` 拿回三个字段做刷新与跳转。 -->
     <CreateConversationSheet
       v-model:show="showCreateDialog"
       :connection-groups="connectionGroups"
       :default-connection-key="createSheetDefaultConnectionKey"
+      :default-folder-id="createSheetDefaultFolderId"
       @created="handleConversationCreated"
     />
 
@@ -160,13 +162,6 @@
       </view>
     </up-popup>
 
-    <RemoteDirectoryBrowser
-      v-model:show="showDirectoryBrowser"
-      :gateway="directoryBrowserGateway"
-      title="添加项目文件夹"
-      @select="handleRemoteFolderSelected"
-    />
-
     <!--
       会话行长按菜单。条目由 `buildConversationRowActions` 按会话状态现算：
       置顶 / 归档各自只出现当前该出现的那一半，正在进行的会话没有删除项。
@@ -191,7 +186,6 @@ import { onHide, onPullDownRefresh, onShow, onUnload } from "@dcloudio/uni-app"
 import { useAuthStore } from "@/stores/auth"
 import { useConversationRuntimeStore } from "@/stores/conversationRuntime"
 import { acpApi } from "@/api/acp"
-import RemoteDirectoryBrowser from "@/components/remote/RemoteDirectoryBrowser.vue"
 import MarqueeText from "@/components/MarqueeText.vue"
 import ConversationsSearchBar from "@/pages/conversations/components/ConversationsSearchBar.vue"
 import ConversationsNavbar from "@/pages/conversations/components/ConversationsNavbar.vue"
@@ -241,7 +235,6 @@ import {
   openConnectionGateway,
 } from "@/services/connection/connectionAccess"
 import { toErrorMessage } from "@/services/gateway/error"
-import { openRemoteFolder } from "@/services/remoteDirectoryBrowser"
 import {
   getConversationOverviewConnections,
   hasConversationOverviewConnections,
@@ -352,10 +345,6 @@ watch(searchKeyword, (next) => {
   }, SEARCH_KEYWORD_DEBOUNCE_MS)
 })
 const showCreateDialog = ref(false)
-const showDirectoryBrowser = ref(false)
-const directoryBrowserGateway = ref<CodegGateway | null>(null)
-const directoryBrowserConnectionKey = ref("")
-const addingProject = ref(false)
 /**
  * 长按菜单的目标：卡片 + 所属连接，两者必须一起存。
  *
@@ -574,12 +563,15 @@ const bulkSendSubmitDisabled = computed(() =>
 )
 
 /**
- * 打开新建弹层时用哪条连接作默认。
+ * 打开新建弹层时用哪条连接、哪个文件夹作默认。
  *
- * 空串：让子组件自己退回 `connectionGroups[0]`。页面不再持有一个「当前在哪个面板」
- * 的状态 —— 列表只有一种形态，新建永远发生在当前连接上。
+ * 都是 ref 而不是 computed：默认值由**打开入口**决定 —— 顶栏的「＋」是「新建，
+ * 连接和文件夹都待选」，文件夹头的「＋」是「在这个文件夹里新建」（见
+ * `createConversationInFolder`）。页面不再持有一个「当前在哪个面板」的状态，
+ * 列表只有一种形态。
  */
-const createSheetDefaultConnectionKey = computed(() => "")
+const createSheetDefaultConnectionKey = ref("")
+const createSheetDefaultFolderId = ref(0)
 
 /**
  * 搜索行右侧的「＋」是否可见。
@@ -1996,8 +1988,27 @@ async function openConversation(conv: Conversation, connKey?: string) {
  * 打开新建会话弹层。**只负责打开** —— 弹层内部的初始化（按默认连接选项目、填缓存的
  * 智能体列表）由子组件在 `show` 变 true 时自己做。页面留着这个函数是因为顶栏的
  * `@create` 事件要有落点，而 `showCreateDialog` 的所有权在页面（v-model 的那一半）。
+ *
+ * 不预选文件夹：顶栏的「＋」是「新建一个会话，建在哪儿待定」。
  */
 function createConversation() {
+  createSheetDefaultConnectionKey.value = ""
+  createSheetDefaultFolderId.value = 0
+  showCreateDialog.value = true
+}
+
+/**
+ * 文件夹头的「＋」：**在这个文件夹里**新建会话。
+ *
+ * 预选连接 + 文件夹，用户打开弹层后只剩「填写任务内容 → 创建」一步 —— 他刚点开的
+ * 那个文件夹就是目的地，没必要再让他去项目 Picker 里重新找一遍。
+ *
+ * `folderId = 0`（「未归类」）时不预选：那是服务端没有归属的会话，弹层里让用户自己
+ * 挑一个项目，比硬塞一个错的项目好。
+ */
+function createConversationInFolder(folder: { connectionKey: string; folderId: number }) {
+  createSheetDefaultConnectionKey.value = folder.connectionKey
+  createSheetDefaultFolderId.value = folder.folderId > 0 ? folder.folderId : 0
   showCreateDialog.value = true
 }
 
@@ -2009,54 +2020,6 @@ function showGroupError(group: ConnectionGroup) {
     showCancel: false,
     confirmText: "知道了",
   })
-}
-
-async function openAddProjectBrowser(groupKey: string) {
-  if (addingProject.value) return
-  const conn = findConnectedConnection(groupKey)
-  if (!conn) {
-    uni.showToast({ title: "连接不存在或已断开", icon: "none" })
-    return
-  }
-  try {
-    const gateway = await openConnectionGateway(conn)
-    directoryBrowserGateway.value = gateway
-    directoryBrowserConnectionKey.value = groupKey
-    showDirectoryBrowser.value = true
-  } catch (error) {
-    uni.showToast({ title: toErrorMessage(error), icon: "none", duration: 3000 })
-  }
-}
-
-async function handleRemoteFolderSelected(path: string) {
-  const gateway = directoryBrowserGateway.value
-  const groupKey = directoryBrowserConnectionKey.value
-  if (!gateway || !groupKey || addingProject.value) {
-    return
-  }
-  addingProject.value = true
-  try {
-    await openRemoteFolder(gateway, path)
-    showDirectoryBrowser.value = false
-    const conn = findConnectedConnection(groupKey)
-    const current = connectionGroups.value.find(
-      (group) => group.key === groupKey
-    )
-    if (conn && current) {
-      await refreshConnectionGroupFromRemote(conn, current)
-    } else {
-      await loadOverviewData({ force: true })
-    }
-    uni.showToast({ title: "已添加项目", icon: "success" })
-  } catch (error) {
-    uni.showToast({ title: toErrorMessage(error), icon: "none", duration: 3000 })
-  } finally {
-    addingProject.value = false
-    if (!showDirectoryBrowser.value) {
-      directoryBrowserConnectionKey.value = ""
-      directoryBrowserGateway.value = null
-    }
-  }
 }
 
 /**

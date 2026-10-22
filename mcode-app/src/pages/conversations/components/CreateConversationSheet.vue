@@ -300,10 +300,19 @@ const props = defineProps<{
    */
   connectionGroups: ConnectionConversationSnapshot[]
   /**
-   * 打开时的默认连接键。历史面板里新建时是那个分组的键，概览里是上次选中或第一条。
-   * 由页面算好传入 —— 判断依赖 `showHistoryPanel` / `historyGroupKey`，都归页面。
+   * 打开时的默认连接键。顶栏「＋」新建时留空（让弹层自己选第一条），
+   * 文件夹头「＋」新建时是那个分组所属的连接。
+   * 由页面算好传入 —— 打开入口归页面，弹层内部的初始化归弹层。
    */
   defaultConnectionKey?: string
+  /**
+   * 打开时预选的文件夹（项目）id。
+   *
+   * 文件夹头的「＋」语义是「**在这个文件夹里**新建」—— 用户刚点开的那个文件夹就是
+   * 目的地，预选后他只剩「填写任务内容 → 创建」一步，不用再去项目 Picker 里重新找。
+   * `0` / 找不到时留空让用户自己选：硬塞一个错的项目比不选更糟。
+   */
+  defaultFolderId?: number
 }>()
 
 const emit = defineEmits<{
@@ -537,8 +546,7 @@ function closeSheet() {
 function initializeSheetState() {
   clearPendingCreateRequest()
   applySelectedConnection(props.defaultConnectionKey || props.connectionGroups[0]?.key || "")
-  selectedProjectId.value = 0
-  selectedProjectName.value = ""
+  applyDefaultFolderSelection()
   newTaskContent.value = ""
   resetCreateAgentConfig("")
   const cachedOptions = readFreshAgentListCache(selectedConnectionKey.value)
@@ -547,6 +555,30 @@ function initializeSheetState() {
   if (!createAgentOptions.value.some((item) => item.value === selectedAgentType.value)) {
     selectedAgentType.value = createAgentOptions.value[0]?.value || "claude_code"
   }
+}
+
+/**
+ * 打开时按页面给的 `defaultFolderId` 预选项目。
+ *
+ * 必须在 `applySelectedConnection` **之后**跑：项目列表属于连接，连接没定下来之前
+ * 无从判断这个文件夹在不在。
+ *
+ * 名称解析与项目 Picker 的列完全一致（`p.name || p.path || "未命名项目"`）——
+ * 两处各写一份的话，预选后表单上显示的名字会和 Picker 里的对不上。
+ */
+function applyDefaultFolderSelection() {
+  const folderId = Number(props.defaultFolderId || 0)
+  const project =
+    folderId > 0
+      ? selectedConnectionGroup.value?.projects.find((item) => item.id === folderId)
+      : undefined
+  if (project) {
+    selectedProjectId.value = project.id
+    selectedProjectName.value = project.name || project.path || "未命名项目"
+    return
+  }
+  selectedProjectId.value = 0
+  selectedProjectName.value = ""
 }
 
 /**

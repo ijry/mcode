@@ -274,7 +274,7 @@ export function overviewAgentLogoPath(agentType: string): string {
 export function resolveGroupEmptyText(hideCompleted: boolean): string {
   return hideCompleted
     ? "没有进行中的会话；已完成的已隐藏，可在左上角视图里打开「显示已完成会话」"
-    : "暂无打开中或 24 小时内活跃的会话"
+    : "暂无会话"
 }
 
 export function resolveOverviewEmptyText(keyword: string, hideCompleted: boolean): string {
