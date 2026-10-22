@@ -196,4 +196,27 @@ describe("conversation row long-press action sheet contract", () => {
     // 展示模型是 spread 原卡片，置顶标记不会被重建掉。
     expect(page).toContain("isPinned: boolean")
   })
+
+  /**
+   * 置顶必须**看得见**。
+   *
+   * 排位只是间接信号：一屏里只有一个分组、或者置顶的那条本来就在前面时，用户分不
+   * 清「它排第一」是因为最近活跃还是因为自己置顶了 —— 想取消置顶时也不知道该长按
+   * 哪一条。所以行上要有一枚图钉。
+   */
+  it("marks pinned rows with a pin icon", () => {
+    const row = read(ROW)
+    const section = read(SECTION)
+
+    expect(row).toContain("pinned?: boolean")
+    expect(row).toContain('v-if="pinned"')
+    // 跨端图标：小程序不支持内联 SVG，必须走 uview 的图标字体。
+    expect(row).toContain('name="pushpin-fill"')
+    expect(row).toContain("conv-row__pin")
+    // 图钉落在元信息行内，不在标题上 —— 标题是两行截断的，放图标会挤掉可读宽度。
+    const meta = extractBlock(row, '<view class="conv-row__meta">', "</view>")
+    expect(meta).toContain("conv-row__pin")
+    // 分组把卡上的置顶态喂给行，行自己不猜。
+    expect(section).toContain(':pinned="card.isPinned === true"')
+  })
 })

@@ -31,6 +31,19 @@
       <text class="conv-row__title">{{ title }}</text>
 
       <view class="conv-row__meta">
+        <!--
+          置顶标记。
+          置顶的效果只在排位上体现的话，用户看不出哪条是自己置顶的 —— 取消置顶时
+          也不知道该长按哪一条。所以行上必须有一枚图钉，且只在真置顶时出现。
+        -->
+        <up-icon
+          v-if="pinned"
+          class="conv-row__pin"
+          name="pushpin-fill"
+          size="11"
+          :color="pinIconColor"
+        ></up-icon>
+
         <!-- 名称前缀 Logo（仅「名称前缀 Logo 版」）：14×14，与智能体名同基线。 -->
         <view
           v-if="layout.showInlineLogo"
@@ -92,6 +105,8 @@ const props = defineProps<{
   displayStatus?: string
   /** 这个会话在别的端开着（旧版用「标签」角标表达，现在落到状态位）。 */
   isOpenTab?: boolean
+  /** 置顶。除了把行提到分组最前，还要在元信息行打一枚图钉。 */
+  pinned?: boolean
   updatedAt?: string
   previewText?: string
   listStyle: ConversationListStyleId
@@ -147,6 +162,15 @@ const logoClass = computed(() =>
   overviewAgentLogoClass(props.agentType || "").replace("agent-logo--", "conv-row__logo--")
 )
 const logoText = computed(() => overviewAgentLogoText(props.agentType || ""))
+
+/**
+ * 图钉用主色。
+ *
+ * 置顶是用户主动做的动作，用元信息的灰色会和「智能体名 / 时间」这些说明性文字混在
+ * 一起，等于没有标记。主色在 11px 的小图标上并不吵 —— 同一行的状态色（进行中的绿、
+ * 等待的橙）本来也是硬编码的实色。
+ */
+const pinIconColor = "var(--up-primary, #2979ff)"
 </script>
 
 <style scoped lang="scss">
@@ -293,6 +317,13 @@ const logoText = computed(() => overviewAgentLogoText(props.agentType || ""))
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 图钉：与元信息同基线，不参与挤压（时间靠 margin-left:auto 顶到最右）。 */
+.conv-row__pin {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
 }
 
 .conv-row__status {

@@ -40,6 +40,7 @@
           :agent-type="card.agentType"
           :display-status="card.displayStatus"
           :is-open-tab="card.isOpenTab === true"
+          :pinned="card.isPinned === true"
           :updated-at="card.updatedAt"
           :preview-text="card.livePreviewText"
           :list-style="listStyle"
