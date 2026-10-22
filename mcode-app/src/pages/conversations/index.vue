@@ -109,9 +109,11 @@
       @created="handleConversationCreated"
     />
 
-    <!-- 批量发送弹层 -->
+    <!-- 批量发送弹层。外壳用共享的 `.create-sheet`（滚动/高度上限都在那一份里），
+         内容同样收进 `__body`：输入框 autoHeight + 1200 字上限，长文本一样会把弹层
+         撑出屏幕。 -->
     <up-popup v-model:show="showBulkSendDialog" mode="bottom" :round="28" @close="closeBulkSendDialog">
-      <view class="bulk-send-sheet" :style="upThemeCardStyle">
+      <view class="create-sheet" :style="upThemeCardStyle">
         <view class="create-sheet__hd">
           <text class="create-sheet__title">批量发送</text>
           <view class="create-sheet__close" @click="closeBulkSendDialog">
@@ -119,34 +121,36 @@
           </view>
         </view>
 
-        <view class="bulk-send-warning">
-          <up-icon name="info-circle" size="18" :color="upThemeVar('--up-primary', '#2979ff')"></up-icon>
-          <text class="bulk-send-warning__text">本次将会一键将内容发送给所有勾选的会话</text>
-        </view>
+        <view class="create-sheet__body" @touchmove.stop>
+          <view class="bulk-send-warning">
+            <up-icon name="info-circle" size="18" :color="upThemeVar('--up-primary', '#2979ff')"></up-icon>
+            <text class="bulk-send-warning__text">本次将会一键将内容发送给所有勾选的会话</text>
+          </view>
 
-        <view class="bulk-send-targets">
-          <text class="bulk-send-targets__title">目标会话 {{ selectedBulkCount }} 个</text>
-          <text class="bulk-send-targets__hint u-line-2">{{ selectedBulkSummary }}</text>
-        </view>
+          <view class="bulk-send-targets">
+            <text class="bulk-send-targets__title">目标会话 {{ selectedBulkCount }} 个</text>
+            <text class="bulk-send-targets__hint u-line-2">{{ selectedBulkSummary }}</text>
+          </view>
 
-        <view class="form-group">
-          <text class="form-label">快捷输入</text>
-          <view class="bulk-quick-row">
-            <view class="bulk-quick-chip" @click="applyBulkQuickText(BULK_SEND_QUICK_TEXT)">
-              <text class="bulk-quick-chip__text">{{ BULK_SEND_QUICK_TEXT }}</text>
+          <view class="form-group">
+            <text class="form-label">快捷输入</text>
+            <view class="bulk-quick-row">
+              <view class="bulk-quick-chip" @click="applyBulkQuickText(BULK_SEND_QUICK_TEXT)">
+                <text class="bulk-quick-chip__text">{{ BULK_SEND_QUICK_TEXT }}</text>
+              </view>
             </view>
           </view>
-        </view>
 
-        <view class="form-group">
-          <text class="form-label">发送内容</text>
-          <up-textarea
-            v-model="bulkSendText"
-            placeholder="请输入要发送给所有勾选会话的内容"
-            autoHeight
-            count
-            :maxlength="1200"
-          ></up-textarea>
+          <view class="form-group">
+            <text class="form-label">发送内容</text>
+            <up-textarea
+              v-model="bulkSendText"
+              placeholder="请输入要发送给所有勾选会话的内容"
+              autoHeight
+              count
+              :maxlength="1200"
+            ></up-textarea>
+          </view>
         </view>
 
         <up-button
@@ -155,7 +159,7 @@
           :disabled="bulkSendSubmitDisabled"
           shape="circle"
           @click="confirmBulkSend"
-          customStyle="margin-top:16rpx"
+          customStyle="margin-top:16rpx;flex-shrink:0"
         >确认批量发送</up-button>
 
         <view class="safe-bottom"></view>
@@ -2341,12 +2345,8 @@ function formatTime(time?: string): string {
   white-space: nowrap;
 }
 
-.bulk-send-sheet {
-  padding: 36rpx 20rpx 0;
-  background-color: var(--up-card-bg-color, #ffffff);
-  border-radius: 28rpx 28rpx 0 0;
-}
-
+/* 批量发送弹层的专属内容（外壳/头部/表单行/安全区全部来自共享样式表的
+   `.create-sheet`，那份由页面与 `CreateConversationSheet` 双方 @import）。 */
 .bulk-send-warning {
   display: flex;
   align-items: flex-start;

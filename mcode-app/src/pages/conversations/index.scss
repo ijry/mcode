@@ -17,11 +17,38 @@
  *
  * 三个弹层共用：新建会话 / 智能体配置（都在 CreateConversationSheet.vue）、批量发送
  * （仍在页面）。`.create-sheet` 这个名字来自最早的新建弹层，后两个是复用它的形制 ——
- * 名字没跟着改，是因为改名要同时动三处模板和一份源码扫描测试，收益不抵风险。 */
+ * 名字没跟着改，是因为改名要同时动三处模板和一份源码扫描测试，收益不抵风险。
+ *
+ * `max-height` + 列向 flex 是**滚动能力的地基**：up-popup 只在 `touchable=true`
+ * 时才给内容套 maxHeight（默认 false），弹层高度本没有上限 —— 内容一高就整块冲出
+ * 视口，而四周又没有任何滚动容器。智能体配置里的「模型」选项一长，弹层就被撑到
+ * 屏幕外，摸不到也滚不到（用户报的「模型列表太长，打开后无法滚动」）。 */
 .create-sheet {
   padding: 36rpx 20rpx 0;
   background-color: var(--up-card-bg-color, #ffffff);
   border-radius: 28rpx 28rpx 0 0;
+  box-sizing: border-box;
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 弹层里唯一允许长高、因此唯一需要滚的一段。
+ *
+ * `flex: 0 1 auto`（可缩不涨）：内容比视口矮时弹层贴着内容走，不多留一寸空白；
+ * 超过 86vh 时它出让高度，内部 `overflow-y: auto` 接手。头部与底部动作留在壳上，
+ * 不跟着内容滚走。
+ *
+ * 光有 overflow 还不够 —— 模板里必须在这个元素上补 `@touchmove.stop`：up-popup 的
+ * 内容节点绑了 `@touchmove.stop.prevent`，触摸事件一旦冒泡到那里就会被
+ * preventDefault，容器自身的原生滚动会被一并取消（桌面滚轮不受影响，触屏整块滚不动）。
+ * 这是样式解决不了的事，只能靠模板拦住冒泡。 */
+.create-sheet__body {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
 
 .create-sheet__hd {
@@ -29,6 +56,8 @@
   align-items: center;
   justify-content: space-between;
   margin-bottom: 32rpx;
+  /* 弹层被 86vh 夹住时只有 body 出让高度，头部不参与缩放。 */
+  flex-shrink: 0;
 }
 
 .create-sheet__title {
@@ -92,7 +121,9 @@
 
 /* ── 底部安全区占位 ───────────────────────────────────────────────────
  *
- * 四处：历史列表尾部、新建弹层、智能体配置弹层、批量发送弹层。 */
+ * 四处：历史列表尾部、新建弹层、智能体配置弹层、批量发送弹层。弹层里它排在 body
+ * 之后、是壳上最后一个 flex 子项，同样不参与缩放。 */
 .safe-bottom {
   height: calc(32rpx + env(safe-area-inset-bottom));
+  flex-shrink: 0;
 }

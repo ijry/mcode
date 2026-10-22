@@ -23,8 +23,11 @@ const SHARED = "../../../src/pages/conversations/index.scss"
 describe("conversations shared stylesheet contract", () => {
   // 判据是「跨组件边界共用」。四组分别对应：三个弹层共用的外壳/头部、新建与批量发送共用的
   // 表单行、两种 logo 容器共用的按类型修饰符、四处共用的安全区占位。
+  // `.create-sheet__body` 有两个消费者：`CreateConversationSheet` 的两个弹层 + 页面里的
+  // 批量发送弹层 —— 它承载弹层唯一的滚动能力（见 createSheetScrollContract.spec.ts）。
   const SHARED_SELECTORS = [
     ".create-sheet {",
+    ".create-sheet__body {",
     ".create-sheet__hd {",
     ".create-sheet__title {",
     ".create-sheet__close {",

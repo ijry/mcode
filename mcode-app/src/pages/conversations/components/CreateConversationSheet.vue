@@ -12,97 +12,104 @@
           </view>
         </view>
 
-        <view class="form-group">
-          <text class="form-label">连接</text>
-          <view class="form-readonly" @click="showConnectionPicker = true">
-            <text class="form-readonly__text">{{ selectedConnectionName || '请选择连接' }}</text>
-            <up-icon name="arrow-down" size="14" :color="upThemeVar('--up-light-color', '#c0c4cc')"></up-icon>
+        <!-- 表单整段可滚：`overflow-y` 由共享样式表给，`@touchmove.stop` 拦在冒泡到
+             up-popup 内容节点之前 —— 那个节点上绑着 preventDefault，会把容器的原生
+             滚动一起取消（详见 index.scss 里 .create-sheet__body 的注释）。 -->
+        <view class="create-sheet__body" @touchmove.stop>
+          <view class="form-group">
+            <text class="form-label">连接</text>
+            <view class="form-readonly" @click="showConnectionPicker = true">
+              <text class="form-readonly__text">{{ selectedConnectionName || '请选择连接' }}</text>
+              <up-icon name="arrow-down" size="14" :color="upThemeVar('--up-light-color', '#c0c4cc')"></up-icon>
+            </view>
           </view>
-        </view>
 
-        <view class="form-group">
-          <text class="form-label">项目</text>
-          <view class="form-readonly" @click="showProjectPicker = true">
-            <text class="form-readonly__text">{{ selectedProjectName || '请选择' }}</text>
-            <up-icon name="arrow-down" size="14" :color="upThemeVar('--up-light-color', '#c0c4cc')"></up-icon>
+          <view class="form-group">
+            <text class="form-label">项目</text>
+            <view class="form-readonly" @click="showProjectPicker = true">
+              <text class="form-readonly__text">{{ selectedProjectName || '请选择' }}</text>
+              <up-icon name="arrow-down" size="14" :color="upThemeVar('--up-light-color', '#c0c4cc')"></up-icon>
+            </view>
+            <text v-if="selectedProjectPath" class="form-helper-text">{{ selectedProjectPath }}</text>
           </view>
-          <text v-if="selectedProjectPath" class="form-helper-text">{{ selectedProjectPath }}</text>
-        </view>
 
-        <view class="form-group">
-          <text class="form-label">智能体</text>
-          <view v-if="loadingCreateAgents" class="config-loading">
-            <up-loading-icon size="18" color="#2979ff"></up-loading-icon>
-            <text class="config-loading__text">正在读取智能体...</text>
-          </view>
-          <scroll-view class="agent-scroll" scroll-x show-scrollbar="false" enhanced>
-            <view class="agent-grid">
-              <view
-                v-for="agent in createAgentOptions"
-                :key="agent.value"
-                :class="[
-                  'agent-card',
-                  selectedAgentType === agent.value && 'agent-card--active',
-                ]"
-                @click="selectAgent(agent.value)"
-              >
+          <view class="form-group">
+            <text class="form-label">智能体</text>
+            <view v-if="loadingCreateAgents" class="config-loading">
+              <up-loading-icon size="18" color="#2979ff"></up-loading-icon>
+              <text class="config-loading__text">正在读取智能体...</text>
+            </view>
+            <!-- 横向列表同样要 `@touchmove.stop`：智能体一多，这条带就伸出屏幕外，
+                 不拦住冒罩的话触屏上整条带拖不动。 -->
+            <scroll-view class="agent-scroll" scroll-x show-scrollbar="false" enhanced @touchmove.stop>
+              <view class="agent-grid">
                 <view
+                  v-for="agent in createAgentOptions"
+                  :key="agent.value"
                   :class="[
-                    'agent-card__logo',
-                    overviewAgentLogoClass(agent.value),
-                    overviewAgentLogoPath(agent.value) && 'agent-card__logo--real',
+                    'agent-card',
+                    selectedAgentType === agent.value && 'agent-card--active',
                   ]"
+                  @click="selectAgent(agent.value)"
                 >
-                  <image
-                    v-if="overviewAgentLogoPath(agent.value)"
-                    class="agent-card__logo-img"
-                    :src="overviewAgentLogoPath(agent.value)"
-                    mode="aspectFit"
-                  />
-                  <text v-else class="agent-card__logo-text">{{ overviewAgentLogoText(agent.value) }}</text>
+                  <view
+                    :class="[
+                      'agent-card__logo',
+                      overviewAgentLogoClass(agent.value),
+                      overviewAgentLogoPath(agent.value) && 'agent-card__logo--real',
+                    ]"
+                  >
+                    <image
+                      v-if="overviewAgentLogoPath(agent.value)"
+                      class="agent-card__logo-img"
+                      :src="overviewAgentLogoPath(agent.value)"
+                      mode="aspectFit"
+                    />
+                    <text v-else class="agent-card__logo-text">{{ overviewAgentLogoText(agent.value) }}</text>
+                  </view>
+                  <text class="agent-card__label">{{ agent.label }}</text>
                 </view>
-                <text class="agent-card__label">{{ agent.label }}</text>
               </view>
-            </view>
-          </scroll-view>
-          <text
-            v-if="createAgentListHelperText"
-            class="form-helper-text"
-          >{{ createAgentListHelperText }}</text>
-        </view>
-
-        <view class="form-group">
-          <text class="form-label">智能体配置</text>
-
-          <view v-if="createAgentConfig.status === 'loading'" class="config-loading">
-            <up-loading-icon size="18" color="#2979ff"></up-loading-icon>
-            <text class="config-loading__text">正在读取可用配置...</text>
+            </scroll-view>
+            <text
+              v-if="createAgentListHelperText"
+              class="form-helper-text"
+            >{{ createAgentListHelperText }}</text>
           </view>
 
-          <view
-            v-else
-            class="form-readonly form-readonly--config"
-            @click="openCreateConfigDialog"
-          >
-            <view class="form-readonly__stack">
-              <text class="form-readonly__text">{{ createConfigSummary }}</text>
-              <text v-if="createAgentConfig.message" class="form-helper-inline">
-                {{ createAgentConfig.message }}
-              </text>
-            </view>
-            <up-icon name="arrow-right" size="14" :color="upThemeVar('--up-light-color', '#c0c4cc')"></up-icon>
-          </view>
-        </view>
+          <view class="form-group">
+            <text class="form-label">智能体配置</text>
 
-        <view class="form-group">
-          <text class="form-label">本次任务内容</text>
-          <up-textarea
-            v-model="newTaskContent"
-            placeholder="请输入本次任务内容"
-            autoHeight
-            count
-            :maxlength="1200"
-          ></up-textarea>
+            <view v-if="createAgentConfig.status === 'loading'" class="config-loading">
+              <up-loading-icon size="18" color="#2979ff"></up-loading-icon>
+              <text class="config-loading__text">正在读取可用配置...</text>
+            </view>
+
+            <view
+              v-else
+              class="form-readonly form-readonly--config"
+              @click="openCreateConfigDialog"
+            >
+              <view class="form-readonly__stack">
+                <text class="form-readonly__text">{{ createConfigSummary }}</text>
+                <text v-if="createAgentConfig.message" class="form-helper-inline">
+                  {{ createAgentConfig.message }}
+                </text>
+              </view>
+              <up-icon name="arrow-right" size="14" :color="upThemeVar('--up-light-color', '#c0c4cc')"></up-icon>
+            </view>
+          </view>
+
+          <view class="form-group">
+            <text class="form-label">本次任务内容</text>
+            <up-textarea
+              v-model="newTaskContent"
+              placeholder="请输入本次任务内容"
+              autoHeight
+              count
+              :maxlength="1200"
+            ></up-textarea>
+          </view>
         </view>
 
         <up-button
@@ -111,7 +118,7 @@
           :disabled="createSubmitDisabled"
           shape="circle"
           @click="confirmCreate"
-          customStyle="margin-top:16rpx"
+          customStyle="margin-top:16rpx;flex-shrink:0"
         >创建会话</up-button>
 
         <view class="safe-bottom"></view>
@@ -128,54 +135,59 @@
           </view>
         </view>
 
-        <view v-if="createAgentConfig.message" class="config-hint">
-          <text class="config-hint__text">{{ createAgentConfig.message }}</text>
-        </view>
+        <!-- 这个弹层没有底部按钮，整段配置（授权类型 + 每个配置项，尤其是「模型」的
+             十几个取值）就是全部内容 —— 一长就必须能滚，否则下面的选项被屏幕底沿
+             裁掉且没有任何补救手段。 -->
+        <view class="create-sheet__body" @touchmove.stop>
+          <view v-if="createAgentConfig.message" class="config-hint">
+            <text class="config-hint__text">{{ createAgentConfig.message }}</text>
+          </view>
 
-        <view v-if="showCreateModeOptions" class="config-section">
-          <text class="config-section__title">授权类型</text>
-          <view class="config-chip-grid">
-            <view
-              v-for="mode in createAgentConfig.modes?.available_modes || []"
-              :key="mode.id"
-              :class="[
-                'config-chip',
-                createAgentConfig.selectedModeId === mode.id && 'config-chip--active',
-              ]"
-              @click="selectCreateMode(mode.id)"
-            >
-              <text class="config-chip__title">{{ mode.name }}</text>
+          <view v-if="showCreateModeOptions" class="config-section">
+            <text class="config-section__title">授权类型</text>
+            <view class="config-chip-grid">
+              <view
+                v-for="mode in createAgentConfig.modes?.available_modes || []"
+                :key="mode.id"
+                :class="[
+                  'config-chip',
+                  createAgentConfig.selectedModeId === mode.id && 'config-chip--active',
+                ]"
+                @click="selectCreateMode(mode.id)"
+              >
+                <text class="config-chip__title">{{ mode.name }}</text>
+              </view>
             </view>
           </view>
-        </view>
 
-        <view
-          v-for="option in createAgentConfig.configOptions"
-          :key="option.id"
-          class="config-section"
-        >
-          <text class="config-section__title">{{ option.name }}</text>
-          <text v-if="option.description" class="config-section__desc">{{ option.description }}</text>
-          <view class="config-chip-grid">
-            <view
-              v-for="value in option.kind.options"
-              :key="value.value"
-              :class="[
-                'config-chip',
-                createAgentConfig.selectedValues[option.id] === value.value && 'config-chip--active',
-              ]"
-              @click="selectCreateConfigValue(option.id, value.value)"
-            >
-              <text class="config-chip__title">{{ value.name }}</text>
+          <view
+            v-for="option in createAgentConfig.configOptions"
+            :key="option.id"
+            class="config-section"
+          >
+            <text class="config-section__title">{{ option.name }}</text>
+            <text v-if="option.description" class="config-section__desc">{{ option.description }}</text>
+            <view class="config-chip-grid">
+              <view
+                v-for="value in option.kind.options"
+                :key="value.value"
+                :class="[
+                  'config-chip',
+                  createAgentConfig.selectedValues[option.id] === value.value && 'config-chip--active',
+                ]"
+                @click="selectCreateConfigValue(option.id, value.value)"
+              >
+                <text class="config-chip__title">{{ value.name }}</text>
+              </view>
             </view>
           </view>
-        </view>
 
-        <view
-          v-if="!showCreateModeOptions && createAgentConfig.configOptions.length === 0"
-          class="config-hint"
-        >
-          <text class="config-hint__text">该智能体将使用远端默认配置</text>
+          <view
+            v-if="!showCreateModeOptions && createAgentConfig.configOptions.length === 0"
+            class="config-hint"
+          >
+            <text class="config-hint__text">该智能体将使用远端默认配置</text>
+          </view>
         </view>
 
         <view class="safe-bottom"></view>
