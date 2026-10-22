@@ -264,16 +264,23 @@ export function overviewAgentLogoPath(agentType: string): string {
   return ""
 }
 
+/**
+ * 空态文案里怎么指路。
+ *
+ * 「隐藏已完成」的唯一开关在**左上角视图面板**里（列表形态 / 显示已完成 / 选择同层），
+ * 顶栏和搜索行上都没有第二个入口。旧文案写的「点上方『已完成』」指向一个早就删掉的
+ * 筛选胶囊，照着找只会白点一遍。
+ */
 export function resolveGroupEmptyText(hideCompleted: boolean): string {
   return hideCompleted
-    ? "没有进行中的会话；已完成的已隐藏，可点上方「已完成」查看"
+    ? "没有进行中的会话；已完成的已隐藏，可在左上角视图里打开「显示已完成会话」"
     : "暂无打开中或 24 小时内活跃的会话"
 }
 
 export function resolveOverviewEmptyText(keyword: string, hideCompleted: boolean): string {
   if (keyword.trim()) return "没有匹配的会话"
   return hideCompleted
-    ? "已完成的会话已隐藏，可点上方「已完成」查看"
+    ? "已完成的会话已隐藏，可在左上角视图里打开「显示已完成会话」"
     : "暂无分组会话"
 }
 

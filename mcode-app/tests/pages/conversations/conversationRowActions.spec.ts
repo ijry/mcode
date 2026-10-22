@@ -5,6 +5,7 @@ import {
   buildConversationRowActions,
   canDeleteConversation,
   isConversationArchived,
+  resolveArchiveSuccessToast,
   resolveRowActionSheetTitle,
   resolveSelectedRowAction,
 } from "@/pages/conversations/conversationRowActions"
@@ -83,6 +84,22 @@ describe("conversationRowActions", () => {
     expect(CONVERSATION_ARCHIVED_STATUS).toBe("completed")
     // 取消归档不能退回 in_progress：那等于凭空宣布会话在跑，会把它推回「不可删」那一侧。
     expect(CONVERSATION_UNARCHIVED_STATUS).toBe("pending_review")
+  })
+
+  // 归档写的是 completed，而「隐藏已完成」默认开着 —— 归档完这条会话当场从列表消失。
+  // 提示必须顺带指路，否则用户分不清「归档」和「删除」，取消归档的入口也找不回来。
+  describe("resolveArchiveSuccessToast", () => {
+    it("points at the view panel when completed conversations are hidden", () => {
+      const text = resolveArchiveSuccessToast(true)
+      expect(text).toContain("已归档")
+      expect(text).toContain("左上角")
+      expect(text).toContain("显示已完成")
+    })
+
+    // 开关关着时会话还在原地，多说一句指路反而是噪音。
+    it("stays terse when the conversation remains visible", () => {
+      expect(resolveArchiveSuccessToast(false)).toBe("已归档")
+    })
   })
 
   describe("resolveSelectedRowAction", () => {

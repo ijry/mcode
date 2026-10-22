@@ -26,12 +26,31 @@ export const CONVERSATION_PIN_COMMAND = "update_conversation_pinned"
 /**
  * 归档就是服务端的「完成」。
  *
- * 会话没有独立的归档字段，服务端用 `completed` 承担这个含义 —— 所以归档写
- * `completed`，取消归档退回 `pending_review`（待处理）。**不退回 `in_progress`**：
- * 那等于凭空宣布这个会话正在跑，会把它推进「不可删除」的那一侧。
+ * 会话没有独立的归档字段，服务端的状态枚举就是 in_progress / pending_review /
+ * completed / cancelled 四个（见 `codeg` 的 `update_conversation_status_core`，它只
+ * 校验枚举合法性、不限迁移方向）。`completed` 是其中唯一表达「这件事已经了结」的
+ * 状态，所以归档写 `completed`、取消归档退回 `pending_review`。
+ *
+ * **取消归档不退回 `in_progress`**：那等于凭空宣布这个会话正在跑，会把它推进
+ * 「不可删除」的那一侧 —— 用户刚取消归档，马上又删不掉。
  */
 export const CONVERSATION_ARCHIVED_STATUS = "completed"
 export const CONVERSATION_UNARCHIVED_STATUS = "pending_review"
+
+/**
+ * 归档成功后的提示文案。
+ *
+ * 归档写的是 `completed`，而「隐藏已完成会话」**默认开着** —— 归档完这条会话会立刻
+ * 从列表上消失。只弹一句「已归档」，用户看到的是「我点了归档，会话不见了」，跟被删掉
+ * 没区别，而且取消归档的入口（长按那一行）也跟着一起没了。
+ *
+ * 所以隐藏开着时必须顺带说清去哪找回来；关着的时候会话还在原地，多说这句反而是噪音。
+ */
+export function resolveArchiveSuccessToast(hideCompleted: boolean): string {
+  return hideCompleted
+    ? "已归档；可在左上角视图里显示已完成"
+    : "已归档"
+}
 
 export type ConversationRowActionId =
   | "rename"

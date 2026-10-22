@@ -130,6 +130,23 @@ describe("conversation row long-press action sheet contract", () => {
     )
   })
 
+  // 归档写的是 completed，而「隐藏已完成」默认开着 —— 归档完这条会话当场从列表消失，
+  // 取消归档的入口（长按那一行）也一起没了。只弹「已归档」跟被删掉没区别，必须指路。
+  it("tells the user where to find the conversation back after archiving", () => {
+    const page = read(PAGE)
+    const block = extractBlock(
+      page,
+      "async function toggleRowConversationArchived(",
+      "\n  } catch (error) {"
+    )
+
+    // 提示必须看「隐藏已完成」的当前值，写死文案的话开关关着时也会指路，是噪音。
+    expect(block).toContain("resolveArchiveSuccessToast(hideCompletedConversations.value)")
+    // 指路的文案比「已归档」长，icon: "success" 那行放不下，用 none 并给足停留时间。
+    expect(block).toContain('icon: "none"')
+    expect(block).toContain("duration: 2500")
+  })
+
   // 删除两道闸：菜单里不给入口（见 conversationRowActions.spec.ts 的映射用例），
   // 执行前再守一次 —— 菜单是按弹开那一刻的状态算的，弹出后会话可能已经开始跑。
   it("guards delete twice and asks for confirmation", () => {

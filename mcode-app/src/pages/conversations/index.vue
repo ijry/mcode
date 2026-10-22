@@ -207,6 +207,7 @@ import {
   CONVERSATION_UNARCHIVED_STATUS,
   buildConversationRowActions,
   canDeleteConversation,
+  resolveArchiveSuccessToast,
   resolveRowActionSheetTitle,
   resolveSelectedRowAction,
 } from "@/pages/conversations/conversationRowActions"
@@ -1021,7 +1022,17 @@ async function toggleRowConversationArchived(
       conversationId: Number(target.card.conversationId || 0),
       status: archived ? CONVERSATION_ARCHIVED_STATUS : CONVERSATION_UNARCHIVED_STATUS,
     })
-    uni.showToast({ title: archived ? "已归档" : "已取消归档", icon: "success" })
+    if (archived) {
+      // 归档写的是 completed，而「隐藏已完成」默认开着 —— 这条会话刷新后就不在列表里了。
+      // 只弹「已归档」跟被删掉没区别，取消归档的入口也一起消失，必须说清去哪找回来。
+      uni.showToast({
+        title: resolveArchiveSuccessToast(hideCompletedConversations.value),
+        icon: "none",
+        duration: 2500,
+      })
+    } else {
+      uni.showToast({ title: "已取消归档", icon: "success" })
+    }
     await refreshAfterRowAction()
   } catch (error) {
     uni.showToast({
