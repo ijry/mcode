@@ -10,6 +10,7 @@ import {
   overviewStatusLabel,
   resolveOverviewCardDisplayStatus,
   shouldHideCompletedOverviewCard,
+  shouldShowCardForStatusMode,
   sortRunningOverviewCardsFirst,
 } from "@/pages/conversations/conversationOverviewPresentation"
 
@@ -169,6 +170,48 @@ describe("hiding completed cards", () => {
   })
 })
 
+describe("shouldShowCardForStatusMode", () => {
+  // 四个模式的判据必须各自独立、互不串味。尤其 `running` 与 `archived` 都围绕 completed，
+  // 但一个排除、一个只留 —— 写反了列表就会多出/漏掉正好一类会话。
+  it("all mode keeps every card regardless of status or pin", () => {
+    expect(shouldShowCardForStatusMode("completed", false, "all")).toBe(true)
+    expect(shouldShowCardForStatusMode("in_progress", true, "all")).toBe(true)
+    expect(shouldShowCardForStatusMode("pending_review", undefined, "all")).toBe(true)
+  })
+
+  it("running mode excludes only completed, keeping every other status", () => {
+    // 与旧版「隐藏已完成」同一语义：只挡 completed。pending_review（待处理）、
+    // in_progress、failed、cancelled 都留着 —— 它们不是「已了结」。
+    expect(shouldShowCardForStatusMode("completed", true, "running")).toBe(false)
+    expect(shouldShowCardForStatusMode("pending_review", false, "running")).toBe(true)
+    expect(shouldShowCardForStatusMode("in_progress", false, "running")).toBe(true)
+    expect(shouldShowCardForStatusMode("failed", false, "running")).toBe(true)
+    expect(shouldShowCardForStatusMode("cancelled", false, "running")).toBe(true)
+  })
+
+  it("running mode keeps a completed card that is currently running", () => {
+    // 复用 shouldHideCompletedOverviewCard 后，这个判据天然继承「displayStatus 优先」：
+    // 一个 persisted 为 completed、但此刻 runtime 在跑的会话，displayStatus 已被提升成
+    // in_progress，因此不会被 running 模式藏掉。
+    const runningDisplayStatus = resolveOverviewCardDisplayStatus("completed", "thinking")
+    expect(shouldShowCardForStatusMode(runningDisplayStatus, false, "running")).toBe(true)
+  })
+
+  it("pinned mode keeps only pinned cards (pin flag wins over status)", () => {
+    expect(shouldShowCardForStatusMode("in_progress", true, "pinned")).toBe(true)
+    // 置顶的归档会话也该在「已置顶」里出现 —— 置顶是跨状态的。
+    expect(shouldShowCardForStatusMode("completed", true, "pinned")).toBe(true)
+    expect(shouldShowCardForStatusMode("in_progress", false, "pinned")).toBe(false)
+    expect(shouldShowCardForStatusMode("pending_review", undefined, "pinned")).toBe(false)
+  })
+
+  it("archived mode keeps only completed cards", () => {
+    expect(shouldShowCardForStatusMode("completed", true, "archived")).toBe(true)
+    expect(shouldShowCardForStatusMode("in_progress", true, "archived")).toBe(false)
+    expect(shouldShowCardForStatusMode("pending_review", false, "archived")).toBe(false)
+  })
+})
+
 describe("buildOverviewDisplayModel", () => {
   // 这一组取代了原先 `hideCompletedFilterWiring.spec.ts` 的源码扫描断言。
   //
@@ -210,7 +253,7 @@ describe("buildOverviewDisplayModel", () => {
       resolveRuntimeSession: () => undefined,
       instanceKeyByGroupKey: { "conn-a": "direct::local" },
       keyword: "",
-      hideCompleted: false,
+      statusMode: "all",
       livePreviewEnabled: false,
       ...patch,
     })
@@ -245,7 +288,7 @@ describe("buildOverviewDisplayModel", () => {
     // 实时流、仍能被「全选」勾中 —— 用户于是对着一个看不见的会话发消息。
     const model = build({
       groups: [group({ cards: [card({ status: "completed" })] })],
-      hideCompleted: true,
+      statusMode: "running",
     })
 
     expect(model.groups[0].cards).toHaveLength(0)
@@ -255,7 +298,7 @@ describe("buildOverviewDisplayModel", () => {
   it("keeps a completed card that runtime says is running", () => {
     const model = build({
       groups: [group({ cards: [card({ status: "completed" })] })],
-      hideCompleted: true,
+      statusMode: "running",
       resolveRuntimeSession: () => ({ status: "thinking" }),
     })
 
@@ -357,14 +400,14 @@ describe("buildOverviewDisplayModel", () => {
   })
 
   /**
-   * 「待回复」不能被「隐藏已完成」吃掉：一个 status 是 completed、但此刻正等用户回答的会话
+   * 「待回复」不能被「进行中」模式吃掉：一个 status 是 completed、但此刻正等用户回答的会话
    * （比如上一轮结束后 agent 又发起了提问），藏掉等于让那个提问永远无人应答。
    */
   it("never hides an awaiting card even when it is persisted as completed", () => {
     const model = build({
       groups: [group({ cards: [card({ status: "completed" })] })],
       resolveAwaitingStatus: () => "waiting_question",
-      hideCompleted: true,
+      statusMode: "running",
     })
     expect(model.groups[0].cards).toHaveLength(1)
     expect(model.candidates).toHaveLength(1)

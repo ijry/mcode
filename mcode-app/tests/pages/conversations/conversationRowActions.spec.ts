@@ -86,19 +86,20 @@ describe("conversationRowActions", () => {
     expect(CONVERSATION_UNARCHIVED_STATUS).toBe("pending_review")
   })
 
-  // 归档写的是 completed，而「隐藏已完成」默认开着 —— 归档完这条会话当场从列表消失。
-  // 提示必须顺带指路，否则用户分不清「归档」和「删除」，取消归档的入口也找不回来。
+  // 归档写的是 completed。只有「进行中」模式（排除 completed）会让归档后的会话从列表消失，
+  // 此时提示必须顺带指路；其余模式下会话仍在原地，多说一句反而是噪音。
   describe("resolveArchiveSuccessToast", () => {
-    it("points at the view panel when completed conversations are hidden", () => {
-      const text = resolveArchiveSuccessToast(true)
+    it("points at the archived view when the running mode would hide it", () => {
+      const text = resolveArchiveSuccessToast("running")
       expect(text).toContain("已归档")
-      expect(text).toContain("左上角")
-      expect(text).toContain("显示已完成")
+      expect(text).toContain("「已归档」视图")
     })
 
-    // 开关关着时会话还在原地，多说一句指路反而是噪音。
+    // 全部 / 已置顶 / 已归档 模式下会话仍在列表里，文案保持最简。
     it("stays terse when the conversation remains visible", () => {
-      expect(resolveArchiveSuccessToast(false)).toBe("已归档")
+      expect(resolveArchiveSuccessToast("all")).toBe("已归档")
+      expect(resolveArchiveSuccessToast("pinned")).toBe("已归档")
+      expect(resolveArchiveSuccessToast("archived")).toBe("已归档")
     })
   })
 

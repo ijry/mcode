@@ -2,6 +2,7 @@ import {
   isActiveConversationSummaryStatus,
   normalizeConversationSummaryStatus,
 } from "@/services/conversation/conversationSummaryStatus"
+import type { ConversationStatusMode } from "@/pages/conversations/conversationOverviewPresentation"
 
 /**
  * 会话行长按菜单的裁决层。
@@ -40,16 +41,16 @@ export const CONVERSATION_UNARCHIVED_STATUS = "pending_review"
 /**
  * 归档成功后的提示文案。
  *
- * 归档写的是 `completed`，而「隐藏已完成会话」**默认开着** —— 归档完这条会话会立刻
- * 从列表上消失。只弹一句「已归档」，用户看到的是「我点了归档，会话不见了」，跟被删掉
- * 没区别，而且取消归档的入口（长按那一行）也跟着一起没了。
+ * 归档写的是 `completed`。当前若是「进行中」模式（排除 completed），归档后这条会话会立刻
+ * 从列表上消失。只弹一句「已归档」，用户看到的是「我点了归档，会话不见了」，跟被删掉没区别，
+ * 而且取消归档的入口（长按那一行）也跟着一起没了 —— 所以必须说清去「已归档」视图找回。
  *
- * 所以隐藏开着时必须顺带说清去哪找回来；关着的时候会话还在原地，多说这句反而是噪音。
+ * 其它模式下它仍在列表里（全部 / 已置顶 / 已归档），多说这句反而是噪音。
+ *
+ * 入参是**当前列表的状态模式**，不是某个布尔开关：模式是用户自选的视图，文案据此指路。
  */
-export function resolveArchiveSuccessToast(hideCompleted: boolean): string {
-  return hideCompleted
-    ? "已归档；可在左上角视图里显示已完成"
-    : "已归档"
+export function resolveArchiveSuccessToast(mode: ConversationStatusMode): string {
+  return mode === "running" ? "已归档；可在「已归档」视图中查看" : "已归档"
 }
 
 export type ConversationRowActionId =

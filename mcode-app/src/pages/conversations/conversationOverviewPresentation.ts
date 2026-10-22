@@ -77,7 +77,8 @@ export function resolveOverviewCardDisplayStatus(
  *
  * **只挡 `completed`。** `pending_review`（列表上的「待处理」）是轮次跑完的常态状态，
  * 藏它等于让「刚跑完等我看结果」的会话消失；`failed` / `cancelled` 可能还需要用户重试。
- * 理由详见 `hideCompletedConversationsPreference` 的模块注释。
+ * 这是「进行中」状态模式（排除 completed）复用的一处底层判据，见
+ * `conversationStatusModePreference` 与 `shouldShowCardForStatusMode`。
  *
  * 归一化与 `resolveOverviewCardDisplayStatus` 共用同一个 helper —— 状态串来自服务端且
  * 不是封闭枚举（`normalizeConversationSummaryStatus` 会原样透传未知值），两边不同源的话
@@ -118,6 +119,109 @@ export interface OverviewCardLike {
   status: string
   isActive: boolean
   isOpenTab: boolean
+  /** 置顶。页面侧快照是写死的字段，分组排序与长按菜单都读它；纯模块这里也顺带透传。 */
+  isPinned?: boolean
+}
+
+/**
+ * 会话列表左上角「视图」面板里的**状态筛选模式**。
+ *
+ * 四个档位，互斥单选：
+ *
+ * | 模式 | 含义 | 判据 |
+ * |---|---|---|
+ * | `all`（全部） | 显示每一类会话，含已归档 | 恒真 |
+ * | `running`（进行中） | 进行中的会话 | `displayStatus` 不是 `completed` |
+ * | `pinned`（已置顶） | 被置顶的会话 | `isPinned === true` |
+ * | `archived`（已归档） | 已归档的会话 | `displayStatus === "completed"` |
+ *
+ * 默认 `all`：与旧版「隐藏已完成」默认开的设计相反 —— 那是为了避免列表被归档会话淹没，
+ * 但代价是用户得先知道有这个开关才找得到归档。现在四个模式都是可见入口，默认把全部摊开
+ * 更不易让人以为数据丢了。旧开关的 `completed` 排除逻辑由 `running` 档复用。
+ */
+export type ConversationStatusMode = "all" | "running" | "pinned" | "archived"
+
+export interface ConversationStatusModeOption {
+  id: ConversationStatusMode
+  name: string
+  /** 给切换面板做副标题，说明这一档到底留哪些会话。 */
+  description: string
+}
+
+export const CONVERSATION_STATUS_MODE_OPTIONS: ConversationStatusModeOption[] = [
+  { id: "all", name: "全部", description: "显示所有会话，含已归档" },
+  { id: "running", name: "进行中", description: "进行中的会话（不含已归档）" },
+  { id: "pinned", name: "已置顶", description: "被置顶的会话" },
+  { id: "archived", name: "已归档", description: "已归档的会话" },
+]
+
+function isStatusModeValue(value: unknown): value is ConversationStatusMode {
+  return (
+    value === "all" || value === "running" || value === "pinned" || value === "archived"
+  )
+}
+
+/**
+ * 落盘值的容错解析。
+ *
+ * 存过的东西可能是字符串、`{ mode }`、也可能是别的版本写坏的对象 —— 一律回落到默认
+ * `all`，绝不因为坏字段让列表渲染成空白。和 `normalizeConversationListStyle` 同一种写法。
+ */
+export function normalizeConversationStatusMode(raw: unknown): ConversationStatusMode {
+  if (isStatusModeValue(raw)) return raw
+  if (typeof raw === "string") {
+    const trimmed = raw.trim()
+    if (isStatusModeValue(trimmed)) return trimmed
+    try {
+      const parsed = JSON.parse(trimmed)
+      if (isStatusModeValue(parsed)) return parsed
+      if (parsed && typeof parsed === "object") {
+        const record = parsed as Record<string, unknown>
+        if (isStatusModeValue(record.mode)) return record.mode
+      }
+    } catch {
+      return "all"
+    }
+    return "all"
+  }
+  if (raw && typeof raw === "object") {
+    const record = raw as Record<string, unknown>
+    if (isStatusModeValue(record.mode)) return record.mode
+  }
+  return "all"
+}
+
+/** 切换面板的选项文案：当前模式带「· 当前」后缀，与列表形态选择器同一种写法。 */
+export function buildConversationStatusModeActions(active: ConversationStatusMode) {
+  return CONVERSATION_STATUS_MODE_OPTIONS.map((item) => ({
+    ...item,
+    active: item.id === active,
+    label: item.id === active ? `${item.name} · 当前` : item.name,
+  }))
+}
+
+/**
+ * 这张卡在给定状态模式下该不该显示。
+ *
+ * `running` 档复用 `shouldHideCompletedOverviewCard(displayStatus, true)` 的「只挡 completed」
+ * 语义 —— 那个判据已经是按 displayStatus 算好的（正在跑的 completed 会话会被提升成
+ * in_progress，因此不会被它挡住），这里直接借力，不另起一套归一化。
+ */
+export function shouldShowCardForStatusMode(
+  displayStatus: string,
+  isPinned: boolean | undefined,
+  mode: ConversationStatusMode
+): boolean {
+  switch (mode) {
+    case "all":
+      return true
+    case "running":
+      return !shouldHideCompletedOverviewCard(displayStatus, true)
+    case "pinned":
+      return isPinned === true
+    case "archived":
+      return normalizeOverviewStatus(displayStatus) === "completed"
+  }
 }
 
 export interface OverviewGroupLike {
@@ -265,23 +369,22 @@ export function overviewAgentLogoPath(agentType: string): string {
 }
 
 /**
- * 空态文案里怎么指路。
+ * 分组空态文案。
  *
- * 「隐藏已完成」的唯一开关在**左上角视图面板**里（列表形态 / 显示已完成 / 选择同层），
- * 顶栏和搜索行上都没有第二个入口。旧文案写的「点上方『已完成』」指向一个早就删掉的
- * 筛选胶囊，照着找只会白点一遍。
+ * 四个模式各自给出「为什么这一组是空的」—— 用户切到「已归档」却看不到任何东西时，
+ * 一句「没有已归档的会话」比泛泛的「暂无会话」更说明问题，也顺带告诉他是当前筛选在起作用，
+ * 而不是数据丢了。
  */
-export function resolveGroupEmptyText(hideCompleted: boolean): string {
-  return hideCompleted
-    ? "没有进行中的会话；已完成的已隐藏，可在左上角视图里打开「显示已完成会话」"
-    : "暂无会话"
+export function resolveGroupEmptyText(mode: ConversationStatusMode): string {
+  if (mode === "archived") return "没有已归档的会话"
+  if (mode === "pinned") return "没有置顶的会话"
+  if (mode === "running") return "没有进行中的会话"
+  return "暂无会话"
 }
 
-export function resolveOverviewEmptyText(keyword: string, hideCompleted: boolean): string {
+export function resolveOverviewEmptyText(keyword: string, mode: ConversationStatusMode): string {
   if (keyword.trim()) return "没有匹配的会话"
-  return hideCompleted
-    ? "已完成的会话已隐藏，可在左上角视图里打开「显示已完成会话」"
-    : "暂无分组会话"
+  return resolveGroupEmptyText(mode)
 }
 
 /**
@@ -334,7 +437,7 @@ export function buildOverviewDisplayModel<G extends OverviewGroupLike>(input: {
   ) => string | undefined | null
   instanceKeyByGroupKey: Record<string, string>
   keyword: string
-  hideCompleted: boolean
+  statusMode: ConversationStatusMode
   livePreviewEnabled: boolean
 }): OverviewDisplayModel<G> {
   const keyword = input.keyword.trim().toLowerCase()
@@ -357,8 +460,9 @@ export function buildOverviewDisplayModel<G extends OverviewGroupLike>(input: {
       )
 
       // 过滤必须在 displayStatus 算完之后：正在跑的 completed 会话此时已被提升成
-      // in_progress，不会被藏。
-      if (shouldHideCompletedOverviewCard(displayStatus, input.hideCompleted)) continue
+      // in_progress，不会被 `running` 档的「只挡 completed」藏掉。置顶档读的是快照的
+      // `isPinned`，与 displayStatus 同源（都在上面同一次遍历里取好）。
+      if (!shouldShowCardForStatusMode(displayStatus, card.isPinned, input.statusMode)) continue
       if (!overviewCardMatchesKeyword(card, keyword)) continue
 
       visible.push({

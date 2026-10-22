@@ -109,17 +109,19 @@ describe("conversation list navbar header contract", () => {
     expect(source).not.toContain("<up-select")
   })
 
-  // 视图面板里每一项都写「点下去会发生什么」，不写当前状态。
+  // 视图面板里每一项都写「点下去会发生什么」，不写当前状态（当前态由「· 当前」后缀标在
+  // 选项文案上）。状态筛选模式（全部 / 进行中 / 已置顶 / 已归档）放在最前，列表形态其次，
+  // 选择入口最后。
   it("labels the view-sheet items by the action they perform", () => {
     const source = read(PAGE)
 
-    expect(source).toContain('hideCompletedConversations.value ? "显示已完成会话" : "隐藏已完成会话"')
-    expect(source).toContain('selectionMode.value ? "退出选择" : "选择会话"')
-    // 没有可选中卡片时不出「选择会话」；但已在选择模式里必须保留，否则筛选把卡全藏掉后
-    // 用户没有退出选择的入口。
-    expect(source).toContain("if (showSelectionEntry.value || selectionMode.value) {")
-    // 列表形态由同一张面板切换，文案来自共享选项构造器。
+    // 状态筛选四模式由共享选项构造器产出（含「· 当前」标记），列表形态由另一个构造器产出。
+    expect(source).toContain("buildConversationStatusModeActions(statusMode.value)")
     expect(source).toContain("buildConversationListStyleActions(listStyle.value)")
+    // 选择入口文案仍是动作式，且只在有可选中卡片或已在选择模式时出现（后者保证筛选把
+    // 卡全藏掉后用户仍有退出出口）。
+    expect(source).toContain('selectionMode.value ? "退出选择" : "选择会话"')
+    expect(source).toContain("if (showSelectionEntry.value || selectionMode.value) {")
   })
 
   // 中间槽只有一种形态：连接胶囊。历史模式取消后不再有「标题态」。

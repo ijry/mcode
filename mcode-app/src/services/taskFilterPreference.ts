@@ -1,7 +1,7 @@
 /**
  * 任务列表页筛选偏好的持久化。
  *
- * 与 `services/conversation/hideCompletedConversationsPreference.ts` 同一套写法：
+ * 与 `services/conversation/conversationStatusModePreference.ts` 同一套写法：
  * 一个存储键、读时归一化、写时只存必要字段。放在 services 层是因为列表页与
  * （将来的）项目详情任务面板都要读同一份偏好，不能各存一份。
  */

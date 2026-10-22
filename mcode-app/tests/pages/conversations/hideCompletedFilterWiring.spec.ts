@@ -6,7 +6,7 @@ function read(relativePath: string) {
 }
 
 /**
- * 「隐藏已完成会话」的接线契约。
+ * 状态筛选模式的接线契约。
  *
  * **历史**：可见卡片曾经在页面里有两处独立派生（渲染用的 `filteredConnectionGroups` 与喂
  * 订阅/批量选择的 `getDisplayCandidateCards()`），各自算一份 `displayStatus`、各自做一遍
@@ -19,7 +19,7 @@ function read(relativePath: string) {
  * `conversationOverviewPresentation.spec.ts`；这里只保留**防退化**的结构断言 ——
  * 页面不得再自己算一遍派生，以及响应式必须挡在纯模块外面。
  */
-describe("hide-completed filter wiring contract", () => {
+describe("status-mode filter wiring contract", () => {
   // 原先这里有两条断言，用「`shouldHideCompletedOverviewCard` 至少出现 3 次」和「两个派生
   // 函数体里各出现一次」来防漏改。收口成 `buildOverviewDisplayModel` 之后那个前提消失了
   // —— 两个消费者读的是同一次计算的两个字段，结构上不可能分叉。
@@ -55,15 +55,15 @@ describe("hide-completed filter wiring contract", () => {
     // 列表页是 tabBar 页面，onMounted 只跑一次。
     const source = read("../../../src/pages/conversations/index.vue")
 
-    const occurrences = source.split("loadHideCompletedPreference()").length - 1
+    const occurrences = source.split("loadStatusModePreference()").length - 1
     expect(occurrences).toBeGreaterThanOrEqual(3) // 定义 + onMounted + onShow
   })
 
-  it("re-reconciles live preview subscriptions when the toggle flips", () => {
-    // 可见卡集合变了就要重新对账订阅，否则刚被取消隐藏的会话预览文案一直空着。
+  it("re-reconciles live preview subscriptions when the mode flips", () => {
+    // 可见卡集合变了就要重新对账订阅，否则刚被筛进/筛出视野的会话预览文案一直空着或残留。
     const source = read("../../../src/pages/conversations/index.vue")
 
-    const fnStart = source.indexOf("function toggleHideCompletedConversations()")
+    const fnStart = source.indexOf("function applyStatusMode(")
     expect(fnStart).toBeGreaterThan(-1)
     expect(source.slice(fnStart, fnStart + 600)).toContain("scheduleLivePreviewReconcile()")
   })

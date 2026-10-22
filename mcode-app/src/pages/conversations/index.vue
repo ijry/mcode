@@ -216,6 +216,7 @@ import CreateConversationSheet from "@/pages/conversations/components/CreateConv
 import {
   buildBulkSelectionItem,
   buildBulkSelectionKey,
+  buildConversationStatusModeActions,
   buildOverviewDisplayModel,
   formatOverviewAgentLabel,
   formatOverviewRelativeTime,
@@ -228,6 +229,7 @@ import {
   resolveGroupEmptyText,
   resolveOverviewEmptyText,
   type BulkSelectionItem,
+  type ConversationStatusMode,
   type OverviewCandidateCard,
 } from "@/pages/conversations/conversationOverviewPresentation"
 import { selectConversationLivePreviewIds } from "@/pages/conversations/conversationLivePreview"
@@ -264,9 +266,9 @@ import {
   readConversationListLiveStreamEnabled,
 } from "@/services/conversation/conversationListLiveStreamPreference"
 import {
-  readHideCompletedConversations,
-  writeHideCompletedConversations,
-} from "@/services/conversation/hideCompletedConversationsPreference"
+  readConversationStatusMode,
+  writeConversationStatusMode,
+} from "@/services/conversation/conversationStatusModePreference"
 import {
   ensureGlobalConversationSync,
   subscribeConversationOverviewInvalidation,
@@ -396,9 +398,9 @@ const lastBridgeStateMap = new Map<string, RealtimeBridgeHealth["state"]>()
 const activeSessionsRefreshTimerMap = new Map<string, ReturnType<typeof setTimeout>>()
 const ACTIVE_SESSIONS_REFRESH_DEBOUNCE_MS = 400
 const livePreviewEnabled = ref(false)
-// 「隐藏已完成会话」开关（默认开，见 hideCompletedConversationsPreference）。
-// 在 onShow 里从存储读取，与 livePreviewEnabled 同一套路。
-const hideCompletedConversations = ref(true)
+// 左上角「视图」面板里的状态筛选模式（全部 / 进行中 / 已置顶 / 已归档，默认全部，
+// 见 conversationStatusModePreference）。在 onShow 里从存储读取，与 livePreviewEnabled 同一套路。
+const statusMode = ref<ConversationStatusMode>("all")
 const livePreviewPageVisible = ref(false)
 const livePreviewOwnedConversationIds = new Set<number>()
 const livePreviewTransferredConversationIds = new Set<number>()
@@ -496,7 +498,7 @@ const overviewDisplayModel = computed(() => {
       getAwaitingReply(instanceKey, conversationId)?.kind,
     instanceKeyByGroupKey: Object.fromEntries(connectionInstanceKeyMap),
     keyword: appliedSearchKeyword.value,
-    hideCompleted: hideCompletedConversations.value,
+    statusMode: statusMode.value,
     livePreviewEnabled: livePreviewEnabled.value,
   })
 })
@@ -535,9 +537,9 @@ const folderGroups = computed(() => {
 /** 批量选择集的 key 列表，传给行组件判断勾选态。 */
 const selectedConversationKeys = computed(() => Object.keys(selectedConversationMap.value))
 
-const groupEmptyText = computed(() => resolveGroupEmptyText(hideCompletedConversations.value))
+const groupEmptyText = computed(() => resolveGroupEmptyText(statusMode.value))
 const overviewEmptyText = computed(() =>
-  resolveOverviewEmptyText(appliedSearchKeyword.value, hideCompletedConversations.value)
+  resolveOverviewEmptyText(appliedSearchKeyword.value, statusMode.value)
 )
 
 const showSelectionEntry = computed(() =>
@@ -631,7 +633,7 @@ const hasActiveConnection = computed(() => {
 
 onMounted(() => {
   loadConversationLivePreviewPreference()
-  loadHideCompletedPreference()
+  loadStatusModePreference()
   restoreListStylePreference()
   scheduleLivePreviewReconcile()
   if (!disposeOverviewInvalidation) {
@@ -688,7 +690,7 @@ onShow(() => {
   livePreviewPageVisible.value = true
   livePreviewTransferredConversationIds.clear()
   loadConversationLivePreviewPreference()
-  loadHideCompletedPreference()
+  loadStatusModePreference()
   restoreListStylePreference()
   syncConversationListNativeStatusBar()
   // 追上页面未挂载期间常驻服务 ingest 的待回复状态，否则第一屏的 chip 要等下一次推送才出现。
@@ -757,16 +759,14 @@ function syncConversationListNativeStatusBar() {
   } catch {}
 }
 
-function loadHideCompletedPreference() {
-  hideCompletedConversations.value = readHideCompletedConversations()
+function loadStatusModePreference() {
+  statusMode.value = readConversationStatusMode()
 }
 
-function toggleHideCompletedConversations() {
-  hideCompletedConversations.value = writeHideCompletedConversations(
-    !hideCompletedConversations.value
-  )
-  // 隐藏状态变了 → 可见卡集合变了 → 实时预览订阅要按新集合重新对账。不调这一步，
-  // 刚被取消隐藏的会话不会自动开始订阅实时流（它的预览文案会一直空着）。
+function applyStatusMode(mode: ConversationStatusMode) {
+  statusMode.value = writeConversationStatusMode(mode)
+  // 可见卡集合变了 → 实时预览订阅要按新集合重新对账。不调这一步，
+  // 刚被筛进/筛出视野的会话不会正确订阅或退订实时流（预览文案会一直空着或一直残留）。
   scheduleLivePreviewReconcile()
 }
 
@@ -785,24 +785,35 @@ function toggleSearchBar() {
 }
 
 /**
- * 左上角「视图」按钮：一个面板管三件事 —— 列表展示形态、是否隐藏已完成、是否进入选择。
+ * 左上角「视图」按钮：一个面板管三件事 —— 状态筛选模式、列表展示形态、是否进入选择。
  *
- * 合并成一张面板而不是三个入口，是因为它们都是「你看到的列表长什么样」这一层的开关；
- * 拆开会让顶栏需要三个按钮，与设计稿「左上角一个筛选」直接冲突。
+ * 合并成一张面板而不是多个入口，是因为它们都是「你看到的列表长什么样」这一层的开关；
+ * 拆开会让顶栏需要多个按钮，与设计稿「左上角一个筛选」直接冲突。
+ *
+ * 状态模式（全部 / 进行中 / 已置顶 / 已归档）放在最前：它改变的是「哪些会话存在」，
+ * 比「Logo 放哪儿」这种纯排版开关更常切。当前模式在文案上标「· 当前」，让面板自身
+ * 兼任状态指示（顶栏那个图标是纯入口，不显示当前选了哪个）。
  */
 function openViewFilterSheet() {
-  const styleActions = buildConversationListStyleActions(listStyle.value)
-  const actions: { label: string; run: () => void }[] = styleActions.map((item) => ({
-    label: item.label,
-    run: () => applyListStyle(item.id),
-  }))
+  const actions: { label: string; run: () => void }[] = []
 
-  actions.push({
-    label: hideCompletedConversations.value ? "显示已完成会话" : "隐藏已完成会话",
-    run: toggleHideCompletedConversations,
-  })
+  // 一、状态筛选模式。
+  for (const mode of buildConversationStatusModeActions(statusMode.value)) {
+    actions.push({
+      label: mode.label,
+      run: () => applyStatusMode(mode.id),
+    })
+  }
 
-  // 已经在选择模式里就无条件保留退出项，否则筛选把卡全藏掉后没有出口。
+  // 二、列表展示形态（Logo 放哪儿）。
+  for (const item of buildConversationListStyleActions(listStyle.value)) {
+    actions.push({
+      label: item.label,
+      run: () => applyListStyle(item.id),
+    })
+  }
+
+  // 三、选择入口。已经在选择模式里就无条件保留退出项，否则筛选把卡全藏掉后没有出口。
   if (showSelectionEntry.value || selectionMode.value) {
     actions.push({
       label: selectionMode.value ? "退出选择" : "选择会话",
@@ -1022,10 +1033,11 @@ async function toggleRowConversationArchived(
       status: archived ? CONVERSATION_ARCHIVED_STATUS : CONVERSATION_UNARCHIVED_STATUS,
     })
     if (archived) {
-      // 归档写的是 completed，而「隐藏已完成」默认开着 —— 这条会话刷新后就不在列表里了。
-      // 只弹「已归档」跟被删掉没区别，取消归档的入口也一起消失，必须说清去哪找回来。
+      // 归档写的是 completed。当前若是「进行中」模式（排除 completed），归档后这条会话会
+      // 立刻从列表消失；只弹「已归档」跟被删掉没区别，必须说清去「已归档」视图找回。
+      // 其它模式（全部/已置顶/已归档）下它仍在列表里，多说这句反而是噪音。
       uni.showToast({
-        title: resolveArchiveSuccessToast(hideCompletedConversations.value),
+        title: resolveArchiveSuccessToast(statusMode.value),
         icon: "none",
         duration: 2500,
       })

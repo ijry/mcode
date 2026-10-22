@@ -140,8 +140,9 @@ describe("conversation row long-press action sheet contract", () => {
       "\n  } catch (error) {"
     )
 
-    // 提示必须看「隐藏已完成」的当前值，写死文案的话开关关着时也会指路，是噪音。
-    expect(block).toContain("resolveArchiveSuccessToast(hideCompletedConversations.value)")
+    // 提示必须看「当前状态模式」：只有「进行中」模式（排除 completed）下归档会让会话消失，
+    // 写死文案的话其它模式下也会多此一举地指路，是噪音。
+    expect(block).toContain("resolveArchiveSuccessToast(statusMode.value)")
     // 指路的文案比「已归档」长，icon: "success" 那行放不下，用 none 并给足停留时间。
     expect(block).toContain('icon: "none"')
     expect(block).toContain("duration: 2500")
