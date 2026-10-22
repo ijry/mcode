@@ -178,8 +178,21 @@ describe("conversation row long-press action sheet contract", () => {
     )
     const page = read(PAGE)
 
-    expect(snapshot).toContain("isPinned: Boolean(conversation?.is_pinned)")
-    expect(snapshot).toContain("isPinned: Boolean(conversation.is_pinned)")
+    /**
+     * 置顶态**只能**经 `resolveConversationPinned` 读。
+     *
+     * 服务端字段是 `pinned_at` 时间戳（网关出来是 camelCase `pinnedAt`），不是布尔
+     * `is_pinned`。任何一处直接写 `Boolean(conversation.is_pinned)` 都会让远程置顶
+     * 读不回来 —— 手机上置顶完，下次拉远程摘要落本地又被抹平。
+     */
+    expect(snapshot).toContain("export function resolveConversationPinned(")
+    expect(snapshot).toContain("pinned_at?: string | null")
+    expect(snapshot).toContain("pinnedAt?: string | null")
+    // 三处构造（打开中的标签 / 普通卡 / 落本地的 summary 映射）都必须走它。
+    const uses = snapshot.split("isPinned: resolveConversationPinned(conversation)").length - 1
+    expect(uses).toBe(3)
+    expect(snapshot).not.toContain("isPinned: Boolean(conversation.is_pinned)")
+    expect(snapshot).not.toContain("isPinned: Boolean(conversation?.is_pinned)")
     // 展示模型是 spread 原卡片，置顶标记不会被重建掉。
     expect(page).toContain("isPinned: boolean")
   })

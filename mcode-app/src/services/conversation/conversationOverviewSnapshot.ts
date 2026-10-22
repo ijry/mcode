@@ -16,12 +16,37 @@ export interface ConversationOverviewConversation {
   external_id?: string
   externalId?: string
   /**
-   * 是否置顶。
+   * 置顶时间。
    *
-   * 服务端用 snake_case（`is_pinned`，与标签的同名字段一致），本地 DB 行是
-   * `isPinned` —— 两边各自归口，进快照时统一成卡上的 `isPinned`。
+   * 服务端（`codeg` 的 `conversation` 表与 `DbConversationSummary`）用的是
+   * **`pinned_at`：一个时间戳，不是布尔** —— 未置顶时为 `null`。走 HTTP 网关时按
+   * camelCase 出来，是 `pinnedAt`。本地 DB 行与「打开的标签」用的是布尔
+   * `is_pinned`（两套各自独立：标签置顶和会话置顶本来就是两个字段）。
+   *
+   * 三种形态都得认，统一走 `resolveConversationPinned`。
    */
+  pinned_at?: string | null
+  pinnedAt?: string | null
   is_pinned?: boolean
+}
+
+/**
+ * 置顶态的**唯一**读法。
+ *
+ * 只写 `Boolean(conversation.is_pinned)` 的话，远程返回的 `pinnedAt` 从头到尾没被看
+ * 过一眼 —— 置顶在手机上做了，下次刷新（远程摘要落本地）又被抹成未置顶。
+ */
+export function resolveConversationPinned(
+  conversation?: Pick<
+    ConversationOverviewConversation,
+    "pinned_at" | "pinnedAt" | "is_pinned"
+  > | null
+): boolean {
+  if (!conversation) return false
+  // 时间戳优先：服务端权威字段。空串也当未置顶（`null` 过一遍 JSON 可能变成 ""）。
+  if (conversation.pinned_at) return true
+  if (conversation.pinnedAt) return true
+  return Boolean(conversation.is_pinned)
 }
 
 export interface ConversationOverviewProject {
@@ -131,7 +156,7 @@ export function buildConnectionConversationSnapshot(
         activityAt: activity.at,
         status: normalizeConversationStatus(conversation?.status),
         isActive: Boolean(tab.is_active),
-        isPinned: Boolean(conversation?.is_pinned),
+        isPinned: resolveConversationPinned(conversation),
         isOpenTab: true,
       } satisfies ConversationOverviewCard
     })
@@ -167,7 +192,7 @@ export function buildConnectionConversationSnapshot(
         activityAt: activity.at,
         status: normalizeConversationStatus(conversation.status),
         isActive: false,
-        isPinned: Boolean(conversation.is_pinned),
+        isPinned: resolveConversationPinned(conversation),
         isOpenTab: false,
       } satisfies ConversationOverviewCard
     })
@@ -259,7 +284,8 @@ export function mapConversationToSummaryRecord(
     lastMessageAt,
     unreadCount: 0,
     // 曾经写死 false：远程落库时会把已经置顶的会话抹平，再刷新又跳回置顶态。
-    isPinned: Boolean(conversation.is_pinned),
+    // 现在读服务端权威字段 `pinned_at`/`pinnedAt`（布尔 `is_pinned` 只作本地兜底）。
+    isPinned: resolveConversationPinned(conversation),
     deletedAt: null,
     updatedAt,
   }

@@ -1,4 +1,8 @@
-import { buildConnectionConversationSnapshot } from "@/services/conversation/conversationOverviewSnapshot"
+import {
+  buildConnectionConversationSnapshot,
+  mapConversationToSummaryRecord,
+  resolveConversationPinned,
+} from "@/services/conversation/conversationOverviewSnapshot"
 
 const folder = {
   id: 7,
@@ -237,6 +241,73 @@ describe("conversationOverviewSnapshot", () => {
       expect(build([tabNine, tabFour]).cards.map((card) => card.title)).toEqual(expected)
       // 输入顺序反过来结果必须一样 —— 否则列表会在每次刷新时抖动。
       expect(build([tabFour, tabNine]).cards.map((card) => card.title)).toEqual(expected)
+    })
+  })
+
+  /**
+   * 置顶态的读法：服务端字段是 `pinned_at` 时间戳（走网关出来是 camelCase `pinnedAt`），
+   * **不是**布尔 `is_pinned`。
+   *
+   * 这组用例锁的是「三种形态都认得出来」。只认 `is_pinned` 的话，手机上置顶完、下次
+   * 拉远程摘要落本地时会被抹成未置顶 —— 用户看到的是「点了置顶，刷一下就没了」。
+   */
+  describe("pinned flag", () => {
+    const now = Date.parse("2026-06-09T12:00:00+08:00")
+
+    // 服务端权威字段：snake_case 时间戳。
+    it("reads the server-side pinned_at timestamp", () => {
+      expect(
+        resolveConversationPinned({ pinned_at: "2026-06-09T10:00:00+08:00" })
+      ).toBe(true)
+      expect(resolveConversationPinned({ pinned_at: null })).toBe(false)
+      // 空串是 null 过一遍某些序列化后的样子，不能当置顶。
+      expect(resolveConversationPinned({ pinned_at: "" })).toBe(false)
+    })
+
+    // 走 HTTP 网关时按 camelCase 出来。
+    it("reads the camelCase pinnedAt the gateway returns", () => {
+      expect(resolveConversationPinned({ pinnedAt: "2026-06-09T10:00:00+08:00" })).toBe(true)
+      // 两个都在时以服务端权威字段为准，结果一致即可。
+      expect(
+        resolveConversationPinned({ pinned_at: "2026-06-09T10:00:00+08:00", pinnedAt: null })
+      ).toBe(true)
+    })
+
+    // 本地 DB 行与标签用的是布尔，仍然要认。
+    it("still reads the local boolean is_pinned", () => {
+      expect(resolveConversationPinned({ is_pinned: true })).toBe(true)
+      expect(resolveConversationPinned({ is_pinned: false })).toBe(false)
+      expect(resolveConversationPinned({})).toBe(false)
+      expect(resolveConversationPinned(undefined)).toBe(false)
+    })
+
+    // 端到端：远程那种只有 pinnedAt 的会话，进快照后卡上必须是置顶。
+    it("carries a remote-only pinnedAt onto the card", () => {
+      const snapshot = buildSnapshot({
+        now,
+        conversations: [
+          conversation({ id: 601, title: "服务端置顶的会话", pinnedAt: "2026-06-09T10:00:00+08:00" }),
+          conversation({ id: 602, title: "未置顶的会话", pinnedAt: null }),
+        ],
+      })
+      const pinned = snapshot.cards.filter((card) => card.isPinned).map((card) => card.title)
+      expect(pinned).toEqual(["服务端置顶的会话"])
+    })
+
+    /**
+     * 落本地：曾经写死 false，远程摘要一落库就把置顶抹平。
+     * 这条锁的是「映射函数必须把服务端字段带下去」。
+     */
+    it("keeps pinned_at when mapping a remote conversation into a summary record", () => {
+      const record = mapConversationToSummaryRecord(
+        "inst-1",
+        conversation({ id: 701, pinnedAt: "2026-06-09T10:00:00+08:00" }) as any,
+        now
+      )
+      expect(record.isPinned).toBe(true)
+      expect(
+        mapConversationToSummaryRecord("inst-1", conversation({ id: 702 }) as any, now).isPinned
+      ).toBe(false)
     })
   })
 })

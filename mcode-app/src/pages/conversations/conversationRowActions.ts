@@ -14,8 +14,12 @@ import {
 /**
  * 置顶要走的网关命令名。
  *
- * 服务端目前的命令集里还没有会话置顶（`conversations` 表有 `is_pinned` 列，客户端
- * 却没有写过它），命令名按既有命名习惯定为这个。**服务端若不是这个名字，只改这里。**
+ * 服务端（`codeg`，`web/handlers/conversations.rs`）确实有这条：
+ * `update_conversation_pinned`，payload `{ conversationId, pinned }`，写的是
+ * `conversation.pinned_at`（置顶时间，取消置顶写回 null）。
+ *
+ * 注意**它不是布尔字段**：会话的置顶是时间戳，标签的置顶才是 `is_pinned`。读回置顶
+ * 态必须走 `resolveConversationPinned`，只认 `is_pinned` 会永远读到 false。
  */
 export const CONVERSATION_PIN_COMMAND = "update_conversation_pinned"
 
