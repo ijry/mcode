@@ -166,6 +166,7 @@
 import { computed, getCurrentInstance, onMounted, reactive, ref, watch } from "vue"
 import { onHide, onPullDownRefresh, onShow, onUnload } from "@dcloudio/uni-app"
 import { acpApi } from "@/api/acp"
+import McodeTabBar from "@/components/McodeTabBar.vue"
 import TaskPageHeader from "./components/TaskPageHeader.vue"
 import TaskCard from "./components/TaskCard.vue"
 import TaskEditorSheet from "./components/TaskEditorSheet.vue"

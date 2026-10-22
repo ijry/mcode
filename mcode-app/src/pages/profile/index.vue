@@ -161,6 +161,7 @@ import { usePetStore } from "@/stores/pet"
 import { requestPetSetup } from "@/services/petSetupSignal"
 import { usePetEngine } from "@/services/petEngine"
 import PetPanel from "@/components/pet/PetPanel.vue"
+import McodeTabBar from "@/components/McodeTabBar.vue"
 import { useAccountStore } from "@/stores/account"
 import {
   getAchievementEntrySummary,

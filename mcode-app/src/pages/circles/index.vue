@@ -286,6 +286,7 @@ import { computed, onUnmounted, ref } from "vue"
 import { onLoad, onPullDownRefresh, onReachBottom, onShow } from "@dcloudio/uni-app"
 import { useAccountStore } from "@/stores/account"
 import { buildCircleShareText, resolveCirclePostMenuItems } from "./postActions"
+import McodeTabBar from "@/components/McodeTabBar.vue"
 
 import {
   fetchCircleComments,
