@@ -1781,9 +1781,9 @@ function persistConnectedMap() {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
-  /* 底栏是 fixed 的：内容区底部要留出「12 + 62 + 21」再加安全区，
+  /* 底栏是 fixed 的：内容区底部要留出「12 + 62 + 14」再加安全区，
      否则最后一行「先完成部署」会被胶囊压住。 */
-  padding-bottom: calc(95px + env(safe-area-inset-bottom));
+  padding-bottom: calc(88px + env(safe-area-inset-bottom));
 }
 
 .connections-statusbar {

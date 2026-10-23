@@ -439,13 +439,13 @@ function logout() {
 
 /*
  * 悬浮胶囊底栏（`McodeTabBar`）是 `position: fixed`，原生 tabBar 已被隐藏 ——
- * 所以页面必须自己留出「12 + 62 + 21」再加安全区，否则最后一段内容被胶囊压住。
+ * 所以页面必须自己留出「12 + 62 + 14」再加安全区，否则最后一段内容被胶囊压住。
  *
  * 用显式 class 而不是 `.page:has(.mc-tabbar)`：`:has()` 要 iOS 15.4+，
  * 而这个 app 的 iOS 最低版本比它低，老机器上会整条规则失效（不是降级，是完全没有留白）。
  */
 .page.page--with-tabbar {
-  padding-bottom: calc(95px + env(safe-area-inset-bottom)) !important;
+  padding-bottom: calc(88px + env(safe-area-inset-bottom)) !important;
 }
 
 .page {

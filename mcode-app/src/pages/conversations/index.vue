@@ -2173,13 +2173,13 @@ function formatTime(time?: string): string {
 
 /*
  * 悬浮胶囊底栏（`McodeTabBar`）是 `position: fixed`，原生 tabBar 已被隐藏 ——
- * 所以页面必须自己留出「12 + 62 + 21」再加安全区，否则最后一段内容被胶囊压住。
+ * 所以页面必须自己留出「12 + 62 + 14」再加安全区，否则最后一段内容被胶囊压住。
  *
  * 用显式 class 而不是 `.page:has(.mc-tabbar)`：`:has()` 要 iOS 15.4+，
  * 而这个 app 的 iOS 最低版本比它低，老机器上会整条规则失效（不是降级，是完全没有留白）。
  */
 .page.page--with-tabbar {
-  padding-bottom: calc(95px + env(safe-area-inset-bottom)) !important;
+  padding-bottom: calc(88px + env(safe-area-inset-bottom)) !important;
 }
 
 /* 与子组件共用的规则（弹层外壳/头部、表单行、agent logo 修饰符、安全区占位）。
@@ -2315,11 +2315,11 @@ function formatTime(time?: string): string {
   left: 24rpx;
   right: 24rpx;
   /*
-   * 悬浮胶囊底栏（`McodeTabBar`，高 62px + 上下内距 12/21）是 fixed 且 z-index 20。
+   * 悬浮胶囊底栏（`McodeTabBar`，高 62px + 上下内距 12/14）是 fixed 且 z-index 20。
    * 批量条原先 `bottom: 24rpx` —— 正好骑在底栏上，两枚胶囊叠成一团，看起来就是「乱了」。
-   * 抬到胶囊之上（95px 与 `.page--with-tabbar` 的留白同一个数），选择时才两层都读得清。
+   * 抬到胶囊之上（88px 与 `.page--with-tabbar` 的留白同一个数），选择时才两层都读得清。
    */
-  bottom: calc(103px + env(safe-area-inset-bottom));
+  bottom: calc(96px + env(safe-area-inset-bottom));
   z-index: 30;
   padding: 18rpx 18rpx;
   border-radius: 28rpx;

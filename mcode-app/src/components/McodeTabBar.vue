@@ -139,10 +139,15 @@ function handleSwitch(item: TabItem) {
 <style scoped lang="scss">
 /*
  * 几何全部来自设计稿「底部导航」节点（393 宽基准）：
- *   外层 padding 0 21 / 12 / 21，导航条 radius 36 + 1px rgba(0,0,0,.06) 描边 + padding 4，
+ *   外层 padding 0 21 / 12 / 14（下内距 14 是设计稿 21 收窄后的值，贴底一些），
+ *   导航条 radius 36 + 1px rgba(0,0,0,.06) 描边 + padding 4，
  *   单 item 高 54（= 62 - 4*2），激活项 radius 30。
  * 单位用 px 而不是 rpx：底栏在所有机型上都应保持同样的物理尺寸密度，rpx 会在窄屏上把
  * 10px 的文字压到不可读。
+ *
+ * **下内距与页面留白是一对**：胶囊占据的高度 = 12 + 62 + 下内距，改动这里必须同步改
+ * 5 个 tab 页的「页面底部留白」（见 `mcodeTabbarWiring.spec.ts` 的留白断言），否则
+ * 胶囊会盖住最后一行内容。
  */
 .mc-tabbar {
   position: fixed;
@@ -150,7 +155,7 @@ function handleSwitch(item: TabItem) {
   right: 0;
   bottom: 0;
   z-index: 20;
-  padding: 12px 21px calc(21px + env(safe-area-inset-bottom));
+  padding: 12px 21px calc(14px + env(safe-area-inset-bottom));
   pointer-events: none;
 
   &--hidden {

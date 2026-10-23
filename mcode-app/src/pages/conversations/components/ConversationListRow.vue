@@ -30,7 +30,7 @@
       行首 Logo（仅「Logo 版」）。
       22×22 与设计稿节点 9:1549 一致；圆角给 7 让它在两行文字左侧不至于像一枚生硬的方块。
     -->
-    <view v-if="layout.showLeadingLogo" :class="['conv-row__logo', logoClass, hasLogoAsset && 'conv-row__logo--real']">
+    <view v-if="layout.showLeadingLogo" :class="['conv-row__logo', logoClass]">
       <image v-if="hasLogoAsset" class="conv-row__logo-img" :src="logoPath" mode="aspectFit" />
       <text v-else class="conv-row__logo-text">{{ logoText }}</text>
     </view>
@@ -55,7 +55,7 @@
         <!-- 名称前缀 Logo（仅「名称前缀 Logo 版」）：14×14，与智能体名同基线。 -->
         <view
           v-if="layout.showInlineLogo"
-          :class="['conv-row__inline-logo', logoClass, hasLogoAsset && 'conv-row__inline-logo--real']"
+          :class="['conv-row__inline-logo', logoClass]"
         >
           <image v-if="hasLogoAsset" class="conv-row__inline-logo-img" :src="logoPath" mode="aspectFit" />
           <text v-else class="conv-row__inline-logo-text">{{ logoText }}</text>
@@ -166,7 +166,8 @@ const logoPath = computed(() => overviewAgentLogoPath(props.agentType || ""))
 const hasLogoAsset = computed(() => Boolean(logoPath.value))
 const logoClass = computed(() =>
   // 复用共享的类型归一化结果，但换成行组件自己的命名空间：共享的 `.agent-logo--*`
-  // 是「有 SVG 资源时」的白底描边，行里的兜底是**彩色渐变方块**，两套规则不能同名。
+  // 是「有 SVG 资源时」的白底描边（概览卡/新建弹层用），行里则是无底色，
+  // 两套规则不能同名 —— 同名会让行内 logo 被那一层白底重新盖回来。
   overviewAgentLogoClass(props.agentType || "").replace("agent-logo--", "conv-row__logo--")
 )
 const logoText = computed(() => overviewAgentLogoText(props.agentType || ""))
@@ -235,21 +236,25 @@ const pinIconColor = "var(--up-primary, #2979ff)"
   background: var(--up-primary, #2979ff);
 }
 
+/*
+ * Logo 不要背景色：SVG（或兜底字母）直接压在卡片上。
+ *
+ * 之前这里挂着两层底色：基类一层灰，`.conv-row__logo--<type>` 一层品牌渐变。后者是
+ * **两个 class** 的选择器，权重盖过只写一个 class 的 `--real { background: transparent }`
+ * 覆盖 —— 于是连有 SVG 资源的 agent 也照样顶着一块彩色方块，那句透明覆盖一直是空转的。
+ * 所以去底色必须连那组渐变一起删，只改基类没用。
+ *
+ * 去掉方块后，兜底字母（没有 SVG 资源时）不能再是白色：白字压白卡等于没有。
+ * 改用内容色，与同一行的标题/时间一个色系，也不抢主文字。
+ */
 .conv-row__logo {
   width: 22px;
   height: 22px;
   flex-shrink: 0;
   margin-top: 1px;
-  border-radius: 7px;
-  overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--up-hover-bg-color, #f3f4f6);
-}
-
-.conv-row__logo--real {
-  background: transparent;
 }
 
 .conv-row__logo-img {
@@ -261,7 +266,7 @@ const pinIconColor = "var(--up-primary, #2979ff)"
   font-size: 9px;
   font-weight: 700;
   line-height: 1;
-  color: #ffffff;
+  color: var(--up-content-color, #48484a);
 }
 
 .conv-row__info {
@@ -296,20 +301,14 @@ const pinIconColor = "var(--up-primary, #2979ff)"
   min-width: 0;
 }
 
+/* 行内小号 logo（14px）同样不要底色，理由同上。 */
 .conv-row__inline-logo {
   width: 14px;
   height: 14px;
   flex-shrink: 0;
-  border-radius: 4px;
-  overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--up-hover-bg-color, #f3f4f6);
-}
-
-.conv-row__inline-logo--real {
-  background: transparent;
 }
 
 .conv-row__inline-logo-img {
@@ -321,7 +320,7 @@ const pinIconColor = "var(--up-primary, #2979ff)"
   font-size: 7px;
   font-weight: 700;
   line-height: 1;
-  color: #ffffff;
+  color: var(--up-content-color, #48484a);
 }
 
 .conv-row__agent {
@@ -388,39 +387,4 @@ const pinIconColor = "var(--up-primary, #2979ff)"
   min-width: 0;
 }
 
-/* ── 智能体 Logo 退化配色（没有 svg 资源时用两字母方块） ── */
-.conv-row__logo.conv-row__logo--claude_code,
-.conv-row__inline-logo.conv-row__logo--claude_code {
-  background: linear-gradient(135deg, #d97757, #b8532f);
-}
-
-.conv-row__logo.conv-row__logo--codex,
-.conv-row__inline-logo.conv-row__logo--codex {
-  background: linear-gradient(135deg, #10a37f, #0b7a5e);
-}
-
-.conv-row__logo.conv-row__logo--gemini,
-.conv-row__inline-logo.conv-row__logo--gemini {
-  background: linear-gradient(135deg, #4285f4, #2b6cd4);
-}
-
-.conv-row__logo.conv-row__logo--cline,
-.conv-row__inline-logo.conv-row__logo--cline {
-  background: linear-gradient(135deg, #6366f1, #4338ca);
-}
-
-.conv-row__logo.conv-row__logo--open_code,
-.conv-row__inline-logo.conv-row__logo--open_code {
-  background: linear-gradient(135deg, #0ea5e9, #0369a1);
-}
-
-.conv-row__logo.conv-row__logo--open_claw,
-.conv-row__inline-logo.conv-row__logo--open_claw {
-  background: linear-gradient(135deg, #f59e0b, #b45309);
-}
-
-.conv-row__logo.conv-row__logo--other,
-.conv-row__inline-logo.conv-row__logo--other {
-  background: linear-gradient(135deg, #94a3b8, #64748b);
-}
 </style>

@@ -71,14 +71,26 @@ describe("conversations shared stylesheet contract", () => {
     expect(shared).toContain(".agent-logo--cline {")
     expect(page).not.toContain("\n.agent-logo--claude_code,")
 
-    // 会话行的 Logo 用的是**自己的一套渐变兜底**（没有 SVG 时显示两字母彩色方块），
-    // 命名空间必须与共享修饰符分开，否则两套规则会互相覆盖。
+    // 会话行的 Logo 要**无底色**：SVG（或没有 SVG 时的两字母兜底）直接压在卡片上，
+    // 不再顶一块按类型着色的方块。
     const row = fs.readFileSync(
       path.resolve(__dirname, "../../../src/pages/conversations/components/ConversationListRow.vue"),
       "utf8"
     )
-    expect(row).toContain(".conv-row__logo.conv-row__logo--claude_code")
+    // 命名空间仍必须与共享修饰符分开：同名会让行内 logo 被共享那份「有 SVG 时白底」
+    // 规则重新盖回来（当初拆出这套命名空间就是为了防这个）。
     expect(row).not.toContain(".agent-logo--claude_code")
+    // 按类型的底色方块不许再回来。它们是两个 class 的选择器，权重会盖过单 class 的
+    // `--real { background: transparent }` 覆盖 —— 那一层透明覆盖因此一直是空转的，
+    // 结果连已有 SVG 的 agent 也照样顶着方块。
+    expect(row).not.toContain(".conv-row__logo.conv-row__logo--claude_code")
+    expect(row).not.toContain(".conv-row__inline-logo.conv-row__logo--claude_code")
+    expect(row).not.toContain("linear-gradient")
+    // 兜底字母不能再是白色：底色没了之后白字压白卡等于没有。
+    // （注意断言的是 CSS 的 `color: #ffffff`，模板里勾选对勾的 `color="#ffffff"` 
+    // 是压在主色实心勾选框上的，不受影响。）
+    expect(row).not.toContain("color: #ffffff")
+    expect(row).toContain("color: var(--up-content-color")
   })
 
   it("keeps page-only rules out of the shared stylesheet", () => {

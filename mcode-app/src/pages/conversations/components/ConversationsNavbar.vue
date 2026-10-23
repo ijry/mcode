@@ -7,7 +7,7 @@
     :autoBack="false"
     height="46px"
     bgColor="transparent"
-    :statusBarBgColor="NAVBAR_GLASS_BG_COLOR"
+    statusBarBgColor="transparent"
   >
     <!--
       M08 顶栏三件套：左「视图」· 中「连接」· 右「搜索」。
@@ -67,13 +67,6 @@ const emit = defineEmits<{
 }>()
 
 /**
- * 状态栏底色。**直接给 CSS `var()` 字符串，不在 script 里求值** —— `upThemeVar` 是
- * uview 按 Options API mixin 注入的方法，只有模板作用域能调；在 `<script setup>`
- * 顶层调用会抛 ReferenceError（computed 里静默失败，prop 变空串，navbar 回退透明）。
- */
-const NAVBAR_GLASS_BG_COLOR = "var(--up-navbar-glass-bg-color, rgba(255, 255, 255, 0.82))"
-
-/**
  * 图标与箭头颜色直接用 CSS 变量字符串，交给浏览器求值。
  *
  * `up-icon` 把它写进内联 `color`，CSS 自定义属性在内联样式里是合法值，所以深浅色切换
@@ -85,26 +78,20 @@ const activeIconColor = "var(--up-primary, #2979ff)"
 </script>
 
 <style scoped lang="scss">
-/* navbar 容器底色穿透（沿用本页既有的液态玻璃做法，见
-   docs/mcode-architecture-notes/2026-06-28-conversations-liquid-glass.md）。 */
+/*
+ * 顶栏**不要底色**：整体透明，直接透到页面的纸面上。
+ *
+ * 磨砂（`backdrop-filter`）留着：navbar 是 `fixed` 且开了 `placeholder`，列表会从它
+ * 底下滚过去。完全裸透明时卡片与顶栏的按钮会叠字，磨砂把底下的内容糊掉却不上色块 ——
+ * 这是「去掉背景色」与「滚过去还读得清」两者唯一能同时满足的做法。
+ * 想要连磨砂也不要（彻底透明）就把这两行 blur 删掉。
+ */
 .conversations-navbar-shell :deep(.u-navbar--fixed),
 .conversations-navbar-shell :deep(.u-status-bar),
 .conversations-navbar-shell :deep(.u-navbar__content) {
-  background: var(--up-navbar-glass-bg-color, rgba(255, 255, 255, 0.82)) !important;
+  background: transparent !important;
   backdrop-filter: blur(30rpx);
   -webkit-backdrop-filter: blur(30rpx);
-}
-
-/* 降级：不支持 backdrop-filter 时退到实色卡片 + 一条底边，保证文字可读。 */
-@supports not (backdrop-filter: blur(1px)) {
-  .conversations-navbar-shell :deep(.u-navbar__content) {
-    background: var(--up-card-bg-color, #ffffff) !important;
-    border-bottom: 1rpx solid var(--up-border-color, #dadbde);
-  }
-
-  .conversations-navbar-shell :deep(.u-status-bar) {
-    background: var(--up-card-bg-color, #ffffff) !important;
-  }
 }
 
 .conversations-navbar-shell :deep(.u-navbar__placeholder) {

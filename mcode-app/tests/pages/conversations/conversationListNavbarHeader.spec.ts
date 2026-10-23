@@ -227,8 +227,9 @@ describe("conversation list navbar header contract", () => {
   })
 
   // .u-navbar__content 自带 background-color: $u-bg-color，光靠 bgColor="transparent"
-  // 只覆盖 inline style，容器层仍不透明，必须 :deep() 穿透。
-  it("makes the navbar glassy through deep selectors", () => {
+  // 只覆盖 inline style，容器层仍不透明，必须 :deep() 穿透 —— 现在穿透进去是为了把
+  // 底色**清掉**（透明到页面纸面上），而不是染上玻璃色。
+  it("removes the navbar background color through deep selectors", () => {
     const source = read(NAVBAR)
 
     expect(source).toContain(".conversations-navbar-shell :deep(.u-navbar__content)")
@@ -236,18 +237,18 @@ describe("conversation list navbar header contract", () => {
     expect(source).toContain("backdrop-filter: blur(30rpx)")
     expect(source).toContain("-webkit-backdrop-filter: blur(30rpx)")
     expect(source).toContain('bgColor="transparent"')
-    // 状态栏必须和 navbar 同色，否则真机上顶部有一条色差接缝。
-    expect(source).toContain(':statusBarBgColor="NAVBAR_GLASS_BG_COLOR"')
-    // 必须是 CSS var() 字面量，不能在 script 里调 upThemeVar ——
-    // 它是 uview 用 Options API mixin 注入的方法，只有模板作用域能调，
-    // 在 <script setup> 里会抛 ReferenceError（prop 于是变成空串）。
-    expect(source).toContain(
-      'const NAVBAR_GLASS_BG_COLOR = "var(--up-navbar-glass-bg-color, rgba(255, 255, 255, 0.82))"'
-    )
-    expect(source).not.toContain('statusBarBgColor="transparent"')
-    // 玻璃底色两处必须同源，否则状态栏与 navbar 会不一致
-    expect(source).toContain("var(--up-navbar-glass-bg-color, rgba(255, 255, 255, 0.82)) !important")
-    // __placeholder 是 u-navbar--fixed 之外的独立兄弟节点，一旦被染上玻璃色
+    // 状态栏必须和 navbar 同为透明，否则真机上顶部有一条色差接缝。
+    expect(source).toContain('statusBarBgColor="transparent"')
+    // 容器层必须用 !important 压住 uview 自带的 $u-bg-color，否则容器仍是不透明的。
+    expect(source).toContain("background: transparent !important")
+    // 玻璃底色整套已经不用了：常量留着下一个人会以为顶栏还有底色，
+    // 于是对着一个不再生效的变量改颜色。
+    expect(source).not.toContain("NAVBAR_GLASS_BG_COLOR")
+    expect(source).not.toContain("--up-navbar-glass-bg-color")
+    // 磨砂要留住：navbar 是 fixed + placeholder，列表会从它底下滚过去，
+    // 删掉 blur 又不给底色就是叠字，滚过去完全读不清。
+    expect(source).toContain("backdrop-filter: blur(30rpx)")
+    // __placeholder 是 u-navbar--fixed 之外的独立兄弟节点，一旦被染上颜色
     // 顶部会出现「占位块 + fixed 层」双层色带。
     expect(source).toContain(".conversations-navbar-shell :deep(.u-navbar__placeholder)")
   })

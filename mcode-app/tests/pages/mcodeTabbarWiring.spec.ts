@@ -108,7 +108,7 @@ describe("McodeTabBar wiring contract", () => {
     // 两个实现都接受：其它页统一用 .page--with-tabbar，连接页用自己的 .connections-shell。
     for (const item of TAB_PAGES) {
       const source = read(`../../src/pages/${item.name}/index.vue`)
-      const hasSpacer = /95px\s*\+\s*env\(safe-area-inset-bottom\)/.test(source)
+      const hasSpacer = /88px\s*\+\s*env\(safe-area-inset-bottom\)/.test(source)
       expect(hasSpacer).toBe(true)
     }
   })
