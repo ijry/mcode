@@ -4,7 +4,6 @@
       <ConversationsNavbar
         :connection-name="activeConnectionName"
         :search-active="searchVisible"
-        :dark="statusBarDark"
         @filter="openViewFilterSheet"
         @connection="openConnectionPicker"
         @search="toggleSearchBar"
@@ -722,9 +721,6 @@ function loadConversationLivePreviewPreference() {
 const PAGE_SURFACE_LIGHT = "#f2f2f7"
 const PAGE_SURFACE_DARK = "#000000"
 
-/** 当前是否深色模式，透传给 ConversationsNavbar 决定状态栏占位条要不要叠暗罩。 */
-const statusBarDark = ref(false)
-
 /**
  * 顶部状态栏色带同步。
  *
@@ -740,18 +736,16 @@ const statusBarDark = ref(false)
  * 正是要修的黑带。
  *
  * 底色取**页面底色**（与下面 `.conversations-page` 的 `background` 同一个值），不是卡片色：
- * navbar 现在是全透明玻璃（`bgColor="transparent"`，只剩 `backdrop-filter`），状态栏那一条
- * 后面真正透出来的就是页面底色。旧代码取 `--up-card-bg-color`（白）近似「navbar 表面」，那是
- * navbar 还自带 0.82 白底时的遗留；页面底色换成 #F2F2F7 之后，白带压在灰底上就成了一条接缝 ——
- * 视觉上正是「导航没穿进状态栏」。这两个值改一处就要改另一处。
+ * navbar 现在用统一页面底色（`ConversationsNavbar` 的 `bgColor` / `statusBarBgColor` 两个 prop
+ * 都下传同一个页面色），状态栏那一条后面真正透出来的就是页面底色。旧代码取 `--up-card-bg-color`
+ * （白）近似「navbar 表面」，那是 navbar 还自带 0.82 白底时的遗留；页面底色换成 #F2F2F7 之后，
+ * 白带压在灰底上就成了一条接缝 —— 视觉上正是「导航没穿进状态栏」。这两个值改一处就要改另一处。
  *
  * 两个参数给同一个值是刻意的：色带、theme-color、`html`/`body` 背景在这一页都应该是页面底色。
  * `body` 背景平时被 `.conversations-page` 的底色盖住，只在橡皮筋回弹时露出。
  */
 function syncConversationListNativeStatusBar() {
   const darkStatusBarBand = isDarkThemeMode()
-  // 透传给 ConversationsNavbar：standalone 下状态栏是白字，浅色页面需要它叠一层暗罩。
-  statusBarDark.value = darkStatusBarBand
   const pageSurfaceColor = darkStatusBarBand ? PAGE_SURFACE_DARK : PAGE_SURFACE_LIGHT
   const frontColor = darkStatusBarBand ? "#ffffff" : "#000000"
 

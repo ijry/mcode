@@ -32,9 +32,10 @@ describe("conversation list iOS standalone status bar", () => {
       source.indexOf("\n}", source.indexOf("function syncConversationListNativeStatusBar() {"))
     )
 
-    // 色带要涂**页面底色**：navbar 现在是全透明玻璃（`bgColor="transparent"`），状态栏那一条
-    // 后面透出来的就是页面底色；涂卡片白会在 navbar 上沿留一条色差接缝 —— 那正是「导航没
-    // 穿进状态栏」的观感。所以既不能用卡片色，也不能用任何 var()/rgba()。
+    // 色带要涂**页面底色**：navbar 现在用统一页面底色（状态栏与导航内容同一个色，
+    // 走 uview 的 bgColor / statusBarBgColor prop），状态栏那一条后面透出来的就是页面底色；
+    // 涂卡片白会在 navbar 上沿留一条色差接缝 —— 那正是「导航没穿进状态栏」的观感。
+    // 所以既不能用卡片色，也不能用任何 var()/rgba()。
     expect(block).toMatch(/const pageSurfaceColor = darkStatusBarBand \? PAGE_SURFACE_DARK : PAGE_SURFACE_LIGHT/)
     expect(block).not.toContain("--up-card-bg-color")
     expect(block).not.toContain("var(--up-navbar-glass-bg-color")

@@ -30,17 +30,22 @@ const NAVBAR = "../../src/pages/conversations/components/ConversationsNavbar.vue
 describe("conversations status bar bleed-through contract", () => {
   const source = read(PAGE)
 
-  it("renders the navbar without any background so the page shows through", () => {
-    // 透明是「穿透」的前提：navbar 自带状态栏占位，底色一给实色，
-    // 状态栏那一条就与下面的内容分成两块。
+  it("unifies the status bar and navbar background via the uview bgColor props", () => {
+    // 状态栏与导航内容用同一个色（脚本里 navbarBgColor / navbarStatusBarBgColor 是同一值），
+    // 走 uview 的 `bgColor` / `statusBarBgColor` 两个 prop 下传 —— 详情页同款「统一背景色」做法。
+    // 不再给状态栏单独叠暗罩：那正是之前状态栏与导航分裂成两截的元凶。
     const navbar = read(NAVBAR)
-    expect(navbar).toContain('bgColor="transparent"')
-    expect(navbar).toContain('statusBarBgColor="transparent"')
+    expect(navbar).toContain(':bgColor="navbarBgColor"')
+    expect(navbar).toContain(':statusBarBgColor="navbarStatusBarBgColor"')
 
-    // 磨砂必须还在：完全裸透明时，滚上来的卡片会与顶栏按钮叠字。
-    // 断言落在 CSS 规则块里，避免被注释里的同名字符串骗过。
+    // 不再有「只盖状态栏」的暗罩 / is-dark 分支：那会在状态栏与导航之间拉出一条缝。
+    expect(navbar).not.toContain("rgba(0, 0, 0, 0.3)")
+    expect(navbar).not.toContain("is-dark")
+    // 也不再用手写 :deep 透明去覆盖 uview 默认底色 —— 底色交给 prop。
     const shell = navbar.slice(navbar.indexOf(".conversations-navbar-shell :deep(.u-navbar--fixed)"))
-    expect(shell.slice(0, shell.indexOf("}"))).toContain("background: transparent !important")
+    expect(shell.slice(0, shell.indexOf("}"))).not.toContain("background: transparent !important")
+
+    // 磨砂必须还在：滚动时底下卡片上来要被糊掉，不能裸透。
     expect(navbar).toContain("backdrop-filter: blur(")
     expect(navbar).toContain("-webkit-backdrop-filter: blur(")
   })

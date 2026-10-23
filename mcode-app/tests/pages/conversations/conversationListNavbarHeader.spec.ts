@@ -226,31 +226,36 @@ describe("conversation list navbar header contract", () => {
     expect(source).not.toContain("watch(")
   })
 
-  // .u-navbar__content 自带 background-color: $u-bg-color，光靠 bgColor="transparent"
-  // 只覆盖 inline style，容器层仍不透明，必须 :deep() 穿透 —— 现在穿透进去是为了把
-  // 底色**清掉**（透明到页面纸面上），而不是染上玻璃色。
-  it("removes the navbar background color through deep selectors", () => {
+  // 状态栏与导航内容用**同一个页面底色**，通过 uview 的 `bgColor` / `statusBarBgColor`
+  // 两个 prop 下传（详情页同款「统一背景色」做法）。不再给状态栏单独叠暗罩，
+  // 也不再用手写 :deep 透明去覆盖 uview 默认底色 —— 那正是之前状态栏与导航分裂成两截的原因。
+  it("unifies the navbar and status bar background via the uview bgColor props", () => {
     const source = read(NAVBAR)
 
-    expect(source).toContain(".conversations-navbar-shell :deep(.u-navbar__content)")
-    expect(source).toContain(".conversations-navbar-shell :deep(.u-status-bar)")
-    expect(source).toContain("backdrop-filter: blur(30rpx)")
-    expect(source).toContain("-webkit-backdrop-filter: blur(30rpx)")
-    expect(source).toContain('bgColor="transparent"')
-    // 状态栏必须和 navbar 同为透明，否则真机上顶部有一条色差接缝。
-    expect(source).toContain('statusBarBgColor="transparent"')
-    // 容器层必须用 !important 压住 uview 自带的 $u-bg-color，否则容器仍是不透明的。
-    expect(source).toContain("background: transparent !important")
-    // 玻璃底色整套已经不用了：常量留着下一个人会以为顶栏还有底色，
-    // 于是对着一个不再生效的变量改颜色。
-    expect(source).not.toContain("NAVBAR_GLASS_BG_COLOR")
-    expect(source).not.toContain("--up-navbar-glass-bg-color")
-    // 磨砂要留住：navbar 是 fixed + placeholder，列表会从它底下滚过去，
+    // 两个 prop 绑定同一个色（脚本里 navbarBgColor / navbarStatusBarBgColor 是同一值）。
+    expect(source).toContain(':bgColor="navbarBgColor"')
+    expect(source).toContain(':statusBarBgColor="navbarStatusBarBgColor"')
+    // 脚本里确实只定义了一份底色，状态栏不另起炉灶。
+    expect(source).toContain("const navbarStatusBarBgColor = computed(")
+    expect(source).toContain("const navbarBgColor = navbarStatusBarBgColor")
+
+    // 不再有「只盖状态栏」的暗罩 / is-dark 分支：那会在状态栏与导航之间拉出一条缝。
+    expect(source).not.toContain("rgba(0, 0, 0, 0.3)")
+    expect(source).not.toContain("is-dark")
+    // 不再用手写 :deep 透明覆盖 uview 默认底色。
+    expect(source).not.toContain('bgColor="transparent"')
+    expect(source).not.toContain('statusBarBgColor="transparent"')
+
+    // 磨砂仍在：navbar 是 fixed + placeholder，列表会从它底下滚过去，
     // 删掉 blur 又不给底色就是叠字，滚过去完全读不清。
     expect(source).toContain("backdrop-filter: blur(30rpx)")
-    // __placeholder 是 u-navbar--fixed 之外的独立兄弟节点，一旦被染上颜色
-    // 顶部会出现「占位块 + fixed 层」双层色带。
+    expect(source).toContain("-webkit-backdrop-filter: blur(30rpx)")
+    expect(source).toContain(".conversations-navbar-shell :deep(.u-navbar__content)")
+    expect(source).toContain(".conversations-navbar-shell :deep(.u-status-bar)")
+    // __placeholder 是 u-navbar--fixed 之外的独立兄弟节点，要透明，
+    // 否则一旦被染上颜色，顶部会出现「占位块 + fixed 层」双层色带。
     expect(source).toContain(".conversations-navbar-shell :deep(.u-navbar__placeholder)")
+    expect(source).toContain("background: transparent !important")
   })
 
   it("keeps Android WebView content under the system status bar", () => {

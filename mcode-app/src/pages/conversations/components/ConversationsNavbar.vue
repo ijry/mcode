@@ -1,14 +1,13 @@
 <template>
   <up-navbar
     customClass="conversations-navbar-shell"
-    :class="{ 'is-dark': dark }"
     :fixed="true"
     :placeholder="true"
     :border="false"
     :autoBack="false"
     height="46px"
-    bgColor="transparent"
-    statusBarBgColor="transparent"
+    :bgColor="navbarBgColor"
+    :statusBarBgColor="navbarStatusBarBgColor"
   >
     <!--
       M08 顶栏三件套：左「视图」· 中「连接」· 右「搜索」。
@@ -45,6 +44,9 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from "vue"
+import { isDarkThemeMode } from "@/services/theme"
+
 /**
  * 会话列表顶栏（M08）。
  *
@@ -59,14 +61,6 @@ defineProps<{
   connectionName?: string
   /** 搜索条是否已展开（决定右侧按钮的高亮态）。 */
   searchActive?: boolean
-  /**
-   * 当前是否深色模式。
-   *
-   * standalone 模式下状态栏走 `black-translucent`（白字），浅色页面上白字压在磨砂浅底上看不清，
-   * 需要给状态栏占位条叠一层淡暗罩兜底。深色模式不需要（磨砂压在深色内容上本就够暗），
-   * 所以这个 prop 只用来决定是否加那层罩子。
-   */
-  dark?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -84,42 +78,34 @@ const emit = defineEmits<{
 const iconColor = "var(--up-content-color, #48484a)"
 const chevronColor = "var(--up-tips-color, #8a8a8e)"
 const activeIconColor = "var(--up-primary, #2979ff)"
+
+// 状态栏与导航内容用同一个页面纸面色（见详情页同款「统一背景色」做法），
+// 不再给状态栏单独叠暗罩 —— 那正是之前状态栏与导航分裂成两截的元凶。
+const NAVBAR_BG_LIGHT = "#f2f2f7"
+const NAVBAR_BG_DARK = "#000000"
+const navbarStatusBarBgColor = computed(() =>
+  isDarkThemeMode() ? NAVBAR_BG_DARK : NAVBAR_BG_LIGHT
+)
+const navbarBgColor = navbarStatusBarBgColor
 </script>
 
 <style scoped lang="scss">
 /*
- * 顶栏**不要底色**：整体透明，直接透到页面的纸面上。
+ * 顶栏统一用页面纸面色（由 `bgColor` / `statusBarBgColor` 两个 prop 下传，状态栏与导航
+ * 内容同一个色 —— 详情页同款「统一背景色」做法），不再各自设底色，也就不会分裂成两截。
  *
- * 磨砂（`backdrop-filter`）留着：navbar 是 `fixed` 且开了 `placeholder`，列表会从它
- * 底下滚过去。完全裸透明时卡片与顶栏的按钮会叠字，磨砂把底下的内容糊掉却不上色块 ——
- * 这是「去掉背景色」与「滚过去还读得清」两者唯一能同时满足的做法。
- * 想要连磨砂也不要（彻底透明）就把这两行 blur 删掉。
+ * 磨砂（`backdrop-filter`）保留：navbar 是 `fixed` 且开了 `placeholder`，列表会从它
+ * 底下滚过去；底下的卡片滚上来要被糊掉，不能裸透。
  */
 .conversations-navbar-shell :deep(.u-navbar--fixed),
 .conversations-navbar-shell :deep(.u-status-bar),
 .conversations-navbar-shell :deep(.u-navbar__content) {
-  background: transparent !important;
   backdrop-filter: blur(30rpx);
   -webkit-backdrop-filter: blur(30rpx);
 }
 
 .conversations-navbar-shell :deep(.u-navbar__placeholder) {
   background: transparent !important;
-}
-
-/*
- * 浅色 + standalone 下的可读性兜底。
- *
- * `black-translucent` 把状态栏文字锁成白色，而磨砂压在浅色内容上是浅底，白字对比偏弱。
- * 给状态栏占位条叠一层很淡的暗罩把对比拉起来。两层条件都收紧：
- *   - `@media (display-mode: standalone)`：普通浏览器（无原生状态栏）不加，免得顶上多一条灰带；
- *   - `:not(.is-dark)`：深色模式不加，磨砂本就压在深色内容上，白字读得清。
- * 罩子只盖 `.u-status-bar` 占位条这一小条（与下方导航栏分离），不影响按钮区。
- */
-@media (display-mode: standalone) {
-  .conversations-navbar-shell:not(.is-dark) :deep(.u-status-bar) {
-    background: rgba(0, 0, 0, 0.3) !important;
-  }
 }
 
 /* 左右按钮：32×32、圆角 16、72% 卡片色 + 6% 前景色描边（设计稿 9:1666）。 */
