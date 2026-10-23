@@ -144,15 +144,20 @@ function handleSwitch(item: TabItem) {
 <style scoped lang="scss">
 /*
  * 几何全部来自设计稿「底部导航」节点（393 宽基准）：
- *   外层 padding 0 21 / 12 / 14（下内距 14 是设计稿 21 收窄后的值，贴底一些），
- *   导航条 radius 36 + 1px rgba(0,0,0,.06) 描边 + padding 4，
- *   单 item 高 54（= 62 - 4*2），激活项 radius 30。
+ *   外层 padding 12 / 21 / 0+安全区（上 12 保持不动；下内距不写死 px —— 按 iOS 标准，
+ *   悬浮条应贴住 Home 指示条上沿，gap 只留 `safe-area-inset-bottom` 本身，不能叠多余 px），
+ *   导航条高 62（保持设计稿高度 —— 用户反馈「还是很高」指的是位置偏上、要往下挪，不是缩高度），
+ *   radius 36 + 1px rgba(0,0,0,.06) 描边 + padding 4，单 item 高 54（= 62 - 4*2），激活项 radius 30。
  * 单位用 px 而不是 rpx：底栏在所有机型上都应保持同样的物理尺寸密度，rpx 会在窄屏上把
  * 10px 的文字压到不可读。
  *
- * **下内距与页面留白是一对**：胶囊占据的高度 = 12 + 62 + 下内距，改动这里必须同步改
- * 5 个 tab 页的「页面底部留白」（见 `mcodeTabbarWiring.spec.ts` 的留白断言），否则
- * 胶囊会盖住最后一行内容。
+ * item 内部是 22 图标 + 3 gap + 10 文字 = 35，54 的高度留了 19 的上下余量。
+ *
+ * **上下内距与页面留白是一对**：胶囊从屏底占用的高度 = 12(上内距) + 62(胶囊) +
+ * `env(safe-area-inset-bottom)`(下内距=底部安全区)。带 Home 指示条的机型安全区≈34px，
+ * 胶囊因此离屏底 34px——这正是 iOS 标准位置（系统 tabBar 内容也只到这）；无指示条的
+ * 桌面/老机型安全区为 0，胶囊贴屏底。改动这里必须同步改 5 个 tab 页的「页面底部留白」
+ * （见 `mcodeTabbarWiring.spec.ts` 的留白断言），否则胶囊会盖住最后一行内容。
  */
 .mc-tabbar {
   position: fixed;
@@ -160,7 +165,7 @@ function handleSwitch(item: TabItem) {
   right: 0;
   bottom: 0;
   z-index: 20;
-  padding: 12px 21px calc(14px + env(safe-area-inset-bottom));
+  padding: 12px 21px calc(0px + env(safe-area-inset-bottom));
   pointer-events: none;
 
   &--hidden {

@@ -32,13 +32,16 @@ describe("conversation list iOS standalone status bar", () => {
       source.indexOf("\n}", source.indexOf("function syncConversationListNativeStatusBar() {"))
     )
 
-    // 色带压在 navbar 玻璃层的正上方，所以对齐 navbar 表面色而不是页面底色，
-    // 否则真机上 navbar 上沿会出现一条色差接缝。
-    expect(block).toContain('upThemeVar("--up-card-bg-color"')
+    // 色带要涂**页面底色**：navbar 现在是全透明玻璃（`bgColor="transparent"`），状态栏那一条
+    // 后面透出来的就是页面底色；涂卡片白会在 navbar 上沿留一条色差接缝 —— 那正是「导航没
+    // 穿进状态栏」的观感。所以既不能用卡片色，也不能用任何 var()/rgba()。
+    expect(block).toMatch(/const pageSurfaceColor = darkStatusBarBand \? PAGE_SURFACE_DARK : PAGE_SURFACE_LIGHT/)
+    expect(block).not.toContain("--up-card-bg-color")
     expect(block).not.toContain("var(--up-navbar-glass-bg-color")
     expect(block).not.toContain("rgba(")
-    // fallback 也必须是 6 位实色，主题表缺键时不能落到 service 的黑色兜底。
-    expect(block).toMatch(/surfaceFallbackColor = darkStatusBarBand \? "#[0-9a-f]{6}" : "#[0-9a-f]{6}"/)
+    // 两个常量本身也必须是 6 位实色字面量，不能为了「跟着主题变量走」换成 upThemeVar()。
+    expect(source).toMatch(/const PAGE_SURFACE_LIGHT = "#[0-9a-f]{6}"/)
+    expect(source).toMatch(/const PAGE_SURFACE_DARK = "#[0-9a-f]{6}"/)
   })
 
   // 深色主题下色带底色变深，图标必须跟着转白，否则黑字压深底不可读。

@@ -110,11 +110,31 @@ describe("taskPresentation", () => {
           (entry) => entry.task.id
         )
       ).toEqual([])
+    })
+
+    /**
+     * 「全部」永远不含已归档：即便打开「显示已归档」，归档任务也不会出现在「全部」里，
+     * 只会出现在它所属的具体分组 tab（这里切到 done 后打开开关才放出）。
+     */
+    it("keeps archived out of 'all' even when showArchived is on, but shows them under a group tab", () => {
+      const entries = [
+        makeEntry({ id: 1, status: "done" }),
+        makeEntry({ id: 2, status: "done", archived_at: "2026-09-01T00:00:00Z" }),
+      ]
+      // 「全部」tab：无论是否打开「显示已归档」，都不含已归档。
       expect(
-        filterTaskEntries(entries, makeFilter({ showArchived: true })).map(
-          (entry) => entry.task.id
-        ).sort()
+        filterTaskEntries(entries, makeFilter({ showArchived: true })).map((entry) => entry.task.id)
+      ).toEqual([1])
+      // 具体分组 tab + 打开「显示已归档」：归档的同组任务才出现。
+      expect(
+        filterTaskEntries(entries, makeFilter({ tab: "done", showArchived: true }))
+          .map((entry) => entry.task.id)
+          .sort()
       ).toEqual([1, 2])
+      // 分组 tab 但没打开开关：归档的仍隐藏。
+      expect(
+        filterTaskEntries(entries, makeFilter({ tab: "done" })).map((entry) => entry.task.id)
+      ).toEqual([1])
     })
 
     it("filters by connection and by project", () => {
@@ -184,6 +204,20 @@ describe("taskPresentation", () => {
         makeEntry({ id: 2, status: "done", archived_at: "2026-09-01T00:00:00Z" }),
       ]
       expect(countTaskEntriesByTab(entries, makeFilter({ showCanceled: false })).all).toBe(0)
+    })
+
+    /**
+     * 「全部」的计数只看非归档任务：打开「显示已归档」后归档任务会进各自的分组计数，
+     * 但永远不进「全部」—— 否则「全部」就名不副实了。
+     */
+    it("counts only non-archived tasks in 'all' even when showArchived is on", () => {
+      const entries = [
+        makeEntry({ id: 1, status: "running" }),
+        makeEntry({ id: 2, status: "running", archived_at: "2026-09-01T00:00:00Z" }),
+      ]
+      const counts = countTaskEntriesByTab(entries, makeFilter({ showArchived: true }))
+      expect(counts.all).toBe(1)
+      expect(counts.inProgress).toBe(2)
     })
   })
 

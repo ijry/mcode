@@ -4,6 +4,7 @@
       <ConversationsNavbar
         :connection-name="activeConnectionName"
         :search-active="searchVisible"
+        :dark="statusBarDark"
         @filter="openViewFilterSheet"
         @connection="openConnectionPicker"
         @search="toggleSearchBar"
@@ -714,6 +715,17 @@ function loadConversationLivePreviewPreference() {
 }
 
 /**
+ * 页面底色。**必须与 `<style>` 里 `.conversations-page` 的 `background` 是同一个值** ——
+ * 顶部状态栏色带、navbar 透明玻璃后面透出来的、橡皮筋回弹露出的 `body`，三处都该是这个色。
+ * 差一个色号就会在状态栏下沿出现一条接缝（看起来像「导航没穿进状态栏」）。
+ */
+const PAGE_SURFACE_LIGHT = "#f2f2f7"
+const PAGE_SURFACE_DARK = "#000000"
+
+/** 当前是否深色模式，透传给 ConversationsNavbar 决定状态栏占位条要不要叠暗罩。 */
+const statusBarDark = ref(false)
+
+/**
  * 顶部状态栏色带同步。
  *
  * iOS standalone（`apple-mobile-web-app-status-bar-style` 非 `black-translucent`）下 webview
@@ -725,24 +737,28 @@ function loadConversationLivePreviewPreference() {
  * inset 重复计算一遍（见 docs/mcode-architecture-notes/2026-07-05-p63-detail-cyber-mode.md）。
  *
  * 底色必须给 6 位实色 —— service 的 normalizeHexColor 会把 `var()`/`rgba()` 判非法后回退成黑色，
- * 正是要修的黑带。navbar 玻璃色 `--up-navbar-glass-bg-color` 只由 u-navbar 组件的 CSS 定义、不在
- * uview 的 JS 主题表里，`upThemeVar` 取不到，所以用表里现成的 `--up-card-bg-color` 近似 navbar
- * 表面：玻璃层是 0.82 不透明度的白（深色下为 rgba(28,28,30,.82)）叠在页面顶部渐变上，合成结果
- * 比 `--up-page-bg-color` 更接近卡片色，色带与它同色才不会在 navbar 上沿留一条接缝。
+ * 正是要修的黑带。
  *
- * 两个参数给同一个值是刻意的：色带、theme-color、`html`/`body` 背景在这一页都应该是 navbar
- * 表面色。`body` 背景平时被 `.conversations-page` 的渐变盖住，只在橡皮筋回弹时露出。
+ * 底色取**页面底色**（与下面 `.conversations-page` 的 `background` 同一个值），不是卡片色：
+ * navbar 现在是全透明玻璃（`bgColor="transparent"`，只剩 `backdrop-filter`），状态栏那一条
+ * 后面真正透出来的就是页面底色。旧代码取 `--up-card-bg-color`（白）近似「navbar 表面」，那是
+ * navbar 还自带 0.82 白底时的遗留；页面底色换成 #F2F2F7 之后，白带压在灰底上就成了一条接缝 ——
+ * 视觉上正是「导航没穿进状态栏」。这两个值改一处就要改另一处。
+ *
+ * 两个参数给同一个值是刻意的：色带、theme-color、`html`/`body` 背景在这一页都应该是页面底色。
+ * `body` 背景平时被 `.conversations-page` 的底色盖住，只在橡皮筋回弹时露出。
  */
 function syncConversationListNativeStatusBar() {
   const darkStatusBarBand = isDarkThemeMode()
-  const surfaceFallbackColor = darkStatusBarBand ? "#1c1c1e" : "#ffffff"
-  const navbarSurfaceColor = upThemeVar("--up-card-bg-color", surfaceFallbackColor) || surfaceFallbackColor
+  // 透传给 ConversationsNavbar：standalone 下状态栏是白字，浅色页面需要它叠一层暗罩。
+  statusBarDark.value = darkStatusBarBand
+  const pageSurfaceColor = darkStatusBarBand ? PAGE_SURFACE_DARK : PAGE_SURFACE_LIGHT
   const frontColor = darkStatusBarBand ? "#ffffff" : "#000000"
 
   try {
     const result = uni.setNavigationBarColor?.({
       frontColor,
-      backgroundColor: navbarSurfaceColor,
+      backgroundColor: pageSurfaceColor,
       animation: { duration: 0, timingFunc: "linear" },
     })
     result && typeof (result as Promise<unknown>).catch === "function" && (result as Promise<unknown>).catch(() => {})
@@ -750,8 +766,8 @@ function syncConversationListNativeStatusBar() {
 
   syncIosStandaloneStatusBar({
     darkStatusBarBand,
-    statusBarBackgroundColor: navbarSurfaceColor,
-    pageBackgroundColor: navbarSurfaceColor,
+    statusBarBackgroundColor: pageSurfaceColor,
+    pageBackgroundColor: pageSurfaceColor,
   })
 
   try {
@@ -2173,13 +2189,13 @@ function formatTime(time?: string): string {
 
 /*
  * 悬浮胶囊底栏（`McodeTabBar`）是 `position: fixed`，原生 tabBar 已被隐藏 ——
- * 所以页面必须自己留出「12 + 62 + 14」再加安全区，否则最后一段内容被胶囊压住。
+ * 所以页面必须自己留出「12 + 62 + 安全区(底内距由安全区提供)」再加安全区，否则最后一段内容被胶囊压住。
  *
  * 用显式 class 而不是 `.page:has(.mc-tabbar)`：`:has()` 要 iOS 15.4+，
  * 而这个 app 的 iOS 最低版本比它低，老机器上会整条规则失效（不是降级，是完全没有留白）。
  */
 .page.page--with-tabbar {
-  padding-bottom: calc(88px + env(safe-area-inset-bottom)) !important;
+  padding-bottom: calc(74px + env(safe-area-inset-bottom)) !important;
 }
 
 /* 与子组件共用的规则（弹层外壳/头部、表单行、agent logo 修饰符、安全区占位）。
@@ -2194,13 +2210,22 @@ function formatTime(time?: string): string {
 .conversations-page {
   position: relative;
   /*
-   * 纯色纸面。
+   * 灰底白卡：与连接列表同构（浅 #F2F2F7 中性纸面 + 白色圆角卡片浮起）。
    *
-   * 旧版是从主色拉一层 7% 的竖向渐变 + 三团 blur(80rpx) 的光斑。M08 的画板是
-   * **平底色**（浅 #FAFAFC / 深 #08080A），列表与玻璃按钮都靠留白和分隔线建立层级，
-   * 底色不该再自带一层方向性 —— 那会与「行分隔线」的细线打架。
+   * 这两个色值与 `<script>` 里的 `PAGE_SURFACE_LIGHT` / `PAGE_SURFACE_DARK` 是同一对
+   * （顶部状态栏色带要用它们），改一处必须改另一处 —— `conversationsStatusBar.spec.ts`
+   * 会比对两处，防止只改一半又长出接缝。
+   *
+   * 旧版是近乎纯白的 `--up-page-bg-color`，文件夹分组又是直接压在底色上的裸列表，
+   * 白卡与底色几乎没有层次、看着发空。统一取连接列表的设计稿值：浅色用中性灰、深色
+   * 用纯黑，白色卡片（`ConversationFolderSection` 的 `.conv-group__card`）才能浮起来。
    */
-  background: var(--up-page-bg-color, #fafafc);
+  background: #f2f2f7;
+}
+
+[data-up-theme='dark'] .conversations-page {
+  /* 深色下比 --up-page-bg-color 更黑一档，卡片（深色表面）才沉得下去。 */
+  background: #000000;
 }
 
 
@@ -2315,11 +2340,11 @@ function formatTime(time?: string): string {
   left: 24rpx;
   right: 24rpx;
   /*
-   * 悬浮胶囊底栏（`McodeTabBar`，高 62px + 上下内距 12/14）是 fixed 且 z-index 20。
+   * 悬浮胶囊底栏（`McodeTabBar`，高 62px + 上内距 12 / 下内距 8）是 fixed 且 z-index 20。
    * 批量条原先 `bottom: 24rpx` —— 正好骑在底栏上，两枚胶囊叠成一团，看起来就是「乱了」。
-   * 抬到胶囊之上（88px 与 `.page--with-tabbar` 的留白同一个数），选择时才两层都读得清。
+   * 抬到胶囊之上（90px = 留白 82 + 两枚胶囊之间留 8 的缝），选择时才两层都读得清。
    */
-  bottom: calc(96px + env(safe-area-inset-bottom));
+  bottom: calc(82px + env(safe-area-inset-bottom));
   z-index: 30;
   padding: 18rpx 18rpx;
   border-radius: 28rpx;

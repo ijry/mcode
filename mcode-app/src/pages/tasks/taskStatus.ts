@@ -28,8 +28,8 @@ export const TASK_STATUS_GROUPS: TaskStatusGroup[] = [
 export const TASK_TAB_IDS: TaskTabId[] = ["all", ...TASK_STATUS_GROUPS]
 
 export const STATUSES_BY_GROUP: Record<TaskStatusGroup, WorkTaskStatus[]> = {
-  todo: ["todo", "queued"],
-  inProgress: ["preparing", "running"],
+  todo: ["todo", "queued", "preparing"],
+  inProgress: ["running"],
   attention: ["awaiting_input", "review", "merging", "failed"],
   done: ["done", "canceled"],
 }
@@ -37,8 +37,10 @@ export const STATUSES_BY_GROUP: Record<TaskStatusGroup, WorkTaskStatus[]> = {
 /**
  * 状态 → 分组。
  *
- * 两个刻意的归类，与 PC 端逐字一致：
+ * 三个刻意的归类，与 PC 端逐字一致：
  * - `queued`（等并发槽）归「待办」而不是「进行中」—— 什么都还没发生。
+ * - `preparing`（初始化中）归「待办」而不是「进行中」—— 初始化是开工前的准备，
+ *   agent 还没真正跑起来；「进行中」只留给 `running`（agent 正在执行）。
  * - `merging` 归「等你处理」而不是「已完成」—— 合并本身是一次 agent 轮次，但卡片
  *   不能在用户点了合并之后就跳到另一个分组；它留在原处，落地后直接进「已完成」。
  *
@@ -49,8 +51,8 @@ export function groupForStatus(status: WorkTaskStatus | string): TaskStatusGroup
   switch (status) {
     case "todo":
     case "queued":
-      return "todo"
     case "preparing":
+      return "todo"
     case "running":
       return "inProgress"
     case "awaiting_input":

@@ -104,7 +104,7 @@ import {
  * 会话列表里的一行。
  *
  * 三种展示形态的差别**只在 Logo 位置与分隔线缩进**，文字层级完全一致：
- * 标题 15px/21（最多两行）+ 元信息行 12px（智能体 · 状态 + 右对齐时间）。
+ * 标题 15px/21（单行截断）+ 元信息行 12px（智能体 · 状态 + 右对齐时间）。
  * 形态差异由 `resolveConversationListRowLayout` 统一裁决，这里不判断样式 id。
  */
 const props = defineProps<{
@@ -281,16 +281,14 @@ const pinIconColor = "var(--up-primary, #2979ff)"
 .conv-row__title {
   width: 100%;
   font-size: 15px;
-  /* 设计稿 lineHeight 21px 是定值，不是 1.4 —— 两行时行距才稳。 */
+  /* 设计稿 lineHeight 21px 是定值，单行不折行。 */
   line-height: 21px;
   font-weight: 500;
   color: var(--up-main-color, #3c3c43);
-  /* 两行截断：一行放不下长标题，全放开会把列表稀释成正文流。 */
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  /* 名称只显示一行：超出用省略号收掉，不允许折行。 */
+  white-space: nowrap;
   overflow: hidden;
-  word-break: break-word;
+  text-overflow: ellipsis;
 }
 
 .conv-row__meta {

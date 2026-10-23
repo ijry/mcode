@@ -106,10 +106,25 @@ describe("McodeTabBar wiring contract", () => {
     // 胶囊是 position: fixed，脱离文档流 —— 页面不自己留白的话，
     // 最后一行会被压在胶囊底下（看得见一半、点不到）。
     // 两个实现都接受：其它页统一用 .page--with-tabbar，连接页用自己的 .connections-shell。
+    //
+    // 留白值**从组件几何算出来**而不是写死一个 70：光断言「5 个页面都有 70px」防不住
+    // 最常见的改法 —— 把胶囊调矮了却忘了同步留白（或反过来），底部就凭空多一条空白 /
+    // 最后一行被压住。所以这里从 `McodeTabBar` 读出「上内距 + 胶囊高 + 下内距」再比对。
+    const component = read(COMPONENT)
+    const padding = /\.mc-tabbar\s*\{[\s\S]*?padding:\s*(\d+)px\s+\d+px\s+calc\((\d+)px/.exec(component)
+    const height = /&__bar\s*\{[\s\S]*?height:\s*(\d+)px/.exec(component)
+    expect(padding).not.toBeNull()
+    expect(height).not.toBeNull()
+
+    const reserve = Number(padding![1]) + Number(height![1]) + Number(padding![2])
+    // 反算出的占位 = 12(上内距) + 62(胶囊高) + 0(下内距，按 iOS 标准已交给安全区)。
+    // 在带 Home 指示条的机型上安全区≈34px，所以胶囊实际离屏底 34px（系统 tabBar 同位置）；
+    // 反算值 74 只是「无安全区兜底」下的几何，上限 82 仍留缓冲，不能再往上加。
+    expect(reserve).toBeLessThanOrEqual(82)
+
     for (const item of TAB_PAGES) {
       const source = read(`../../src/pages/${item.name}/index.vue`)
-      const hasSpacer = /88px\s*\+\s*env\(safe-area-inset-bottom\)/.test(source)
-      expect(hasSpacer).toBe(true)
+      expect(source).toContain(`calc(${reserve}px + env(safe-area-inset-bottom))`)
     }
   })
 })

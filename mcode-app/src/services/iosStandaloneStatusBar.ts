@@ -30,13 +30,18 @@ export function syncIosStandaloneStatusBar(options: IosStandaloneStatusBarOption
 
   if (!isIosStandaloneDisplayMode()) return
 
-  // iOS standalone only exposes coarse status bar modes. Use black instead of
-  // black-translucent because the existing uni-app pages already account for
-  // safe areas; full-bleed mode double-counts top and bottom insets.
-  syncMetaContent(
-    APPLE_STATUS_BAR_META_NAME,
-    options.darkStatusBarBand ? "black" : "default"
-  )
+  // iOS standalone 下要让状态栏和导航栏一样有磨砂：
+  // 只有 `black-translucent` 会让原生状态栏变透明、把 webview 露出来，而我们给
+  // `.u-status-bar` 占位条加了 backdrop-filter，于是状态栏区域也跟着被磨砂。
+  // 另两种模式（black / default）会由原生的不透明条盖住 webview 顶部，磨砂永远透不出来。
+  //
+  // 代价：translucent 下状态栏文字固定为浅色（白），浅色页面上白字对比偏弱 ——
+  // 由调用方（ConversationsNavbar）在占位条上叠一层很淡的暗罩来兜底可读性。
+  //
+  // index.html 早已开启 viewport-fit=cover，webview 本来就是全屏铺到状态栏底下，
+  // 切换成 translucent 不会改变布局（u-navbar 的占位条已经预留了状态栏高度），
+  // 不会重复吃 safe-area。
+  syncMetaContent(APPLE_STATUS_BAR_META_NAME, "black-translucent")
   document.documentElement.style.backgroundColor = options.darkStatusBarBand ? statusColor : pageColor
   document.body?.style.setProperty("background-color", pageColor)
 }

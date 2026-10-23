@@ -63,9 +63,10 @@ describe("iOS standalone status bar service", () => {
     expect(document.documentElement.style.backgroundColor).toBe("")
   })
 
-  // 这是本次列表页黑带的直接机制：standalone 非 translucent 模式下 webview 画不到状态栏，
-  // 那条带子由系统按 html/body 背景 + status bar style 绘制。style=black 就是纯黑带。
-  it("paints the standalone status bar band from the page background in light mode", () => {
+  // standalone 下固定在 black-translucent：原生状态栏透明、把 webview 露出来，
+  // 于是导航栏那套 backdrop-filter 磨砂也能压到状态栏区域上（navbar 自带占位条承接）。
+  // 深/浅只影响 html/body 背景（橡皮筋回弹露出的颜色），不再切换 status bar style。
+  it("uses black-translucent so the status bar frosts like the navbar, in light mode", () => {
     setUserAgent(IOS_UA)
     setStandalone(true)
 
@@ -75,13 +76,13 @@ describe("iOS standalone status bar service", () => {
       pageBackgroundColor: "#f3f4f6",
     })
 
-    expect(readMeta("apple-mobile-web-app-status-bar-style")).toBe("default")
+    expect(readMeta("apple-mobile-web-app-status-bar-style")).toBe("black-translucent")
     expect(readMeta("theme-color")).toBe("#f3f4f6")
     expect(document.documentElement.style.backgroundColor).toBe("rgb(243, 244, 246)")
     expect(document.body.style.backgroundColor).toBe("rgb(243, 244, 246)")
   })
 
-  it("switches to the black band and status bar color when the band is dark", () => {
+  it("stays black-translucent in dark mode and still paints the dark page background", () => {
     setUserAgent(IOS_UA)
     setStandalone(true)
 
@@ -91,7 +92,7 @@ describe("iOS standalone status bar service", () => {
       pageBackgroundColor: "#000000",
     })
 
-    expect(readMeta("apple-mobile-web-app-status-bar-style")).toBe("black")
+    expect(readMeta("apple-mobile-web-app-status-bar-style")).toBe("black-translucent")
     expect(readMeta("theme-color")).toBe("#000000")
   })
 

@@ -220,11 +220,22 @@ function cardKey(card: any, index: number) {
   background: color-mix(in srgb, var(--up-hover-bg-color, #f3f4f6) 70%, transparent 30%);
 }
 
-/* 设计稿：列表整体左缩进 12px（节点 9:1681 padding-left） */
+/*
+ * 白卡容器：与连接列表的 `.connections-list` 同构（16px 圆角 + 白底 + 1px 浅描边 +
+ * overflow:hidden 让首尾行的 :active 高亮裁进圆角）。
+ *
+ * 原先是「设计稿节点 9:1681」的纯左缩进 12px 裸列表，行直接压在页面底色上 —— 改成
+ * 白卡后，每个文件夹分组像连接列表里「我的连接」那样是一张浮起来的卡片，缩进由卡内
+ * padding 提供（分隔线的 dividerIndent 仍按 Logo/勾选位现算，两者叠加后依旧与标题左沿对齐）。
+ */
 .conv-group__card {
-  padding-left: 12px;
+  padding: 6px 12px 8px;
   width: 100%;
   box-sizing: border-box;
+  background: var(--up-card-bg-color, #ffffff);
+  border: 1px solid var(--up-border-color, rgba(0, 0, 0, 0.06));
+  border-radius: 16px;
+  overflow: hidden;
 }
 
 .conv-group__divider {

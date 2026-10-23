@@ -231,7 +231,7 @@ describe("conversation row long-press action sheet contract", () => {
     // 跨端图标：小程序不支持内联 SVG，必须走 uview 的图标字体。
     expect(row).toContain('name="pushpin-fill"')
     expect(row).toContain("conv-row__pin")
-    // 图钉落在元信息行内，不在标题上 —— 标题是两行截断的，放图标会挤掉可读宽度。
+    // 图钉落在元信息行内，不在标题上 —— 标题是单行截断的，放图标会挤掉可读宽度。
     const meta = extractBlock(row, '<view class="conv-row__meta">', "</view>")
     expect(meta).toContain("conv-row__pin")
     // 分组把卡上的置顶态喂给行，行自己不猜。

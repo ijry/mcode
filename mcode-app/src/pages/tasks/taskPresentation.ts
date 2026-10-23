@@ -1,5 +1,5 @@
 import type { WorkTask, WorkTaskEvent } from "@/types/workTask"
-import { groupForStatus, type TaskTabId } from "./taskStatus"
+import { groupForStatus, TASK_STATUS_GROUPS, type TaskTabId } from "./taskStatus"
 
 /**
  * 任务列表的**全部可见派生**：过滤、排序、卡片文案、推进记录标签。
@@ -61,7 +61,12 @@ export function filterTaskEntries(
     .filter((entry) => {
       const task = entry.task
       if (task.status === "canceled" && !filter.showCanceled) return false
-      if (task.archived_at != null && !filter.showArchived) return false
+      // 「全部」tab 永远不含已归档：它是活跃任务的总览。已归档只在其所属的具体状态
+      // 分组 tab 下、且用户打开「显示已归档」时才出现（见下一条）。
+      if (task.archived_at != null) {
+        if (filter.tab === "all") return false
+        if (!filter.showArchived) return false
+      }
       if (filter.tab !== "all" && groupForStatus(task.status) !== filter.tab) {
         return false
       }
@@ -89,17 +94,19 @@ export function countTaskEntriesByTab(
   entries: TaskListEntry[],
   filter: TaskListFilter
 ): Record<TaskTabId, number> {
-  const base = filterTaskEntries(entries, { ...filter, tab: "all" })
+  // 「全部」永远不含已归档：直接走 tab="all"（该分支强制排除已归档），得到活跃任务总数。
   const counts: Record<TaskTabId, number> = {
-    all: base.length,
+    all: filterTaskEntries(entries, { ...filter, tab: "all" }).length,
     todo: 0,
     inProgress: 0,
     attention: 0,
     done: 0,
   }
-  base.forEach((entry) => {
-    counts[groupForStatus(entry.task.status)] += 1
-  })
+  // 具体分组计数尊重「显示已归档」：打开开关后归档任务会出现在所属分组里，但不进「全部」。
+  // 复用 filterTaskEntries 而不是重写过滤逻辑，避免两套规则漂移。
+  for (const group of TASK_STATUS_GROUPS) {
+    counts[group] = filterTaskEntries(entries, { ...filter, tab: group }).length
+  }
   return counts
 }
 
@@ -109,7 +116,8 @@ export function resolveTaskListEmptyText(filter: TaskListFilter, hasAnyTask: boo
   if (filter.keyword.trim()) return "没有匹配的任务"
   if (filter.tab !== "all") return "该状态下暂无任务"
   if (filter.connectionKey || filter.folderId > 0) return "当前筛选下暂无任务"
-  if (!filter.showArchived) return "任务都已归档，可在筛选里打开「显示已归档」"
+  // 「全部」永远不含已归档：开关打开后要到具体分组 tab 才能看到归档任务，提示说清去向。
+  if (!filter.showArchived) return "任务都已归档，可在筛选里打开「显示已归档」后到对应分组查看"
   return "暂无任务"
 }
 

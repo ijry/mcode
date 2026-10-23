@@ -71,12 +71,13 @@ describe("taskStatus", () => {
   })
 
   /**
-   * `queued` 归「待办」而不是「进行中」：它还在等并发槽，什么都没发生。
-   * 这一条与 PC 端看板逐字一致，改了会让两端对同一个任务给出不同的位置。
+   * `queued` 与 `preparing` 都归「待办」而不是「进行中」：`queued` 在等并发槽、
+   * `preparing` 在开工前初始化，两者都还没真正跑起来。与 PC 端看板逐字一致，
+   * 改了会让两端对同一个任务给出不同的位置。
    */
-  it("files queued under todo, not inProgress", () => {
+  it("files queued and preparing under todo, not inProgress", () => {
     expect(groupForStatus("queued")).toBe("todo")
-    expect(groupForStatus("preparing")).toBe("inProgress")
+    expect(groupForStatus("preparing")).toBe("todo")
   })
 
   /**
@@ -121,7 +122,7 @@ describe("taskStatus", () => {
    */
   it("separates 'has a live session' from the inProgress group", () => {
     expect(isTaskLive(makeTask({ status: "preparing" }))).toBe(false)
-    expect(groupForStatus("preparing")).toBe("inProgress")
+    expect(groupForStatus("preparing")).toBe("todo")
     expect(isTaskLive(makeTask({ status: "awaiting_input" }))).toBe(true)
     expect(isTaskLive(makeTask({ status: "merging" }))).toBe(true)
   })

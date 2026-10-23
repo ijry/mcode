@@ -1,6 +1,7 @@
 <template>
   <up-navbar
     customClass="conversations-navbar-shell"
+    :class="{ 'is-dark': dark }"
     :fixed="true"
     :placeholder="true"
     :border="false"
@@ -58,6 +59,14 @@ defineProps<{
   connectionName?: string
   /** 搜索条是否已展开（决定右侧按钮的高亮态）。 */
   searchActive?: boolean
+  /**
+   * 当前是否深色模式。
+   *
+   * standalone 模式下状态栏走 `black-translucent`（白字），浅色页面上白字压在磨砂浅底上看不清，
+   * 需要给状态栏占位条叠一层淡暗罩兜底。深色模式不需要（磨砂压在深色内容上本就够暗），
+   * 所以这个 prop 只用来决定是否加那层罩子。
+   */
+  dark?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -96,6 +105,21 @@ const activeIconColor = "var(--up-primary, #2979ff)"
 
 .conversations-navbar-shell :deep(.u-navbar__placeholder) {
   background: transparent !important;
+}
+
+/*
+ * 浅色 + standalone 下的可读性兜底。
+ *
+ * `black-translucent` 把状态栏文字锁成白色，而磨砂压在浅色内容上是浅底，白字对比偏弱。
+ * 给状态栏占位条叠一层很淡的暗罩把对比拉起来。两层条件都收紧：
+ *   - `@media (display-mode: standalone)`：普通浏览器（无原生状态栏）不加，免得顶上多一条灰带；
+ *   - `:not(.is-dark)`：深色模式不加，磨砂本就压在深色内容上，白字读得清。
+ * 罩子只盖 `.u-status-bar` 占位条这一小条（与下方导航栏分离），不影响按钮区。
+ */
+@media (display-mode: standalone) {
+  .conversations-navbar-shell:not(.is-dark) :deep(.u-status-bar) {
+    background: rgba(0, 0, 0, 0.3) !important;
+  }
 }
 
 /* 左右按钮：32×32、圆角 16、72% 卡片色 + 6% 前景色描边（设计稿 9:1666）。 */
