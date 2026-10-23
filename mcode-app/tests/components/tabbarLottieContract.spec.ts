@@ -30,9 +30,37 @@ const SHAPE_COUNTS: Record<string, number> = {
 
 /** 未激活的描边色 #8E8E93（归一化到 0-1，Lottie 的颜色格式）。 */
 const GRAY = [0.5569, 0.5569, 0.5765, 1]
-const WHITE = [1, 1, 1, 1]
+/**
+ * 激活项垫底的实心块：浅色模式 #1C1C1F、深色模式 #3A3A3C。
+ * 后者更亮、对比更低，是真正卡下限的那一个，所以两个都要测。
+ */
+const ACTIVE_PILLS = ["#1C1C1F", "#3A3A3C"]
 
 type AnyRecord = Record<string, any>
+
+/** 把 #RRGGBB 解析成 Lottie 的归一化 RGB 三元组。 */
+function parseHex(hex: string): number[] {
+  const n = Number.parseInt(hex.slice(1), 16)
+  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255]
+}
+
+/** sRGB 分量转线性光，WCAG 的相对亮度要求在线性空间里算。 */
+function toLinear(channel: number): number {
+  return channel <= 0.03928 ? channel / 12.92 : Math.pow((channel + 0.055) / 1.055, 2.4)
+}
+
+/** WCAG 相对亮度。 */
+function luminance(rgb: number[]): number {
+  const [r, g, b] = rgb.map(toLinear)
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b
+}
+
+/** WCAG 对比度（1–21）。 */
+function contrast(a: number[], b: number[]): number {
+  const la = luminance(a)
+  const lb = luminance(b)
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05)
+}
 
 function read(relativePath: string): string {
   return fs.readFileSync(path.resolve(APP, relativePath), "utf8")
@@ -97,14 +125,68 @@ describe("tabbar lottie contract", () => {
       }
     })
 
-    it("描边从激活前的灰色插值到白色", () => {
+    it("描边从激活前的灰色插值到该 tab 的颜色", () => {
       for (const name of TAB_NAMES) {
         const stroke = shapeItems(readAnimation(name)).find((item) => item.ty === "st")
         const keys = stroke.c.k
         expect(keys[0].s).toEqual(GRAY)
-        expect(keys[keys.length - 1].s).toEqual(WHITE)
+        // 末帧不能再是灰（没上色）也不能再是白（退回单色方案）。
+        expect(keys[keys.length - 1].s).not.toEqual(GRAY)
+        expect(keys[keys.length - 1].s).not.toEqual([1, 1, 1, 1])
         // 线宽 1.8：24 的画布渲染到 22px 位置，实际约 1.65px，是刻意的细线。
         expect(stroke.w.k).toBe(1.8)
+      }
+    })
+
+    /**
+     * 激活态是「主色填充 + 亮一档描边」的双色构成，两者必须真的不同色 ——
+     * 同色会让图标退化成一块纯色剪影，线条转填充的过程就没了。
+     */
+    it("每个图标的填充与描边是同色系的两档，不是同一个色", () => {
+      for (const name of TAB_NAMES) {
+        const items = shapeItems(readAnimation(name))
+        const fill = items.find((item) => item.ty === "fl").c.k
+        const stroke = items.find((item) => item.ty === "st").c.k
+        const strokeEnd = stroke[stroke.length - 1].s
+
+        expect(fill.slice(0, 3)).not.toEqual(strokeEnd.slice(0, 3))
+        // 描边要比填充亮，否则看起来是填充在往外洇，而不是轮廓先被点亮。
+        expect(luminance(strokeEnd)).toBeGreaterThan(luminance(fill))
+      }
+    })
+
+    /**
+     * 5 个 tab 各有一套色，不是统一强调色。
+     * 这条同时防住「为了省事把 5 份配色合成 1 份」的退化。
+     */
+    it("5 个 tab 的激活色互不相同", () => {
+      const signatures = TAB_NAMES.map((name) => {
+        const items = shapeItems(readAnimation(name))
+        return [items.find((item) => item.ty === "fl").c.k, items.find((item) => item.ty === "st").c.k[1].s]
+          .map((color: number[]) => color.slice(0, 3).join(","))
+          .join("|")
+      })
+      expect(new Set(signatures).size).toBe(TAB_NAMES.length)
+    })
+
+    /**
+     * 颜色必须在**深浅两套**实心块上都站得住。
+     *
+     * 这是纯 JSON 层面的检查，肉眼看不到的失败模式是：有人挑了深色系的强调色（比如
+     * #0A3F8F），在白底的设计稿里很好看，压到 #1C1C1F 的激活块上就糊成一团。
+     * 阈值取 WCAG 对非文本图形的 3:1。
+     */
+    it("激活色在深浅两套实心块上都有 3:1 以上的对比", () => {
+      for (const name of TAB_NAMES) {
+        const items = shapeItems(readAnimation(name))
+        const fill = items.find((item) => item.ty === "fl").c.k
+        const strokeEnd = items.find((item) => item.ty === "st").c.k[1].s
+        for (const pillHex of ACTIVE_PILLS) {
+          const pill = parseHex(pillHex)
+          // 描边在最外侧，它糊掉等于整个图标轮廓消失，要求与填充一样严。
+          expect(contrast(fill, pill)).toBeGreaterThan(3)
+          expect(contrast(strokeEnd, pill)).toBeGreaterThan(3)
+        }
       }
     })
 
@@ -196,7 +278,7 @@ describe("tabbar lottie contract", () => {
       expect(bar).toContain("isolation: isolate")
     })
 
-    it("激活项仍是实心块，好让白色填充有足够对比", () => {
+    it("激活项仍是实心块，好让彩色填充有足够对比", () => {
       const source = read("src/components/McodeTabBar.vue")
       // 磨砂让胶囊通透了，激活标记若也半透明，白色末帧会发灰、边界糊掉。
       expect(source).toContain("&__item--active {\n    background: #1c1c1f;")
