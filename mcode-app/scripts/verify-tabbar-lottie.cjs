@@ -3,19 +3,19 @@
  *
  * **为什么不在 CI 里跑**：它依赖 jsdom，而本项目当前没有 lockfile —— 往 devDependencies
  * 加 jsdom 会让 `npm install` 重新解析含 vue / pinia / uview-plus 的依赖树，风险高于收益
- * （lottie 运行时本身也是因此走的 vendor 化，见 src/vendor/lottie-light.min.js 的文件头）。
+ * （lottie 运行时本身也是因此走的 vendor 化）。
  *
  * **怎么用**：在一个**独立目录**里装 jsdom，再指向本仓库：
  *   mkdir /tmp/lottie-verify && cd /tmp/lottie-verify && npm init -y && npm i jsdom
- *   cd <本仓库>/mcode-app && node scripts/verify-tabbar-lottie.cjs
+ *   cd <本仓库>/mcode-app && NODE_PATH=/tmp/lottie-verify/node_modules node scripts/verify-tabbar-lottie.cjs
  * 脚本会自动从仓库里取 lottie 运行时与动画 JSON。
  *
- * CI 里的日常防退化由 `tests/components/tabbarLottieData.spec.ts` 承担（纯 JSON 结构断言，
+ * CI 里的日常防退化由 `tests/components/tabbarLottieContract.spec.ts` 承担（纯 JSON 结构断言，
  * 不需要 jsdom）；本脚本是改动动画后做**深度验证**用的 —— 结构断言只能证明字段对，
- * 证明不了 lottie 真的画出来了。
- *
- * 它检查：解析不抛错、每个形状都渲染成子路径、首帧纯线稿（填充透明 + 灰色描边）、
- * 末帧线转面（填充实色 + 该 tab 的亮档色描边）。
+ * 证明不了 lottie 真的画出来了。它检查：
+ *   解析不抛错、部件一个不丢（每个部件渲染出独立的 fill/stroke path）、
+ *   首帧纯线稿（填充透明 + 灰色描边）、末帧线转面（填充实色 + 彩色描边）、
+ *   渲染出来的颜色与动画 JSON 里写的颜色一致（±1 舍入容差）。
  */
 const fs = require("fs")
 const path = require("path")
@@ -62,31 +62,16 @@ dom.window.HTMLCanvasElement.prototype.getContext = function () {
 
 const lottie = require(LOTTIE)
 
-/** 每个图标预期渲染出的形状个数（= 复合 path 里的子路径数）。 */
-const EXPECTED_SUBPATHS = {
-  connections: 4, // 2×2 方块
-  conversations: 2, // 气泡 + 尾巴
-  tasks: 3, // 三条清单行
-  circles: 4, // 两个头 + 两段肩弧
-  profile: 2, // 头 + 肩弧
+/** 每个图标预期渲染出的部件数（= 转换器产出的组数 = 源 SVG 的 path 数）。 */
+const EXPECTED_PARTS = {
+  connections: 3, // 圆点 + 箭头 + 折线
+  conversations: 2, // 外气泡 + 内气泡
+  tasks: 5, // 两个清单条 + 叉 + 勾 + ?
+  circles: 4, // 双人：两个填充 + 两条线
+  profile: 3, // 外框 + 头 + 肩
 }
 
 const GRAY = "rgb(142,142,147)"
-
-/**
- * 激活态期望色（与 build-tabbar-lottie.mjs 的 `ICONS[*].colors`、tint-tabbar-fallback.cjs
- * 的 `TARGETS` 三处互为镜像，改动要三处同步）。
- *
- * 这里刻意**硬编码**而不是从动画 JSON 里读出来再比 —— 那是同源比较，永远绿；
- * 写死才验得出「lottie 渲染层真的把 JSON 里的色值画出来了」。
- */
-const ACTIVE_COLORS = {
-  connections: { fill: [76, 141, 255], stroke: [169, 201, 255] },
-  conversations: { fill: [50, 215, 75], stroke: [155, 231, 169] },
-  tasks: { fill: [255, 159, 10], stroke: [255, 207, 138] },
-  circles: { fill: [191, 90, 242], stroke: [221, 168, 255] },
-  profile: { fill: [255, 100, 130], stroke: [255, 174, 191] },
-}
 
 /**
  * 颜色允许 ±1 容差。
@@ -102,9 +87,22 @@ function closeRgb(actual, expected) {
   return m.slice(1).every((v, i) => Math.abs(Number(v) - expected[i]) <= 1)
 }
 
+/** 从动画 JSON 里收集所有可能出现过的末帧色（描边末帧 + 填充色），0-255 形式。 */
+function collectColors(data) {
+  const fills = new Set()
+  const strokes = new Set()
+  for (const group of data.layers[0].shapes) {
+    for (const item of group.it) {
+      if (item.ty === "fl") fills.add(item.c.k.slice(0, 3).map((v) => Math.round(v * 255)))
+      if (item.ty === "st") strokes.add(item.c.k[1].s.slice(0, 3).map((v) => Math.round(v * 255)))
+    }
+  }
+  return { fills: [...fills], strokes: [...strokes] }
+}
+
 let failures = 0
 
-for (const [name, expected] of Object.entries(EXPECTED_SUBPATHS)) {
+for (const [name, expectedParts] of Object.entries(EXPECTED_PARTS)) {
   const animationData = JSON.parse(fs.readFileSync(path.join(ANIM_DIR, `${name}.json`), "utf8"))
   const container = dom.window.document.createElement("div")
   dom.window.document.body.appendChild(container)
@@ -124,47 +122,65 @@ for (const [name, expected] of Object.entries(EXPECTED_SUBPATHS)) {
     continue
   }
 
+  const allowed = collectColors(animationData)
+
   /**
-   * 采样一帧。
+   * 采样一帧。返回值是**属性快照**而不是 DOM 引用 —— lottie 在 goToAndStop 后会原地
+   * 改写同一批 path 节点的属性，先存 0 帧的引用、再采 29 帧，0 帧读到的就全是末帧值了
+   * （旧版每次采完立刻读字符串快照就是为了躲这个坑）。
    *
-   * lottie 的 SVG renderer 会把同一组里的多个形状**合并成一条复合 path**（`d` 里串多个
-   * `M...C...Z`），fill 与 stroke 各渲染一条。所以不能笼统地扫所有 path：stroke 那条自身
-   * 没有填充，`fill-opacity` 恒为 0，会污染断言。必须按「有 fill 属性的」和
-   * 「有 stroke 属性的」分开取。
+   * 每个部件一个组、一个形状，所以渲染出的 fill path / stroke path 数应与部件数对齐：
+   * 面部件出 1 条 fill path + 1 条 stroke path，线部件只出 stroke path。
    */
   function sample(frame) {
     anim.goToAndStop(frame, true)
     const paths = [...container.querySelectorAll("path")]
-    const fillPath = paths.find((p) => p.getAttribute("fill") && p.getAttribute("fill") !== "none")
-    const strokePath = paths.find((p) => p.getAttribute("stroke"))
     return {
-      fillOpacity: fillPath ? fillPath.getAttribute("fill-opacity") : null,
-      fill: fillPath ? fillPath.getAttribute("fill") : null,
-      stroke: strokePath ? strokePath.getAttribute("stroke") : null,
-      subpaths: fillPath ? (fillPath.getAttribute("d").match(/M/g) || []).length : 0,
+      fills: paths
+        .filter((p) => p.getAttribute("fill") && p.getAttribute("fill") !== "none")
+        .map((p) => ({
+          color: p.getAttribute("fill"),
+          opacity: p.getAttribute("fill-opacity"),
+          subpaths: (p.getAttribute("d").match(/M/g) || []).length,
+        })),
+      strokes: paths
+        .filter((p) => p.getAttribute("stroke"))
+        .map((p) => ({ color: p.getAttribute("stroke") })),
     }
   }
 
   const first = sample(0)
   const last = sample(29)
-  const active = ACTIVE_COLORS[name]
 
   const problems = []
-  if (first.subpaths === 0) problems.push("首帧没渲染出 fill path（形状没被解析）")
-  if (first.fillOpacity !== "0") problems.push(`首帧 fill-opacity 应为 0，实际 ${first.fillOpacity}`)
-  if (last.fillOpacity !== "1") problems.push(`末帧 fill-opacity 应为 1，实际 ${last.fillOpacity}`)
-  if (first.stroke !== GRAY) problems.push(`首帧描边应为灰 ${GRAY}，实际 ${first.stroke}`)
-  if (!closeRgb(last.stroke, active.stroke)) {
-    problems.push(`末帧描边应为亮档色 rgb(${active.stroke.join(",")})，实际 ${last.stroke}`)
+  if (last.fills.length === 0) problems.push("末帧没渲染出 fill path（形状没被解析）")
+  if (first.strokes.length !== expectedParts || last.strokes.length !== expectedParts) {
+    problems.push(
+      `部件数应为 ${expectedParts}，实际渲染出 stroke path：首帧 ${first.strokes.length}、末帧 ${last.strokes.length}`
+    )
   }
-  if (!closeRgb(last.fill, active.fill)) {
-    problems.push(`末帧填充应为主色 rgb(${active.fill.join(",")})，实际 ${last.fill}`)
+  if (last.fills.length + last.strokes.length < expectedParts) {
+    problems.push("渲染出的 path 总数少于部件数，有部件丢失")
   }
-  if (first.subpaths !== expected) {
-    problems.push(`形状数应为 ${expected}，实际渲染出 ${first.subpaths} 个子路径`)
+
+  for (const f of first.fills) {
+    if (f.opacity !== "0") problems.push(`首帧有 fill-opacity 不为 0 的部件（${f.color}）`)
   }
-  if (first.subpaths !== last.subpaths) {
-    problems.push(`首帧 ${first.subpaths} 个、末帧 ${last.subpaths} 个子路径，形状在动画中丢失`)
+  for (const f of last.fills) {
+    if (f.opacity !== "1") problems.push(`末帧有 fill-opacity 不为 1 的部件（${f.color}）`)
+    if (!allowed.fills.some((c) => closeRgb(f.color, c))) {
+      problems.push(`末帧填充色 ${f.color} 不在动画 JSON 的填充色集合里`)
+    }
+    // 转换器一个部件一个形状：fill path 的 d 里不该出现多个子路径。
+    if (f.subpaths !== 1) problems.push(`填充 path 含 ${f.subpaths} 个子路径，应为 1（部件被合并了？）`)
+  }
+  for (const s of first.strokes) {
+    if (s.color !== GRAY) problems.push(`首帧有描边不是灰的部件（${s.color}）`)
+  }
+  for (const s of last.strokes) {
+    if (!allowed.strokes.some((c) => closeRgb(s.color, c))) {
+      problems.push(`末帧描边色 ${s.color} 不在动画 JSON 的描边色集合里`)
+    }
   }
 
   if (problems.length) {
@@ -173,7 +189,7 @@ for (const [name, expected] of Object.entries(EXPECTED_SUBPATHS)) {
     problems.forEach((p) => console.log(`       - ${p}`))
   } else {
     console.log(
-      `PASS ${name}: ${last.subpaths} shapes | fill-opacity ${first.fillOpacity}→${last.fillOpacity} | stroke ${first.stroke}→${last.stroke}`
+      `PASS ${name}: ${expectedParts} parts | ${last.fills.length} fills + ${last.strokes.length} strokes | stroke ${first.strokes[0].color}→${last.strokes[0].color}`
     )
   }
 

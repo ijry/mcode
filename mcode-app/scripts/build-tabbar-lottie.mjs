@@ -2,24 +2,47 @@
 /**
  * 生成底栏 5 个 Lottie 图标动画。
  *
- * **为什么要有这个脚本**：Lottie 的 JSON 是 AE 用 bodymovin 导出的产物，嵌套极深
- * （`layers[].shapes[].it[]` 里混着形状、描边、填充、变换），直接手写 5 份等于用汇编写
- * 动画 —— 写着痛苦、改一个圆角要动 5 个文件、出错还毫无提示。这里改成参数化：
- * 形状用几个构造器表达，动效参数集中在一处，改图标只需改下面 `ICONS` 那几十行。
+ * **形状从哪来**：不是手写的几何，而是 `src/assets/tabbar-src/*.svg` —— 5 个 IconPark
+ * （字节开源，Apache-2.0，48×48 网格，multi-color 主题）图标。手写几何只能拼出方块和
+ * 圆，「细腻的多色图标」得靠专业图标库的造型。本脚本是那批 SVG 的**转换器**：
+ * 把 48 网格的 path 缩放进 24 画布，再套上动效与配色，输出 Lottie JSON。
  *
- * **动效是「线条转填充 + 上色」**：首帧只有灰色描边（未激活），末帧描边变成该 tab 的
- * 亮档色、内部被主色填满（激活）。播放方向反过来就是取消激活，所以一个文件同时承担
- * 两种状态，不用导出两份。
+ * **为什么保留 Lottie 而不是直接用 SVG**：动效（灰线稿 → 弹跳 → 被彩色填满）是底栏
+ * 的反馈来源，换成静态 SVG 就只剩换图，切换 tab 会没有落点。
+ *
+ * **动效是「线条转填充」**：首帧只有灰色描边（未激活），末帧描边亮起、内部被彩色
+ * 填满（激活）。播放方向反过来就是取消激活，所以一个文件同时承担两种状态。
  *
  * 产物被 `src/components/tabbar/McTabbarLottieIcon.vue` 以 `import` 方式内联进包，
  * 不走运行时 fetch —— App 端是 file:// 协议，XHR 取本地 JSON 会受限制。
+ *
+ * **依赖 svgpath**（把 SVG 的 A/Q/T/S/H/V 统一成三次贝塞尔）。它不进项目依赖，
+ * 在外部目录装了再跑：
+ *   cd <workspace> && npm i svgpath --no-save
+ *   cd <本仓库>/mcode-app && NODE_PATH=<workspace>/node_modules node scripts/build-tabbar-lottie.mjs
  */
 
-import { mkdirSync, writeFileSync } from "node:fs"
+import { createRequire } from "node:module"
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
+const require = createRequire(import.meta.url)
+
+let SvgPath
+try {
+  SvgPath = require("svgpath")
+} catch {
+  console.error(
+    "缺少 svgpath。请在外部目录安装后运行（不要装进本仓库，会污染依赖树）：\n" +
+      "  cd <workspace> && npm i svgpath --no-save\n" +
+      "  cd <本仓库>/mcode-app && NODE_PATH=<workspace>/node_modules node scripts/build-tabbar-lottie.mjs"
+  )
+  process.exit(2)
+}
+
 const __dirname = dirname(fileURLToPath(import.meta.url))
+const SRC_DIR = resolve(__dirname, "../src/assets/tabbar-src")
 const OUT_DIR = resolve(__dirname, "../src/assets/tabbar-lottie")
 
 /** 合成参数：60fps × 30 帧 = 500ms，画布 24×24（与图标设计稿同尺寸）。 */
@@ -29,25 +52,189 @@ const SIZE = 24
 /** 变换锚点放在画布中心，scale 才会绕图标中心缩放而不是缩到左上角。 */
 const CENTER = 12
 
-/**
- * 未激活的描边色 #8E8E93。
- *
- * 深色模式的 #8C8C94 与之相差 ≤2%，肉眼不可辨，因此浅深共用一套 JSON —— 否则每个图标
- * 得导出两份文件，包体与维护成本翻倍，换来的是没人看得出的差别。
- */
-const GRAY = [0.5569, 0.5569, 0.5765, 1]
+/** IconPark 画在 48×48 网格上，缩一半进我们的 24 画布。 */
+const SOURCE_SIZE = 48
+const SCALE = SIZE / SOURCE_SIZE
 
 /**
- * 把 `#4C8DFF` 转成 Lottie 的归一化 RGBA。
+ * IconPark multi-color 主题的四个颜色槽。
  *
- * Lottie 的颜色是 4 个 0–1 的分量而不是 hex 或 0–255，直接抄 CSS 的色值会被解读成
- * 近乎全黑（4C/255≈0.3 与 0.3/255 差了两个数量级）。保留 4 位小数是必要的：取 2 位
- * 会让 #4C8DFF 与 #4F8DFF 落成同一个值，配色微调时看不出效果。
+ * 按槽位换成我们自己的配色，而不是直接沿用：它的外轮廓色是 #333，那是给浅色背景用的
+ * —— 底栏激活项垫的是深色实心块，#333 压上去等于轮廓消失，图标会散成一摊色块。
  */
+const SLOT_OUT_STROKE = "#333333"
+const SLOT_OUT_FILL = "#2F88FF"
+const SLOT_INNER_STROKE = "#FFFFFF"
+const SLOT_INNER_FILL = "#43CCF8"
+
+/** 未激活的描边色 #8E8E93。深色模式的 #8C8C94 与它相差 ≤2%，共用一套 JSON。 */
+const GRAY = [0.5569, 0.5569, 0.5765, 1]
+
+/** 面部件的描边线宽。1.8 在 24 画布上渲染到 22px 位置约 1.65px，是刻意的细线。 */
+const FACE_STROKE_WIDTH = 1.8
+/** 线部件（原图里 fill="none" 的线条）沿用 IconPark 的 4/48 比例，即 2。 */
+const LINE_STROKE_WIDTH = 2
+
+/**
+ * 每个 tab 的配色。
+ *
+ * `main` 接外层面（IconPark 的 outFill）、`sub` 接内层与线条（innerFill），
+ * 两个色是**同色系深浅两档**而不是撞色 —— 22px 上撞色会互相打架、显得廉价。
+ * 外轮廓色由 `main` 派生（见 `lighten`），不单独写。
+ */
+const PALETTES = {
+  connections: { main: "#4F8DFF", sub: "#6FE3F5" },
+  conversations: { main: "#FF6FA5", sub: "#FFA8C5" },
+  tasks: { main: "#2FC48D", sub: "#86EFC8" },
+  circles: { main: "#A78BFA", sub: "#C9B6FF" },
+  profile: { main: "#FF9F45", sub: "#FFC99B" },
+}
+
+/** #RGB 简写展开成 #RRGGBB。IconPark 的 #333 与 #FFF 都是简写，不展开比对不上。 */
+function expandHex(hex) {
+  const body = hex.slice(1)
+  return `#${body.length === 3 ? body.replace(/./g, (c) => c + c) : body}`
+}
+
+/** 把 #RGB / #RRGGBB 解析成 [r, g, b]（0-255）。 */
+function parseHex(hex) {
+  const n = Number.parseInt(expandHex(hex).slice(1), 16)
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
+}
+
+/** 归一化成 Lottie 的 0–1 颜色（保留 4 位小数，取 2 位会让相邻色落成同一个值）。 */
 function rgba(hex) {
-  const n = Number.parseInt(hex.slice(1), 16)
-  const channel = (shift) => Math.round(((n >> shift) & 255) / 255 * 10000) / 10000
-  return [channel(16), channel(8), channel(0), 1]
+  return [...parseHex(hex).map((v) => Math.round((v / 255) * 10000) / 10000), 1]
+}
+
+/**
+ * 描边色：往白色方向推。
+ *
+ * 逐色派生而不是再写一套描边色板 —— 手写两套要维护几十个色值，还会出现
+ * 「面换了色、描边还是旧色的亮档」这类漏改。
+ */
+function lighten(hex, amount = 0.42) {
+  const rgb = parseHex(hex).map((v) => Math.round(v + (255 - v) * amount))
+  return `#${rgb.map((v) => v.toString(16).padStart(2, "0")).join("")}`
+}
+
+/**
+ * 颜色槽 → 本 tab 的实际颜色。
+ *
+ * 白色内部描边原样保留：它是压在彩色块上的高光，换成别的色反而没了那层通透感。
+ */
+function mapColor(hex, palette, hasFill) {
+  const upper = expandHex(hex).toUpperCase()
+  if (upper === SLOT_INNER_STROKE) return expandHex(hex)
+  if (upper === SLOT_OUT_FILL) return palette.main
+  if (upper === SLOT_INNER_FILL) return palette.sub
+  if (upper === SLOT_OUT_STROKE) {
+    // 外轮廓：有面的用它自己的亮档（贴在面的边缘）；纯线条没有面可贴，用 sub。
+    return hasFill ? lighten(palette.main) : palette.sub
+  }
+  throw new Error(`未知的 IconPark 颜色槽 ${hex}`)
+}
+
+/**
+ * 把 SVG 的 `d` 转成 Lottie 形状。
+ *
+ * Lottie 只认三次贝塞尔，且控制点写的是**相对顶点的偏移量**（这是它与 SVG `d` 最大的
+ * 差别，写绝对坐标会整体变形）。所以先把 A/Q/T/S/H/V 全归一成 C，再逐段换算。
+ */
+function convertPath(d) {
+  const path = new SvgPath(d).abs().unshort().unarc().round(2)
+  const shapes = []
+
+  let verts = null
+  let segs = null
+  let prev = null
+  let closed = false
+
+  function flush() {
+    if (!segs || segs.length === 0) return
+
+    const pointCount = closed ? segs.length : segs.length + 1
+    const v = []
+    const i = []
+    const o = []
+
+    for (let k = 0; k < pointCount; k++) {
+      v.push([verts[k][0] * SCALE, verts[k][1] * SCALE])
+      i.push([0, 0])
+      o.push([0, 0])
+    }
+    for (let k = 0; k < segs.length; k++) {
+      const seg = segs[k]
+      o[k] = [seg.c1[0] - seg.from[0], seg.c1[1] - seg.from[1]]
+      const target = (k + 1) % pointCount
+      i[target] = [seg.c2[0] - seg.to[0], seg.c2[1] - seg.to[1]]
+    }
+
+    shapes.push({ ty: "sh", d: 1, ks: { a: 0, k: { i, o, v, c: closed } }, nm: "sh" })
+
+    verts = null
+    segs = null
+    closed = false
+  }
+
+  /**
+   * svgpath 的段是 `[命令字母, ...参数]` 的数组（`abs()` 之后参数已是数字）。
+   * 迭代前先 abs/unshort/unarc，所以到这里只剩 M、L、C、Q、H、V、Z。
+   */
+  path.iterate((seg) => {
+    const cmd = seg[0]
+    const data = seg.slice(1).map(Number)
+    if (cmd === "M") {
+      flush()
+      prev = [data[0], data[1]]
+      verts = [prev]
+      segs = []
+      closed = false
+      return
+    }
+    if (cmd === "Z") {
+      closed = true
+      flush()
+      prev = null
+      return
+    }
+
+    let end
+    let c1
+    let c2
+    if (cmd === "L") {
+      end = [data[0], data[1]]
+      c1 = prev
+      c2 = end
+    } else if (cmd === "H") {
+      end = [data[0], prev[1]]
+      c1 = prev
+      c2 = end
+    } else if (cmd === "V") {
+      end = [prev[0], data[0]]
+      c1 = prev
+      c2 = end
+    } else if (cmd === "C") {
+      c1 = [data[0], data[1]]
+      c2 = [data[2], data[3]]
+      end = [data[4], data[5]]
+    } else if (cmd === "Q") {
+      // 二次贝塞尔升三次：控制点各取 2/3 处，两端点与原来严格重合。
+      const [qx, qy, ex, ey] = data
+      c1 = [prev[0] + ((qx - prev[0]) * 2) / 3, prev[1] + ((qy - prev[1]) * 2) / 3]
+      c2 = [ex + ((qx - ex) * 2) / 3, ey + ((qy - ey) * 2) / 3]
+      end = [ex, ey]
+    } else {
+      throw new Error(`不支持的 path 命令 ${cmd}`)
+    }
+
+    segs.push({ from: prev, c1, c2, to: end })
+    verts.push(end)
+    prev = end
+  })
+  flush()
+
+  return shapes
 }
 
 /** 标量属性的缓动：快起慢停（ease-out）。多段串联出来就是弹簧感。 */
@@ -58,35 +245,11 @@ const EASE3 = {
   o: { x: [0.4, 0.4, 0.4], y: [0, 0, 0] },
 }
 
-/** 圆角矩形。`s`=[宽,高]，`p`=中心点，`r`=圆角半径。 */
-function rc(p, s, r) {
-  return { ty: "rc", d: 1, s: { a: 0, k: s }, p: { a: 0, k: p }, r: { a: 0, k: r }, nm: "rc" }
-}
-
-/** 椭圆。正圆时 `s` 的两个分量相等，`p`=中心点。 */
-function el(p, s) {
-  return { ty: "el", d: 1, s: { a: 0, k: s }, p: { a: 0, k: p }, nm: "el" }
-}
-
-/**
- * 自定义路径。
- *
- * `v` 是顶点；`i`/`o` 是各顶点的入/出控制点，**写相对该顶点的偏移量而不是绝对坐标** ——
- * 这是 Lottie 与 SVG `d` 属性最大的差别，写错会整体变形。
- * `c`=是否闭合（闭合的开放路径在填充时会补一条直线，正好用来把肩弧填成身体）。
- */
-function sh(v, i, o, c) {
-  return { ty: "sh", d: 1, ks: { a: 0, k: { i, o, v, c } }, nm: "sh" }
-}
-
 /**
  * 描边。**描边写在填充之前**：Lottie 的 `it` 数组里靠前的元素渲染在上层，
  * 这样描边压住填充边缘，填充变实后轮廓才不会被吃掉。
- *
- * 颜色从灰插值到该 tab 的**亮档**色：激活后描边要比填充亮一档，图标才像「被点亮」
- * 而不是被染成一块色块。
  */
-function stroke(activeColor) {
+function stroke(activeColor, width) {
   return {
     ty: "st",
     c: {
@@ -97,7 +260,7 @@ function stroke(activeColor) {
       ],
     },
     o: { a: 0, k: 100 },
-    w: { a: 0, k: 1.8 },
+    w: { a: 0, k: width },
     lc: 2, // 圆头端点
     lj: 2, // 圆角接合
     ml: 4,
@@ -106,10 +269,10 @@ function stroke(activeColor) {
 }
 
 /**
- * 填充。**透明度是「线条转填充」的主体**：从 0 涨到 100，形状内部被该 tab 的主色填满。
+ * 填充。**透明度是「线条转填充」的主体**：从 0 涨到 100，形状内部被彩色填满。
  * 前 3 帧刻意保持 0，让弹跳的「按压」先发生，填充再跟上，否则一点击就糊成一团。
  */
-function fill(activeColor) {
+function fill(activeColor, evenOdd) {
   return {
     ty: "fl",
     c: { a: 0, k: rgba(activeColor) },
@@ -121,7 +284,7 @@ function fill(activeColor) {
         { t: 15, s: [100] },
       ],
     },
-    r: 1,
+    r: evenOdd ? 2 : 1,
     nm: "fill",
   }
 }
@@ -138,20 +301,6 @@ function transform() {
     sk: { a: 0, k: 0 },
     sa: { a: 0, k: 0 },
     nm: "tr",
-  }
-}
-
-/**
- * 把若干形状收进一个组，共享同一套描边与填充。
- *
- * 颜色只在**组级别**给一次，不在每个形状上各给一份：组内形状共用描边与填充，
- * 逐形状上色会让 22px 的图标里挤进 4 种颜色，缩到真实尺寸就成了一团糊。
- */
-function group(shapes, colors) {
-  return {
-    ty: "gr",
-    nm: "icon",
-    it: [...shapes, stroke(colors.stroke), fill(colors.fill), transform()],
   }
 }
 
@@ -176,81 +325,59 @@ function bounce() {
   }
 }
 
-/**
- * 5 个图标的定义：形状 + 激活态配色。
- *
- * 形状全部按 24×24 画布的绝对坐标书写，内容区控制在 3–21 之间（四周留 3 的呼吸）。
- * 形状必须是**封闭或可填充**的：开放线条（比如一条横线）没有内部，填充动效会毫无表现。
- *
- * **配色为什么是一主一亮两档**：激活态同时有描边和填充两个着色对象，两者同色会让图标
- * 变成一块纯色剪影，看不出线条转填充的过程；描边改用亮一档的同色系色，既保持了
- * 每个 tab 的色彩身份，又留住了「线先亮、再被填满」的层次。
- *
- * 取值是 Apple 深色模式的系统色（#4C8DFF 蓝 / #32D74B 绿 / #FF9F0A 橙 / #BF5AF2 紫 /
- * #FF6482 粉），选这套而非浅色版是因为激活项垫的是深色实心块（浅色 #1C1C1F、
- * 深色 #3A3A3C），深色系统色在深底上才有足够对比，浅色版会糊进背景里。
- */
-const ICONS = {
-  /** 连接：2×2 圆角方块。沿用原 `grid-fill` 的网格语义。 */
-  connections: {
-    shapes: [
-      rc([7, 7], [6.5, 6.5], 2),
-      rc([17, 7], [6.5, 6.5], 2),
-      rc([7, 17], [6.5, 6.5], 2),
-      rc([17, 17], [6.5, 6.5], 2),
-    ],
-    colors: { fill: "#4C8DFF", stroke: "#A9C9FF" },
-  },
-  /** 会话：气泡主体 + 左下尖角尾巴。 */
-  conversations: {
-    shapes: [
-      rc([12, 9.5], [17, 12.5], 4),
-      // 尾巴用直角三角：直线段在填充后与气泡连成一体，不需要额外的圆角处理。
-      sh(
-        [[8, 15.2], [8, 20], [13.2, 15.2]],
-        [[0, 0], [0, 0], [0, 0]],
-        [[0, 0], [0, 0], [0, 0]],
-        true
-      ),
-    ],
-    colors: { fill: "#32D74B", stroke: "#9BE7A9" },
-  },
-  /** 任务：三条清单行，末行缩短表示列表收尾。沿用原 `list-dot` 的列表语义。 */
-  tasks: {
-    shapes: [
-      rc([12, 6.5], [14, 3], 1.5),
-      rc([12, 12], [14, 3], 1.5),
-      rc([9.5, 17.5], [9, 3], 1.5),
-    ],
-    colors: { fill: "#FF9F0A", stroke: "#FFCF8A" },
-  },
-  /**
-   * 圈子：并肩双人。
-   *
-   * 原来是 `account`（单人），和「我的」的 `account-fill` 放在一起几乎分不清 —— 两个
-   * tab 挨着、都是一个人头。改成双人后既是「多人/社区」的语义，也在形状上拉开了差距。
-   * 两段肩弧之间留 1 的缝（11.5→12.5），否则填充后两个身体会粘成一整块。
-   */
-  circles: {
-    shapes: [
-      el([7, 9], [6, 6]),
-      sh([[3, 18], [11.5, 18]], [[0, 0], [-2.8, -4]], [[2.8, -4], [0, 0]], false),
-      el([17, 9], [6, 6]),
-      sh([[12.5, 18], [21, 18]], [[0, 0], [-2.8, -4]], [[2.8, -4], [0, 0]], false),
-    ],
-    colors: { fill: "#BF5AF2", stroke: "#DDA8FF" },
-  },
-  /** 我的：单人（头 + 肩弧，填充后弧口自动补成身体）。 */
-  profile: {
-    shapes: [
-      el([12, 8], [8, 8]),
-      sh([[4, 19], [20, 19]], [[0, 0], [-1.3, -6]], [[1.3, -6], [0, 0]], false),
-    ],
-    colors: { fill: "#FF6482", stroke: "#FFAEBF" },
-  },
+/** 取出 `<path .../>` 上的属性。IconPark 产出的属性一律带引号。 */
+function attrs(tag) {
+  const result = {}
+  for (const m of tag.matchAll(/([a-z-]+)="([^"]*)"/g)) result[m[1]] = m[2]
+  return result
 }
 
-function buildAnimation(name, def) {
+/**
+ * 解析一个 IconPark SVG，返回按**视觉层叠顺序**排列的部件（数组靠前 = 画在上层）。
+ *
+ * SVG 里后出现的元素绘制在上，而 Lottie 的形状数组是 AE 顺序（靠前的在上），
+ * 所以这里要**反转** —— 不反转的话，气泡里的高光、身体前的四肢都会盖住该在
+ * 下层的部分，图标会变成一坨实心。
+ */
+function parseSvg(source) {
+  const viewBox = source.match(/viewBox="([^"]*)"/)[1].split(/\s+/).map(Number)
+  if (viewBox[2] !== SOURCE_SIZE || viewBox[3] !== SOURCE_SIZE) {
+    throw new Error(
+      `源图标必须是 ${SOURCE_SIZE}×${SOURCE_SIZE} 网格，实际 ${viewBox[2]}×${viewBox[3]}`
+    )
+  }
+
+  const parts = [...source.matchAll(/<path\b[^>]*>/g)].map((m) => {
+    const a = attrs(m[0])
+    return {
+      shapes: convertPath(a.d),
+      fill: a.fill && a.fill !== "none" ? a.fill : null,
+      stroke: a.stroke && a.stroke !== "none" ? a.stroke : null,
+      evenOdd: a["fill-rule"] === "evenodd",
+    }
+  })
+
+  parts.reverse()
+  return parts
+}
+
+function buildAnimation(name, parts, palette) {
+  const groups = parts.map((part) => {
+    const hasFill = Boolean(part.fill)
+    const items = [...part.shapes]
+
+    if (part.stroke) {
+      const color = mapColor(part.stroke, palette, hasFill)
+      const width = hasFill ? FACE_STROKE_WIDTH : LINE_STROKE_WIDTH
+      items.push(stroke(color, width))
+    }
+    // 填充写在描边之后：数组靠前的渲染在上层，描边要压住填充边缘。
+    if (hasFill) items.push(fill(mapColor(part.fill, palette, hasFill), part.evenOdd))
+    items.push(transform())
+
+    return { ty: "gr", nm: "part", it: items }
+  })
+
   return {
     v: "5.12.2",
     fr: FR,
@@ -278,7 +405,7 @@ function buildAnimation(name, def) {
           s: bounce(),
         },
         ao: 0,
-        shapes: [group(def.shapes, def.colors)],
+        shapes: groups,
         ip: 0,
         op: OP,
         st: 0,
@@ -291,8 +418,10 @@ function buildAnimation(name, def) {
 
 mkdirSync(OUT_DIR, { recursive: true })
 
-for (const [name, def] of Object.entries(ICONS)) {
-  const file = resolve(OUT_DIR, `${name}.json`)
-  writeFileSync(file, JSON.stringify(buildAnimation(name, def), null, 2) + "\n", "utf8")
-  console.log(`generated ${name}.json`)
+for (const name of Object.keys(PALETTES)) {
+  const source = readFileSync(resolve(SRC_DIR, `${name}.svg`), "utf8")
+  const parts = parseSvg(source)
+  const data = buildAnimation(name, parts, PALETTES[name])
+  writeFileSync(resolve(OUT_DIR, `${name}.json`), JSON.stringify(data, null, 2) + "\n", "utf8")
+  console.log(`generated ${name}.json (${parts.length} parts)`)
 }

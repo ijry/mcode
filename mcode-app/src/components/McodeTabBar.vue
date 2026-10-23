@@ -22,8 +22,9 @@
       >
         <view class="mc-tabbar__icon">
           <!--
-            图标配色现在由 Lottie 自己管（首帧灰描边 → 末帧亮档描边 + 主色填充，
-            每个 tab 一套色），不再由这里传 color：动画文件里已经写死了这条插值。
+            图标是 IconPark 多色图标（源 SVG 在 assets/tabbar-src/，Apache-2.0）转成的
+            Lottie：首帧灰线稿，末帧描边亮起、内部被该 tab 的双色填满。配色在
+            scripts/build-tabbar-lottie.mjs 的 PALETTES，改色后要重跑生成脚本。
           -->
           <McTabbarLottieIcon :name="item.name" :active="item.name === current" />
           <view v-if="item.name === 'conversations' && badgeText" class="mc-tabbar__badge">
@@ -269,7 +270,7 @@ function handleSwitch(item: TabItem) {
    * 激活项在这两种模式下都保持**实心**块（浅色 #1C1C1F / 深色 #3A3A3C）。
    * 磨砂让胶囊整体变通透了，激活标记若也跟着半透明，彩色填充图标压在浅色磨砂上
    * 会发灰、边界糊掉。实心块同时保证了动画的彩色末帧始终有足够对比 —— 激活态的
-   * 5 套配色都是按深底选的，垫底的块一旦变浅，它们在浅色磨砂上就不成立了。
+   * 配色都是按深底选的，垫底的块一旦变浅，它们在浅色磨砂上就不成立了。
    */
   .mc-tabbar__item--active {
     background: #3a3a3c;

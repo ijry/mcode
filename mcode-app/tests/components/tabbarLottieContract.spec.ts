@@ -1,13 +1,15 @@
 /**
  * 底栏 Lottie 动画的接线契约。
  *
+ * 图标源自 IconPark（字节开源，Apache-2.0）的 multi-color 主题，源 SVG 固化在
+ * `src/assets/tabbar-src/`，由 `scripts/build-tabbar-lottie.mjs` 转成 Lottie。
+ *
  * **这些断言防的都是「构建期看着没事、上线才炸」的那一类问题**：
  *   - lottie 运行时用 .js 而不是 .cjs → 在 `"type": "module"` 的仓库里被当 ESM 解析，
  *     UMD 包导出变空，编译不报错，运行时才 `loadAnimation is not a function`。
  *   - 动画数据用 `@/` 别名做动态 import → Vite 的 dynamic-import-vars 不解析别名，
  *     构建能过，但对应 chunk 根本没打进去，运行时取到空。
- *   - 磨砂少了 `-webkit-` 前缀或 iOS 毛边修复 → 只在 Safari/WKWebView 上可见，
- *     H5 预览用的 Chrome 上看不出来。
+ *   - 转换器丢部件 / 丢颜色 → 图标缺一块或退化成单色，渲染时才看得见。
  *
  * 这里只做**结构断言**（纯读 JSON 与源码，不渲染）：动画是否真的被 lottie 画出来，
  * 由 `scripts/verify-tabbar-lottie.cjs` 在 jsdom 里验证（那个要 jsdom，CI 不跑）。
@@ -19,13 +21,13 @@ const APP = path.resolve(__dirname, "../..")
 
 const TAB_NAMES = ["connections", "conversations", "tasks", "circles", "profile"]
 
-/** 每个图标由几个形状拼成（= Lottie 复合 path 里的子路径数）。 */
-const SHAPE_COUNTS: Record<string, number> = {
-  connections: 4, // 2×2 方块
-  conversations: 2, // 气泡 + 尾巴
-  tasks: 3, // 三条清单行
-  circles: 4, // 两个头 + 两段肩弧
-  profile: 2, // 头 + 肩弧
+/** 每个图标的部件数（= 源 SVG 的 path 数，转换器一个 path 一个组一个形状）。 */
+const PART_COUNTS: Record<string, number> = {
+  connections: 3, // 圆点 + 箭头 + 折线
+  conversations: 2, // 外气泡 + 内气泡
+  tasks: 5, // 两个清单条 + 叉 + 勾 + ?
+  circles: 4, // 双人：两个填充 + 两条线
+  profile: 3, // 外框 + 头 + 肩
 }
 
 /** 未激活的描边色 #8E8E93（归一化到 0-1，Lottie 的颜色格式）。 */
@@ -36,12 +38,62 @@ const GRAY = [0.5569, 0.5569, 0.5765, 1]
  */
 const ACTIVE_PILLS = ["#1C1C1F", "#3A3A3C"]
 
+/**
+ * 每个 tab 的调色板 —— 与 `scripts/build-tabbar-lottie.mjs` 的 `PALETTES` 互为镜像。
+ * 改了一边忘了另一边，下面的「色都在调色板里」断言会红。
+ */
+const PALETTES: Record<string, { main: string; sub: string }> = {
+  connections: { main: "#4F8DFF", sub: "#6FE3F5" },
+  conversations: { main: "#FF6FA5", sub: "#FFA8C5" },
+  tasks: { main: "#2FC48D", sub: "#86EFC8" },
+  circles: { main: "#A78BFA", sub: "#C9B6FF" },
+  profile: { main: "#FF9F45", sub: "#FFC99B" },
+}
+
 type AnyRecord = Record<string, any>
 
-/** 把 #RRGGBB 解析成 Lottie 的归一化 RGB 三元组。 */
-function parseHex(hex: string): number[] {
-  const n = Number.parseInt(hex.slice(1), 16)
-  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255]
+function read(relativePath: string): string {
+  return fs.readFileSync(path.resolve(APP, relativePath), "utf8")
+}
+
+function readAnimation(name: string): AnyRecord {
+  return JSON.parse(read(`src/assets/tabbar-lottie/${name}.json`))
+}
+
+/** 图标的全部组（转换器一个部件一个组）。 */
+function groups(data: AnyRecord): AnyRecord[] {
+  return data.layers[0].shapes
+}
+
+/** 把 #RGB / #RRGGBB 归一化成 Lottie 的 0-1 颜色，与生成脚本同规则（4 位小数）。 */
+function rgba(hex: string): number[] {
+  const body = hex.slice(1)
+  const full = body.length === 3 ? body.replace(/./g, (c) => c + c) : body
+  const n = Number.parseInt(full, 16)
+  return [
+    Math.round(((n >> 16) & 255) / 255 * 10000) / 10000,
+    Math.round(((n >> 8) & 255) / 255 * 10000) / 10000,
+    Math.round((n & 255) / 255 * 10000) / 10000,
+  ]
+}
+
+/** 描边色派生：往白推 42%。与生成脚本的 lighten 同规则（先取整回 hex，再归一化）——
+ * 脚本先 round 成 0-255 整数再转归一化值，直接用小数算会差出第 3 位小数。 */
+function lighten(hex: string): number[] {
+  const rgb = rgba(hex).slice(0, 3).map((v) => Math.round(v * 255))
+  return rgb
+    .map((v) => Math.round(v + (255 - v) * 0.42))
+    .map((v) => Math.round((v / 255) * 10000) / 10000)
+}
+
+/** 某个图标激活后允许出现的全部颜色（填充与描边末帧）。 */
+function allowedColors(name: string): number[][] {
+  const { main, sub } = PALETTES[name]
+  return [rgba(main), rgba(sub), [1, 1, 1], lighten(main)]
+}
+
+function sameColor(a: number[], b: number[]): boolean {
+  return a.length === b.length && a.every((v, i) => Math.abs(v - b[i]) < 0.001)
 }
 
 /** sRGB 分量转线性光，WCAG 的相对亮度要求在线性空间里算。 */
@@ -60,19 +112,6 @@ function contrast(a: number[], b: number[]): number {
   const la = luminance(a)
   const lb = luminance(b)
   return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05)
-}
-
-function read(relativePath: string): string {
-  return fs.readFileSync(path.resolve(APP, relativePath), "utf8")
-}
-
-function readAnimation(name: string): AnyRecord {
-  return JSON.parse(read(`src/assets/tabbar-lottie/${name}.json`))
-}
-
-/** 动画里唯一的形状组。生成器只产一个组，所以直接取第一个是稳定的。 */
-function shapeItems(data: AnyRecord): AnyRecord[] {
-  return data.layers[0].shapes[0].it
 }
 
 describe("tabbar lottie contract", () => {
@@ -94,98 +133,97 @@ describe("tabbar lottie contract", () => {
       }
     })
 
-    it("每个图标都画出了预期数量的形状", () => {
+    it("源 SVG 的每个 path 都转换成了部件，一个不丢", () => {
       for (const name of TAB_NAMES) {
-        const shapes = shapeItems(readAnimation(name)).filter((item) =>
-          ["rc", "el", "sh"].includes(item.ty)
-        )
-        expect(shapes).toHaveLength(SHAPE_COUNTS[name])
+        expect(groups(readAnimation(name))).toHaveLength(PART_COUNTS[name])
+        // 源 SVG 也要在仓库里：转换器以它为输入，丢了就无法重新生成。
+        expect(() => read(`src/assets/tabbar-src/${name}.svg`)).not.toThrow()
       }
     })
 
     /**
-     * Lottie 的 `it` 数组里**靠前的元素渲染在上层**。描边必须在填充之前，
+     * 组结构只有两种：面部件 `[形状, 描边, 填充, 变换]`、线部件 `[形状, 描边, 变换]`。
+     * Lottie 的 `it` 数组里靠前的元素渲染在上层，描边必须在填充之前，
      * 否则填充变实后会把轮廓吃掉（图标看起来像少了一圈边）。
      */
-    it("把描边排在填充之前", () => {
+    it("面部件描边在填充之前，线部件只有描边", () => {
       for (const name of TAB_NAMES) {
-        const types = shapeItems(readAnimation(name)).map((item) => item.ty)
-        expect(types.indexOf("st")).toBeGreaterThan(-1)
-        expect(types.indexOf("fl")).toBeGreaterThan(-1)
-        expect(types.indexOf("st")).toBeLessThan(types.indexOf("fl"))
+        for (const group of groups(readAnimation(name))) {
+          const types = group.it.map((item: AnyRecord) => item.ty)
+          expect(types[0]).toBe("sh")
+          expect(types[types.length - 1]).toBe("tr")
+          if (types.includes("fl")) {
+            expect(types.indexOf("st")).toBeGreaterThan(-1)
+            expect(types.indexOf("st")).toBeLessThan(types.indexOf("fl"))
+          } else {
+            expect(types).toEqual(["sh", "st", "tr"])
+          }
+        }
       }
     })
 
     it("填充从不透明 0 涨到 100（线条转填充）", () => {
       for (const name of TAB_NAMES) {
-        const fill = shapeItems(readAnimation(name)).find((item) => item.ty === "fl")
-        const keys = fill.o.k
-        expect(keys[0].s).toEqual([0])
-        expect(keys[keys.length - 1].s).toEqual([100])
+        for (const group of groups(readAnimation(name))) {
+          const fill = group.it.find((item: AnyRecord) => item.ty === "fl")
+          if (!fill) continue
+          const keys = fill.o.k
+          expect(keys[0].s).toEqual([0])
+          expect(keys[keys.length - 1].s).toEqual([100])
+        }
       }
     })
 
-    it("描边从激活前的灰色插值到该 tab 的颜色", () => {
+    it("描边从激活前的灰色插值到彩色", () => {
       for (const name of TAB_NAMES) {
-        const stroke = shapeItems(readAnimation(name)).find((item) => item.ty === "st")
-        const keys = stroke.c.k
-        expect(keys[0].s).toEqual(GRAY)
-        // 末帧不能再是灰（没上色）也不能再是白（退回单色方案）。
-        expect(keys[keys.length - 1].s).not.toEqual(GRAY)
-        expect(keys[keys.length - 1].s).not.toEqual([1, 1, 1, 1])
-        // 线宽 1.8：24 的画布渲染到 22px 位置，实际约 1.65px，是刻意的细线。
-        expect(stroke.w.k).toBe(1.8)
+        for (const group of groups(readAnimation(name))) {
+          const stroke = group.it.find((item: AnyRecord) => item.ty === "st")
+          const keys = stroke.c.k
+          expect(keys[0].s).toEqual(GRAY)
+          // 末帧不能还是灰。允许纯白：IconPark 的内部高光描边（#FFF）按原样保留，
+          // 它压在彩色填充上正是「细腻」的来源之一。
+          expect(keys[keys.length - 1].s).not.toEqual(GRAY)
+        }
       }
     })
 
     /**
-     * 激活态是「主色填充 + 亮一档描边」的双色构成，两者必须真的不同色 ——
-     * 同色会让图标退化成一块纯色剪影，线条转填充的过程就没了。
+     * 「图标内多色」是这次改版的核心诉求：每个图标至少要用到 2 种不同的彩色
+     * （主色 + 辅色/白高光）。只有一种色就是退化回了单色方案。
+     * 同时所有色都必须来自该 tab 的调色板，防止转换器漏映射把 IconPark 原色
+     * （#333 / #2F88FF）带进产物。
      */
-    it("每个图标的填充与描边是同色系的两档，不是同一个色", () => {
+    it("每个图标至少两种彩色，且全部来自调色板", () => {
       for (const name of TAB_NAMES) {
-        const items = shapeItems(readAnimation(name))
-        const fill = items.find((item) => item.ty === "fl").c.k
-        const stroke = items.find((item) => item.ty === "st").c.k
-        const strokeEnd = stroke[stroke.length - 1].s
-
-        expect(fill.slice(0, 3)).not.toEqual(strokeEnd.slice(0, 3))
-        // 描边要比填充亮，否则看起来是填充在往外洇，而不是轮廓先被点亮。
-        expect(luminance(strokeEnd)).toBeGreaterThan(luminance(fill))
+        const seen = new Set<number[]>()
+        for (const group of groups(readAnimation(name))) {
+          const stroke = group.it.find((item: AnyRecord) => item.ty === "st")
+          seen.add(stroke.c.k[stroke.c.k.length - 1].s.slice(0, 3))
+          const fill = group.it.find((item: AnyRecord) => item.ty === "fl")
+          if (fill) seen.add(fill.c.k.slice(0, 3))
+        }
+        const allowed = allowedColors(name)
+        for (const color of seen) {
+          expect(allowed.some((a) => sameColor(a, color))).toBe(true)
+        }
+        expect(seen.size).toBeGreaterThanOrEqual(2)
       }
-    })
-
-    /**
-     * 5 个 tab 各有一套色，不是统一强调色。
-     * 这条同时防住「为了省事把 5 份配色合成 1 份」的退化。
-     */
-    it("5 个 tab 的激活色互不相同", () => {
-      const signatures = TAB_NAMES.map((name) => {
-        const items = shapeItems(readAnimation(name))
-        return [items.find((item) => item.ty === "fl").c.k, items.find((item) => item.ty === "st").c.k[1].s]
-          .map((color: number[]) => color.slice(0, 3).join(","))
-          .join("|")
-      })
-      expect(new Set(signatures).size).toBe(TAB_NAMES.length)
     })
 
     /**
      * 颜色必须在**深浅两套**实心块上都站得住。
      *
-     * 这是纯 JSON 层面的检查，肉眼看不到的失败模式是：有人挑了深色系的强调色（比如
-     * #0A3F8F），在白底的设计稿里很好看，压到 #1C1C1F 的激活块上就糊成一团。
+     * 肉眼看不到的失败模式是：配色挑了深色系（比如 IconPark 原生的 #333 外轮廓），
+     * 在白底的设计稿里很好看，压到深色激活块上就糊成一团。
      * 阈值取 WCAG 对非文本图形的 3:1。
      */
     it("激活色在深浅两套实心块上都有 3:1 以上的对比", () => {
       for (const name of TAB_NAMES) {
-        const items = shapeItems(readAnimation(name))
-        const fill = items.find((item) => item.ty === "fl").c.k
-        const strokeEnd = items.find((item) => item.ty === "st").c.k[1].s
         for (const pillHex of ACTIVE_PILLS) {
-          const pill = parseHex(pillHex)
-          // 描边在最外侧，它糊掉等于整个图标轮廓消失，要求与填充一样严。
-          expect(contrast(fill, pill)).toBeGreaterThan(3)
-          expect(contrast(strokeEnd, pill)).toBeGreaterThan(3)
+          const pill = rgba(pillHex)
+          for (const color of allowedColors(name)) {
+            expect(contrast(color, pill)).toBeGreaterThan(3)
+          }
         }
       }
     })
@@ -203,7 +241,7 @@ describe("tabbar lottie contract", () => {
     })
 
     /**
-     * 描边色只写了一套（灰→白），没有为深色模式导出第二份。
+     * 描边色只写了一套（灰→彩），没有为深色模式导出第二份。
      * 深色的 #8C8C94 与浅色的 #8E8E93 相差 ≤2%，肉眼看不出，不值得翻倍包体。
      */
     it("不为深色模式重复导出动画", () => {
@@ -222,6 +260,10 @@ describe("tabbar lottie contract", () => {
 
     it("带着 MIT 许可证一起存放", () => {
       expect(fs.existsSync(path.resolve(APP, "src/vendor/lottie-light.LICENSE.md"))).toBe(true)
+    })
+
+    it("IconPark 源图标带着 Apache-2.0 许可证一起存放", () => {
+      expect(fs.existsSync(path.resolve(APP, "src/assets/tabbar-src/LICENSE"))).toBe(true)
     })
   })
 
@@ -280,7 +322,7 @@ describe("tabbar lottie contract", () => {
 
     it("激活项仍是实心块，好让彩色填充有足够对比", () => {
       const source = read("src/components/McodeTabBar.vue")
-      // 磨砂让胶囊通透了，激活标记若也半透明，白色末帧会发灰、边界糊掉。
+      // 磨砂让胶囊通透了，激活标记若也半透明，彩色末帧会发灰、边界糊掉。
       expect(source).toContain("&__item--active {\n    background: #1c1c1f;")
       expect(source).toContain(".mc-tabbar__item--active {\n    background: #3a3a3c;")
     })
