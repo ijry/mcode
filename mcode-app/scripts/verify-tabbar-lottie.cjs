@@ -15,7 +15,7 @@
  * 证明不了 lottie 真的画出来了。
  *
  * 它检查：解析不抛错、每个形状都渲染成子路径、首帧纯线稿（填充透明 + 灰色描边）、
- * 末帧线转面（填充实色 + 白色描边）。
+ * 末帧线转面（填充实色 + 该 tab 的亮档色描边）。
  */
 const fs = require("fs")
 const path = require("path")
@@ -72,7 +72,35 @@ const EXPECTED_SUBPATHS = {
 }
 
 const GRAY = "rgb(142,142,147)"
-const WHITE = "rgb(255,255,255)"
+
+/**
+ * 激活态期望色（与 build-tabbar-lottie.mjs 的 `ICONS[*].colors`、tint-tabbar-fallback.cjs
+ * 的 `TARGETS` 三处互为镜像，改动要三处同步）。
+ *
+ * 这里刻意**硬编码**而不是从动画 JSON 里读出来再比 —— 那是同源比较，永远绿；
+ * 写死才验得出「lottie 渲染层真的把 JSON 里的色值画出来了」。
+ */
+const ACTIVE_COLORS = {
+  connections: { fill: [76, 141, 255], stroke: [169, 201, 255] },
+  conversations: { fill: [50, 215, 75], stroke: [155, 231, 169] },
+  tasks: { fill: [255, 159, 10], stroke: [255, 207, 138] },
+  circles: { fill: [191, 90, 242], stroke: [221, 168, 255] },
+  profile: { fill: [255, 100, 130], stroke: [255, 174, 191] },
+}
+
+/**
+ * 颜色允许 ±1 容差。
+ *
+ * 生成脚本把色值归一化到 4 位小数（0.6627），lottie 渲染时乘回 255 会落在
+ * 168.99 这类非整数上再取整 —— 与 `Math.round(169/255*10000)/10000*255` 差 1
+ * 是舍入路径不同，不是颜色错了。放宽到 ±1，真正的换色（差几十）照样报。
+ */
+function closeRgb(actual, expected) {
+  if (!actual) return false
+  const m = actual.match(/^rgb\((\d+),(\d+),(\d+)\)$/)
+  if (!m) return false
+  return m.slice(1).every((v, i) => Math.abs(Number(v) - expected[i]) <= 1)
+}
 
 let failures = 0
 
@@ -111,6 +139,7 @@ for (const [name, expected] of Object.entries(EXPECTED_SUBPATHS)) {
     const strokePath = paths.find((p) => p.getAttribute("stroke"))
     return {
       fillOpacity: fillPath ? fillPath.getAttribute("fill-opacity") : null,
+      fill: fillPath ? fillPath.getAttribute("fill") : null,
       stroke: strokePath ? strokePath.getAttribute("stroke") : null,
       subpaths: fillPath ? (fillPath.getAttribute("d").match(/M/g) || []).length : 0,
     }
@@ -118,13 +147,19 @@ for (const [name, expected] of Object.entries(EXPECTED_SUBPATHS)) {
 
   const first = sample(0)
   const last = sample(29)
+  const active = ACTIVE_COLORS[name]
 
   const problems = []
   if (first.subpaths === 0) problems.push("首帧没渲染出 fill path（形状没被解析）")
   if (first.fillOpacity !== "0") problems.push(`首帧 fill-opacity 应为 0，实际 ${first.fillOpacity}`)
   if (last.fillOpacity !== "1") problems.push(`末帧 fill-opacity 应为 1，实际 ${last.fillOpacity}`)
   if (first.stroke !== GRAY) problems.push(`首帧描边应为灰 ${GRAY}，实际 ${first.stroke}`)
-  if (last.stroke !== WHITE) problems.push(`末帧描边应为白 ${WHITE}，实际 ${last.stroke}`)
+  if (!closeRgb(last.stroke, active.stroke)) {
+    problems.push(`末帧描边应为亮档色 rgb(${active.stroke.join(",")})，实际 ${last.stroke}`)
+  }
+  if (!closeRgb(last.fill, active.fill)) {
+    problems.push(`末帧填充应为主色 rgb(${active.fill.join(",")})，实际 ${last.fill}`)
+  }
   if (first.subpaths !== expected) {
     problems.push(`形状数应为 ${expected}，实际渲染出 ${first.subpaths} 个子路径`)
   }
