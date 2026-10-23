@@ -21,11 +21,11 @@
         @click="handleSwitch(item)"
       >
         <view class="mc-tabbar__icon">
-          <u-icon
-            :name="item.icon"
-            :size="21"
-            :color="item.name === current ? '#FFFFFF' : resolvedInactiveColor"
-          ></u-icon>
+          <!--
+            图标配色现在由 Lottie 自己管（首帧灰描边 → 末帧白描边 + 白填充），
+            不再由这里传 color：动画文件里已经写死了这条插值。
+          -->
+          <McTabbarLottieIcon :name="item.name" :active="item.name === current" />
           <view v-if="item.name === 'conversations' && badgeText" class="mc-tabbar__badge">
             <text class="mc-tabbar__badge-text">{{ badgeText }}</text>
           </view>
@@ -41,13 +41,17 @@ import { computed, onMounted, onUnmounted, ref } from "vue"
 import { onShow } from "@dcloudio/uni-app"
 import { subscribeConversationTabBadge } from "@/services/conversation/conversationTabBadgeService"
 import { isDarkThemeMode } from "@/services/theme"
+import McTabbarLottieIcon from "@/components/McTabbarLottieIcon.vue"
 
 type TabName = "connections" | "conversations" | "tasks" | "circles" | "profile"
 
+/**
+ * 没有 `icon` 字段：图标改由 `McTabbarLottieIcon` 按 `name` 载入对应的 Lottie 动画，
+ * 原来那些 u-icon 名字（`grid-fill` 之类）已经没有消费者，留着只会误导后人。
+ */
 interface TabItem {
   name: TabName
   text: string
-  icon: string
   path: string
 }
 
@@ -69,11 +73,11 @@ const props = withDefaults(
  * 一旦这里的顺序和配置错位，未读数就会长到别的 tab 上。
  */
 const tabs: TabItem[] = [
-  { name: "connections", text: "连接", icon: "grid-fill", path: "/pages/connections/index" },
-  { name: "conversations", text: "会话", icon: "chat", path: "/pages/conversations/index" },
-  { name: "tasks", text: "任务", icon: "list-dot", path: "/pages/tasks/index" },
-  { name: "circles", text: "圈子", icon: "account", path: "/pages/circles/index" },
-  { name: "profile", text: "我的", icon: "account-fill", path: "/pages/profile/index" },
+  { name: "connections", text: "连接", path: "/pages/connections/index" },
+  { name: "conversations", text: "会话", path: "/pages/conversations/index" },
+  { name: "tasks", text: "任务", path: "/pages/tasks/index" },
+  { name: "circles", text: "圈子", path: "/pages/circles/index" },
+  { name: "profile", text: "我的", path: "/pages/profile/index" },
 ]
 
 /**
@@ -168,10 +172,26 @@ function handleSwitch(item: TabItem) {
     height: 62px;
     padding: 4px;
     border-radius: 36px;
-    background: #ffffff;
+    /*
+     * 磨砂玻璃：底色只给到 72%，剩下的交给 backdrop-filter 把身后滚过的列表糊进来。
+     * 留 1px 描边是因为半透明底在浅色内容上会「化掉」，没有边就分不清胶囊的轮廓。
+     *
+     * `overflow` 与 `isolation` 这两条是 iOS 的必修项：模糊与圆角同用时，背景会从
+     * 圆角外侧溢出一条毛边，靠它们裁掉。缺了在 Safari/WKWebView 上肉眼可见，
+     * Chrome 上则看不出来 —— 所以只靠 H5 预览会漏掉这个缺陷。
+     *
+     * 注释里刻意不写这两条属性的**完整声明**：契约测试要对它们做 toContain 断言，
+     * 注释里出现同名完整值会让断言在属性被删掉时照样通过（上一轮就在
+     * `animation: false` 上栽过一次）。
+     */
+    background: rgba(255, 255, 255, 0.72);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
     border: 1px solid rgba(0, 0, 0, 0.06);
     box-sizing: border-box;
     pointer-events: auto;
+    overflow: hidden;
+    isolation: isolate;
   }
 
   &__item {
@@ -239,11 +259,17 @@ function handleSwitch(item: TabItem) {
  * 用户在 app 里的偏好写到 `<html data-up-theme>`，与系统设置不是同一来源。
  */
 [data-up-theme='dark'] {
+  /* 深色下不透明度给到 75%：深色底本身更沉，再稀就压不住身后亮内容的穿透。 */
   .mc-tabbar__bar {
-    background: #1c1c1e;
+    background: rgba(28, 28, 30, 0.75);
     border-color: rgba(255, 255, 255, 0.08);
   }
 
+  /*
+   * 激活项在这两种模式下都保持**实心**块（浅色 #1C1C1F / 深色 #3A3A3C）。
+   * 磨砂让胶囊整体变通透了，激活标记若也跟着半透明，白色填充图标压在浅色磨砂上
+   * 会发灰、边界糊掉。实心块同时保证了动画的白色末帧始终有足够对比。
+   */
   .mc-tabbar__item--active {
     background: #3a3a3c;
   }
