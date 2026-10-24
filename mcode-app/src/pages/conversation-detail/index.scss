@@ -832,8 +832,9 @@ $composer-panel-max-height: 590rpx;
   min-width: 0;
   display: block;
   width: 100%;
-  /* 16px @393 视口 —— 设计稿 M09 导航栏标题实测 */
-  font-size: 32rpx;
+  /* 15px @393 视口 —— 设计稿 M09 导航栏标题实测 16px，用户 2026-10-24 反馈
+   * 「小2号字太大了」，降一档到小三号（15pt = 30rpx）。再嫌大就降到 28rpx（四号）。 */
+  font-size: 30rpx;
   line-height: 1.25;
   font-weight: 600;
   color: var(--up-main-color, #303133);
