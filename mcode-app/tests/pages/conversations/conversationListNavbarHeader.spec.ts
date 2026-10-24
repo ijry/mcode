@@ -17,18 +17,33 @@ const SEARCHBAR = "../../../src/pages/conversations/components/ConversationsSear
  * 三个都是一次点击一个面板，所以顶栏本身零状态、零业务。
  */
 describe("conversation list navbar header contract", () => {
-  it("renders the top bar through up-navbar instead of a sticky big title", () => {
+  // 顶栏是 **fixed + 全透明**的：三件套必须置顶（常驻控件，滚走就没了入口），
+  // 但整层不画背景。iOS 26/27 在 standalone 下于页面顶部画自己的 Liquid Glass
+  // 滚动边缘带（约 75pt，锚在 webview 顶部）采样滚动内容 —— 连接列表「状态栏与
+  // 内容一整片」靠的是这条系统带。WebKit 的 _shouldHideTopScrollPocket 只在命中
+  // 测试撞上的 fixed 盒子**带底色**时拿它的颜色填掉玻璃带（fixed colour
+  // extension，WKWebViewIOS.mm）；透明 = 取不到色 = 带子照画，导航行整个落进
+  // 带里被系统糊掉。用户三次反馈的「两块割裂」成因是上色，不是 fixed。
+  it("pins the top bar as a fixed, fully transparent strip", () => {
     const source = read(NAVBAR)
 
-    expect(source).toContain('customClass="conversations-navbar-shell"')
-    expect(source).toContain(':fixed="true"')
-    expect(source).toContain(':placeholder="true"')
+    // 置顶：fixed 层全宽、z-index 压过列表内容。三件套是常驻控件。
+    expect(source).toContain("position: fixed")
+    expect(source).toContain("z-index: 10")
+    // 但不套 up-navbar：那套自带 placeholder 与背景机制，是三轮割裂的载体。
+    expect(source).not.toContain("up-navbar")
+    expect(source).not.toContain(":fixed=")
+    expect(source).not.toContain(":placeholder=")
+    // 状态栏占位 + 46px 导航行（设计稿 9:1661）；占位高度按平台取（statusBarInset）。
+    expect(source).toContain("conversations-navbar__statusbar")
+    expect(source).toContain("statusBarInset")
+    expect(source).toContain("height: 46px;")
+    expect(source).toContain(".conversations-navbar__row {")
+    // fixed 之后不再吃 shell 的 32rpx 内距，导航行自己补，与搜索条/卡片对齐。
+    expect(source).toContain("padding: 0 32rpx")
     // tab 页没有返回目标；一旦误开 autoBack 会 navigateBack 到上一个 tab。
-    expect(source).toContain(':autoBack="false"')
-    // M08 导航栏高度 46（设计稿节点 9:1661）。
-    expect(source).toContain('height="46px"')
-    // 顶栏不再自带返回：历史面板取消后，tab 页没有任何「返回上一屏」的目标，
-    // 留着 @leftClick 只会让左上角那块空白变成一个沉默的死点。
+    expect(source).not.toContain("autoBack")
+    // 顶栏不再自带返回：历史面板取消后，tab 页没有任何「返回上一屏」的目标。
     expect(source).not.toContain("@leftClick")
     expect(source).not.toContain("arrow-left")
   })
@@ -81,13 +96,17 @@ describe("conversation list navbar header contract", () => {
    *
    * 「隐藏已完成」「选择会话」这两个开关移进了页面侧的视图面板 —— 顶栏只留一个入口，
    * 这也是设计稿「左上角筛选视图」这句话的字面实现。
+   *
+   * 三件套直接排在导航行里（不再借 up-navbar 的 left/center/right 槽位），
+   * space-between 让左按钮贴头、右按钮贴尾、胶囊居中。
    */
   it("lays out the three glass controls of the M08 top bar", () => {
     const source = read(NAVBAR)
 
-    expect(source).toContain("<template #left>")
-    expect(source).toContain("<template #center>")
-    expect(source).toContain("<template #right>")
+    // 不再有插槽：三件套是导航行的直接子节点。
+    expect(source).not.toContain("<template #")
+    expect(source).toContain('<view class="conv-nav__btn" @click="emit(\'filter\')">')
+    expect(source).toContain('<view class="conv-nav__conn" @click="emit(\'connection\')">')
 
     // 左：视图切换；右：搜索。32px 方块、圆角 16、72% 卡片色 + 6% 前景描边。
     expect(source).toContain('class="conv-nav__btn"')
@@ -124,11 +143,10 @@ describe("conversation list navbar header contract", () => {
     expect(source).toContain("if (showSelectionEntry.value || selectionMode.value) {")
   })
 
-  // 中间槽只有一种形态：连接胶囊。历史模式取消后不再有「标题态」。
-  it("shows the connection pill in the centre slot", () => {
+  // 中间只有一个连接胶囊。历史模式取消后不再有「标题态」。
+  it("shows the connection pill in the centre of the row", () => {
     const source = read(NAVBAR)
 
-    expect(source).toContain("<template #center>")
     expect(source).toContain('class="conv-nav__conn"')
     expect(source).toContain('{{ connectionName || "未连接" }}')
     expect(source).not.toContain("historyMode")
@@ -226,36 +244,34 @@ describe("conversation list navbar header contract", () => {
     expect(source).not.toContain("watch(")
   })
 
-  // 状态栏与导航内容用**同一个页面底色**，通过 uview 的 `bgColor` / `statusBarBgColor`
-  // 两个 prop 下传（详情页同款「统一背景色」做法）。不再给状态栏单独叠暗罩，
-  // 也不再用手写 :deep 透明去覆盖 uview 默认底色 —— 那正是之前状态栏与导航分裂成两截的原因。
-  it("unifies the navbar and status bar background via the uview bgColor props", () => {
+  // 顶栏**整体不画背景**：状态栏占位与导航行都透明，露的是 `.conversations-page`
+  // 的页面底色；顶上那条玻璃带是 iOS 系统画的（meta=black，service 的 "system" 档）。
+  // 曾经在这里手绘玻璃（backdrop-filter + 状态栏段深色渐变），系统带照画、两层材质
+  // 对不上 —— 割裂的成因。删干净，别留「把玻璃画得更好」的回头路。
+  it("paints nothing over the status bar area so the system glass shows through", () => {
     const source = read(NAVBAR)
+    // 只查样式块：注释里会留下这些词的历史记录（讲清楚为什么删），那不是代码。
+    const styles = source.slice(source.indexOf("<style"))
 
-    // 两个 prop 绑定同一个色（脚本里 navbarBgColor / navbarStatusBarBgColor 是同一值）。
-    expect(source).toContain(':bgColor="navbarBgColor"')
-    expect(source).toContain(':statusBarBgColor="navbarStatusBarBgColor"')
-    // 脚本里确实只定义了一份底色，状态栏不另起炉灶。
-    expect(source).toContain("const navbarStatusBarBgColor = computed(")
-    expect(source).toContain("const navbarBgColor = navbarStatusBarBgColor")
-
-    // 不再有「只盖状态栏」的暗罩 / is-dark 分支：那会在状态栏与导航之间拉出一条缝。
-    expect(source).not.toContain("rgba(0, 0, 0, 0.3)")
-    expect(source).not.toContain("is-dark")
-    // 不再用手写 :deep 透明覆盖 uview 默认底色。
-    expect(source).not.toContain('bgColor="transparent"')
-    expect(source).not.toContain('statusBarBgColor="transparent"')
-
-    // 磨砂仍在：navbar 是 fixed + placeholder，列表会从它底下滚过去，
-    // 删掉 blur 又不给底色就是叠字，滚过去完全读不清。
-    expect(source).toContain("backdrop-filter: blur(30rpx)")
-    expect(source).toContain("-webkit-backdrop-filter: blur(30rpx)")
-    expect(source).toContain(".conversations-navbar-shell :deep(.u-navbar__content)")
-    expect(source).toContain(".conversations-navbar-shell :deep(.u-status-bar)")
-    // __placeholder 是 u-navbar--fixed 之外的独立兄弟节点，要透明，
-    // 否则一旦被染上颜色，顶部会出现「占位块 + fixed 层」双层色带。
-    expect(source).toContain(".conversations-navbar-shell :deep(.u-navbar__placeholder)")
-    expect(source).toContain("background: transparent !important")
+    // 没有任何自绘材质：没有磨砂、没有玻璃底、没有渐变、没有暗罩。
+    expect(styles).not.toContain("backdrop-filter")
+    expect(styles).not.toContain("linear-gradient")
+    expect(styles).not.toContain("rgba(242, 242, 247")
+    expect(styles).not.toContain("rgba(0, 0, 0, 0.3)")
+    expect(styles).not.toContain("is-dark")
+    // 脚本里不再保留任何底色常量 / computed：留着下一个人会以为顶栏还有底色。
+    expect(source).not.toContain("NAVBAR_BG_LIGHT")
+    expect(source).not.toContain("NAVBAR_BG_DARK")
+    expect(source).not.toContain("isDarkThemeMode")
+    // 占位条透明是唯一被要求的「颜色」。
+    const spacerBlock = styles.slice(
+      styles.indexOf(".conversations-navbar__statusbar {")
+    )
+    expect(spacerBlock.slice(0, spacerBlock.indexOf("}"))).toContain("background: transparent")
+    // u-navbar 的残留机制全部不许回来。
+    expect(source).not.toContain("u-navbar")
+    expect(source).not.toContain("u-status-bar")
+    expect(source).not.toContain("__placeholder")
   })
 
   it("keeps Android WebView content under the system status bar", () => {
@@ -282,7 +298,8 @@ describe("conversation list navbar header contract", () => {
 
   it("keeps theme colors as var() fallbacks only", () => {
     const source = read(NAVBAR)
-    const navbarStyles = source.slice(source.indexOf(".conversations-navbar-shell"))
+    // 从第一块控件样式开始取：顶栏不再有外壳 class，样式全部挂在三件套上。
+    const navbarStyles = source.slice(source.indexOf(".conv-nav__btn {"))
 
     expect(navbarStyles).toContain("var(--up-card-bg-color, #ffffff)")
     expect(source).toContain(".conv-nav__conn-name")

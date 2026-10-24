@@ -715,31 +715,36 @@ function loadConversationLivePreviewPreference() {
 
 /**
  * 页面底色。**必须与 `<style>` 里 `.conversations-page` 的 `background` 是同一个值** ——
- * 顶部状态栏色带、navbar 透明玻璃后面透出来的、橡皮筋回弹露出的 `body`，三处都该是这个色。
- * 差一个色号就会在状态栏下沿出现一条接缝（看起来像「导航没穿进状态栏」）。
+ * iOS standalone 下系统玻璃带采样到的、Android app-plus 状态栏区域透出的、橡皮筋回弹
+ * 露出的 `body`，都是这个色。差一个色号就会在顶部出现一条接缝。
+ *
+ * 旧版这里还兼着「navbar 玻璃底色」的职责（navbar 玻璃取它的 78%），那套随 fixed
+ * 玻璃 navbar 一起删了 —— 现在顶上那条带子是 iOS 系统画的，页面只提供底色。
  */
 const PAGE_SURFACE_LIGHT = "#f2f2f7"
 const PAGE_SURFACE_DARK = "#000000"
 
 /**
- * 顶部状态栏色带同步。
+ * 顶部状态栏色带同步。两条线，行为不同：
  *
- * iOS standalone（`apple-mobile-web-app-status-bar-style` 非 `black-translucent`）下 webview
- * 画不到状态栏那条带子，它由系统按 `html`/`body` 背景 + status bar style 绘制。列表页此前从不
- * 调这个 service，色带就停在 index.html 启动时写的 `black`，玻璃 navbar 上方于是压着一条黑带 ——
- * 视觉上就是「顶部导航没沉浸进状态栏」。
+ * - **iOS standalone（PWA 加到主屏）**：meta 走 `black`（service 的 "system" 档）——
+ *   webview 从状态栏下方开始，顶上那条带子交还 iOS：iOS 26/27 在页面顶部画自己的
+ *   Liquid Glass 滚动边缘带（实测约 75pt），采样滚到它下面的内容。连接列表
+ *   （pages/connections/index.vue）走 index.html 默认 black、从不调本 service，
+ *   状态栏与内容区因此是一整片；本页顶栏是 fixed 但全透明（见 ConversationsNavbar），
+ *   WebKit 取不到颜色、系统带照画，所以这里也回到 black，与连接列表同一条系统带。
+ *   调这个 service 是为了把 theme-color /
+ *   html/body 背景同步成页面底色（Android app-plus immersed 与橡皮筋回弹吃这个色），
+ *   并把 meta 从详情页的 translucent 档写回来（SPA 的 meta 是文档级的，不写就停留）。
+ *   曾经整站强制 black-translucent 让 fixed 玻璃 navbar 自画状态栏段：系统带照画、
+ *   手工玻璃与系统材质对不上，用户三次反馈「两块割裂」—— 解法是不画。
+ * - **Android app-plus**：manifest 是 immersed 状态栏，webview 画得到状态栏底下，
+ *   滚到顶部时那一条由页面底色承接，所以底色必须涂准。
  *
- * 刻意不改成 `black-translucent`：现有页面都各自消费过一次 safe-area，full-bleed 会把上下
- * inset 重复计算一遍（见 docs/mcode-architecture-notes/2026-07-05-p63-detail-cyber-mode.md）。
+ * 底色必须给 6 位实色 —— service 的 normalizeHexColor 会把 `var()`/`rgba()` 判非法后回退成黑色。
  *
- * 底色必须给 6 位实色 —— service 的 normalizeHexColor 会把 `var()`/`rgba()` 判非法后回退成黑色，
- * 正是要修的黑带。
- *
- * 底色取**页面底色**（与下面 `.conversations-page` 的 `background` 同一个值），不是卡片色：
- * navbar 现在用统一页面底色（`ConversationsNavbar` 的 `bgColor` / `statusBarBgColor` 两个 prop
- * 都下传同一个页面色），状态栏那一条后面真正透出来的就是页面底色。旧代码取 `--up-card-bg-color`
- * （白）近似「navbar 表面」，那是 navbar 还自带 0.82 白底时的遗留；页面底色换成 #F2F2F7 之后，
- * 白带压在灰底上就成了一条接缝 —— 视觉上正是「导航没穿进状态栏」。这两个值改一处就要改另一处。
+ * 底色取**页面底色**（与下面 `.conversations-page` 的 `background` 同一个值）：系统玻璃带
+ * 采样到的、橡皮筋回弹露出的正是它。涂卡片色（白）会在灰底上留一条接缝。
  *
  * 两个参数给同一个值是刻意的：色带、theme-color、`html`/`body` 背景在这一页都应该是页面底色。
  * `body` 背景平时被 `.conversations-page` 的底色盖住，只在橡皮筋回弹时露出。
@@ -762,6 +767,10 @@ function syncConversationListNativeStatusBar() {
     darkStatusBarBand,
     statusBarBackgroundColor: pageSurfaceColor,
     pageBackgroundColor: pageSurfaceColor,
+    // 显式钉在 "system" 档（meta=black）：顶上那条带子交给 iOS 自己画（iOS 26/27 的
+    // Liquid Glass 滚动边缘带，采样滚动内容），与连接列表同一条系统带。详情页走的是
+    // 另一档（"webview"），别照搬过来 —— 本页顶栏 fixed 但全透明，没有底色给系统填。
+    iosStatusBarPainter: "system",
   })
 
   try {

@@ -1479,6 +1479,12 @@ function syncDetailNativeStatusBar() {
     darkStatusBarBand: detailTheme.value === "matrix",
     statusBarBackgroundColor: statusBarBackgroundColor,
     pageBackgroundColor,
+    // 本页顶部是 fixed navbar + 不透明色带，带子由页面自己画 —— 走 "webview" 档
+    // （black-translucent，webview 伸到状态栏底下）。这个 fixed 不透明容器同时会被
+    // WebKit 当成 fixed colour extension 填掉系统玻璃带（_shouldHideTopScrollPocket），
+    // 正合设计：不要系统的磨砂，要自己那条纯色带。
+    // 列表页走的是另一档（"system"，见 ConversationsNavbar），两页必须各选各的。
+    iosStatusBarPainter: "webview",
   })
 
   try {

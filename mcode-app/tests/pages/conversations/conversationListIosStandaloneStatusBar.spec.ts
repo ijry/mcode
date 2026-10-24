@@ -9,9 +9,10 @@ const PAGE = "../../../src/pages/conversations/index.vue"
 const SERVICE = "../../../src/services/iosStandaloneStatusBar.ts"
 
 describe("conversation list iOS standalone status bar", () => {
-  // iOS standalone（非 black-translucent）下 webview 画不到状态栏，那条色带由系统按
-  // html/body 背景绘制。列表页此前完全没调这个 service，色带只能停留在 index.html 启动时
-  // 声明的 black，于是玻璃 navbar 上方出现一条黑带 —— 也就是「没有沉浸进状态栏」。
+  // iOS standalone 下 meta 固定 `black`：状态栏交还 iOS 系统绘制（系统材质 + iOS 26/27
+  // 滚动玻璃模糊），与连接列表（走 index.html 默认 black、从不调本 service）逐字一致。
+  // 列表页调这个 service 是为了把 theme-color / html/body 背景同步成页面底色
+  // （Android app-plus immersed 与橡皮筋回弹都吃这个色）。
   it("syncs the standalone status bar band from the page", () => {
     const source = read(PAGE)
 
@@ -23,8 +24,8 @@ describe("conversation list iOS standalone status bar", () => {
   })
 
   // 色带底色必须是 6 位实色：service 的 normalizeHexColor 会把 var()/rgba() 判非法后回退成
-  // 黑色，那正是要修的黑带。navbar 玻璃色 var(--up-navbar-glass-bg-color, ...) 因此不能直接传，
-  // 而且它只由 u-navbar 的 CSS 定义、不在 uview 的 JS 主题表里，upThemeVar 也取不到。
+  // 黑色，那正是要修的黑带。navbar 已改为 fixed 但全透明、不再有玻璃色常量，但 pageSurfaceColor 仍是
+  // theme-color / html / body / Android 色带的唯一来源，一样不能传表达式。
   it("passes a resolved hex color instead of a CSS var expression", () => {
     const source = read(PAGE)
     const block = source.slice(
@@ -32,9 +33,8 @@ describe("conversation list iOS standalone status bar", () => {
       source.indexOf("\n}", source.indexOf("function syncConversationListNativeStatusBar() {"))
     )
 
-    // 色带要涂**页面底色**：navbar 现在用统一页面底色（状态栏与导航内容同一个色，
-    // 走 uview 的 bgColor / statusBarBgColor prop），状态栏那一条后面透出来的就是页面底色；
-    // 涂卡片白会在 navbar 上沿留一条色差接缝 —— 那正是「导航没穿进状态栏」的观感。
+    // 色带要涂**页面底色**：iOS 的系统玻璃带采样到的、Android app-plus 状态栏透出的、
+    // 橡皮筋回弹露出的都是它；涂卡片白会在灰底上留一条色差接缝。
     // 所以既不能用卡片色，也不能用任何 var()/rgba()。
     expect(block).toMatch(/const pageSurfaceColor = darkStatusBarBand \? PAGE_SURFACE_DARK : PAGE_SURFACE_LIGHT/)
     expect(block).not.toContain("--up-card-bg-color")
