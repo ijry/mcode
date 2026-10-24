@@ -22,11 +22,11 @@ import {
 } from "@/pages/conversations/conversationOverviewPresentation"
 
 /**
- * 一张任务卡片。
+ * 一张任务卡片（M03）。
  *
- * 整卡点击 = 打开详情页；底部动作条里 **一个实心主动作 + 若干图标次动作**，动作集由
- * `taskActions.buildTaskActions` 推导 —— 与详情页共用同一份判定，两处不会给出不同的
- * 可做事项。
+ * 整卡点击 = 打开详情页；底部动作条 = **一个安静的主操作灰胶囊 + 若干幽灵图标次动作**，
+ * 右端一枚「查看会话 ›」文字链接，动作集由 `taskActions.buildTaskActions` 推导 ——
+ * 与详情页共用同一份判定，两处不会给出不同的可做事项。
  *
  * 副行（错误 / 实时进展 / 结果摘要）只在任务确实有话说时出现，优先级见
  * `taskPresentation.taskCardNote`；超过两行时默认截断，点「展开」看全文 —— 结果摘要和
@@ -71,6 +71,17 @@ const agentLogoClass = computed(() => overviewAgentLogoClass(agentType.value))
 const actions = computed(() => buildTaskActions(task.value))
 const note = computed(() => taskCardNote(task.value))
 const stat = computed(() => taskDiffStat(task.value))
+
+/**
+ * 「查看会话」在 M03 里是一枚右侧文字链接（「查看会话 ›」），不是图标按钮 ——
+ * 从 secondaries 里拆出来单画；其余次动作仍然是安静的图标钮。
+ */
+const sessionLink = computed(
+  () => actions.value.secondaries.find((item) => item.id === "viewSession") || null
+)
+const iconSecondaries = computed(() =>
+  actions.value.secondaries.filter((item) => item.id !== "viewSession")
+)
 
 /**
  * 副行展开状态。**组件本地**，不上提到页面：它纯粹是这张卡的观看姿态，页面不需要知道，
@@ -223,7 +234,7 @@ function toggleNote() {
     </view>
 
     <view
-      v-if="actions.primary || actions.secondaries.length > 0"
+      v-if="actions.primary || iconSecondaries.length > 0 || sessionLink"
       class="task-card__footer"
     >
       <view
@@ -235,19 +246,12 @@ function toggleNote() {
           v-if="isActionPending(actions.primary.id)"
           mode="circle"
           size="14"
-          color="#ffffff"
+          :color="upThemeVar('--up-main-color', '#303133')"
         ></up-loading-icon>
-        <up-icon
-          v-else
-          :name="actions.primary.icon"
-          size="14"
-          color="#ffffff"
-        ></up-icon>
         <text class="task-card__primary-text">{{ actions.primary.label }}</text>
       </view>
-      <view class="task-card__spacer"></view>
       <view
-        v-for="item in actions.secondaries"
+        v-for="item in iconSecondaries"
         :key="item.id"
         :class="['task-card__icon-btn', isActionPending(item.id) && 'task-card__icon-btn--loading']"
         @click.stop="emit('action', item.id)"
@@ -262,9 +266,17 @@ function toggleNote() {
         <up-icon
           v-else
           :name="item.icon"
-          size="16"
+          size="17"
           :color="item.danger ? upThemeVar('--up-error', '#fa3534') : upThemeVar('--up-tips-color', '#909193')"
         ></up-icon>
+      </view>
+      <view class="task-card__spacer"></view>
+      <view
+        v-if="sessionLink"
+        class="task-card__session-link"
+        @click.stop="emit('action', sessionLink.id)"
+      >
+        <text class="task-card__session-link-text">{{ sessionLink.label }} ›</text>
       </view>
     </view>
   </view>
@@ -273,20 +285,23 @@ function toggleNote() {
 <style scoped lang="scss">
 @import "../index.scss";
 
+/*
+ * M03 任务卡片：28rpx 圆角、卡片底色 + 主文字色 7% 的发丝描边，无投影；
+ * 内距 28/24，节与节之间 16rpx。
+ */
 .task-card {
   display: flex;
   flex-direction: column;
-  gap: 14rpx;
-  padding: 22rpx 20rpx;
-  border-radius: 20rpx;
+  gap: 16rpx;
+  padding: 24rpx 28rpx;
+  border-radius: 28rpx;
   background: var(--up-card-bg-color, #ffffff);
-  border: 1rpx solid var(--up-border-color, #dadbde);
-  box-shadow: 0 4rpx 12rpx rgba(15, 23, 42, 0.04);
-  transition: box-shadow 0.2s ease;
+  border: 1rpx solid color-mix(in srgb, var(--up-main-color, #303133) 7%, transparent);
+  transition: opacity 0.2s ease;
 }
 
 .task-card:active {
-  box-shadow: 0 2rpx 8rpx rgba(15, 23, 42, 0.06);
+  opacity: 0.9;
 }
 
 .task-card--archived {
@@ -295,19 +310,20 @@ function toggleNote() {
 
 .task-card__head {
   display: flex;
-  align-items: flex-start;
-  gap: 14rpx;
+  align-items: center;
+  gap: 20rpx;
 }
 
+/* agent 图标：28px 圆角方块，兜底字母白字压在主文字色 18% 的灰底上。 */
 .task-card__logo {
-  width: 44rpx;
-  height: 44rpx;
+  width: 56rpx;
+  height: 56rpx;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 14rpx;
-  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
+  border-radius: 16rpx;
+  background: color-mix(in srgb, var(--up-main-color, #303133) 18%, var(--up-card-bg-color, #ffffff));
 }
 
 .task-card__logo--real {
@@ -315,26 +331,31 @@ function toggleNote() {
 }
 
 .task-card__logo-img {
-  width: 36rpx;
-  height: 36rpx;
+  width: 44rpx;
+  height: 44rpx;
 }
 
 .task-card__logo-text {
-  font-size: 20rpx;
+  font-size: 26rpx;
   font-weight: 700;
-  color: var(--up-tips-color, #909193);
+  color: #ffffff;
 }
 
+/* M03：15px Medium 标题（原为 Bold —— 卡片标题降半档，层级让给状态胶囊）。 */
 .task-card__title {
   flex: 1;
   min-width: 0;
   font-size: 30rpx;
-  font-weight: 700;
+  font-weight: 500;
   line-height: 1.35;
   color: var(--up-main-color, #303133);
   word-break: break-word;
 }
 
+/*
+ * 元信息（M03）：一整行 12px 中性灰 —— 项目 · 分支 · 增删 · 时间同为灰色，
+ * 不再用绿/红给增删上色；颜色只留给状态胶囊与副行。
+ */
 .task-card__meta {
   display: flex;
   align-items: center;
@@ -347,13 +368,13 @@ function toggleNote() {
 .task-card__meta-branch,
 .task-card__meta-add,
 .task-card__meta-del {
-  font-size: 22rpx;
+  font-size: 24rpx;
   line-height: 1.4;
+  color: var(--up-tips-color, #909193);
 }
 
 .task-card__meta-text {
   max-width: 320rpx;
-  color: var(--up-tips-color, #909193);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -365,19 +386,9 @@ function toggleNote() {
 
 .task-card__meta-branch {
   max-width: 300rpx;
-  font-family: "Courier New", monospace;
-  color: var(--up-content-color, #606266);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.task-card__meta-add {
-  color: var(--up-success, #19be6b);
-}
-
-.task-card__meta-del {
-  color: var(--up-error, #fa3534);
 }
 
 .task-card__badges {
@@ -387,25 +398,32 @@ function toggleNote() {
   gap: 10rpx;
 }
 
+/* 来源标签（M03）：小灰胶囊，主文字色 4% 底。 */
 .task-card__source {
-  font-size: 20rpx;
-  font-family: "Courier New", monospace;
-  color: var(--up-primary, #2979ff);
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  padding: 6rpx 16rpx;
+  border-radius: 16rpx;
+  background: color-mix(in srgb, var(--up-main-color, #303133) 4%, var(--up-card-bg-color, #ffffff));
+  font-size: 22rpx;
+  color: var(--up-tips-color, #909193);
 }
 
+/*
+ * 副行（M03）：裸文本行，不再垫灰底盒 —— 进展蓝、错误红、其余灰；
+ * 颜色已经在下面的 tone 变体里。
+ */
 .task-card__note {
   display: flex;
   flex-direction: column;
   gap: 6rpx;
-  padding: 14rpx 18rpx;
-  border-radius: 16rpx;
-  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
 }
 
 .task-card__note-text {
-  font-size: 22rpx;
+  font-size: 24rpx;
   line-height: 1.5;
-  color: var(--up-content-color, #606266);
+  color: var(--up-tips-color, #909193);
   word-break: break-word;
 }
 
@@ -467,22 +485,24 @@ function toggleNote() {
   color: var(--up-primary, #2979ff);
 }
 
+/*
+ * 动作行（M03）：安静的主操作灰胶囊（主文字色 5% 底 + 深字）+ 幽灵图标次动作，
+ * 右端一枚「查看会话 ›」文字链接；不再有分隔线与实心蓝按钮。
+ */
 .task-card__footer {
   display: flex;
   align-items: center;
-  gap: 10rpx;
-  padding-top: 16rpx;
-  border-top: 1rpx solid var(--up-border-color, #ebeef5);
+  gap: 16rpx;
 }
 
 .task-card__primary {
   display: inline-flex;
   align-items: center;
   gap: 8rpx;
-  padding: 12rpx 24rpx;
-  border-radius: 999rpx;
-  background: var(--up-primary, #2979ff);
-  transition: opacity 0.2s ease, transform 0.1s ease;
+  padding: 14rpx 28rpx;
+  border-radius: 18rpx;
+  background: color-mix(in srgb, var(--up-main-color, #303133) 5%, var(--up-card-bg-color, #ffffff));
+  transition: opacity 0.2s ease;
 }
 
 .task-card__primary--loading {
@@ -491,9 +511,9 @@ function toggleNote() {
 }
 
 .task-card__primary-text {
-  font-size: 24rpx;
-  font-weight: 600;
-  color: #ffffff;
+  font-size: 26rpx;
+  font-weight: 500;
+  color: var(--up-main-color, #303133);
 }
 
 .task-card__spacer {
@@ -502,14 +522,12 @@ function toggleNote() {
 }
 
 .task-card__icon-btn {
-  width: 56rpx;
-  height: 56rpx;
+  min-width: 48rpx;
+  height: 48rpx;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
-  background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
   transition: opacity 0.2s ease, transform 0.1s ease;
 }
 
@@ -521,5 +539,22 @@ function toggleNote() {
 .task-card__icon-btn--loading {
   opacity: 0.7;
   pointer-events: none;
+}
+
+.task-card__session-link {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  transition: opacity 0.2s ease;
+}
+
+.task-card__session-link:active {
+  opacity: 0.7;
+}
+
+.task-card__session-link-text {
+  font-size: 26rpx;
+  font-weight: 500;
+  color: var(--up-primary, #2979ff);
 }
 </style>

@@ -31,6 +31,8 @@ const spinnerColor = computed(() => upThemeVar("--up-primary", "#2979ff"))
       size="14"
       :color="spinnerColor"
     ></up-loading-icon>
+    <!-- M03：状态胶囊带一枚 6px 状态点；转圈的场景用 spinner 顶替点（见上）。 -->
+    <view v-else class="task-status-chip__dot"></view>
     <text class="task-status-chip__text">{{ label }}</text>
   </view>
 </template>

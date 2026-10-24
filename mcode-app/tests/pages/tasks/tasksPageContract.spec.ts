@@ -88,24 +88,32 @@ describe("tasks page contract", () => {
   describe("list page", () => {
     const source = read("pages/tasks/index.vue")
 
-    it("renders the header with up-tabs status filtering and a create entry", () => {
+    /**
+     * M03 把状态筛选从 up-tabs 下划线样式换成了胶囊 chips：选中态灰底深字、
+     * 「等你处理」带数字角标。chips 由 tab id 直接驱动，不再有下标换算层。
+     */
+    it("renders the header with chip status filtering and a create entry", () => {
       const header = read("pages/tasks/components/TaskPageHeader.vue")
-      expect(header).toContain("up-tabs")
-      expect(header).toContain(':current="currentIndex"')
+      // 不许再回到 up-tabs：它的下标驱动与本页的 tab id 模型对不上。
+      //（只查元素标签，别把 docblock 里记录沿革的 "up-tabs" 字样误伤。）
+      expect(header).not.toContain("<up-tabs")
+      expect(header).toContain("task-header__chip")
+      expect(header).toContain("task-header__chip--active")
+      expect(header).toContain("handleTabChange(tab)")
+      expect(header).toContain("taskTabLabel(tab)")
       expect(source).toContain("TaskPageHeader")
       expect(source).toContain('@create="openCreateSheet"')
     })
 
     /**
-     * up-tabs 是**下标驱动**的，而页面持有的是 tab id。回调形状在各版本间不一致
-     * （`{index}` / item / 裸下标），三种都要认 —— 认错会让点 tab 没反应。
+     * chips 点击直接上抛 tab id；重复点同一个 tab 不能再 emit —— 否则 watcher 会
+     * 把一个没变化的筛选又写一遍存储。
      */
-    it("tolerates every shape up-tabs reports a change in", () => {
+    it("emits the tab id itself and skips redundant switches", () => {
       const header = read("pages/tasks/components/TaskPageHeader.vue")
-      const block = extractFunctionBlock(header, "function handleTabChange(item: any)")
-      expect(block).toContain('typeof item === "number"')
-      expect(block).toContain('typeof item?.index === "number"')
-      expect(block).toContain("item?.id")
+      const block = extractFunctionBlock(header, "function handleTabChange(tab: TaskTabId)")
+      expect(block).toContain("tab !== props.activeTab")
+      expect(block).toContain('emit("update:activeTab", tab)')
     })
 
     /** 引擎无头运行，`task://changed` 是列表唯一的推进信号。 */

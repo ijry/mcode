@@ -13,22 +13,30 @@
  * 不新增 `--mcode-*` 别名。
  */
 
-/* ===== 状态胶囊 ===== */
+/* ===== 状态胶囊（M03：状态点 + 12px Medium 文字，底色 = 状态色 12~14% 调进卡片色） ===== */
 
 .task-status-chip {
   display: inline-flex;
   align-items: center;
-  gap: 6rpx;
+  gap: 8rpx;
   flex-shrink: 0;
   max-width: 100%;
-  padding: 6rpx 14rpx;
-  border-radius: 999rpx;
+  padding: 8rpx 16rpx;
+  border-radius: 24rpx;
   background: var(--up-hover-bg-color, var(--up-bg-color, #f3f4f6));
 }
 
+.task-status-chip__dot {
+  width: 12rpx;
+  height: 12rpx;
+  flex-shrink: 0;
+  border-radius: 6rpx;
+  background: var(--up-tips-color, #909193);
+}
+
 .task-status-chip__text {
-  font-size: 20rpx;
-  font-weight: 700;
+  font-size: 24rpx;
+  font-weight: 500;
   line-height: 1.2;
   color: var(--up-tips-color, #909193);
   overflow: hidden;
@@ -37,19 +45,27 @@
 }
 
 .task-status-chip--running {
-  background: color-mix(in srgb, var(--up-primary, #2979ff) 14%, var(--up-card-bg-color, #ffffff) 86%);
+  background: color-mix(in srgb, var(--up-primary, #2979ff) 12%, var(--up-card-bg-color, #ffffff) 88%);
 }
 
 .task-status-chip--running .task-status-chip__text {
   color: var(--up-primary, #2979ff);
 }
 
+.task-status-chip--running .task-status-chip__dot {
+  background: var(--up-primary, #2979ff);
+}
+
 .task-status-chip--attention {
-  background: color-mix(in srgb, var(--up-warning, #ff9900) 16%, var(--up-card-bg-color, #ffffff) 84%);
+  background: color-mix(in srgb, var(--up-warning, #ff9900) 14%, var(--up-card-bg-color, #ffffff) 86%);
 }
 
 .task-status-chip--attention .task-status-chip__text {
   color: var(--up-warning, #ff9900);
+}
+
+.task-status-chip--attention .task-status-chip__dot {
+  background: var(--up-warning, #ff9900);
 }
 
 .task-status-chip--success {
@@ -60,12 +76,20 @@
   color: var(--up-success, #19be6b);
 }
 
+.task-status-chip--success .task-status-chip__dot {
+  background: var(--up-success, #19be6b);
+}
+
 .task-status-chip--error {
-  background: color-mix(in srgb, var(--up-error, #fa3534) 14%, var(--up-card-bg-color, #ffffff) 86%);
+  background: color-mix(in srgb, var(--up-error, #fa3534) 12%, var(--up-card-bg-color, #ffffff) 88%);
 }
 
 .task-status-chip--error .task-status-chip__text {
   color: var(--up-error, #fa3534);
+}
+
+.task-status-chip--error .task-status-chip__dot {
+  background: var(--up-error, #fa3534);
 }
 
 /* ===== 小角标（排队合并、worktree 已删、计划开始……） ===== */

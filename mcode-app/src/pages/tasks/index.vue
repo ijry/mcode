@@ -5,10 +5,10 @@
         class="tasks-sticky"
         :offset-top="0"
         :custom-nav-height="0"
-        :bg-color="upThemeVar('--up-page-bg-color', '#f5f5f7')"
+        :bg-color="upThemeVar('--up-page-bg-color', '#f2f2f7')"
         z-index="20"
       >
-        <up-status-bar :bg-color="upThemeVar('--up-page-bg-color', '#f5f5f7')"></up-status-bar>
+        <up-status-bar :bg-color="upThemeVar('--up-page-bg-color', '#f2f2f7')"></up-status-bar>
         <TaskPageHeader
           :activeTab="filter.tab"
           :searchKeyword="filter.keyword"
@@ -1041,12 +1041,13 @@ function handleCardAction(entry: TaskListEntry, id: TaskActionId) {
 }
 
 .tasks-page {
-  background: var(--up-page-bg-color, var(--up-bg-color, #f3f4f6));
+  background: var(--up-page-bg-color, var(--up-bg-color, #f2f2f7));
 }
 
+/* M03：内容容器左右 16px、列表节距 10px。 */
 .tasks-shell {
   min-height: 100vh;
-  padding: 0 24rpx 40rpx;
+  padding: 0 32rpx 40rpx;
 }
 
 .tasks-sticky {
@@ -1056,7 +1057,7 @@ function handleCardAction(entry: TaskListEntry, id: TaskActionId) {
 
 .tasks-sticky :deep(.u-sticky__content) {
   padding-top: 24rpx;
-  background: var(--up-page-bg-color, var(--up-bg-color, #f3f4f6));
+  background: var(--up-page-bg-color, var(--up-bg-color, #f2f2f7));
 }
 
 .tasks-body {
@@ -1068,7 +1069,7 @@ function handleCardAction(entry: TaskListEntry, id: TaskActionId) {
 .tasks-list {
   display: flex;
   flex-direction: column;
-  gap: 18rpx;
+  gap: 20rpx;
 }
 
 .tasks-empty-fullpage {
